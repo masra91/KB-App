@@ -1,13 +1,23 @@
-// Locate the packaged Electron executable produced by `electron-forge package` (out/).
-// Platform-specific layout; returns null if no build is present yet.
+// Paths to the build artifacts e2e needs:
+//  - builtMainEntry(): the production-built main entry (`.vite/build/main.js`). Playwright
+//    drives this real bundle (works because it isn't fuse-locked like the packaged binary).
+//  - packagedExecutable(): the fully-packaged, fused binary from `electron-forge package`
+//    (out/). Playwright can't attach to it (fuses disable Node inspect/RunAsNode), so it is
+//    used only for a boot-survival smoke that catches asar/dep-bundling crashes.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
 const APP_NAME = 'KB-App';
+const appRoot = path.resolve(__dirname, '..');
+
+export function builtMainEntry(): string | null {
+  const p = path.join(appRoot, '.vite', 'build', 'main.js');
+  return fs.existsSync(p) ? p : null;
+}
 
 export function packagedExecutable(): string | null {
-  const outDir = path.resolve(__dirname, '..', 'out');
+  const outDir = path.join(appRoot, 'out');
   if (!fs.existsSync(outDir)) return null;
   const arch = os.arch();
 

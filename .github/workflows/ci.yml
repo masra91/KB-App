@@ -19,6 +19,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # `labeled` so adding the `e2e` label re-triggers the workflow and runs the opt-in e2e job.
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch: {}
 
 permissions:
