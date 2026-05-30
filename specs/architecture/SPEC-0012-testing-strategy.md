@@ -73,13 +73,24 @@ Main-process code that touches Electron APIs (`app`, `dialog`, `ipcMain`) is kep
 its **logic extracted into pure modules** so it is unit-testable without launching Electron;
 the Electron-bound wiring itself is covered by e2e.
 
-### e2e — Playwright driving Electron
+### e2e — Playwright + a packaged boot smoke
 
-e2e uses **Playwright** via its Electron support (`_electron.launch`) to drive the actual
-app, not a mocked shell. It exercises real user flows (Setup first-run SETUP-1..6; the
-returning-launch "no re-onboarding" path SETUP-6) and includes a **packaged-app smoke**
-(ENG-13) so we catch breakage that only appears in the built `.app`/`.exe` (e.g. asar/dep
-bundling — a known footgun called out in the repo `CLAUDE.md`).
+e2e uses **Playwright** via its Electron support (`_electron.launch`) to drive the **real
+production-built app bundle** (`.vite/build/main.js` — actual main + preload + renderer, not
+the dev server, not a mock), exercising real user flows (Setup first-run, SETUP-1).
+
+**Built bundle, not the packaged binary (impl finding):** Playwright **cannot attach** to the
+fully-packaged, fused binary — the production fuses (`RunAsNode: false`,
+`EnableNodeCliInspectArguments: false`) are exactly what block its main-process connection, and
+we will **not** weaken production fuses for tests. So the packaged artifact gets a separate,
+non-Playwright check: a **boot-survival smoke** that spawns the real packaged `.app`/`.exe` with
+a clean userData dir and asserts it boots and stays up without crashing. That is what catches
+the asar/dep-bundling class of failure (e.g. the `simple-git` bundling footgun in `CLAUDE.md`) —
+a missing bundled dep crashes the packaged app on boot.
+
+**CI-only, enforced.** The e2e harness refuses to run outside CI (`globalSetup` throws unless
+`CI` is set), with an `ALLOW_LOCAL_E2E=1` escape hatch for rare local debugging — launching real
+windows and packaging is disruptive on a dev machine (TEST-9).
 
 e2e and any test that touches a vault **MUST** operate on a **throwaway vault in a temp
 directory**, never the app's own repo (STACK-8).
@@ -171,7 +182,7 @@ The point of all this (SPEC-0000):
 | TEST-1   | must     | Testing has three levels — unit, component, e2e — with the roles defined here     | manual:review | ENG-13 |
 | TEST-2   | must     | Unit tests target domain/core with no Electron or network; FS/git is stubbed or confined to a temp dir | test:app/src/kb | ENG-10 |
 | TEST-3   | must     | The unit/component runner is Vitest (Vite-native)                                 | test:app/vitest.config.ts | STACK-1 |
-| TEST-4   | must     | e2e uses Playwright to drive the real Electron app, incl. a packaged-app smoke    | none-yet      | ENG-13; STACK-3 |
+| TEST-4   | must     | e2e uses Playwright to drive the real Electron app, incl. a packaged-app smoke    | test:app/e2e/smoke.e2e.ts | ENG-13; STACK-3 |
 | TEST-5   | should   | The component tier is reserved (`none-yet`) until a UI framework is chosen         | manual:review | ENG-13 |
 | TEST-6   | must     | ESLint (flat config) reports zero errors                                          | test:.github/workflows/ci.yml | ENG-14 |
 | TEST-7   | must     | `tsc --noEmit` typecheck passes clean                                             | test:.github/workflows/ci.yml | ENG-14 |
@@ -220,15 +231,17 @@ The point of all this (SPEC-0000):
 - **Traces:** STACK-1 · **Verify:** test:app/vitest.config.ts
 
 ### TEST-4 — e2e drives the real app
-- **Status:** draft · **Priority:** must
-- **Statement:** e2e **MUST** use Playwright to launch and drive the real Electron app, and
-  **MUST** include a packaged-app smoke test that boots the built artifact.
+- **Status:** active · **Priority:** must
+- **Statement:** e2e **MUST** use Playwright to drive the real Electron app (the production
+  build), and **MUST** include a packaged-app boot smoke that launches the packaged artifact.
 - **Rationale:** Only the real (and packaged) app catches IPC, window lifecycle, and
   asar/dep-bundling failures that unit tests can't see.
-- **Status (impl):** scaffolded — `app/playwright.config.ts` + `app/e2e/smoke.e2e.ts` launch
-  the packaged app with a clean `--user-data-dir` and assert the first-run Setup UI (SETUP-1).
-  Stays `none-yet` until it has run green in CI on macOS/Windows (phased rollout, opt-in job).
-- **Traces:** ENG-13, STACK-3 · **Verify:** none-yet *(scaffold present; pending first green run)*
+- **Status (impl):** done. `app/e2e/smoke.e2e.ts` has two checks: (1) Playwright drives the
+  built bundle and asserts the first-run Setup UI (SETUP-1); (2) a boot-survival smoke spawns
+  the packaged binary with a clean userData dir and asserts it doesn't crash on boot. Green
+  locally on macOS and in CI (opt-in `e2e` job, macOS + Windows). Playwright can't attach to
+  the fused packaged binary, hence the split — see the e2e decision in §2.
+- **Traces:** ENG-13, STACK-3 · **Verify:** test:app/e2e/smoke.e2e.ts
 
 ### TEST-5 — Component tier reserved
 - **Status:** draft · **Priority:** should
@@ -363,9 +376,11 @@ The point of all this (SPEC-0000):
       faster, jsdom more complete. No-op until then.
 - [x] **Coverage provider** — **resolved: `v8`** (fast, native; accurate enough here). Revisit
       only if remapping proves inaccurate.
-- [x] **e2e target** — **resolved (for the smoke): the packaged artifact**, launched with a clean
-      `--user-data-dir` to force first-run. Dev-build flow tests may be added later for speed;
-      the authoritative smoke stays on the packaged app.
+- [x] **e2e target** — **resolved: split.** Playwright drives the **production-built bundle**
+      (`.vite/build/main.js`) for UI flows (Setup, SETUP-1) — it can't attach to the fused
+      packaged binary. The **packaged** artifact gets a separate non-Playwright **boot-survival**
+      smoke (spawn + assert no crash) for the asar/dep-bundling concern. Both use a clean
+      `--user-data-dir` to force first-run.
 - [ ] **Coverage of generated/config files** — what's excluded from the "production LOC" the
       ~1:1 heuristic (ENG-11) measures against? Pin an exclude list in `vitest.config.ts`.
 - [ ] **CI dependency gate** — fold an `npm audit` / dependency-review step into the same
@@ -375,6 +390,14 @@ The point of all this (SPEC-0000):
 
 ## 5. Changelog
 
+- 2026-05-30 — **TEST-4 green** (`none-yet → test:`). `app/e2e/smoke.e2e.ts` now: (1) Playwright
+  drives the production-built bundle and asserts the first-run Setup UI (SETUP-1 → `test:`);
+  (2) a boot-survival smoke spawns the packaged binary and asserts no boot crash (asar/dep
+  bundling). Discovered Playwright can't attach to the fused packaged binary → split approach
+  (documented in §2). e2e harness now **refuses to run outside CI** (`globalSetup` guard,
+  `ALLOW_LOCAL_E2E=1` escape hatch) per the Principal's CI-only preference. Green locally
+  (macOS) + CI (opt-in `e2e` job, macOS + Windows). e2e stays opt-in, **not** a required ruleset
+  context (would block PRs lacking the label) — follow-up if/when it runs on every PR.
 - 2026-05-30 — **TEST-10 enforced** (`none-yet → manual:review`). Added an active repository
   ruleset on `main` requiring a PR + the `typecheck · lint · unit (ubuntu-latest)` check, with
   force-push/deletion blocked and no bypass. CI now genuinely gates merges. (Rulesets, not classic
