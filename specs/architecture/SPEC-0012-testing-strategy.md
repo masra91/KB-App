@@ -177,7 +177,7 @@ The point of all this (SPEC-0000):
 | TEST-7   | must     | `tsc --noEmit` typecheck passes clean                                             | test:.github/workflows/ci.yml | ENG-14 |
 | TEST-8   | should   | CI runs ESLint with `--max-warnings 0` (no warning rot)                           | test:.github/workflows/ci.yml | ENG-14 |
 | TEST-9   | must     | The local quick suite (`/validate`) = typecheck + lint + unit (+ component); NO e2e; no git hooks | manual:review | ENG-14 |
-| TEST-10  | must     | CI (GitHub Actions) runs the full suite incl. e2e and gates merges to `main`      | none-yet      | ENG-14 |
+| TEST-10  | must     | CI (GitHub Actions) runs the full suite incl. e2e and gates merges to `main`      | manual:review | ENG-14 |
 | TEST-11  | should   | CI targets a full macOS+Windows matrix; rollout is phased and the workflow documents current coverage (no silent caps) | manual:review | STACK-3 |
 | TEST-12  | must     | Domain/core coverage ≥90% lines, enforced via Vitest thresholds; below fails CI   | test:app/vitest.config.ts | ENG-10 |
 | TEST-13  | should   | Per-layer coverage: main-process ≥70%; component/renderer no threshold while reserved | manual:review  | ENG-10 |
@@ -274,10 +274,14 @@ The point of all this (SPEC-0000):
   component, e2e, packaged smoke) and **MUST** be a required check that gates merges to `main`.
 - **Rationale:** Local is fast-but-partial; only CI runs the slow, matrixed, authoritative
   suite that defines "mergeable."
-- **Status (impl):** `.github/workflows/ci.yml` runs the gating `quick` job (typecheck + lint +
-  unit + coverage). The "gates merges to `main`" half still needs **branch-protection / required
-  status checks** enabled in repo settings — a follow-up, hence still `none-yet`.
-- **Traces:** ENG-14 · **Verify:** none-yet *(workflow present; required-check enforcement pending)*
+- **Status (impl):** done. `.github/workflows/ci.yml` runs the gating `quick` job (typecheck +
+  lint + unit + coverage), and a repository **ruleset** ("main: require CI + PR", active, no
+  bypass) on the default branch now **requires** a PR and a passing `typecheck · lint · unit
+  (ubuntu-latest)` check before merge, and blocks force-push/deletion. Rulesets are used (not
+  classic branch protection) because the repo is private on a free plan, where rulesets are the
+  free mechanism. The "full suite incl. e2e" half is still phased — e2e is opt-in (TEST-4/TEST-11)
+  and not yet a required context; the unit gate is.
+- **Traces:** ENG-14 · **Verify:** manual:review (repo ruleset; `gh api repos/<o>/<r>/rulesets`)
 
 ### TEST-11 — Cross-platform matrix, honest rollout
 - **Status:** draft · **Priority:** should
@@ -371,6 +375,10 @@ The point of all this (SPEC-0000):
 
 ## 5. Changelog
 
+- 2026-05-30 — **TEST-10 enforced** (`none-yet → manual:review`). Added an active repository
+  ruleset on `main` requiring a PR + the `typecheck · lint · unit (ubuntu-latest)` check, with
+  force-push/deletion blocked and no bypass. CI now genuinely gates merges. (Rulesets, not classic
+  branch protection — free on private repos.) Remaining `none-yet`: TEST-4 (e2e green).
 - 2026-05-30 — **harness implemented** (status → active). Vitest 3.2.4 + @vitest/coverage-v8 +
   Playwright 1.60.0 (pinned, ≥7-day-old, ENG E1). `app/vitest.config.ts` gates `src/kb` ≥90%
   (first run 91.8% lines); `vault.test.ts` + `copilot.test.ts` cover SETUP-3/4/5 (graduated to
