@@ -20,6 +20,9 @@ and a unique `key` here.
 | SPEC-0005 | SCOPE   | Contexts, Scopes & Surfacing   | product | draft | `product/` |
 | SPEC-0006 | AUTO    | Agent Autonomy & Approval      | product | draft | `product/` |
 | SPEC-0007 | DATA    | Core Data Model (Sources/Entities/Outputs) | product | draft | `product/` |
+| SPEC-0008 | INGEST  | Ingestion Pipeline (Ingest spine)          | feature | draft | `features/` |
+| SPEC-0009 | SETUP   | First-Run / KB Setup (first build story)   | feature | draft | `features/` |
+| SPEC-0010 | STACK   | Tech Stack & App Shell Architecture        | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
@@ -28,8 +31,8 @@ assigned at creation time.
 
 | Likely key | Candidate title                  | Type    | Stage     | Notes |
 | ---------- | -------------------------------- | ------- | --------- | ----- |
-| CAPTURE    | Quick Capture                    | feature | Ingest    | hotkey bar + tray sheet |
-| INGEST     | Rich Ingestion                   | feature | Ingest    | text / drag files / chat |
+| CAPTURE    | Quick Capture                    | feature | Ingest    | hotkey bar + tray sheet (calls SPEC-0008) — **next** |
+| RICHIN     | Rich Ingestion                   | feature | Ingest    | text / drag files / chat (calls SPEC-0008) |
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
 | CATALOG    | Decompose & Catalog              | feature | Enrich    | sources → entities/ontology |
@@ -44,5 +47,6 @@ assigned at creation time.
 | ORCH       | Orchestration & Recurring Tasks  | feature | _x-cut_   | the headless engine |
 | PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
+| TEST       | Testing Strategy                 | architecture | _x-cut_ | unit (code) + component + Playwright e2e (Electron/UI); graduates `Verify:` from `none-yet` |
 
 > Numbers are assigned at creation time, in order, to avoid gaps.
