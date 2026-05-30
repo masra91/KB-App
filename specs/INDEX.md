@@ -24,6 +24,7 @@ and a unique `key` here.
 | SPEC-0009 | SETUP   | First-Run / KB Setup (first build story)   | feature | draft | `features/` |
 | SPEC-0010 | STACK   | Tech Stack & App Shell Architecture        | architecture | draft | `architecture/` |
 | SPEC-0011 | ENG     | Engineering Principles & Rules             | architecture | active | `architecture/` |
+| SPEC-0012 | TEST    | Testing Strategy                           | architecture | draft  | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
@@ -48,6 +49,5 @@ assigned at creation time.
 | ORCH       | Orchestration & Recurring Tasks  | feature | _x-cut_   | the headless engine |
 | PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
-| TEST       | Testing Strategy                 | architecture | _x-cut_ | unit (code) + component + Playwright e2e (Electron/UI); graduates `Verify:` from `none-yet` |
 
 > Numbers are assigned at creation time, in order, to avoid gaps.
