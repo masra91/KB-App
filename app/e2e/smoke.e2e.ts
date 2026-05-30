@@ -19,6 +19,16 @@ function freshUserDataDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'kb-e2e-'));
 }
 
+// Best-effort: a temp userData dir the (now-exited) app may still briefly lock on Windows
+// (EBUSY) must never fail the test — the assertion already happened, and the OS reaps temp.
+function rmDirBestEffort(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch {
+    /* leave it for the OS to reap */
+  }
+}
+
 test.describe('SETUP-1 — first-run boot', () => {
   let app: ElectronApplication | null = null;
   let userDataDir: string | null = null;
@@ -27,7 +37,7 @@ test.describe('SETUP-1 — first-run boot', () => {
     await app?.close();
     app = null;
     if (userDataDir) {
-      fs.rmSync(userDataDir, { recursive: true, force: true });
+      rmDirBestEffort(userDataDir);
       userDataDir = null;
     }
   });
@@ -68,10 +78,23 @@ test('TEST-4: packaged app boots without crashing (asar/dep-bundling smoke)', as
     });
   });
 
-  try {
-    expect(earlyExit, `packaged app exited during boot (code ${earlyExit?.code}). stderr:\n${stderr}`).toBeNull();
-  } finally {
-    if (!child.killed) child.kill('SIGKILL');
-    fs.rmSync(userDataDir, { recursive: true, force: true });
+  // Shut it down and WAIT for full exit before touching the userData dir — Windows holds
+  // file locks (e.g. Chromium's DIPS db) until the process is actually gone.
+  if (earlyExit === null) {
+    await new Promise<void>((resolve) => {
+      child.once('exit', () => resolve());
+      child.kill();
+      setTimeout(() => {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
+        resolve();
+      }, 3000);
+    });
   }
+  rmDirBestEffort(userDataDir);
+
+  expect(earlyExit, `packaged app exited during boot (code ${earlyExit?.code}). stderr:\n${stderr}`).toBeNull();
 });
