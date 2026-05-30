@@ -92,19 +92,26 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
 
 ## 5. Open questions
 
-- [ ] **Initial KB structure** — what folders/files does a fresh vault get? (Sources/
-      entities/outputs areas? a README? a `.kb/` config dir?) Pin during build.
-- [ ] **Config location/format** — app-level (Electron userData, pointing at the active
-      vault) vs. vault-level (`.kb/config.json` in the repo). Likely both: app remembers
-      the active vault; vault holds its own KB config.
-- [ ] **Copilot detection specifics** — exact binary/command to probe (`gh copilot`? a
-      `copilot` CLI? the SDK's own check). Confirm against the actual SDK at build.
+- [x] **Initial KB structure** — resolved (implemented): `sources/`, `entities/`,
+      `outputs/` (DATA-1 three kinds, each with `.gitkeep`), `.kb/config.json`, a
+      `README.md`, and a vault `.gitignore`.
+- [x] **Config location/format** — resolved (implemented): **both**, as predicted —
+      app-level `kb-app.config.json` in Electron `userData` holds `activeVaultPath`;
+      vault-level `.kb/config.json` holds the KB's identity (`id`, `name`, `createdAt`).
+- [x] **Copilot detection specifics** — resolved (implemented, detection-only): probes
+      `copilot --version` then `gh copilot --version` on PATH; reports availability +
+      detail. Exact BYOA SDK invocation still deferred to the agent stories.
 - [ ] **Multiple Instances** — switching/opening a different KB later: in scope for a
       later story; first story is single-KB.
-- [ ] **`.gitignore` for the vault** — what should never be committed (caches, derived
-      indexes that are rebuildable)?
+- [x] **`.gitignore` for the vault** — resolved (implemented): ignores `.kb/cache/`
+      (rebuildable) and `.DS_Store`.
 
 ## 6. Changelog
 
 - 2026-05-30 — created (draft). The first build story: first-run KB setup (root + git +
   Copilot detection + initial commit + main-process management).
+- 2026-05-30 — implemented in `app/` (Electron, SPEC-0010). Domain `kb/` (vault +
+  copilot), main-process IPC + app config, preload bridge, Setup UI renderer. Validated:
+  typecheck, lint, headless smoke test (inspect → init git → scaffold → commit →
+  idempotent re-run), and a full Forge package build. `Verify:` methods stay `none-yet`
+  pending the Testing Strategy spec (automated unit/e2e). Resolved 4 open questions above.

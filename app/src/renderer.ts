@@ -1,33 +1,101 @@
-/**
- * This file will automatically be loaded by vite and run in the "renderer" context.
- * To learn more about the differences between the "main" and the "renderer" context in
- * Electron, visit:
- *
- * https://electronjs.org/docs/tutorial/process-model
- *
- * By default, Node.js integration in this file is disabled. When enabling Node.js integration
- * in a renderer process, please be aware of potential security implications. You can read
- * more about security risks here:
- *
- * https://electronjs.org/docs/tutorial/security
- *
- * To enable Node.js integration in this file, open up `main.ts` and enable the `nodeIntegration`
- * flag:
- *
- * ```
- *  // Create the browser window.
- *  mainWindow = new BrowserWindow({
- *    width: 800,
- *    height: 600,
- *    webPreferences: {
- *      nodeIntegration: true
- *    }
- *  });
- * ```
- */
-
+// Renderer: the Setup flow (SPEC-0009). Plain DOM — minimal UI, no framework.
+// On launch it asks main for state and shows either the loaded KB or the Setup wizard.
 import './index.css';
+import type { PathInspection } from './kb/types';
 
-console.log(
-  '👋 This message is being logged by "renderer.ts", included via Vite',
-);
+const root = document.getElementById('app')!;
+
+let chosenPath: string | null = null;
+let inspection: PathInspection | null = null;
+
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+function baseName(p: string): string {
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? 'My KB';
+}
+
+function mark(ok: boolean, warnIfFalse = false): string {
+  return ok ? '✅' : warnIfFalse ? '⚠️' : '❌';
+}
+
+function renderLoaded(vaultPath: string, name: string): void {
+  root.innerHTML = `
+    <div class="card">
+      <h1>📚 ${esc(name)}</h1>
+      <p class="muted">Knowledge base loaded. The app is now managing it.</p>
+      <p class="path">${esc(vaultPath)}</p>
+    </div>`;
+}
+
+function renderSetup(): void {
+  root.innerHTML = `
+    <div class="card">
+      <h1>Set up your Knowledge Base</h1>
+      <p class="muted">
+        Choose a folder to hold your KB. It becomes a git-versioned vault you can also
+        open directly in Obsidian.
+      </p>
+      <button id="choose" class="primary">Choose folder…</button>
+      <div id="details"></div>
+    </div>`;
+  document.getElementById('choose')!.addEventListener('click', onChoose);
+}
+
+async function onChoose(): Promise<void> {
+  const p = await window.kbApi.pickFolder();
+  if (!p) return;
+  chosenPath = p;
+  inspection = await window.kbApi.inspect(p);
+  renderDetails();
+}
+
+function renderDetails(): void {
+  if (!inspection) return;
+  const ins = inspection;
+  document.getElementById('details')!.innerHTML = `
+    <p class="path">${esc(ins.path)}</p>
+    <ul class="checks">
+      <li>${mark(ins.gitInstalled)} git installed</li>
+      <li>${mark(ins.isGitRepo)} git repository ${ins.isGitRepo ? '' : '<span class="muted">(will initialize)</span>'}</li>
+      <li>${mark(ins.copilot.available, true)} Copilot &mdash; <span class="muted">${esc(ins.copilot.detail)}</span></li>
+      ${ins.alreadyKb ? '<li>⚠️ This folder already contains a KB-App config (will be reused).</li>' : ''}
+    </ul>
+    <label class="field">Name<input id="name" value="${esc(baseName(ins.path))}" /></label>
+    <label class="checkbox"><input type="checkbox" id="initGit" checked /> Initialize git repo if needed</label>
+    ${ins.gitInstalled ? '' : '<p class="error">git is required. Install git, then choose the folder again.</p>'}
+    <button id="create" class="primary" ${ins.gitInstalled ? '' : 'disabled'}>Create KB</button>
+    <div id="result"></div>`;
+  document.getElementById('create')?.addEventListener('click', onCreate);
+}
+
+async function onCreate(): Promise<void> {
+  if (!chosenPath) return;
+  const name = (document.getElementById('name') as HTMLInputElement | null)?.value;
+  const initGit = (document.getElementById('initGit') as HTMLInputElement | null)?.checked ?? true;
+  const btn = document.getElementById('create') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+
+  const res = await window.kbApi.create({ path: chosenPath, name, initGitIfNeeded: initGit });
+
+  if (res.ok && res.vaultConfig) {
+    renderLoaded(chosenPath, res.vaultConfig.name);
+    return;
+  }
+  document.getElementById('result')!.innerHTML = `<p class="error">${esc(res.message)}</p>`;
+  btn.disabled = false;
+  btn.textContent = 'Create KB';
+}
+
+async function init(): Promise<void> {
+  const state = await window.kbApi.getState();
+  if (state.activeVaultPath && state.vaultConfig) {
+    renderLoaded(state.activeVaultPath, state.vaultConfig.name);
+  } else {
+    renderSetup();
+  }
+}
+
+void init();
