@@ -42,6 +42,9 @@ same way:
   (Invoking it authorizes the full commit/push/PR loop for that work.)
 - **`/validate`** — run local checks (typecheck, lint, tests/e2e when present); honest green/red.
 - **`/kb-code-review`** — review the diff for bugs, regressions, and SPEC-0011 compliance.
+- **`/merge`** — squash-merge **any** PR (by #/URL/branch) into `main` + delete the branch.
+  Works for PRs you didn't author (multi-agent: implementer ≠ tester ≠ merger).
+- **`/auto-mission`** — like `/mission` but authorized to go all the way through `/merge`.
 
 ## Build / repo
 
