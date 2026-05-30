@@ -95,20 +95,20 @@ Three layers; only one has a brain.
 | ID       | Priority | Statement (short)                                                  | Verify   | Traces |
 | -------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
 | ORCH-1   | must     | The app runs a long-lived orchestrator that keeps processing while no window is open (headless) | none-yet | VISION-10 |
-| ORCH-2   | must     | Stage work runs in a dedicated git **worktree of the vault repo**, isolating dirty state from the canonical tree | none-yet | DATA-9 |
-| ORCH-3   | must     | The canonical vault (root) tree advances **only** by completed, committed work; it is never left dirty for the user | none-yet | VISION-4; DATA-9 |
-| ORCH-4   | must     | A known queue **folder is the durable work list**; an item leaves it only once its processed result is committed | none-yet | INGEST-8; PRIN-1 |
+| ORCH-2   | must     | Stage work runs in a dedicated git **worktree of the vault repo**, isolating dirty state from the canonical tree | test:src/kb/orchestrator.test.ts | DATA-9 |
+| ORCH-3   | must     | The canonical vault (root) tree advances **only** by completed, committed work; it is never left dirty for the user | test:src/kb/orchestrator.test.ts | VISION-4; DATA-9 |
+| ORCH-4   | must     | A known queue **folder is the durable work list**; an item leaves it only once its processed result is committed | test:src/kb/orchestrator.test.ts | INGEST-8; PRIN-1 |
 | ORCH-5   | must     | Each work item is handled in a **fresh, isolated agent session** (empty context) — no cross-item contamination | none-yet | AUTO-2 |
-| ORCH-6   | should   | v1 drains each stage **serially** (one item at a time); conflict-freedom comes from globally-unique item ids | none-yet | DATA-9 |
-| ORCH-7   | must     | The orchestrator (deterministic) owns all git/file **effects**; in v1 the agent session is **cognition-only** (thin agent) | none-yet | AUTO-3,4 |
+| ORCH-6   | should   | v1 drains each stage **serially** (one item at a time); conflict-freedom comes from globally-unique item ids | test:src/kb/orchestrator.test.ts | DATA-9 |
+| ORCH-7   | must     | The orchestrator (deterministic) owns all git/file **effects**; in v1 the agent session is **cognition-only** (thin agent) | test:src/kb/sourceDoc.test.ts | AUTO-3,4 |
 | ORCH-8   | must     | Agent sessions use the **BYOA Copilot CLI non-interactively**, reusing the user's existing credentials (no separate auth in our flow) | none-yet | AUTO-11 |
 | ORCH-9   | must     | The engine is **stage-agnostic**: the same harness drives later stages via a different instruction file + queue folder | none-yet | LIFE-1,3,8 |
-| ORCH-10  | must     | The engine exposes **observable status** (queue depth, current item, processing state) for the app UI | none-yet | VISION-11 |
-| ORCH-11  | must     | Every pipeline action **emits an append-only audit event** (start, commit, failure), colocated with the item | none-yet | DATA-10; LIFE-9 |
-| ORCH-12  | must     | A **failed item is never lost**: it stays preserved and is flagged for review/retry, not dropped | none-yet | INGEST-8,9; LIFE-6 |
-| ORCH-13  | must     | The orchestrator is **idempotent / restartable**: re-poke or restart resumes from queue state without duplicating work | none-yet | PRIN-1 |
+| ORCH-10  | must     | The engine exposes **observable status** (queue depth, current item, processing state) for the app UI | test:src/kb/orchestrator.test.ts | VISION-11 |
+| ORCH-11  | must     | Every pipeline action **emits an append-only audit event** (start, commit, failure), colocated with the item | test:src/kb/orchestrator.test.ts | DATA-10; LIFE-9 |
+| ORCH-12  | must     | A **failed item is never lost**: it stays preserved and is flagged for review/retry, not dropped | test:src/kb/orchestrator.test.ts | INGEST-8,9; LIFE-6 |
+| ORCH-13  | must     | The orchestrator is **idempotent / restartable**: re-poke or restart resumes from queue state without duplicating work | test:src/kb/orchestrator.test.ts | PRIN-1 |
 | ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | none-yet | VISION-3; INGEST-7 |
-| ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | none-yet | VISION-10 |
+| ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | test:src/kb/orchestrator.test.ts | VISION-10 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -119,7 +119,7 @@ Three layers; only one has a brain.
 - **Rationale:** The root tree *is* the live KB the Principal reads; hiding dirty
   agent state in a worktree is what makes autonomous churn safe.
 - **Traces:** VISION-4, DATA-9
-- **Verify:** none-yet
+- **Verify:** test:src/kb/orchestrator.test.ts
 
 ### ORCH-5 — One fresh brain per item
 - **Status:** draft · **Priority:** must
@@ -140,7 +140,7 @@ Three layers; only one has a brain.
   and denying the LLM hands removes a whole risk surface. Later stages (Enrich)
   graduate to a "thick" agent where autonomous tool-use earns its keep.
 - **Traces:** AUTO-3, AUTO-4
-- **Verify:** none-yet
+- **Verify:** test:src/kb/sourceDoc.test.ts
 
 ## 5. Open questions
 
@@ -179,3 +179,13 @@ Three layers; only one has a brain.
   status.json`; single-shot `copilot -p` returning JSON; versioned per-stage prompt
   template via `-p`. Added ORCH-14 (queue-as-contract / foreign-drop `normalize`) and
   ORCH-15 (trigger). Parallelism, scheduled triggers, and audit global-index stay parked.
+- 2026-05-30 — **Phase A implemented** in `app/kb/orchestrator.ts`: worktree-isolated
+  queue drain (sync → decide → move into date-sharded `sources/` + `source.md` → per-item
+  commit → ff-advance root) + `status.json` + poke/sweep + restartable. The per-item
+  decision is a **deterministic decider** standing in for the Copilot thin agent (ORCH-7);
+  Phase B swaps it via the same `ArchivistDecider` interface. Two v1 implementation
+  choices vs. the resolution above: the loop runs **in-process** (serialized by a mutex),
+  not a spawned OS process — headless still holds via the live main process; and the
+  worktree lives under the already-gitignored **`.kb/cache/worktrees/archivist`** (no
+  `.gitignore` churn). Graduated `Verify:` of ORCH-2/3/4/6/7/10/11/12/13/15 → `test:`;
+  ORCH-1/5/8/9/14 await Phase B (Copilot session, normalize) + e2e.
