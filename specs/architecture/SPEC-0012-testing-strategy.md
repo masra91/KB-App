@@ -3,7 +3,7 @@ spec: SPEC-0012
 key: TEST
 title: Testing Strategy
 type: architecture
-status: draft
+status: active
 owners: [KB-Architect, Principal]
 created: 2026-05-30
 updated: 2026-05-30
@@ -169,23 +169,23 @@ The point of all this (SPEC-0000):
 | ID       | Priority | Statement (short)                                                                 | Verify        | Traces |
 | -------- | -------- | --------------------------------------------------------------------------------- | ------------- | ------ |
 | TEST-1   | must     | Testing has three levels — unit, component, e2e — with the roles defined here     | manual:review | ENG-13 |
-| TEST-2   | must     | Unit tests target domain/core with no Electron, real FS, git, or network          | none-yet      | ENG-10 |
-| TEST-3   | must     | The unit/component runner is Vitest (Vite-native)                                 | none-yet      | STACK-1 |
+| TEST-2   | must     | Unit tests target domain/core with no Electron or network; FS/git is stubbed or confined to a temp dir | test:app/src/kb | ENG-10 |
+| TEST-3   | must     | The unit/component runner is Vitest (Vite-native)                                 | test:app/vitest.config.ts | STACK-1 |
 | TEST-4   | must     | e2e uses Playwright to drive the real Electron app, incl. a packaged-app smoke    | none-yet      | ENG-13; STACK-3 |
 | TEST-5   | should   | The component tier is reserved (`none-yet`) until a UI framework is chosen         | manual:review | ENG-13 |
-| TEST-6   | must     | ESLint (flat config) reports zero errors                                          | none-yet      | ENG-14 |
-| TEST-7   | must     | `tsc --noEmit` typecheck passes clean                                             | none-yet      | ENG-14 |
-| TEST-8   | should   | CI runs ESLint with `--max-warnings 0` (no warning rot)                           | none-yet      | ENG-14 |
-| TEST-9   | must     | The local quick suite (`/validate`) = typecheck + lint + unit (+ component); NO e2e; no git hooks | none-yet | ENG-14 |
+| TEST-6   | must     | ESLint (flat config) reports zero errors                                          | test:.github/workflows/ci.yml | ENG-14 |
+| TEST-7   | must     | `tsc --noEmit` typecheck passes clean                                             | test:.github/workflows/ci.yml | ENG-14 |
+| TEST-8   | should   | CI runs ESLint with `--max-warnings 0` (no warning rot)                           | test:.github/workflows/ci.yml | ENG-14 |
+| TEST-9   | must     | The local quick suite (`/validate`) = typecheck + lint + unit (+ component); NO e2e; no git hooks | manual:review | ENG-14 |
 | TEST-10  | must     | CI (GitHub Actions) runs the full suite incl. e2e and gates merges to `main`      | none-yet      | ENG-14 |
-| TEST-11  | should   | CI targets a full macOS+Windows matrix; rollout is phased and the workflow documents current coverage (no silent caps) | none-yet | STACK-3 |
-| TEST-12  | must     | Domain/core coverage ≥90% lines, enforced via Vitest thresholds; below fails CI   | none-yet      | ENG-10 |
-| TEST-13  | should   | Per-layer coverage: main-process ≥70%; component/renderer no threshold while reserved | none-yet  | ENG-10 |
+| TEST-11  | should   | CI targets a full macOS+Windows matrix; rollout is phased and the workflow documents current coverage (no silent caps) | manual:review | STACK-3 |
+| TEST-12  | must     | Domain/core coverage ≥90% lines, enforced via Vitest thresholds; below fails CI   | test:app/vitest.config.ts | ENG-10 |
+| TEST-13  | should   | Per-layer coverage: main-process ≥70%; component/renderer no threshold while reserved | manual:review  | ENG-10 |
 | TEST-14  | should   | Tests reference the requirement ID(s) they cover (greppable by ID)                | manual:review | ENG-8; SPECSYS-8 |
 | TEST-15  | must     | A `must` requirement's `Verify:` graduates `none-yet → test:` in the same change that covers it | manual:review | ENG-8,9; SPECSYS-7 |
 | TEST-16  | must     | A bug fix adds a regression test reproducing the bug                              | manual:review | ENG-12 |
 | TEST-17  | should   | Tests are laid out as `*.test.ts` colocated; e2e under `app/e2e/`; fixtures under `app/test/` | manual:review | — |
-| TEST-18  | must     | Tests that touch a vault use a throwaway temp vault, never the app's own repo     | none-yet      | STACK-8 |
+| TEST-18  | must     | Tests that touch a vault use a throwaway temp vault, never the app's own repo     | test:app/test/tempVault.ts | STACK-8 |
 | TEST-19  | must     | Test-tooling dependencies follow ENG E1 (reputable, pinned, ≥7-day-old)           | manual:review | ENG-1..4 |
 
 ### TEST-1 — Three levels, defined roles
@@ -198,20 +198,26 @@ The point of all this (SPEC-0000):
 - **Traces:** ENG-13 · **Verify:** manual:review
 
 ### TEST-2 — Unit tests are pure and fast
-- **Status:** draft · **Priority:** must
-- **Statement:** Unit tests **MUST** exercise domain/core logic with **no** Electron, real
-  filesystem, git, or network; external effects are stubbed or abstracted behind seams.
-- **Rationale:** Speed and determinism keep the bulk layer runnable on every change; impurity
-  is what makes suites slow and flaky.
-- **Traces:** ENG-10 · **Verify:** none-yet
+- **Status:** active · **Priority:** must
+- **Statement:** Unit tests **MUST** exercise domain/core logic with **no** Electron and **no**
+  network; filesystem/git effects **MUST** be either stubbed or **confined to a throwaway temp
+  dir** (TEST-18), never shared/global state or the user's environment beyond `git` on PATH.
+- **Rationale:** Speed and determinism keep the bulk layer runnable on every change. Logic whose
+  *job* is the filesystem/git (vault setup) is only meaningfully tested against real FS/git, so
+  we keep it hermetic via temp dirs rather than mocking simple-git into a brittle fiction.
+- **Refined (impl):** the original "no real FS/git" was relaxed to "temp-dir-confined" after
+  implementing `vault.test.ts` — mocking simple-git tested nothing real.
+- **Traces:** ENG-10 · **Verify:** test:app/src/kb (`vault.test.ts`, `copilot.test.ts`)
 
 ### TEST-3 — Vitest is the runner
-- **Status:** draft · **Priority:** must
+- **Status:** active · **Priority:** must
 - **Statement:** The unit/component runner **MUST** be Vitest, configured to share the Vite
   toolchain.
 - **Rationale:** One transform/config, native TS/ESM, built-in coverage, fewer deps than a
   Jest stack (ENG-5).
-- **Traces:** STACK-1 · **Verify:** none-yet
+- **Note:** pinned `vitest@3.2.4` (not 4.x) — Vitest 4 requires Vite ^6/7/8, but the app is on
+  Vite 5 via electron-forge (ENG-6 peer check). 3.2.4 accepts Vite 5 and dedupes.
+- **Traces:** STACK-1 · **Verify:** test:app/vitest.config.ts
 
 ### TEST-4 — e2e drives the real app
 - **Status:** draft · **Priority:** must
@@ -219,7 +225,10 @@ The point of all this (SPEC-0000):
   **MUST** include a packaged-app smoke test that boots the built artifact.
 - **Rationale:** Only the real (and packaged) app catches IPC, window lifecycle, and
   asar/dep-bundling failures that unit tests can't see.
-- **Traces:** ENG-13, STACK-3 · **Verify:** none-yet
+- **Status (impl):** scaffolded — `app/playwright.config.ts` + `app/e2e/smoke.e2e.ts` launch
+  the packaged app with a clean `--user-data-dir` and assert the first-run Setup UI (SETUP-1).
+  Stays `none-yet` until it has run green in CI on macOS/Windows (phased rollout, opt-in job).
+- **Traces:** ENG-13, STACK-3 · **Verify:** none-yet *(scaffold present; pending first green run)*
 
 ### TEST-5 — Component tier reserved
 - **Status:** draft · **Priority:** should
@@ -234,13 +243,13 @@ The point of all this (SPEC-0000):
 - **Statement:** `eslint .` (the flat config in `app/eslint.config.mjs`) **MUST** report zero
   errors as part of validation.
 - **Rationale:** Static analysis catches a class of defects before tests run, cheaply.
-- **Traces:** ENG-14 · **Verify:** none-yet
+- **Traces:** ENG-14 · **Verify:** test:.github/workflows/ci.yml (lint step)
 
 ### TEST-7 — Types check clean
 - **Status:** draft · **Priority:** must
 - **Statement:** `tsc --noEmit` **MUST** pass with zero errors as part of validation.
 - **Rationale:** The type system is the first and cheapest test; a red typecheck blocks merge.
-- **Traces:** ENG-14 · **Verify:** none-yet
+- **Traces:** ENG-14 · **Verify:** test:.github/workflows/ci.yml (typecheck step)
 
 ### TEST-8 — No warning rot
 - **Status:** draft · **Priority:** should
@@ -248,7 +257,7 @@ The point of all this (SPEC-0000):
   accumulate unaddressed.
 - **Rationale:** Warnings that never fail anything are ignored forever; CI forces a decision
   (fix or downgrade the rule deliberately).
-- **Traces:** ENG-14 · **Verify:** none-yet
+- **Traces:** ENG-14 · **Verify:** test:.github/workflows/ci.yml (`lint -- --max-warnings 0`)
 
 ### TEST-9 — Fast local loop
 - **Status:** draft · **Priority:** must
@@ -265,7 +274,10 @@ The point of all this (SPEC-0000):
   component, e2e, packaged smoke) and **MUST** be a required check that gates merges to `main`.
 - **Rationale:** Local is fast-but-partial; only CI runs the slow, matrixed, authoritative
   suite that defines "mergeable."
-- **Traces:** ENG-14 · **Verify:** none-yet
+- **Status (impl):** `.github/workflows/ci.yml` runs the gating `quick` job (typecheck + lint +
+  unit + coverage). The "gates merges to `main`" half still needs **branch-protection / required
+  status checks** enabled in repo settings — a follow-up, hence still `none-yet`.
+- **Traces:** ENG-14 · **Verify:** none-yet *(workflow present; required-check enforcement pending)*
 
 ### TEST-11 — Cross-platform matrix, honest rollout
 - **Status:** draft · **Priority:** should
@@ -282,7 +294,9 @@ The point of all this (SPEC-0000):
   Vitest `coverage.thresholds`; falling below **MUST** fail CI.
 - **Rationale:** Makes ENG-10 real and per-directory, so the core can't hide gaps behind
   well-covered glue.
-- **Traces:** ENG-10 · **Verify:** none-yet
+- **Status update:** active — `coverage.include` is scoped to `src/kb/**`; first green run at
+  91.8% lines / 100% functions / 87.8% branches.
+- **Traces:** ENG-10 · **Verify:** test:app/vitest.config.ts (`coverage.thresholds`)
 
 ### TEST-13 — Per-layer coverage
 - **Status:** draft · **Priority:** should
@@ -327,7 +341,7 @@ The point of all this (SPEC-0000):
   directory and **MUST NOT** operate on the app's own source repo.
 - **Rationale:** The app repo is app source, not a KB (STACK-8); a test writing to it could
   corrupt the working tree or commit garbage.
-- **Traces:** STACK-8 · **Verify:** none-yet
+- **Traces:** STACK-8 · **Verify:** test:app/test/tempVault.ts (used by `vault.test.ts`)
 
 ### TEST-19 — Test deps follow supply-chain rules
 - **Status:** draft · **Priority:** must
@@ -343,11 +357,11 @@ The point of all this (SPEC-0000):
       ESLint-only? Leaning ESLint-only until the team grows. Revisit if style churn appears in diffs.
 - [ ] **happy-dom vs jsdom** — decide when the component tier activates (TEST-5); happy-dom is
       faster, jsdom more complete. No-op until then.
-- [ ] **Coverage provider** — Vitest `v8` (fast, native) vs `istanbul` (more precise remap).
-      Default to `v8`; switch only if remapping proves inaccurate.
-- [ ] **e2e target** — run e2e against the dev build (`forge start`) or only the packaged
-      artifact? Likely dev build for flows + a separate packaged smoke; confirm when the
-      Playwright harness is built (ties SPEC-0009).
+- [x] **Coverage provider** — **resolved: `v8`** (fast, native; accurate enough here). Revisit
+      only if remapping proves inaccurate.
+- [x] **e2e target** — **resolved (for the smoke): the packaged artifact**, launched with a clean
+      `--user-data-dir` to force first-run. Dev-build flow tests may be added later for speed;
+      the authoritative smoke stays on the packaged app.
 - [ ] **Coverage of generated/config files** — what's excluded from the "production LOC" the
       ~1:1 heuristic (ENG-11) measures against? Pin an exclude list in `vitest.config.ts`.
 - [ ] **CI dependency gate** — fold an `npm audit` / dependency-review step into the same
@@ -357,6 +371,14 @@ The point of all this (SPEC-0000):
 
 ## 5. Changelog
 
+- 2026-05-30 — **harness implemented** (status → active). Vitest 3.2.4 + @vitest/coverage-v8 +
+  Playwright 1.60.0 (pinned, ≥7-day-old, ENG E1). `app/vitest.config.ts` gates `src/kb` ≥90%
+  (first run 91.8% lines); `vault.test.ts` + `copilot.test.ts` cover SETUP-3/4/5 (graduated to
+  `test:`). Playwright scaffold + packaged boot smoke (`e2e/`, SETUP-1, still `none-yet` pending
+  first green run). `.github/workflows/ci.yml` gating `quick` job + opt-in e2e matrix (phased,
+  TEST-11). `/validate` aligned to exclude e2e (TEST-9). Refined TEST-2 (temp-dir-confined FS/git).
+  Resolved open Qs: coverage provider `v8`, e2e target = packaged. Remaining `none-yet`: TEST-4
+  (e2e green), TEST-10 (branch-protection required-check).
 - 2026-05-30 — created (draft). Establishes the three-level model (unit/component/e2e),
   Vitest + Playwright, the lint/typecheck static gate, the fast-local (`/validate`, no e2e,
   no hooks) vs full-CI (GitHub Actions, e2e, mac+Windows matrix goal with phased rollout)

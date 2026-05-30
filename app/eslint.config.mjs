@@ -10,6 +10,10 @@ export default [
       'out/**',
       'dist/**',
       'node_modules/**',
+      // Generated test artifacts (Vitest coverage report, Playwright output).
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
       '*.d.ts',
       'forge.config.ts',
       'vite.*.config.ts',

@@ -1,0 +1,75 @@
+# KB-App CI — the authoritative test gate (SPEC-0012 TEST-10/TEST-11).
+#
+# COVERAGE — read this before assuming "green == fully verified" (TEST-11, no silent caps):
+#   NOW (phased rollout): the `quick` job runs typecheck + lint + unit tests + coverage on
+#        Linux only. This is the gating check for merges to `main`.
+#   GOAL: a full matrix — every level (unit + component + e2e + packaged smoke) on BOTH
+#        macOS and Windows (the shipped targets, STACK-3). We grow toward it incrementally.
+#   The `e2e` job below is the start of that rollout: it is OPT-IN (manual dispatch or an
+#        `e2e` PR label) and NOT yet a required gate, because the Playwright/packaged-app
+#        harness is new and unverified across runners. Promote it to required once stable.
+#
+# Local vs CI: the local quick suite (/validate) is typecheck + lint + unit and excludes
+# e2e (TEST-9). e2e lives here in CI only.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  quick:
+    name: typecheck · lint · unit
+    strategy:
+      fail-fast: false
+      matrix:
+        # Phased (TEST-11): Linux-only for now. Goal: add macos-latest, windows-latest.
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Typecheck (TEST-7)
+        run: npm run typecheck
+      - name: Lint — zero warnings (TEST-6/TEST-8)
+        run: npm run lint -- --max-warnings 0
+      - name: Unit tests + coverage (TEST-2/TEST-12)
+        run: npm run test:coverage
+
+  e2e:
+    name: e2e (packaged smoke) — phased / opt-in
+    # OPT-IN until stable (TEST-11): manual dispatch, or add the `e2e` label to a PR.
+    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Package the app (TEST-4)
+        run: npm run package
+      - name: Playwright e2e — packaged boot smoke (TEST-4)
+        run: npm run test:e2e
