@@ -1,7 +1,8 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import started from 'electron-squirrel-startup';
-import { registerIpc } from './main/ipc';
+import { registerIpc, initPipeline } from './main/ipc';
+import { stopPipeline } from './main/pipeline';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -30,11 +31,15 @@ const createWindow = () => {
 
 app.on('ready', () => {
   registerIpc();
+  void initPipeline(); // resume archiving a previously-configured KB on launch
   createWindow();
 });
 
+// CAPTURE-12 / ORCH-1: on macOS the app stays alive with no window open, so the
+// orchestrator keeps draining the queue headlessly. Other platforms quit as usual.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
+    stopPipeline();
     app.quit();
   }
 });

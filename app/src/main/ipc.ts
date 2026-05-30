@@ -4,13 +4,38 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
 import { readAppConfig, writeAppConfig } from './appConfig';
-import type { AppState, VaultConfig, CreateKbOptions } from '../kb/types';
+import { startPipeline, activePipeline } from './pipeline';
+import type { CapturePayload } from '../kb/ingest';
+import type {
+  AppState,
+  VaultConfig,
+  CreateKbOptions,
+  CaptureRequest,
+  CaptureResult,
+  PipelineStatus,
+} from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
   try {
     return JSON.parse(await fs.readFile(path.join(vaultPath, '.kb', 'config.json'), 'utf8')) as VaultConfig;
   } catch {
     return null; // vault moved/deleted/invalid
+  }
+}
+
+const NO_PIPELINE: CaptureResult = {
+  ok: false,
+  ids: [],
+  captureBatch: null,
+  committed: false,
+  message: 'No active knowledge base.',
+};
+
+/** Start the orchestrator if a valid KB is already configured (called on app launch). */
+export async function initPipeline(): Promise<void> {
+  const cfg = await readAppConfig();
+  if (cfg.activeVaultPath && (await loadVaultConfig(cfg.activeVaultPath))) {
+    startPipeline(path.resolve(cfg.activeVaultPath));
   }
 }
 
@@ -36,8 +61,41 @@ export function registerIpc(): void {
   ipcMain.handle('kb:create', async (_e, opts: CreateKbOptions) => {
     const result = await createKb(opts);
     if (result.ok) {
-      await writeAppConfig({ activeVaultPath: path.resolve(opts.path) });
+      const vaultPath = path.resolve(opts.path);
+      await writeAppConfig({ activeVaultPath: vaultPath });
+      startPipeline(vaultPath); // the KB is live — start draining captures immediately
     }
     return result;
+  });
+
+  // SPEC-0013 CAPTURE-1/2: fire-and-forget capture of text + dropped files. The renderer
+  // sends file bytes; we hand them to the active orchestrator, which preserves+commits.
+  ipcMain.handle('kb:capture', async (_e, req: CaptureRequest): Promise<CaptureResult> => {
+    const orch = activePipeline();
+    if (!orch) return NO_PIPELINE;
+
+    const payloads: CapturePayload[] = [];
+    for (const input of req.inputs) {
+      if (input.kind === 'text') {
+        if (input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text });
+      } else {
+        payloads.push({ kind: 'file', name: input.name, data: new Uint8Array(input.data) });
+      }
+    }
+    if (payloads.length === 0) {
+      return { ...NO_PIPELINE, message: 'Nothing to capture.' };
+    }
+
+    try {
+      const out = await orch.capture('in-app-panel', payloads);
+      return { ok: true, ids: out.ids, captureBatch: out.captureBatch, committed: out.committed, message: `Captured ${out.ids.length} item(s).` };
+    } catch (err) {
+      return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  ipcMain.handle('kb:pipelineStatus', async (): Promise<PipelineStatus> => {
+    const orch = activePipeline();
+    return orch ? orch.status() : { queueDepth: 0, processing: null, lastArchived: null, updatedAt: null };
   });
 }

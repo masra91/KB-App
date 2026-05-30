@@ -119,3 +119,65 @@ ul.checks li {
   color: var(--error);
   font-size: 0.9rem;
 }
+
+/* --- Simple Capture panel (SPEC-0013) --- */
+textarea.capture {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  resize: vertical;
+}
+
+.dropzone {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.dropzone.over {
+  border-color: var(--accent);
+  color: var(--fg);
+}
+
+ul.staged {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+ul.staged li {
+  font-size: 0.88rem;
+  padding: 0.25rem 0;
+}
+
+button.link {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.82rem;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.status {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+}

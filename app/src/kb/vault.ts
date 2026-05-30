@@ -71,7 +71,7 @@ export async function inspectPath(p: string): Promise<PathInspection> {
 }
 
 /** Set a local committer identity if none is resolvable, so commits never fail. */
-async function ensureGitIdentity(git: SimpleGit): Promise<void> {
+export async function ensureGitIdentity(git: SimpleGit): Promise<void> {
   let email = '';
   try {
     email = (await git.raw(['config', 'user.email'])).trim();
