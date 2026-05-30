@@ -3,11 +3,20 @@
 // logic whose whole job is FS/git is only meaningfully tested against real FS/git, kept
 // hermetic by confining it to a temp dir. Requires `git` on PATH (a project dependency,
 // STACK-4); the suite skips itself if git is absent.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import simpleGit from 'simple-git';
+
+// Copilot detection is an external subprocess effect with its own tests (copilot.test.ts).
+// Stub it here so vault/inspectPath tests stay hermetic and fast — never shelling out to
+// `copilot`/`gh` (which hangs to its timeout on machines that have `gh` but not the
+// extension, e.g. CI runners). TEST-2: no uncontrolled external env beyond `git`.
+vi.mock('./copilot', () => ({
+  detectCopilot: vi.fn(async () => ({ available: false, detail: 'stubbed in vault tests' })),
+}));
+
 import { inspectPath, createKb, isGitInstalled } from './vault';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 
