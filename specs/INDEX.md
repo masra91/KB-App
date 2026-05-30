@@ -25,6 +25,8 @@ and a unique `key` here.
 | SPEC-0010 | STACK   | Tech Stack & App Shell Architecture        | architecture | draft | `architecture/` |
 | SPEC-0011 | ENG     | Engineering Principles & Rules             | architecture | active | `architecture/` |
 | SPEC-0012 | TEST    | Testing Strategy                           | architecture | active | `architecture/` |
+| SPEC-0013 | CAPTURE | Simple Capture (v1)                        | feature | draft | `features/` |
+| SPEC-0014 | ORCH    | Orchestration & Pipeline Engine            | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
@@ -33,8 +35,8 @@ assigned at creation time.
 
 | Likely key | Candidate title                  | Type    | Stage     | Notes |
 | ---------- | -------------------------------- | ------- | --------- | ----- |
-| CAPTURE    | Quick Capture                    | feature | Ingest    | hotkey bar + tray sheet (calls SPEC-0008) — **next** |
-| RICHIN     | Rich Ingestion                   | feature | Ingest    | text / drag files / chat (calls SPEC-0008) |
+| QCAP       | Quick Capture                    | feature | Ingest    | hotkey bar + tray-sheet variant of CAPTURE (SPEC-0013) — calls SPEC-0008 |
+| RICHIN     | Rich Ingestion                   | feature | Ingest    | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
 | CATALOG    | Decompose & Catalog              | feature | Enrich    | sources → entities/ontology |
@@ -46,7 +48,6 @@ assigned at creation time.
 | REFLECT    | Reflect (self-maintenance)       | feature | Reflect   | stale/emergent/coherence |
 | AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
 | REPLAY     | Replay & Reprocessing            | feature | Replay    | rebuild from primary + secondary |
-| ORCH       | Orchestration & Recurring Tasks  | feature | _x-cut_   | the headless engine |
 | PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
 
