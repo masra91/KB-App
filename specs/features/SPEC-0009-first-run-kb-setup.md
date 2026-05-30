@@ -64,9 +64,9 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
 | -------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
 | SETUP-1  | must     | On first run with no configured KB, the app guides the Principal through setup | none-yet | VISION-11 |
 | SETUP-2  | must     | The Principal picks a root folder that becomes the vault root       | none-yet | VISION-12; DATA-9 |
-| SETUP-3  | must     | The app confirms the root is a git repo; if not, offers to initialize one | none-yet | DATA-9; PRIN-13 |
-| SETUP-4  | must     | The app detects Copilot availability on PATH; missing is a warning + guidance, not a hard block | none-yet | AUTO-11 |
-| SETUP-5  | must     | The app writes initial KB structure + config and makes the first commit | none-yet | DATA-9; LIFE-2 |
+| SETUP-3  | must     | The app confirms the root is a git repo; if not, offers to initialize one | test:app/src/kb/vault.test.ts | DATA-9; PRIN-13 |
+| SETUP-4  | must     | The app detects Copilot availability on PATH; missing is a warning + guidance, not a hard block | test:app/src/kb/copilot.test.ts | AUTO-11 |
+| SETUP-5  | must     | The app writes initial KB structure + config and makes the first commit | test:app/src/kb/vault.test.ts | DATA-9; LIFE-2 |
 | SETUP-6  | must     | The main process manages the configured KB; later launches load existing config (no re-onboarding) | none-yet | VISION-10 |
 | SETUP-7  | should   | Setup configures one Instance; config is per-Instance               | none-yet | SCOPE-1,2 |
 | SETUP-8  | should   | Configuration is editable later via the control panel               | none-yet | VISION-11 |
@@ -78,7 +78,7 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
 - **Rationale:** Versioning, audit, and recovery (DATA-9/10/11) depend on git existing
   from the very first commit.
 - **Traces:** DATA-9, PRIN-13
-- **Verify:** none-yet
+- **Verify:** test:app/src/kb/vault.test.ts (`createKb` inits git; refuses non-repo when init off)
 
 ### SETUP-4 — Copilot detected, not required to finish
 - **Status:** draft · **Priority:** must
@@ -88,7 +88,7 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
 - **Rationale:** A user can set up and inspect their KB before wiring the BYOA agent; the
   KB substrate doesn't depend on Copilot.
 - **Traces:** AUTO-11
-- **Verify:** none-yet
+- **Verify:** test:app/src/kb/copilot.test.ts (detects `copilot`/`gh copilot`; reports unavailable cleanly)
 
 ## 5. Open questions
 
@@ -115,3 +115,6 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
   typecheck, lint, headless smoke test (inspect → init git → scaffold → commit →
   idempotent re-run), and a full Forge package build. `Verify:` methods stay `none-yet`
   pending the Testing Strategy spec (automated unit/e2e). Resolved 4 open questions above.
+- 2026-05-30 — SETUP-3/4/5 graduated `none-yet → test:` under the SPEC-0012 harness
+  (`vault.test.ts`, `copilot.test.ts`). SETUP-1 has an e2e smoke scaffold (packaged-app
+  first-run) but stays `none-yet` until it runs green in CI.

@@ -1,6 +1,6 @@
 ---
 name: validate
-description: Run KB-App's local validation/test suite (typecheck, lint, unit tests, and e2e when present) and report a clear pass/fail. Use before committing, inside /mission, or whenever you need to confirm the app is green locally.
+description: Run KB-App's local validation/test suite (typecheck, lint, unit tests) and report a clear pass/fail. Use before committing, inside /mission, or whenever you need to confirm the app is green locally. e2e is CI-only (SPEC-0012 TEST-9), not part of local validate.
 ---
 
 # /validate — local validation gate
@@ -12,9 +12,12 @@ the failing output.
 1. `cd app`
 2. **Typecheck:** `npm run typecheck`
 3. **Lint:** `npm run lint`
-4. **Unit tests:** run `npm test` **if** a `test` script exists (Vitest).
-5. **E2E:** run `npm run test:e2e` **if** it exists (Playwright, incl. the packaged-app
-   boot smoke test that would have caught the `simple-git` packaging bug).
+4. **Unit tests:** run `npm test` (Vitest). Use `npm run test:coverage` when you want the
+   coverage gate (≥90% on `src/kb`, TEST-12) as well.
+5. **E2E is deliberately NOT part of local validate (SPEC-0012 TEST-9).** The local quick
+   suite is fast: typecheck + lint + unit only. Playwright e2e (the packaged-app boot smoke
+   that would have caught the `simple-git` packaging bug) runs in **CI only** — do **not**
+   run `npm run test:e2e` here. That's a layer CI owns, not a gap to report.
 
 ## Reporting rules
 - Report each step's result. **Overall is green only if every present check passes.**
@@ -24,5 +27,5 @@ the failing output.
 
 ## Notes
 - Install/network commands may need the sandbox disabled.
-- Honesty over green. Until the Testing Strategy spec lands the Vitest/Playwright harness,
-  `/validate` = typecheck + lint, and it must say so.
+- Honesty over green. The Testing Strategy spec (SPEC-0012) landed the Vitest harness, so
+  `/validate` = typecheck + lint + unit. e2e is CI-only and not counted here.

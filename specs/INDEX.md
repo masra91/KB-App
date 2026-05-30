@@ -24,7 +24,7 @@ and a unique `key` here.
 | SPEC-0009 | SETUP   | First-Run / KB Setup (first build story)   | feature | draft | `features/` |
 | SPEC-0010 | STACK   | Tech Stack & App Shell Architecture        | architecture | draft | `architecture/` |
 | SPEC-0011 | ENG     | Engineering Principles & Rules             | architecture | active | `architecture/` |
-| SPEC-0012 | TEST    | Testing Strategy                           | architecture | draft  | `architecture/` |
+| SPEC-0012 | TEST    | Testing Strategy                           | architecture | active | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
