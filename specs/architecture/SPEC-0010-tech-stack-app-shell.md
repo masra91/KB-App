@@ -6,7 +6,7 @@ type: architecture
 status: draft
 owners: [KB-Architect, Principal]
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-05-31
 related: [SPEC-0003, SPEC-0006, SPEC-0007, SPEC-0009]
 supersedes: null
 ---
@@ -65,6 +65,20 @@ The BYOA agent layer (AUTO-11) uses the **GitHub Copilot SDK**. For SPEC-0009 we
 agent/enrich stories.
 - **Why:** keeps the first story small; the vault substrate doesn't depend on Copilot.
 
+### Environment — resolve the real PATH for GUI launches
+The main process **augments `process.env.PATH` at startup** with the user's login-shell
+PATH (plus common bin dirs like `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`)
+before spawning any CLI. GUI launches (Finder/Dock/launchd) inherit a **minimal PATH**
+(`/usr/bin:/bin:/usr/sbin:/sbin`) that omits Homebrew/npm/`~/.local/bin`, so `copilot`/`gh`
+(and `git`) aren't found even when they work in a terminal.
+- **Why:** detection (SETUP-4) and every agent call (ORCH-8) shell out **by name**; without
+  this they silently fail in the *packaged* app (the renderer/Finder launch). **Verified:**
+  with the minimal PATH `copilot` is "command not found"; with the login-shell PATH (or its
+  bin dir) prepended it runs.
+- **How (testable):** the merge logic is a pure, DOM/Electron-free module; the shell probe
+  (`$SHELL -ilc`) is injected, so it's unit-tested in the node tier (STACK-6 / TEST-2). No-op
+  on Windows. No new dependency.
+
 ### Domain model — TypeScript, shell-agnostic
 The vault/KB domain (sources, entities, outputs, provenance per SPEC-0007) is plain
 **TypeScript with no Electron/Obsidian dependency**, so it can be shared with the future
@@ -92,6 +106,7 @@ arrive, evolve to npm/pnpm **workspaces** (`packages/desktop`, `packages/plugin`
 | STACK-6  | must     | The KB domain model is TypeScript with no shell/plugin dependency (shareable, swappable) | none-yet | PRIN-4,14 |
 | STACK-7  | should   | Layout starts as `app/`, evolving to workspaces (desktop/plugin/shared) when the plugin lands | none-yet | PRIN-18 |
 | STACK-8  | must     | The app source repo is distinct from any KB vault; vaults are external user-chosen git repos; the app never treats its own repo as a KB | none-yet | DATA-9; SCOPE-1 |
+| STACK-9  | must     | The main process resolves the user's real login-shell PATH at startup (merge + common-dir fallback) so spawned CLIs (Copilot, git) resolve regardless of launch context (Finder vs terminal); no-op on Windows | test:app/src/main/resolvePath.test.ts | SETUP-4; AUTO-11; STACK-4 |
 
 ## 4. Open questions
 
@@ -114,3 +129,8 @@ arrive, evolve to npm/pnpm **workspaces** (`packages/desktop`, `packages/plugin`
 - 2026-05-30 — created (draft). Pinned the stack for the first build story: Electron + TS,
   main-as-manager, Electron Forge (Vite+TS), simple-git over system git, Copilot SDK
   (detect-only now), shell-agnostic TS domain, `app/` layout evolving to workspaces.
+- 2026-05-31 — added **STACK-9**: the main process resolves the user's login-shell PATH at
+  startup so GUI-launched (Finder/Dock) packaged apps can find user-installed CLIs
+  (`copilot`/`gh`/`git`). Fixes the "No Copilot CLI on PATH" false-negative and the silent
+  enrich failure that followed from it. Pure merge logic is node-tested (`resolvePath.test.ts`);
+  the shell probe is injected. No new dependency.

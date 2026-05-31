@@ -3,6 +3,7 @@ import path from 'node:path';
 import started from 'electron-squirrel-startup';
 import { registerIpc, initPipeline } from './main/ipc';
 import { stopPipeline } from './main/pipeline';
+import { ensurePath } from './main/resolvePath';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -29,7 +30,15 @@ const createWindow = () => {
   }
 };
 
-app.on('ready', () => {
+app.on('ready', async () => {
+  // GUI launches (Finder/Dock/launchd) inherit a stripped PATH; recover the user's real
+  // login-shell PATH first so spawned CLIs (Copilot, git) resolve like they do in a
+  // terminal — otherwise detection + enrich silently fail in the packaged app (STACK-9).
+  try {
+    await ensurePath();
+  } catch {
+    // Best-effort: a PATH-resolution failure must never block startup.
+  }
   registerIpc();
   void initPipeline(); // resume archiving a previously-configured KB on launch
   createWindow();
