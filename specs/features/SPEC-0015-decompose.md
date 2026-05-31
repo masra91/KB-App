@@ -255,22 +255,22 @@ structure that keeps the log queryable even though signal content is freeform.
 
 | ID         | Priority | Statement (short)                                                  | Verify   | Traces |
 | ---------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
-| DECOMP-1   | must     | A Decompose stage drains freshly-archived sources and derives the **entity nodes** each mentions into `entities/` | none-yet | LIFE-3; VISION-5 |
-| DECOMP-2   | must     | Decompose is **one instance of the SPEC-0014 harness** (own queue folder, own worktree, own instruction file/model); the engine is reused unchanged | none-yet | ORCH-9 |
-| DECOMP-3   | must     | The Decompose agent is **thin / cognition-only**: it returns a structured decision and is granted **no** shell/write/git tools; the orchestrator performs all effects | none-yet | ORCH-7; AUTO-3 |
-| DECOMP-4   | must     | Each work item is handled in a **fresh, isolated agent session** (one source, empty context) | none-yet | ORCH-5; AUTO-2 |
-| DECOMP-5   | must     | Each derived entity is written as a versioned node in `entities/` with **provenance** (`derivedFrom` → source, transforming agent) and evidence (`mentions`) | none-yet | DATA-3,5,7 |
-| DECOMP-6   | must     | The agent decision is **validated against a schema**; an invalid decision never loses or corrupts the source — it is flagged and retried, then set aside after K attempts | none-yet | ORCH-12; INGEST-8 |
-| DECOMP-7   | must     | Entity **`kind` is an open, emergent vocabulary** — validated only as a non-empty string; the base set is suggested in the instruction file, **never gated in code** | none-yet | DATA-6 |
-| DECOMP-8   | must     | Sources are **never mutated**; Decompose only *derives* — the immutable source remains the ground truth the entity links back to | none-yet | DATA-2; LIFE-2 |
-| DECOMP-9   | must     | The agent may emit optional **signals** (typed freeform `{type, note, refs?}`) routed to the **audit log only**, never into the KB | none-yet | DATA-10; AUTO-8 |
-| DECOMP-10  | must     | Signal `type` is an **open vocabulary** (base set suggested, not gated); signals are **optional and usually absent** | none-yet | DATA-6; AUTO-8 |
-| DECOMP-11  | must     | Every Decompose run **emits append-only audit events** in a rigid orchestrator-owned **envelope** (ts, runId, stage, sourceId, model, event) wrapping freeform payloads | none-yet | ORCH-11; DATA-10 |
-| DECOMP-12  | must     | The graph delta is **committed per source** and the canonical tree advances only by completed commits (via the serialized writer) | none-yet | ORCH-3; DATA-9 |
-| DECOMP-13  | must     | Decompose is **idempotent / restartable**: an item leaves `queue/decompose/` only after its result is committed; crash/re-poke resumes without duplicating committed work | none-yet | ORCH-4,13 |
-| DECOMP-14  | should   | v1 mints **fresh nodes with no cross-source resolution**; dedup/merge/linking ("which Steve?") is deferred to Connect and fed by `ambiguity` signals | none-yet | DATA-3; LIFE-6 |
-| DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage | none-yet | DATA-7 |
-| DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage | none-yet | ORCH-9,15; INGEST-6 |
+| DECOMP-1   | must     | A Decompose stage drains freshly-archived sources and derives the **entity nodes** each mentions into `entities/` | test:decomposeStage.test.ts | LIFE-3; VISION-5 |
+| DECOMP-2   | must     | Decompose is **one instance of the SPEC-0014 harness** (own queue folder, own worktree, own instruction file/model); the engine is reused unchanged | test:decomposeStage.test.ts | ORCH-9 |
+| DECOMP-3   | must     | The Decompose agent is **thin / cognition-only**: it returns a structured decision and is granted **no** shell/write/git tools; the orchestrator performs all effects | test:decomposeAgent.test.ts | ORCH-7; AUTO-3 |
+| DECOMP-4   | must     | Each work item is handled in a **fresh, isolated agent session** (one source, empty context) | test:decomposeAgent.test.ts | ORCH-5; AUTO-2 |
+| DECOMP-5   | must     | Each derived entity is written as a versioned node in `entities/` with **provenance** (`derivedFrom` → source, transforming agent) and evidence (`mentions`) | test:entityDoc.test.ts, decomposeStage.test.ts | DATA-3,5,7 |
+| DECOMP-6   | must     | The agent decision is **validated against a schema**; an invalid decision never loses or corrupts the source — it is flagged and retried, then set aside after K attempts | test:decompose.test.ts, decomposeStage.test.ts | ORCH-12; INGEST-8 |
+| DECOMP-7   | must     | Entity **`kind` is an open, emergent vocabulary** — validated only as a non-empty string; the base set is suggested in the instruction file, **never gated in code** | test:decompose.test.ts, decomposeAgent.test.ts | DATA-6 |
+| DECOMP-8   | must     | Sources are **never mutated**; Decompose only *derives* — the immutable source remains the ground truth the entity links back to | test:decomposeStage.test.ts | DATA-2; LIFE-2 |
+| DECOMP-9   | must     | The agent may emit optional **signals** (typed freeform `{type, note, refs?}`) routed to the **audit log only**, never into the KB | test:decomposeStage.test.ts | DATA-10; AUTO-8 |
+| DECOMP-10  | must     | Signal `type` is an **open vocabulary** (base set suggested, not gated); signals are **optional and usually absent** | test:decompose.test.ts | DATA-6; AUTO-8 |
+| DECOMP-11  | must     | Every Decompose run **emits append-only audit events** in a rigid orchestrator-owned **envelope** (ts, runId, stage, sourceId, model, event) wrapping freeform payloads | test:decomposeStage.test.ts | ORCH-11; DATA-10 |
+| DECOMP-12  | must     | The graph delta is **committed per source** and the canonical tree advances only by completed commits (via the serialized writer) | test:decomposeStage.test.ts | ORCH-3; DATA-9 |
+| DECOMP-13  | must     | Decompose is **idempotent / restartable**: an item leaves `queue/decompose/` only after its result is committed; crash/re-poke resumes without duplicating committed work | test:decomposeStage.test.ts | ORCH-4,13 |
+| DECOMP-14  | should   | v1 mints **fresh nodes with no cross-source resolution**; dedup/merge/linking ("which Steve?") is deferred to Connect and fed by `ambiguity` signals | test:decomposeStage.test.ts | DATA-3; LIFE-6 |
+| DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage | test:entityDoc.test.ts | DATA-7 |
+| DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage | test:decomposeStage.test.ts | ORCH-9,15; INGEST-6 |
 
 ### DECOMP-3 — Thin agent in v1
 - **Status:** draft · **Priority:** must
@@ -283,7 +283,7 @@ structure that keeps the log queryable even though signal content is freeform.
   contract on its second use. Thick agents arrive when research/tool-use earns its
   keep (Enrich & Research), not preemptively.
 - **Traces:** ORCH-7, AUTO-3
-- **Verify:** none-yet
+- **Verify:** test:decomposeAgent.test.ts
 
 ### DECOMP-7 — Open, emergent entity kinds
 - **Status:** draft · **Priority:** must
@@ -295,7 +295,7 @@ structure that keeps the log queryable even though signal content is freeform.
   them in code would freeze a taxonomy the material itself is meant to grow; nudging in
   prose keeps the graph consistent without caging it, and lets the set evolve as config.
 - **Traces:** DATA-6
-- **Verify:** none-yet
+- **Verify:** test:decompose.test.ts
 
 ### DECOMP-8 — Derive, never mutate the source
 - **Status:** draft · **Priority:** must
@@ -306,7 +306,7 @@ structure that keeps the log queryable even though signal content is freeform.
   model (LIFE-10) depend on the original existing untouched so any derived node can be
   re-derived or doubted against it. "Lifting out" content would break this.
 - **Traces:** DATA-2, LIFE-2
-- **Verify:** none-yet
+- **Verify:** test:decomposeStage.test.ts
 
 ### DECOMP-9 — Signals go to the audit log, not the KB
 - **Status:** draft · **Priority:** must
@@ -318,7 +318,7 @@ structure that keeps the log queryable even though signal content is freeform.
   (Connect reads `ambiguity`, Reflect reads `taxonomy`) and for spec authors — a
   feedback channel toward improvement — not knowledge to be queried as ontology.
 - **Traces:** DATA-10, AUTO-8
-- **Verify:** none-yet
+- **Verify:** test:decomposeStage.test.ts
 
 ### DECOMP-13 — Idempotent, commit-to-dequeue
 - **Status:** draft · **Priority:** must
@@ -329,7 +329,7 @@ structure that keeps the log queryable even though signal content is freeform.
   commit the dequeue boundary makes crash-recovery free and keeps the canonical graph
   free of orphaned partial nodes.
 - **Traces:** ORCH-4, ORCH-13
-- **Verify:** none-yet
+- **Verify:** test:decomposeStage.test.ts
 
 ## 5. Concurrency & failure model (v1 posture)
 
@@ -424,3 +424,14 @@ sources/ ─poke→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)        
   Ingest steps, already built; Decompose is this Enrich stage). Added **rich classify**
   (scope/sensitivity inference) to the deferred list / Enrich chain (§6) — homeless
   after Ingest deferred it; not built in v1.
+- 2026-05-30 — **implemented.** Built on the existing SPEC-0014 harness (archivist #7/#8,
+  ORCH-16 #10): extracted the canonical-writer `Mutex` into a shared `stageLock` injected
+  into both the archivist and the new Decompose stage (§5 serialized writer); added the
+  thin `copilot -p` Decompose decider + versioned prompt (open `kind`/`type` nudged in
+  prose, never gated), the decision schema/validation, the `entities/<ULID>.md` writer
+  (provenance, confidence, no `status`), and the stage runtime (own `decompose` worktree,
+  derived sources-sweep queue, commit-to-dequeue, retry/set-aside after K, signals→audit
+  only). v1 handoff is a `sources/` sweep (the archivist does not yet enqueue an Enrich
+  queue; DECOMP-16). All `must` requirements graduated `Verify: none-yet → test:` with
+  requirement-traced tests (DECOMP-1..16 + ORCH-); the injected decider keeps CI
+  credential-free.
