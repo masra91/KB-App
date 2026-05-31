@@ -27,7 +27,7 @@ and a unique `key` here.
 | SPEC-0012 | TEST    | Testing Strategy                           | architecture | active | `architecture/` |
 | SPEC-0013 | CAPTURE | Simple Capture (v1)                        | feature | draft | `features/` |
 | SPEC-0014 | ORCH    | Orchestration & Pipeline Engine            | architecture | draft | `architecture/` |
-| SPEC-0015 | CATALOG | Decompose & Catalog (Enrich v1)            | feature | draft | `features/` |
+| SPEC-0015 | DECOMP  | Decompose (Enrich v1)                      | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -40,7 +40,7 @@ assigned at creation time.
 | RICHIN     | Rich Ingestion                   | feature | Ingest    | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
-| ~~CATALOG~~ | _written → SPEC-0015_           | feature | Enrich    | Decompose & Catalog (Enrich v1) |
+| ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
 | ENRICH     | Enrich & Research                | feature | Enrich    | internal + external context |
 | EXPAND     | Connect & Expand (workstreams)   | feature | Enrich    | link prior + raise questions |
 | ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
