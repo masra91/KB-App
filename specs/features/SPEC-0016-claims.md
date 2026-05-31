@@ -120,6 +120,17 @@ The **work unit is an entity** (the Principal's call). Because v1 Decompose mint
 source — so "this entity and its source" is unambiguous in v1. (§7 notes what shifts once
 Connect merges nodes that share a name across sources.)
 
+> **v1 implementation note (matches the merged code).** Like Decompose, there is **no
+> `queue/` folder yet** — the durable work list is **derived**: Claims sweeps `entities/`
+> and an entity is "queued" until a terminal `{stage:"claims", event:"claimed", entityId}`
+> marker exists. That marker (and all Claims audit) is appended to the entity's **source
+> `audit.jsonl`** — keyed by `entityId`, reusing the per-source audit Decompose already
+> writes rather than inventing per-entity audit files. Committing the claim files + the
+> regenerated node block + the `claimed` marker in **one commit** is the commit-to-dequeue.
+> The `queue/claims/` folder + per-entity poke below is the eventual contract (DECOMP-16 /
+> CLAIMS-18); the diagram shows that target shape. Physical layout: claim files are
+> `claims/<dateShard(id)>/<id>.md`, mirroring `entities/`.
+
 ```
 DECOMPOSE (SPEC-0015) commits entities/<E> from a source, then pokes the claims queue
    per minted entity (DECOMP-16 / ORCH-15) ─────────────────────────────────────────┐
@@ -301,24 +312,24 @@ inside the entity node so its substance reads in place:
 
 | ID         | Priority | Statement (short)                                                  | Verify   | Traces |
 | ---------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
-| CLAIMS-1   | must     | A Claims stage drains entities and derives the **claims** their source makes about each into `claims/`, giving entity pages substance | none-yet | LIFE-3; VISION-5 |
-| CLAIMS-2   | must     | Claims is **one instance of the SPEC-0014 harness** (own queue folder, own worktree, own instruction file/model); the engine is reused unchanged | none-yet | ORCH-9 |
-| CLAIMS-3   | must     | The Claims agent is **thin / cognition-only**: it returns a structured decision and is granted **no** shell/write/git tools; the orchestrator performs all effects | none-yet | ORCH-7; AUTO-3 |
-| CLAIMS-4   | must     | Each work item is handled in a **fresh, isolated agent session** (one entity, empty context) | none-yet | ORCH-5; AUTO-2 |
-| CLAIMS-5   | must     | The work unit is **one entity node + the WHOLE source it derives from** (full source text, not just the Decompose mention spans) | none-yet | DATA-5; LIFE-3 |
-| CLAIMS-6   | must     | Each derived claim is written as a versioned file in `claims/` with **subject → entity**, **evidence** (`derivedFrom` → the whole source + `mentions`), and a transforming agent | none-yet | DATA-3,5,7 |
-| CLAIMS-7   | must     | **`status` (fact/interpretation/hypothesis) is a per-claim attribute** (alongside `confidence` + evidence); entity **nodes** remain status-free — resolving SPEC-0007 §8 and DECOMP-15 | none-yet | DATA-7; PRIN-3 |
-| CLAIMS-8   | must     | Claim `status` is a **closed** validated set `{fact, interpretation, hypothesis}` (distinct from the *open* `kind`/signal-`type` vocabularies); an invalid status fails validation | none-yet | DATA-7; PRIN-3 |
-| CLAIMS-9   | must     | The orchestrator maintains a **delimited, regenerable, idempotent "claims" block** inside the entity node (the hybrid back-link); canonical claim data lives in `claims/`, not the node | none-yet | DATA-3; VAULT (Obsidian-native) |
-| CLAIMS-10  | should   | Claims are **single-subject**; a claim **may** name other entities in prose or carry a soft `relatesTo` hint, but **does not establish a typed cross-entity link** — that is Connect's, fed by these hints | none-yet | DATA-8; LIFE-3,6 |
-| CLAIMS-11  | must     | Claims **never mutates the immutable source, nor the Decompose-authored identity** of the entity node (id/kind/name/provenance/heading); it only writes `claims/` and the generated block | none-yet | DATA-2; LIFE-2 |
-| CLAIMS-12  | must     | The agent decision is **validated against a schema** (incl. `entityId` match + closed `status`); an invalid decision never loses the entity — it is flagged and retried, then set aside after K | none-yet | ORCH-12; INGEST-8 |
-| CLAIMS-13  | must     | The agent may emit optional **signals** (typed freeform `{type, note, refs?}`, open vocab) routed to the **audit log only**, never into the KB | none-yet | DATA-10; AUTO-8 |
-| CLAIMS-14  | must     | Every Claims run **emits append-only audit events** in the rigid orchestrator-owned **envelope** (ts, runId, stage, entityId, sourceId, model, event) wrapping freeform payloads | none-yet | ORCH-11; DATA-10 |
-| CLAIMS-15  | must     | The graph delta is **committed per entity** and the canonical tree advances only by completed commits via the serialized writer | none-yet | ORCH-3; DATA-9 |
-| CLAIMS-16  | must     | Claims is **idempotent / restartable**: an item leaves `queue/claims/` only after its result is committed; crash/re-poke resumes without duplicating committed claims, and the node block regenerates whole | none-yet | ORCH-4,13 |
-| CLAIMS-17  | should   | v1 performs **no cross-source/-claim dedup**: the same assertion from two sources yields two claims; merge/retraction is deferred to Connect/Reflect and fed by `possible-duplicate` signals | none-yet | DATA-3; LIFE-8 |
-| CLAIMS-18  | should   | The Decompose→Claims handoff and the Claims→next-stage **seam are queue folders** (poke on commit + periodic sweep): Decompose enqueues each minted **entity**; later stages attach with no change to Claims | none-yet | ORCH-9,15; DECOMP-16 |
+| CLAIMS-1   | must     | A Claims stage drains entities and derives the **claims** their source makes about each into `claims/`, giving entity pages substance | test:claimsStage.test.ts | LIFE-3; VISION-5 |
+| CLAIMS-2   | must     | Claims is **one instance of the SPEC-0014 harness** (own work-list, own worktree, own instruction file/model); the engine is reused unchanged | test:claimsStage.test.ts | ORCH-9 |
+| CLAIMS-3   | must     | The Claims agent is **thin / cognition-only**: it returns a structured decision and is granted **no** shell/write/git tools; the orchestrator performs all effects | test:claimsAgent.test.ts, claimsStage.test.ts | ORCH-7; AUTO-3 |
+| CLAIMS-4   | must     | Each work item is handled in a **fresh, isolated agent session** (one entity, empty context) | test:claimsAgent.test.ts | ORCH-5; AUTO-2 |
+| CLAIMS-5   | must     | The work unit is **one entity node + the WHOLE source it derives from** (full source text, not just the Decompose mention spans) | test:claimsStage.test.ts, claimsAgent.test.ts | DATA-5; LIFE-3 |
+| CLAIMS-6   | must     | Each derived claim is written as a versioned file in `claims/` with **subject → entity**, **evidence** (`derivedFrom` → the whole source + `mentions`), and a transforming agent | test:claimDoc.test.ts, claimsStage.test.ts | DATA-3,5,7 |
+| CLAIMS-7   | must     | **`status` (fact/interpretation/hypothesis) is a per-claim attribute** (alongside `confidence` + evidence); entity **nodes** remain status-free — resolving SPEC-0007 §8 and DECOMP-15 | test:claimDoc.test.ts, claims.test.ts | DATA-7; PRIN-3 |
+| CLAIMS-8   | must     | Claim `status` is a **closed** validated set `{fact, interpretation, hypothesis}` (distinct from the *open* `kind`/signal-`type` vocabularies); an invalid status fails validation | test:claims.test.ts | DATA-7; PRIN-3 |
+| CLAIMS-9   | must     | The orchestrator maintains a **delimited, regenerable, idempotent "claims" block** inside the entity node (the hybrid back-link); canonical claim data lives in `claims/`, not the node | test:claimDoc.test.ts, claimsStage.test.ts | DATA-3; VAULT (Obsidian-native) |
+| CLAIMS-10  | should   | Claims are **single-subject**; a claim **may** name other entities in prose or carry a soft `relatesTo` hint, but **does not establish a typed cross-entity link** — that is Connect's, fed by these hints | test:claims.test.ts, claimsAgent.test.ts | DATA-8; LIFE-3,6 |
+| CLAIMS-11  | must     | Claims **never mutates the immutable source, nor the Decompose-authored identity** of the entity node (id/kind/name/provenance/heading); it only writes `claims/` and the generated block | test:claimsStage.test.ts, claimDoc.test.ts | DATA-2; LIFE-2 |
+| CLAIMS-12  | must     | The agent decision is **validated against a schema** (incl. `entityId` match + closed `status`); an invalid decision never loses the entity — it is flagged and retried, then set aside after K | test:claims.test.ts, claimsAgent.test.ts, claimsStage.test.ts | ORCH-12; INGEST-8 |
+| CLAIMS-13  | must     | The agent may emit optional **signals** (typed freeform `{type, note, refs?}`, open vocab) routed to the **audit log only**, never into the KB | test:claimsStage.test.ts, claims.test.ts | DATA-10; AUTO-8 |
+| CLAIMS-14  | must     | Every Claims run **emits append-only audit events** in the rigid orchestrator-owned **envelope** (ts, runId, stage, entityId, sourceId, model, event) wrapping freeform payloads | test:claimsStage.test.ts | ORCH-11; DATA-10 |
+| CLAIMS-15  | must     | The graph delta is **committed per entity** and the canonical tree advances only by completed commits via the serialized writer | test:claimsStage.test.ts | ORCH-3; DATA-9 |
+| CLAIMS-16  | must     | Claims is **idempotent / restartable**: an item leaves the **derived work-list** only once its result is committed (terminal marker); crash/re-poke resumes without duplicating committed claims, and the node block regenerates whole | test:claimsStage.test.ts | ORCH-4,13 |
+| CLAIMS-17  | should   | v1 performs **no cross-source/-claim dedup**: the same assertion from two sources yields two claims; merge/retraction is deferred to Connect/Reflect and fed by `possible-duplicate` signals | test:claimsStage.test.ts | DATA-3; LIFE-8 |
+| CLAIMS-18  | should   | The Claims work-list is discovered by a **derived sweep of `entities/`** in v1 (terminal `claims` marker in the source audit, keyed by `entityId`); the eventual seam is a **`queue/claims/` folder + per-entity poke** (DECOMP-16) — later stages attach with no change to Claims | test:claimsStage.test.ts | ORCH-9,15; DECOMP-16 |
 
 ### CLAIMS-5 — The work unit is an entity + its whole source
 - **Status:** draft · **Priority:** must
@@ -441,8 +452,9 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 
 ## 7. Open questions
 
-- [ ] **`claims/` physical layout** *(architecture)* — date-shard like `sources/`, flat,
-      or partitioned by `subject` entity? Pin at build time; does not affect requirements.
+- [x] **`claims/` physical layout** *(architecture)* — *resolved at build time:*
+      **`claims/<dateShard(id)>/<id>.md`**, mirroring `entities/`. (Partition-by-subject was
+      considered but date-shard keeps the convention uniform across sources/entities/claims.)
 - [ ] **Entity-driven unit after Connect** — v1's "one entity ↔ one source" holds only
       because Decompose mints fresh per-source nodes. Once Connect merges nodes spanning
       multiple sources, a merged entity has *many* sources: does Claims then run per
@@ -477,3 +489,13 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
   links, dedup), claim retraction/supersession. Concurrency posture inherited
   (serial-in-stage, pipelined-across-stages, serialized canonical writer); cross-stage node
   writes are disjoint-region + downstream + regenerate-whole, hence conflict-free.
+- 2026-05-30 — **implemented** (`app/src/kb/claims.ts`, `claimDoc.ts`, `claimsAgent.ts`,
+  `claimsStage.ts`; wired in `main/pipeline.ts` sharing the canonical-writer lock). Third
+  user of the SPEC-0014 harness, mirroring Decompose. v1 work-list is **derived** (sweep
+  `entities/`; terminal `claims` marker in the source `audit.jsonl` keyed by `entityId`) —
+  there is no `queue/` folder yet, matching the merged Decompose reality (§3 note). Claim
+  layout pinned to `claims/<dateShard(id)>/<id>.md`. Closed `status` enforced in code; open
+  signal `type` reuses the Decompose validator. On failure the worktree is reset (no partial
+  claim files) then a `failed`/`setaside` marker is committed (CLAIMS-12). All `must`
+  requirements graduated `Verify: none-yet → test:` with requirement-traced tests; injected
+  deciders keep CI credential-free (no copilot shell-out).
