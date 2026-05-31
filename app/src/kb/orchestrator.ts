@@ -126,7 +126,13 @@ export async function archiveOne(
   const archivedAt = new Date().toISOString();
   const textContent = meta.kind === 'text' ? await fs.readFile(path.join(dest, meta.raw), 'utf8') : null;
   await fs.writeFile(path.join(dest, 'source.md'), renderSourceMd(meta, decision, archivedAt, bodyFor(meta, textContent)), 'utf8');
-  await fs.appendFile(path.join(dest, 'audit.jsonl'), JSON.stringify({ action: 'archived', id, archivedAt, decision }) + '\n', 'utf8');
+  // ORCH-16: record the agent invocation (runtime/model/params/outcome) for posterity.
+  const { agent, ...coreDecision } = decision;
+  await fs.appendFile(
+    path.join(dest, 'audit.jsonl'),
+    JSON.stringify({ action: 'archived', id, archivedAt, decision: coreDecision, agent: agent ?? { via: 'deterministic' } }) + '\n',
+    'utf8',
+  );
 
   await wtGit.raw('add', '-A');
   await wtGit.commit(`archive: ${id}`);

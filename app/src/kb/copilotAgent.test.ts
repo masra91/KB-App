@@ -57,36 +57,52 @@ describe('parseDecision (ORCH-8)', () => {
 });
 
 describe('makeCopilotDecider (ORCH-5/8)', () => {
-  it('uses the Copilot session result when available, one fresh session per item', async () => {
+  it('uses the Copilot session result when available, one fresh session per item, and records the trace (ORCH-5/16)', async () => {
     const run = vi.fn(async () => VALID);
     const decide = makeCopilotDecider({ available: true, run });
-    await decide(textMeta);
+    const d = await decide(textMeta);
     await decide(fileMeta);
     expect(run).toHaveBeenCalledTimes(2); // a disposable session per item (ORCH-5)
+    expect(d.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true, params: ['--no-ask-user'] });
+    expect(typeof d.agent?.ms).toBe('number');
+    expect(typeof d.agent?.at).toBe('string');
   });
 
-  it('falls back to the deterministic decision when Copilot is unavailable (no session run)', async () => {
+  it('ORCH-16: records the requested model when KB_COPILOT_MODEL is set', async () => {
+    vi.stubEnv('KB_COPILOT_MODEL', 'claude-x');
+    try {
+      const d = await makeCopilotDecider({ available: true, run: async () => VALID })(textMeta);
+      expect(d.agent?.model).toBe('claude-x');
+      expect(d.agent?.params).toEqual(['--no-ask-user', '--model', 'claude-x']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('ORCH-16: falls back when Copilot is unavailable and records why (no session run)', async () => {
     const run = vi.fn(async () => VALID);
     const decide = makeCopilotDecider({ available: false, run });
-    expect(await decide(textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal' });
+    const d = await decide(textMeta);
+    expect(d).toMatchObject({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal' });
+    expect(d.agent).toEqual({ via: 'deterministic', error: 'copilot unavailable' });
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('falls back when the session errors (e.g. CLI missing / timeout)', async () => {
+  it('ORCH-16: falls back when the session errors, recording the error', async () => {
     const run = vi.fn(async () => {
       throw new Error('ENOENT: copilot not found');
     });
-    expect(await makeCopilotDecider({ available: true, run })(fileMeta)).toEqual({
-      kind: 'file',
-      class: 'primary',
-      scope: 'global',
-      sensitivity: 'internal',
-    });
+    const d = await makeCopilotDecider({ available: true, run })(fileMeta);
+    expect(d).toMatchObject({ kind: 'file', class: 'primary' });
+    expect(d.agent).toMatchObject({ via: 'deterministic', runtime: 'copilot', ok: false });
+    expect(d.agent?.error).toContain('ENOENT');
   });
 
-  it('falls back when the session returns unparseable output', async () => {
-    const decide = makeCopilotDecider({ available: true, run: async () => 'sorry, I cannot help with that' });
-    expect((await decide(textMeta)).class).toBe('primary');
+  it('falls back when the session returns unparseable output (recorded as a failure)', async () => {
+    const d = await makeCopilotDecider({ available: true, run: async () => 'sorry, I cannot help with that' })(textMeta);
+    expect(d.class).toBe('primary');
+    expect(d.agent?.via).toBe('deterministic');
+    expect(d.agent?.ok).toBe(false);
   });
 
   it('detects availability lazily when not forced (stubbed available)', async () => {

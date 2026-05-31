@@ -109,6 +109,7 @@ Three layers; only one has a brain.
 | ORCH-13  | must     | The orchestrator is **idempotent / restartable**: re-poke or restart resumes from queue state without duplicating work | test:src/kb/orchestrator.test.ts | PRIN-1 |
 | ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | test:src/kb/ingest.test.ts | VISION-3; INGEST-7 |
 | ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | test:src/kb/orchestrator.test.ts | VISION-10 |
+| ORCH-16  | must     | **Every model invocation is recorded for posterity**: which decision was used (model vs fallback), the runtime, the **requested** model, launch params, outcome (ok/error), and timing — colocated with the item. Tokens/cost are out of scope | test:src/kb/copilotAgent.test.ts | DATA-10; LIFE-9 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -141,6 +142,23 @@ Three layers; only one has a brain.
   graduate to a "thick" agent where autonomous tool-use earns its keep.
 - **Traces:** AUTO-3, AUTO-4
 - **Verify:** test:src/kb/sourceDoc.test.ts
+
+### ORCH-16 — Record every model invocation
+- **Status:** draft · **Priority:** must
+- **Statement:** Every invocation of a model/agent runtime **MUST** be recorded for
+  posterity, colocated with the item it acted on: which decision was actually used
+  (`copilot` vs deterministic `fallback`), the runtime, the **requested** model, the
+  launch params/flags, the outcome (`ok` or the error/fallback reason), and timing.
+  Token/cost/usage is explicitly **out of scope**.
+- **Rationale:** Non-deterministic steps are where trust erodes silently; recording
+  *what we launched and what happened* from the very first model call makes every
+  non-deterministic decision auditable and reproducible-by-intent. Cheap to start now,
+  expensive to retrofit.
+- **Limitation (honest):** while the model is left unpinned (no `--model`), we record
+  the *requested* model as `default` — Copilot does not report back the model it
+  actually resolved, so certainty requires pinning a model (future).
+- **Traces:** DATA-10, LIFE-9, PRIN-5
+- **Verify:** test:src/kb/copilotAgent.test.ts
 
 ## 5. Open questions
 
@@ -198,3 +216,9 @@ Three layers; only one has a brain.
   loose inbox files are adopted into canonical `origin: external` units and committed.
   Subprocess is injectable → CI stays deterministic, no real creds. Graduated ORCH-5/8/14
   → `test:`. Still `none-yet`: ORCH-1 (headless main, e2e) and ORCH-9 (needs a 2nd stage).
+- 2026-05-31 — added **ORCH-16** (record every model invocation): an `AgentTrace` (via /
+  runtime / requested-model / params / ok / error / ms / at) rides on the archivist
+  decision → written into the item's `archived` audit event and surfaced truthfully in
+  `source.md`'s `archivedBy` (e.g. `copilot (default)` vs `deterministic (copilot failed:
+  …)`). No tokens/cost. Resolved-model limitation noted (unpinned → recorded as `default`).
+  `Verify:` → `test:`.

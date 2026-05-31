@@ -2,11 +2,19 @@
 // provenance in frontmatter, with the body carrying the text or embedding the raw file.
 // Hand-rolled YAML (flat + one nested `provenance` block) — no yaml dependency (ENG-5).
 import type { CapturedMeta } from './ingest';
-import type { ArchiveDecision } from './archivist';
+import type { ArchiveDecision, AgentTrace } from './archivist';
 
 /** Quote a scalar only when it contains YAML-significant characters. */
 function scalar(s: string): string {
   return /[:#'"\n]|^\s|\s$/.test(s) ? JSON.stringify(s) : s;
+}
+
+/** A truthful `archivedBy` from the decision's agent trace (ORCH-16). */
+export function archivedByLabel(agent?: AgentTrace): string {
+  if (agent?.via === 'copilot') return `copilot (${agent.model ?? 'default'})`;
+  if (agent?.runtime === 'copilot') return `deterministic (copilot failed: ${agent.error ?? 'unknown'})`;
+  if (agent?.error) return `deterministic (${agent.error})`; // e.g. copilot unavailable
+  return 'deterministic';
 }
 
 /** The Markdown body: text sources carry their content; files embed the raw payload. */
@@ -38,6 +46,6 @@ export function renderSourceMd(
   fm.push(`  origin: ${meta.origin ?? 'principal'}`);
   fm.push(`  surface: ${scalar(meta.surface)}`);
   fm.push(`  captureBatch: ${meta.captureBatch}`);
-  fm.push(`  archivedBy: ${scalar('archivist (deterministic v1)')}`);
+  fm.push(`  archivedBy: ${scalar(archivedByLabel(decision.agent))}`);
   return `---\n${fm.join('\n')}\n---\n\n${body}\n`;
 }

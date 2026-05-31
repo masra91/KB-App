@@ -10,6 +10,23 @@ export interface ArchiveDecision {
   class: 'primary' | 'secondary';
   scope: 'global';
   sensitivity: 'internal';
+  /** Provenance of the decision itself — see AgentTrace (ORCH-16). */
+  agent?: AgentTrace;
+}
+
+/**
+ * Record of how a decision was reached, for auditing non-deterministic steps (ORCH-16).
+ * Captures *what we launched and what happened* — never tokens/cost.
+ */
+export interface AgentTrace {
+  via: 'copilot' | 'deterministic'; // which decision was actually used
+  runtime?: 'copilot'; // model runtime attempted, if any
+  model?: string; // model we launched with ('default' when unpinned — see note in copilotAgent)
+  params?: string[]; // launch flags (excludes the prompt body)
+  ok?: boolean; // did the runtime call succeed + parse
+  error?: string; // fallback / error reason
+  ms?: number; // call duration
+  at?: string; // ISO timestamp of the invocation
 }
 
 /** A decider maps a captured unit's metadata to an archival decision. */
@@ -21,7 +38,7 @@ export type ArchivistDecider = (meta: CapturedMeta) => ArchiveDecision | Promise
  * Review routing are Enrich's job, deferred.
  */
 export function deterministicDecide(meta: CapturedMeta): ArchiveDecision {
-  return { kind: meta.kind, class: 'primary', scope: 'global', sensitivity: 'internal' };
+  return { kind: meta.kind, class: 'primary', scope: 'global', sensitivity: 'internal', agent: { via: 'deterministic' } };
 }
 
 /** The injectable decider the orchestrator feeds per item (Phase B swaps in a Copilot

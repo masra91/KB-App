@@ -191,6 +191,17 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
 
     expect(await readQueue(vault)).toEqual([]);
     expect(run).toHaveBeenCalledTimes(2); // ORCH-5: a disposable session per item
+
+    // ORCH-16: the invocation is recorded in source.md and the archived audit event.
+    const docs = await collectSourceDocs(vault);
+    expect(await fs.readFile(docs[0], 'utf8')).toContain('archivedBy: copilot (default)');
+    const audit = await fs.readFile(path.join(path.dirname(docs[0]), 'audit.jsonl'), 'utf8');
+    const archived = audit
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .find((e) => e.action === 'archived');
+    expect(archived.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true });
   });
 
   it('reuses a healthy persistent worktree across items', async () => {

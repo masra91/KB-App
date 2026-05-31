@@ -244,3 +244,6 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   are normalized into canonical units with `provenance.origin: external`/`surface:
   folder-drop`. `CapturedMeta` gained `origin`; `source.md` renders it (default
   `principal`). The archivist now runs via a real Copilot session (deterministic fallback).
+- 2026-05-31 — `source.md` `archivedBy` is now **truthful** (SPEC-0014 ORCH-16): it
+  reflects the actual decider — `copilot (<model>)` or `deterministic[ (copilot failed:
+  …)]` — instead of a hardcoded string, and the same trace is recorded in `audit.jsonl`.
