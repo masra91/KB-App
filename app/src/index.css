@@ -181,3 +181,98 @@ button.link {
   margin-top: 0.75rem;
   font-size: 0.82rem;
 }
+
+/* --- App navigation shell (SPEC-0017) --- */
+/* When the shell is mounted, stop centering the lone setup card and let the shell
+   fill the window. */
+body.shell-active {
+  display: block;
+  padding: 0;
+}
+
+body.shell-active #app {
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+}
+
+.shell {
+  display: flex;
+  height: 100vh;
+}
+
+.sidebar {
+  flex: 0 0 13rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar .nav-item {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+
+.sidebar .nav-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sidebar .nav-item[aria-current='page'] {
+  background: var(--accent);
+  color: #fff;
+}
+
+.nav-icon {
+  width: 1.2rem;
+  text-align: center;
+}
+
+.content {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.content .view {
+  width: 100%;
+  max-width: 34rem;
+}
+
+.view.hidden {
+  display: none;
+}
+
+dl.settings {
+  margin: 1rem 0;
+}
+
+dl.settings dt {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 0.9rem;
+}
+
+dl.settings dd {
+  margin: 0.25rem 0 0;
+  font-size: 0.95rem;
+}
