@@ -16,7 +16,7 @@ import { dateShard } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
-import { captureToInbox, readCapturedMeta, type CapturePayload, type CaptureOutcome } from './ingest';
+import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'archivist');
 const WORK_BRANCH = 'kb/archive-work';
@@ -233,6 +233,8 @@ export class Orchestrator {
   }
 
   private async drainOnce(): Promise<void> {
+    // ORCH-14: adopt any foreign drops into canonical units before draining.
+    await this.lock.run(() => normalizeInbox(this.root));
     let queue = await readQueue(this.root);
     await this.updateStatus(queue.length, null);
     while (queue.length > 0) {

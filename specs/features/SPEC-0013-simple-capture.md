@@ -240,3 +240,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   status line. Unit-tested (~97% domain lines); graduated `Verify:` of CAPTURE-2/3/4/5/6/
   7/8/9/10/13/14/15 → `test:`. CAPTURE-1/11/12 (UI/headless) await e2e; the Copilot thin
   agent + foreign-drop `normalize` are Phase B.
+- 2026-05-31 — Phase B (SPEC-0014): foreign-drop adoption landed — loose `inbox/` files
+  are normalized into canonical units with `provenance.origin: external`/`surface:
+  folder-drop`. `CapturedMeta` gained `origin`; `source.md` renders it (default
+  `principal`). The archivist now runs via a real Copilot session (deterministic fallback).
