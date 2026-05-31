@@ -28,6 +28,7 @@ and a unique `key` here.
 | SPEC-0013 | CAPTURE | Simple Capture (v1)                        | feature | draft | `features/` |
 | SPEC-0014 | ORCH    | Orchestration & Pipeline Engine            | architecture | draft | `architecture/` |
 | SPEC-0015 | DECOMP  | Decompose (Enrich v1)                      | feature | draft | `features/` |
+| SPEC-0016 | CLAIMS  | Claims (Enrich v2)                         | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -41,8 +42,9 @@ assigned at creation time.
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
 | ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
-| ENRICH     | Enrich & Research                | feature | Enrich    | internal + external context |
-| EXPAND     | Connect & Expand (workstreams)   | feature | Enrich    | link prior + raise questions |
+| ~~CLAIMS~~ | _written → SPEC-0016 (key CLAIMS)_ | feature | Enrich  | Claims (Enrich v2) — internal substance about entities |
+| RESEARCH   | Enrich & Research                | feature | Enrich    | external corroboration/expansion (egress, AUTO-4; thick agent) — was `ENRICH` |
+| CONNECT    | Connect & Expand                 | feature | Enrich    | entity resolution / dedup / typed links (promotes Claims' `relatesTo`) — was `EXPAND` |
 | ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
 | REVIEW     | Review & Disambiguation          | feature | Review    | escalations → primary sources |

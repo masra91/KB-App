@@ -269,8 +269,8 @@ structure that keeps the log queryable even though signal content is freeform.
 | DECOMP-12  | must     | The graph delta is **committed per source** and the canonical tree advances only by completed commits (via the serialized writer) | test:decomposeStage.test.ts | ORCH-3; DATA-9 |
 | DECOMP-13  | must     | Decompose is **idempotent / restartable**: an item leaves `queue/decompose/` only after its result is committed; crash/re-poke resumes without duplicating committed work | test:decomposeStage.test.ts | ORCH-4,13 |
 | DECOMP-14  | should   | v1 mints **fresh nodes with no cross-source resolution**; dedup/merge/linking ("which Steve?") is deferred to Connect and fed by `ambiguity` signals | test:decomposeStage.test.ts | DATA-3; LIFE-6 |
-| DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage | test:entityDoc.test.ts | DATA-7 |
-| DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage | test:decomposeStage.test.ts | ORCH-9,15; INGEST-6 |
+| DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage (now specced: **SPEC-0016 CLAIMS-7**) | test:entityDoc.test.ts | DATA-7 |
+| DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage; the **Decompose→Claims item is a minted entity ULID** — Decompose pokes `queue/claims/` **per entity** (SPEC-0016 CLAIMS-18) | test:decomposeStage.test.ts | ORCH-9,15; INGEST-6 |
 
 ### DECOMP-3 — Thin agent in v1
 - **Status:** draft · **Priority:** must
@@ -417,6 +417,10 @@ sources/ ─poke→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)        
   agent), entity resolution/linking, taxonomy curation. Pinned the v1 concurrency
   posture (serial-in-stage, pipelined-across-stages, serialized canonical writer) and
   per-stage commit-to-dequeue failure containment.
+- 2026-05-30 — cross-referenced **SPEC-0016 (Claims)**: DECOMP-15's deferred per-claim
+  `status` now lands in CLAIMS-7; clarified DECOMP-16's Decompose→Claims seam — Claims is
+  **entity-driven**, so Decompose pokes `queue/claims/` with a **minted entity ULID** per
+  item. No behavior change to Decompose's own stage.
 - 2026-05-30 — **renamed to "Decompose (Enrich v1)", key CATALOG → DECOMP**, stage/
   queue/worktree → `decompose`, requirement IDs CATALOG-N → DECOMP-N. Reason: "catalog"
   collided with the Ingest **Catalog** step (source-metadata registration). Added §1.1
