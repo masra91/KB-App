@@ -29,6 +29,7 @@ and a unique `key` here.
 | SPEC-0014 | ORCH    | Orchestration & Pipeline Engine            | architecture | draft | `architecture/` |
 | SPEC-0015 | DECOMP  | Decompose (Enrich v1)                      | feature | draft | `features/` |
 | SPEC-0016 | CLAIMS  | Claims (Enrich v2)                         | feature | draft | `features/` |
+| SPEC-0017 | SHELL   | App Navigation Shell                        | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
