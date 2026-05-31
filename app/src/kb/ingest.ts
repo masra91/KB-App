@@ -72,16 +72,17 @@ export async function captureToInbox(
     let meta: CapturedMeta;
     if (p.kind === 'text') {
       const data = new TextEncoder().encode(p.text);
-      await fs.writeFile(path.join(dir, 'raw.txt'), p.text, 'utf8');
+      // Save typed notes as Markdown so Obsidian renders them (text is valid Markdown).
+      await fs.writeFile(path.join(dir, 'raw.md'), p.text, 'utf8');
       meta = {
         id,
         kind: 'text',
-        raw: 'raw.txt',
+        raw: 'raw.md',
         contentHash: sha256(data),
         capturedAt,
         surface,
         captureBatch,
-        mimeType: 'text/plain',
+        mimeType: 'text/markdown',
       };
     } else {
       const raw = rawNameFor(p.name);
