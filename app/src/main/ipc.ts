@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
 import { readAppConfig, writeAppConfig } from './appConfig';
-import { startPipeline, activePipeline } from './pipeline';
+import { startPipeline, activePipeline, listActiveReviews, answerActiveReview } from './pipeline';
 import type { CapturePayload } from '../kb/ingest';
 import type {
   AppState,
@@ -13,6 +13,9 @@ import type {
   CaptureRequest,
   CaptureResult,
   PipelineStatus,
+  ReviewSummary,
+  AnswerReviewRequest,
+  AnswerReviewResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -97,5 +100,23 @@ export function registerIpc(): void {
   ipcMain.handle('kb:pipelineStatus', async (): Promise<PipelineStatus> => {
     const orch = activePipeline();
     return orch ? orch.status() : { queueDepth: 0, processing: null, lastArchived: null, updatedAt: null };
+  });
+
+  // SPEC-0018 REVIEW-10/11: the "needs you" queue + answering, over the typed contract.
+  ipcMain.handle('kb:listReviews', async (): Promise<ReviewSummary[]> => {
+    const reviews = await listActiveReviews();
+    return reviews.map((r) => ({
+      id: r.id,
+      question: r.question,
+      detail: r.detail,
+      stage: r.raisedBy.stage,
+      refs: r.subject.refs ?? [],
+      createdAt: r.createdAt,
+    }));
+  });
+
+  ipcMain.handle('kb:answerReview', async (_e, req: AnswerReviewRequest): Promise<AnswerReviewResult> => {
+    const { ok, message } = await answerActiveReview(req.id, { verdict: req.verdict, note: req.note });
+    return { ok, message };
   });
 }

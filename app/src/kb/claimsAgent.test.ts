@@ -56,3 +56,17 @@ describe('makeClaimsDecider (CLAIMS-3/4/12)', () => {
     await expect(decide(input())).rejects.toThrow(/entityId mismatch/);
   });
 });
+
+describe('review guidance in the prompt (SPEC-0018 REVIEW-14/6)', () => {
+  it('tells the agent it may raise a yes/no review instead of guessing', () => {
+    const p = buildClaimsPrompt(input());
+    expect(p).toMatch(/raise a REVIEW/i);
+    expect(p).toContain('reviews[]');
+  });
+  it('feeds already-answered reviews back as authoritative (REVIEW-6)', () => {
+    const p = buildClaimsPrompt(input({ priorReviews: [{ question: 'Is this Steve Jones?', verdict: 'reject', note: "it's Steve Lin" }] }));
+    expect(p).toContain('ALREADY answered');
+    expect(p).toContain('Is this Steve Jones?');
+    expect(p).toContain("it's Steve Lin");
+  });
+});

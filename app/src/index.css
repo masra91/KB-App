@@ -276,3 +276,66 @@ dl.settings dd {
   margin: 0.25rem 0 0;
   font-size: 0.95rem;
 }
+
+/* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
+ul.review-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+li.review {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+.review-q {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.review-detail {
+  margin: 0.5rem 0;
+}
+.review-detail summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 0.9rem;
+}
+.review-detail p {
+  margin: 0.4rem 0 0;
+  font-size: 0.92rem;
+}
+textarea.review-note {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.5rem 0;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  resize: vertical;
+}
+.review-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+button.review-reject {
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+button.review-reject:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

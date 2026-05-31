@@ -94,3 +94,16 @@ describe('signals reuse the decompose validator (CLAIMS-13)', () => {
     expect(d.signals).toBeUndefined();
   });
 });
+
+describe('reviews channel (SPEC-0018 REVIEW-14)', () => {
+  it('parses reviews[] alongside claims', () => {
+    const d = parseClaimsDecision('{"entityId":"e","claims":[],"reviews":[{"question":"is this Steve Jones?","detail":"ctx","refs":["Steve"]}]}');
+    expect(d.reviews).toEqual([{ question: 'is this Steve Jones?', detail: 'ctx', refs: ['Steve'] }]);
+  });
+  it('omits reviews when absent', () => {
+    expect(parseClaimsDecision('{"entityId":"e","claims":[]}').reviews).toBeUndefined();
+  });
+  it('throws on a review missing its detail/context (REVIEW-3)', () => {
+    expect(() => parseClaimsDecision('{"entityId":"e","claims":[],"reviews":[{"question":"q"}]}')).toThrow(/detail/);
+  });
+});

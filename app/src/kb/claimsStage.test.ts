@@ -14,9 +14,10 @@ import { deterministicDecider } from './archivist';
 import { Mutex } from './stageLock';
 import { decomposeOne, DecomposeStage } from './decomposeStage';
 import type { DecomposeDecider } from './decomposeAgent';
-import { claimsOne, readClaimsQueue, findEntityFiles, parseEntityNode, ClaimsStage, DEFAULT_MAX_ATTEMPTS } from './claimsStage';
+import { claimsOne, readClaimsQueue, findEntityFiles, parseEntityNode, ClaimsStage, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision, ClaimsDecision } from './claims';
+import { findOpenReviews, answerReview, getReview } from './reviewStore';
 
 function gitInstalledSync(): boolean {
   try {
@@ -293,6 +294,168 @@ describe.skipIf(!gitAvailable)('shares the canonical-writer lock with Decompose 
       await claims.poke();
       expect(await readClaimsQueue(root)).toHaveLength(0);
       expect((await simpleGit(root).status()).isClean()).toBe(true);
+    });
+  });
+});
+
+// ── SPEC-0018 REVIEW: raise → park → answer → resume → cascade (via the Claims stage) ──
+
+/** A decider that raises one review (and produces no claims) — the "ask, don't guess" path. */
+function raiseDeciderFor(question = 'Is this the same Steve as Steve Jones?'): ClaimsDecider {
+  return async (input) => ({
+    entityId: input.entityId,
+    claims: [],
+    reviews: [{ question, detail: 'why this matters and what a yes/no means', refs: [input.name] }],
+    agent: { via: 'copilot', model: 'test' },
+  });
+}
+
+describe.skipIf(!gitAvailable)('raising a review parks only that item (REVIEW-5)', () => {
+  it('writes an open review, parks the entity, and applies no claims', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']);
+      const res = await claimsOne(root, entityRels[0], raiseDeciderFor());
+
+      expect(res.parked).toBe(true);
+      expect(res.claimIds).toHaveLength(0);
+      expect(await readClaimFiles(root)).toHaveLength(0); // nothing applied until answered
+      expect(await readClaimsQueue(root)).toHaveLength(0); // parked → excluded from the queue
+      const open = await findOpenReviews(root);
+      expect(open).toHaveLength(1);
+      expect(open[0].question).toContain('Steve');
+      expect(open[0].raisedBy.item.ref).toBe(entityRels[0]);
+    });
+  });
+
+  it('parks ONLY the raising item; sibling entities keep draining', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const { entityRels } = await setup(root, 'Steve and Dana', ['Steve', 'Dana']);
+      const parkId = path.basename(entityRels[0], '.md');
+      const decider: ClaimsDecider = async (input) =>
+        input.entityId === parkId
+          ? { entityId: input.entityId, claims: [], reviews: [{ question: 'q?', detail: 'd' }], agent: { via: 'copilot', model: 'test' } }
+          : claimsDeciderFor([aClaim()])(input);
+
+      await new ClaimsStage(root, decider).poke();
+      expect(await readClaimsQueue(root)).toHaveLength(0); // one parked, one claimed — none left queued
+      expect(await readClaimFiles(root)).toHaveLength(1); // the non-parked sibling was claimed
+      expect(await findOpenReviews(root)).toHaveLength(1); // the parked one awaits an answer
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('answering resumes the parked item (REVIEW-6)', () => {
+  // Raise on the first pass (no prior answers); claim once the question is answered.
+  const raiseThenClaim: ClaimsDecider = async (input) =>
+    (input.priorReviews?.length ?? 0) === 0
+      ? { entityId: input.entityId, claims: [], reviews: [{ question: 'Is this Steve, Steve Jones?', detail: 'ctx', refs: [input.name] }], agent: { via: 'copilot', model: 'test' } }
+      : { entityId: input.entityId, claims: [aClaim()], agent: { via: 'copilot', model: 'test' } };
+
+  it('confirm re-enqueues the item and the re-run produces claims', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']);
+      await claimsOne(root, entityRels[0], raiseThenClaim); // parks
+      const [open] = await findOpenReviews(root);
+
+      const ans = await answerReview(root, lock, open.id, { verdict: 'confirm' });
+      expect(ans.ok).toBe(true);
+      expect(await findOpenReviews(root)).toHaveLength(0); // answered → leaves the queue
+      expect(await readClaimsQueue(root)).toHaveLength(1); // re-enqueued (REVIEW-6)
+
+      await claimsOne(root, entityRels[0], raiseThenClaim); // resumes → claims now
+      expect(await readClaimFiles(root)).toHaveLength(1);
+      const rev = await getReview(root, open.id);
+      expect(rev?.status).toBe('answered');
+      expect(rev?.answer?.verdict).toBe('confirm');
+    });
+  });
+
+  it('feeds the answered review back to the re-run as authoritative context (REVIEW-6)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve', ['Steve']);
+      await claimsOne(root, entityRels[0], raiseDeciderFor('Is this Steve, Steve Jones?'));
+      const [open] = await findOpenReviews(root);
+      await answerReview(root, lock, open.id, { verdict: 'reject', note: "it's Steve Lin" });
+
+      let seen: unknown;
+      const spy: ClaimsDecider = async (input) => {
+        seen = input.priorReviews;
+        return { entityId: input.entityId, claims: [aClaim()], agent: { via: 'copilot', model: 'test' } };
+      };
+      await claimsOne(root, entityRels[0], spy);
+      expect(seen).toEqual([{ question: 'Is this Steve, Steve Jones?', verdict: 'reject', note: "it's Steve Lin" }]);
+    });
+  });
+
+  it('an answer note becomes a primary source, linked from the review (REVIEW-7)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve', ['Steve']);
+      await claimsOne(root, entityRels[0], raiseDeciderFor());
+      const [open] = await findOpenReviews(root);
+
+      await answerReview(root, lock, open.id, { verdict: 'reject', note: "it's Steve Lin" });
+      const rev = await getReview(root, open.id);
+      expect(rev?.answer?.noteSourceId).toBeTruthy();
+      // The note was captured into the ingest inbox as a new primary unit (propagates on its own).
+      const inbox = await readQueue(root);
+      expect(inbox.some((u) => u.includes(rev!.answer!.noteSourceId!))).toBe(true);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('cascade: a resumed run may raise a follow-up (REVIEW-8)', () => {
+  // Raise q1 (0 prior), q2 (1 prior), then claim (2 prior).
+  const cascade: ClaimsDecider = async (input) => {
+    const n = input.priorReviews?.length ?? 0;
+    return n < 2
+      ? { entityId: input.entityId, claims: [], reviews: [{ question: `q${n + 1}?`, detail: 'd' }], agent: { via: 'copilot', model: 'test' } }
+      : { entityId: input.entityId, claims: [aClaim()], agent: { via: 'copilot', model: 'test' } };
+  };
+
+  it('answering one review can surface the next, then resolve', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve', ['Steve']);
+
+      await claimsOne(root, entityRels[0], cascade); // park q1
+      const [o1] = await findOpenReviews(root);
+      expect(o1.question).toBe('q1?');
+      await answerReview(root, lock, o1.id, { verdict: 'confirm' });
+
+      await claimsOne(root, entityRels[0], cascade); // resume → raises q2 (cascade)
+      const [o2] = await findOpenReviews(root);
+      expect(o2.question).toBe('q2?');
+      await answerReview(root, lock, o2.id, { verdict: 'confirm' });
+
+      await claimsOne(root, entityRels[0], cascade); // resume → claims
+      expect(await readClaimFiles(root)).toHaveLength(1);
+      expect(await findOpenReviews(root)).toHaveLength(0);
+    });
+  });
+
+  it('a runaway cascade is set aside after the round cap (REVIEW-8)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve', ['Steve']);
+      const alwaysRaise = raiseDeciderFor('q?');
+
+      for (let i = 0; i < DEFAULT_MAX_REVIEW_ROUNDS; i++) {
+        await claimsOne(root, entityRels[0], alwaysRaise); // park
+        for (const o of await findOpenReviews(root)) await answerReview(root, lock, o.id, { verdict: 'confirm' });
+      }
+      const res = await claimsOne(root, entityRels[0], alwaysRaise); // round cap reached
+      expect(res.setAside).toBe(true);
+      expect(await readClaimsQueue(root)).toHaveLength(0); // set aside — no longer queued
     });
   });
 });

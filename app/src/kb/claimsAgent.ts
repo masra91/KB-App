@@ -17,6 +17,13 @@ import type { AgentTrace } from './archivist';
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000; // reading a whole source for substance takes time
 
+/** A review the Principal has already answered, fed back to a resumed re-run (REVIEW-6). */
+export interface AnsweredReview {
+  question: string;
+  verdict: string; // 'confirm' | 'reject'
+  note?: string | null;
+}
+
 /** The work item as the agent sees it: ONE entity node + the WHOLE source it derives from
  *  (CLAIMS-5). The agent records what the source asserts ABOUT this entity. */
 export interface EntityInput {
@@ -24,6 +31,8 @@ export interface EntityInput {
   kind: string;
   name: string;
   source: SourceInput;
+  /** Reviews this entity already had answered (on a resumed run); authoritative (REVIEW-6). */
+  priorReviews?: AnsweredReview[];
 }
 
 /** A decider maps an entity (+ its source) to a validated claims decision. May throw (CLAIMS-12). */
@@ -82,6 +91,23 @@ export function buildClaimsPrompt(input: EntityInput): string {
     'usually unnecessary — only add one when it genuinely helps. An entity the source merely',
     'name-drops yields an EMPTY claims[] — that is a valid, expected answer.',
     '',
+    'If you genuinely CANNOT decide something on the evidence and must ask the Principal,',
+    'raise a REVIEW instead of guessing: reviews[]:[{question, detail, refs?}]. Each review is',
+    'ONE yes/no question (e.g. "Is the Steve here the same as Steve Jones?" — never open-ended',
+    'like "who is Steve?"), with detail explaining why you ask and what a yes/no means. When',
+    'you raise any review, return it INSTEAD of claims for now — your work pauses until the',
+    'Principal answers, then you will be re-run with the answer. Use this rarely.',
+    '',
+    ...(input.priorReviews && input.priorReviews.length > 0
+      ? [
+          'The Principal has ALREADY answered these questions — treat the answers as authoritative:',
+          ...input.priorReviews.map(
+            (r) => `  • Q: ${r.question}  → ${r.verdict.toUpperCase()}${r.note ? ` (note: ${r.note})` : ''}`,
+          ),
+          'Proceed using these answers; do not re-ask the same question.',
+          '',
+        ]
+      : []),
     `entityId: ${input.entityId}`,
     `entity.kind: ${input.kind}`,
     `entity.name: ${input.name}`,
@@ -91,7 +117,7 @@ export function buildClaimsPrompt(input: EntityInput): string {
     '--- SOURCE END ---',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"entityId":"<the id above>","claims":[{"statement":"...","status":"fact","confidence":0.0,"mentions":["..."],"relatesTo":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
+    '{"entityId":"<the id above>","claims":[{"statement":"...","status":"fact","confidence":0.0,"mentions":["..."],"relatesTo":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}],"reviews":[{"question":"...","detail":"...","refs":["..."]}]}',
   ]
     .filter((l) => l !== '')
     .join('\n');

@@ -2,7 +2,7 @@
 // Runs in the node tier (no DOM), which is itself the proof of SHELL-6.
 import { describe, it, expect, vi } from 'vitest';
 import { createNavModel, type NavView } from './navModel';
-import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
+import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_REVIEWS, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
 
 const sample: NavView[] = [
   { id: 'a', label: 'A' },
@@ -11,8 +11,8 @@ const sample: NavView[] = [
 ];
 
 describe('NAV_VIEWS registry (SHELL-3)', () => {
-  it('registers Capture, placeholder, and Settings, in rail order', () => {
-    expect(NAV_VIEWS.map((v) => v.id)).toEqual([VIEW_CAPTURE, VIEW_PLACEHOLDER, VIEW_SETTINGS]);
+  it('registers Capture, Reviews, placeholder, and Settings, in rail order (REVIEW-10 added via SHELL-5)', () => {
+    expect(NAV_VIEWS.map((v) => v.id)).toEqual([VIEW_CAPTURE, VIEW_REVIEWS, VIEW_PLACEHOLDER, VIEW_SETTINGS]);
   });
 
   it('every view has a non-empty label (SHELL-3)', () => {
