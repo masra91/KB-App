@@ -30,6 +30,7 @@ and a unique `key` here.
 | SPEC-0015 | DECOMP  | Decompose (Enrich v1)                      | feature | draft | `features/` |
 | SPEC-0016 | CLAIMS  | Claims (Enrich v2)                         | feature | draft | `features/` |
 | SPEC-0017 | SHELL   | App Navigation Shell                        | architecture | draft | `architecture/` |
+| SPEC-0018 | REVIEW  | Review & Disambiguation ("needs you" queue) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -48,7 +49,7 @@ assigned at creation time.
 | CONNECT    | Connect & Expand                 | feature | Enrich    | entity resolution / dedup / typed links (promotes Claims' `relatesTo`) — was `EXPAND` |
 | ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
-| REVIEW     | Review & Disambiguation          | feature | Review    | escalations → primary sources |
+| ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
 | REFLECT    | Reflect (self-maintenance)       | feature | Reflect   | stale/emergent/coherence |
 | AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
 | REPLAY     | Replay & Reprocessing            | feature | Replay    | rebuild from primary + secondary |
