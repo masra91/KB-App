@@ -62,11 +62,14 @@ This lineage is the backbone Audit *reads* and Replay *re-executes* (PRIN-2/5).
 
 ## 4. Epistemic attributes (evidence over confidence)
 
-Derived knowledge — entities, individual **claims/assertions**, and **links** — carries:
+Derived knowledge carries epistemic attributes, **at the granularity each is meaningful**
+(pinned by SPEC-0015 DECOMP-15 + SPEC-0016 CLAIMS-7):
 
-- **Status** — `fact` | `interpretation` | `hypothesis` (PRIN-3).
-- **Confidence** — a calibrated degree of belief (PRIN-11).
-- **Evidence** — links to the supporting sources/entities (PRIN-2/10).
+- **Confidence** — a calibrated degree of belief (PRIN-11). On entities, claims, and links.
+- **Evidence** — links to the supporting sources/entities (PRIN-2/10). On all derived knowledge.
+- **Status** — `fact` | `interpretation` | `hypothesis` (PRIN-3). On **assertions — claims
+  and links — not on entity nodes**: a node is an identity anchor; only an assertion *about*
+  it has a truth-value.
 
 Kept deliberately **lightweight**: these are attributes + provenance links, not a heavy
 separate subsystem. Low-confidence **links** are marked speculative and routed to Review
@@ -108,7 +111,7 @@ arise from the material itself.
 | DATA-4   | must     | Outputs are persisted permanently, tagged as synthesis, distinct from ontology/sources, surfacing-governed | none-yet | SCOPE-11; VISION-9 |
 | DATA-5   | must     | Every Entity and Output records provenance: derived-from links + transforming agent/workflow | none-yet | PRIN-2,5; PRIN-10 |
 | DATA-6   | must     | Entity kinds are an open, extensible, emergent, agent-curated set with a base set | none-yet | PRIN-3 |
-| DATA-7   | should   | Derived knowledge (entities/claims/links) carries status (fact/interpretation/hypothesis), confidence, and evidence | none-yet | PRIN-3,11; PRIN-2 |
+| DATA-7   | should   | Derived knowledge carries confidence + evidence; **status (fact/interpretation/hypothesis) attaches to assertions (claims/links), not entity nodes** (granularity pinned by SPEC-0015 DECOMP-15 + SPEC-0016 CLAIMS-7) | none-yet | PRIN-3,11; PRIN-2 |
 | DATA-8   | must     | Links carry confidence; speculative links are marked, not asserted | none-yet | PRIN-4; SCOPE-5 |
 | DATA-9   | must     | The KB is versioned via a git repository (local minimum, optional remote); agents commit and manage dirty state | none-yet | PRIN-4,7,13 |
 | DATA-10  | must     | Commits are audit events linked from the audit log; the audit log is a superset — also recording non-mutating actions, agent decisions, and thought/intent (the *why*) | none-yet | PRIN-5,6,22; LIFE-9 |
@@ -137,9 +140,11 @@ arise from the material itself.
 
 ## 8. Open questions
 
-- [ ] **Epistemic granularity** — do status/confidence/evidence attach at the **entity**
-      level, the **claim/assertion** level, or both? (Leaning: both, with claims
-      lightweight. Pin when the Enrich feature is specced.)
+- [x] **Epistemic granularity** — *resolved (SPEC-0015 DECOMP-15 + SPEC-0016 CLAIMS-7):*
+      confidence + evidence attach at **both** entity and claim/link level; **`status`
+      attaches only to assertions (claims/links), not entity nodes** — a node is an identity
+      anchor, only an assertion about it has a truth-value. Claims stay lightweight
+      (attributes + provenance, per §4).
 - [ ] **Git concurrency strategy** *(architecture)* — how do multiple agents commit
       safely? Serialized writer? Per-agent staging/branches? Conflict resolution policy?
 - [ ] **Commit granularity** *(architecture)* — one commit per agent action? per
@@ -156,3 +161,7 @@ arise from the material itself.
   (Sources/Entities/Outputs); provenance backbone; epistemic attributes
   (status/confidence/evidence); open emergent entity kinds; **git-backed versioning**
   with commits-as-audit-events and history-as-replay-lineage.
+- 2026-05-30 — refined §4 + DATA-7 and **closed the §8 "epistemic granularity" open
+  question**: `status` is per-assertion (claims/links), **not** on entity nodes; entities
+  carry confidence + evidence. Pinned by SPEC-0015 DECOMP-15 (nodes status-free) +
+  SPEC-0016 CLAIMS-7 (status on claims).
