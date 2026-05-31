@@ -28,6 +28,7 @@ and a unique `key` here.
 | SPEC-0013 | CAPTURE | Simple Capture (v1)                        | feature | draft | `features/` |
 | SPEC-0014 | ORCH    | Orchestration & Pipeline Engine            | architecture | draft | `architecture/` |
 | SPEC-0015 | CATALOG | Decompose & Catalog (Enrich v1)            | feature | draft | `features/` |
+| SPEC-0016 | SHELL   | App Navigation Shell                        | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
