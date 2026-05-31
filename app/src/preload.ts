@@ -7,6 +7,8 @@ const kbApi: KbApi = {
   pickFolder: () => ipcRenderer.invoke('kb:pickFolder'),
   inspect: (p) => ipcRenderer.invoke('kb:inspect', p),
   create: (opts) => ipcRenderer.invoke('kb:create', opts),
+  capture: (req) => ipcRenderer.invoke('kb:capture', req),
+  pipelineStatus: () => ipcRenderer.invoke('kb:pipelineStatus'),
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

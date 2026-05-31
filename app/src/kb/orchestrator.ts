@@ -1,0 +1,263 @@
+// The orchestration engine (SPEC-0014 ORCH). A DETERMINISTIC loop that drains the inbox
+// queue one item at a time, each archived in an isolated git worktree so the canonical
+// vault tree only ever advances by clean, committed work (ORCH-2/3). Per item:
+//   sync worktree → decide → move into sources/ + write source.md → commit → ff-advance.
+// "Orchestration is deterministic; cognition is disposable" — the per-item decision comes
+// from an injected `ArchivistDecider` (v1 = deterministic; Phase B = a Copilot session).
+//
+// v1 note: the loop runs in-process (serialized by a mutex) rather than a spawned OS
+// process; "headless when the window is closed" holds because the main process stays
+// alive. The worktree lives under the gitignored `.kb/cache/` (rebuildable) so no
+// `.gitignore` churn is needed.
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import simpleGit from 'simple-git';
+import { dateShard } from './ulid';
+import { ensureGitIdentity } from './vault';
+import { deterministicDecider, type ArchivistDecider } from './archivist';
+import { renderSourceMd, bodyFor } from './sourceDoc';
+import { captureToInbox, readCapturedMeta, type CapturePayload, type CaptureOutcome } from './ingest';
+
+const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'archivist');
+const WORK_BRANCH = 'kb/archive-work';
+const STATUS_REL = path.join('.kb', 'cache', 'status.json');
+
+export interface PipelineStatusData {
+  queueDepth: number;
+  processing: string | null;
+  lastArchived: string | null;
+  updatedAt: string | null;
+}
+
+/** A tiny async mutex: serializes git operations so two never race on `index.lock`. */
+class Mutex {
+  private tail: Promise<unknown> = Promise.resolve();
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.tail;
+    let release: () => void = () => {};
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return prev.then(fn, fn).finally(release);
+  }
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The inbox queue: sorted ULID directories (ULIDs sort by capture time). ORCH-4. */
+export async function readQueue(root: string): Promise<string[]> {
+  const inbox = path.join(path.resolve(root), 'inbox');
+  let entries: string[];
+  try {
+    entries = await fs.readdir(inbox);
+  } catch {
+    return [];
+  }
+  const dirs: string[] = [];
+  for (const e of entries) {
+    try {
+      if ((await fs.stat(path.join(inbox, e))).isDirectory()) dirs.push(e);
+    } catch {
+      /* vanished mid-scan — skip */
+    }
+  }
+  return dirs.sort();
+}
+
+/** Ensure a healthy persistent worktree on `WORK_BRANCH`; recreate if missing/broken. */
+async function ensureWorktree(root: string): Promise<{ wt: string; branch: string }> {
+  const git = simpleGit(root);
+  await ensureGitIdentity(git);
+  const branch = (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
+  const wt = path.join(root, WORKTREE_REL);
+  try {
+    await git.raw('worktree', 'prune');
+  } catch {
+    /* no worktrees registered yet */
+  }
+  // simple-git's constructor throws on a missing dir, so only probe an existing one.
+  const healthy =
+    (await pathExists(wt)) &&
+    (await simpleGit(wt)
+      .revparse(['--is-inside-work-tree'])
+      .then(() => true)
+      .catch(() => false));
+  if (!healthy) {
+    if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(wt), { recursive: true });
+    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, branch);
+  }
+  return { wt, branch };
+}
+
+/**
+ * Archive one inbox unit, returning its new `sources/` path. MUST be called serialized
+ * (the canonical branch must not move mid-cycle, so the final ff-merge always applies).
+ */
+export async function archiveOne(
+  root: string,
+  id: string,
+  decider: ArchivistDecider = deterministicDecider,
+): Promise<string> {
+  root = path.resolve(root);
+  const { wt, branch } = await ensureWorktree(root);
+  const wtGit = simpleGit(wt);
+  const rootGit = simpleGit(root);
+
+  // Sync the worktree to the canonical HEAD — brings in items captured since last cycle.
+  await wtGit.raw('reset', '--hard', branch);
+
+  const unitDir = path.join(wt, 'inbox', id);
+  const meta = await readCapturedMeta(unitDir);
+  const decision = await decider(meta);
+
+  const destRel = path.join('sources', dateShard(id), id);
+  const dest = path.join(wt, destRel);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.rename(unitDir, dest); // move the raw bytes verbatim — never rewritten (DATA-2)
+
+  const archivedAt = new Date().toISOString();
+  const textContent = meta.kind === 'text' ? await fs.readFile(path.join(dest, meta.raw), 'utf8') : null;
+  await fs.writeFile(path.join(dest, 'source.md'), renderSourceMd(meta, decision, archivedAt, bodyFor(meta, textContent)), 'utf8');
+  await fs.appendFile(path.join(dest, 'audit.jsonl'), JSON.stringify({ action: 'archived', id, archivedAt, decision }) + '\n', 'utf8');
+
+  await wtGit.raw('add', '-A');
+  await wtGit.commit(`archive: ${id}`);
+
+  // Advance the canonical tree by fast-forward — root working tree refreshes, never dirty.
+  await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
+  return destRel;
+}
+
+async function writeStatus(root: string, status: PipelineStatusData): Promise<void> {
+  const file = path.join(path.resolve(root), STATUS_REL);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(status, null, 2) + '\n', 'utf8');
+}
+
+/** Live status for the UI: queue depth from the filesystem, the rest from `status.json`. */
+export async function readStatus(root: string): Promise<PipelineStatusData> {
+  const queueDepth = (await readQueue(root)).length;
+  let saved: Partial<PipelineStatusData> = {};
+  try {
+    saved = JSON.parse(await fs.readFile(path.join(path.resolve(root), STATUS_REL), 'utf8')) as Partial<PipelineStatusData>;
+  } catch {
+    /* no status yet */
+  }
+  return {
+    queueDepth,
+    processing: saved.processing ?? null,
+    lastArchived: saved.lastArchived ?? null,
+    updatedAt: saved.updatedAt ?? null,
+  };
+}
+
+/**
+ * Owns one vault's pipeline: capture (under the lock) + a poke/sweep drain loop. Capture
+ * and archiving share the mutex, so the canonical repo is never written by two paths at
+ * once. Restartable: a new instance re-reads the inbox and resumes (ORCH-13).
+ */
+export class Orchestrator {
+  private readonly root: string;
+  private readonly decider: ArchivistDecider;
+  private readonly lock = new Mutex();
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private draining = false;
+  private pending = false;
+  private current: Promise<void> | null = null;
+  private lastArchived: string | null = null;
+
+  constructor(root: string, decider: ArchivistDecider = deterministicDecider) {
+    this.root = path.resolve(root);
+    this.decider = decider;
+  }
+
+  /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
+  start(sweepMs = 30_000): void {
+    void this.poke();
+    if (this.sweepTimer == null) {
+      this.sweepTimer = setInterval(() => void this.poke(), sweepMs);
+      this.sweepTimer.unref?.();
+    }
+  }
+
+  stop(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /** Fire-and-forget capture (CAPTURE-2): preserve+commit under the lock, then poke. */
+  async capture(surface: string, payloads: CapturePayload[]): Promise<CaptureOutcome> {
+    const res = await this.lock.run(() => captureToInbox(this.root, surface, payloads));
+    void this.poke();
+    return res;
+  }
+
+  status(): Promise<PipelineStatusData> {
+    return readStatus(this.root);
+  }
+
+  /**
+   * Drain the queue. Coalesces concurrent pokes: a poke during an active drain re-runs the
+   * loop, and the returned promise resolves only once the pipeline is fully idle — so
+   * callers (and tests) can deterministically await all pending work.
+   */
+  poke(): Promise<void> {
+    this.pending = true;
+    if (!this.draining) {
+      this.draining = true;
+      this.current = this.runDrains();
+    }
+    return this.current ?? Promise.resolve();
+  }
+
+  private async runDrains(): Promise<void> {
+    try {
+      while (this.pending) {
+        this.pending = false;
+        await this.drainOnce();
+      }
+    } finally {
+      this.draining = false;
+      this.current = null;
+    }
+  }
+
+  private async drainOnce(): Promise<void> {
+    let queue = await readQueue(this.root);
+    await this.updateStatus(queue.length, null);
+    while (queue.length > 0) {
+      const id = queue[0];
+      await this.updateStatus(queue.length, id);
+      try {
+        await this.lock.run(() => archiveOne(this.root, id, this.decider));
+        this.lastArchived = id;
+      } catch {
+        // ORCH-12: never lose the item — it stays in the inbox; stop this pass and let a
+        // later poke/sweep retry rather than spin on a bad unit.
+        await this.updateStatus(queue.length, null);
+        return;
+      }
+      queue = await readQueue(this.root);
+    }
+    await this.updateStatus(0, null);
+  }
+
+  private async updateStatus(queueDepth: number, processing: string | null): Promise<void> {
+    await writeStatus(this.root, {
+      queueDepth,
+      processing,
+      lastArchived: this.lastArchived,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+}

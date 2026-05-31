@@ -46,10 +46,44 @@ export interface AppState {
   vaultConfig: VaultConfig | null;
 }
 
+// --- Capture / ingestion (SPEC-0013 CAPTURE) ---
+
+export interface CaptureTextInput {
+  kind: 'text';
+  text: string;
+}
+export interface CaptureFileInput {
+  kind: 'file';
+  name: string; // original filename
+  data: Uint8Array; // raw bytes (read in the renderer from the dropped File)
+}
+export type CaptureInput = CaptureTextInput | CaptureFileInput;
+
+export interface CaptureRequest {
+  inputs: CaptureInput[];
+}
+export interface CaptureResult {
+  ok: boolean;
+  ids: string[];
+  captureBatch: string | null;
+  committed: boolean;
+  message: string;
+}
+
+/** Minimal pipeline status for the capture panel (SPEC-0014 ORCH-10). */
+export interface PipelineStatus {
+  queueDepth: number;
+  processing: string | null;
+  lastArchived: string | null;
+  updatedAt: string | null;
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
   pickFolder(): Promise<string | null>;
   inspect(path: string): Promise<PathInspection>;
   create(opts: CreateKbOptions): Promise<CreateKbResult>;
+  capture(req: CaptureRequest): Promise<CaptureResult>;
+  pipelineStatus(): Promise<PipelineStatus>;
 }

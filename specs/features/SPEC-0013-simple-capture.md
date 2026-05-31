@@ -137,20 +137,20 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
 | ID         | Priority | Statement (short)                                                  | Verify   | Traces |
 | ---------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
 | CAPTURE-1  | must     | An in-app panel lets the Principal capture **typed/pasted text and/or dropped files** | none-yet | VISION-1,2 |
-| CAPTURE-2  | must     | Capture is **fire-and-forget**: it confirms as soon as the item is preserved, never blocking on downstream processing | none-yet | VISION-1,13 |
-| CAPTURE-3  | must     | Each item is written as a self-contained unit into the vault **inbox** and **committed before any processing** | none-yet | INGEST-2; LIFE-2 |
-| CAPTURE-4  | must     | The raw payload is stored **byte-for-byte immutable** (text→`raw.txt`, file→`raw.<ext>`) and never edited | none-yet | DATA-2; INGEST-2 |
-| CAPTURE-5  | must     | Each item gets a **globally-unique id** and its own folder; capture is **add-only** so concurrent capture/archiving never conflict | none-yet | DATA-9; ORCH-6 |
-| CAPTURE-6  | must     | Capture records **arrival provenance** (surface, timestamp, original filename, content hash) with the item | none-yet | INGEST-3; DATA-5 |
-| CAPTURE-7  | must     | Once committed to inbox, the item is **durably preserved even if archiving never runs or fails** | none-yet | INGEST-8; PRIN-1 |
-| CAPTURE-8  | must     | After preservation the item is **enqueued for archiving** (left in the queue + orchestrator poked) | none-yet | INGEST-6; ORCH-4 |
-| CAPTURE-9  | must     | Archiving **moves** each item into a date-sharded `sources/` folder with a `source.md` catalog record, committed per item | none-yet | INGEST-3,5; DATA-1 |
-| CAPTURE-10 | must     | v1 classification is **conservative defaults only** (scope=`global`, sensitivity=`internal`); rich classify deferred to Enrich | none-yet | INGEST-4; SCOPE-8 |
+| CAPTURE-2  | must     | Capture is **fire-and-forget**: it confirms as soon as the item is preserved, never blocking on downstream processing | test:src/kb/orchestrator.test.ts | VISION-1,13 |
+| CAPTURE-3  | must     | Each item is written as a self-contained unit into the vault **inbox** and **committed before any processing** | test:src/kb/ingest.test.ts | INGEST-2; LIFE-2 |
+| CAPTURE-4  | must     | The raw payload is stored **byte-for-byte immutable** (text→`raw.txt`, file→`raw.<ext>`) and never edited | test:src/kb/ingest.test.ts | DATA-2; INGEST-2 |
+| CAPTURE-5  | must     | Each item gets a **globally-unique id** and its own folder; capture is **add-only** so concurrent capture/archiving never conflict | test:src/kb/ingest.test.ts | DATA-9; ORCH-6 |
+| CAPTURE-6  | must     | Capture records **arrival provenance** (surface, timestamp, original filename, content hash) with the item | test:src/kb/ingest.test.ts | INGEST-3; DATA-5 |
+| CAPTURE-7  | must     | Once committed to inbox, the item is **durably preserved even if archiving never runs or fails** | test:src/kb/orchestrator.test.ts | INGEST-8; PRIN-1 |
+| CAPTURE-8  | must     | After preservation the item is **enqueued for archiving** (left in the queue + orchestrator poked) | test:src/kb/orchestrator.test.ts | INGEST-6; ORCH-4 |
+| CAPTURE-9  | must     | Archiving **moves** each item into a date-sharded `sources/` folder with a `source.md` catalog record, committed per item | test:src/kb/orchestrator.test.ts | INGEST-3,5; DATA-1 |
+| CAPTURE-10 | must     | v1 classification is **conservative defaults only** (scope=`global`, sensitivity=`internal`); rich classify deferred to Enrich | test:src/kb/sourceDoc.test.ts | INGEST-4; SCOPE-8 |
 | CAPTURE-11 | should   | The panel shows **minimal pipeline status** (queue depth / items archiving) so the Principal sees progress | none-yet | ORCH-10 |
 | CAPTURE-12 | must     | Capture **and** archiving keep working when the window is closed (headless) | none-yet | VISION-10; ORCH-1 |
-| CAPTURE-13 | must     | Every source records a **`class` (primary\|secondary)** and a **`provenance`** block (origin, surface, captureBatch, archivedBy); v1 = `primary`/`principal` | none-yet | DATA-2,5 |
-| CAPTURE-14 | must     | A capture with multiple payloads writes **one unit per payload**, each its own ULID, linked by a shared **`captureBatch`** id; semantic links are deferred to Enrich | none-yet | DATA-1,3 |
-| CAPTURE-15 | must     | Ids are **in-house ULIDs** (time-sortable, unique, no dependency); the `sources/` date shard is derived from the ULID's UTC timestamp | none-yet | ENG-5; DATA-9 |
+| CAPTURE-13 | must     | Every source records a **`class` (primary\|secondary)** and a **`provenance`** block (origin, surface, captureBatch, archivedBy); v1 = `primary`/`principal` | test:src/kb/ingest.test.ts | DATA-2,5 |
+| CAPTURE-14 | must     | A capture with multiple payloads writes **one unit per payload**, each its own ULID, linked by a shared **`captureBatch`** id; semantic links are deferred to Enrich | test:src/kb/ingest.test.ts | DATA-1,3 |
+| CAPTURE-15 | must     | Ids are **in-house ULIDs** (time-sortable, unique, no dependency); the `sources/` date shard is derived from the ULID's UTC timestamp | test:src/kb/ulid.test.ts | ENG-5; DATA-9 |
 
 ### CAPTURE-3 — Preserve to inbox, commit, *then* process
 - **Status:** draft · **Priority:** must
@@ -161,7 +161,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   becomes durable ground truth the instant it's committed, independent of whatever
   downstream succeeds or fails.
 - **Traces:** INGEST-2, LIFE-2, DATA-2
-- **Verify:** none-yet
+- **Verify:** test:src/kb/ingest.test.ts
 
 ### CAPTURE-5 — Unique unit, add-only, conflict-free
 - **Status:** draft · **Priority:** must
@@ -172,7 +172,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   concurrent captures conflict-free by construction (no shared file to contend on),
   which is what lets the SPEC-0014 worktree merges always fast-forward cleanly.
 - **Traces:** DATA-9, ORCH-6
-- **Verify:** none-yet
+- **Verify:** test:src/kb/ingest.test.ts
 
 ### CAPTURE-10 — Conservative classification, deferred richness
 - **Status:** draft · **Priority:** must
@@ -183,7 +183,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   pulling enrichment forward. INGEST-4's "conservative defaults unless a high-
   confidence signal says otherwise" with, in v1, no such signal yet.
 - **Traces:** INGEST-4, SCOPE-8
-- **Verify:** none-yet
+- **Verify:** test:src/kb/sourceDoc.test.ts
 
 ### CAPTURE-14 — Per-payload units, batch-linked
 - **Status:** draft · **Priority:** must
@@ -196,7 +196,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   forcing a bundle. The richer "this text describes these images" relationship is
   *derived knowledge* Enrich adds later as a versioned link — sources stay frozen.
 - **Traces:** DATA-1, DATA-3
-- **Verify:** none-yet
+- **Verify:** test:src/kb/ingest.test.ts
 
 ## 5. Open questions
 
@@ -234,3 +234,9 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
   inbox-as-contract with deferred foreign-drop `normalize`; status via inbox-count +
   `.kb/cache/status.json`). Added CAPTURE-13/14/15. Parked dedup + large-binary storage/
   extraction.
+- 2026-05-30 — **Phase A implemented** in `app/` on the SPEC-0014 engine: in-house ULID,
+  capture → committed `inbox/<ULID>/` units, deterministic archivist drain into
+  date-sharded `sources/` with `source.md`; in-app capture panel (text + file drop) +
+  status line. Unit-tested (~97% domain lines); graduated `Verify:` of CAPTURE-2/3/4/5/6/
+  7/8/9/10/13/14/15 → `test:`. CAPTURE-1/11/12 (UI/headless) await e2e; the Copilot thin
+  agent + foreign-drop `normalize` are Phase B.

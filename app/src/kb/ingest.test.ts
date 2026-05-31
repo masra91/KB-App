@@ -1,0 +1,143 @@
+// Capture domain tests (SPEC-0013 CAPTURE-3/4/5/6/13/14). Real FS + real git against a
+// throwaway temp vault (TEST-18), like vault.test.ts. Skips if git is absent.
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import simpleGit from 'simple-git';
+import { createKb } from './vault';
+import { captureToInbox, readCapturedMeta, type CapturePayload } from './ingest';
+import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
+
+function gitInstalledSync(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const gitAvailable = gitInstalledSync();
+
+async function inboxUnits(vault: string): Promise<string[]> {
+  try {
+    return (await fs.readdir(path.join(vault, 'inbox'))).sort();
+  } catch {
+    return [];
+  }
+}
+
+describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
+  let dir: string;
+  let vault: string;
+  beforeEach(async () => {
+    dir = await makeTempDir();
+    vault = path.join(dir, 'vault');
+    await createKb({ path: vault, initGitIfNeeded: true });
+  });
+  afterEach(async () => {
+    await rmTempDir(dir);
+  });
+
+  it('CAPTURE-3/4: writes an immutable text unit and commits before processing', async () => {
+    const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'call Steve re: Q3 budget' }]);
+    expect(res.committed).toBe(true);
+    expect(res.ids).toHaveLength(1);
+
+    const unit = path.join(vault, 'inbox', res.ids[0]);
+    expect(await fs.readFile(path.join(unit, 'raw.txt'), 'utf8')).toBe('call Steve re: Q3 budget');
+
+    // Committed (CAPTURE-3) and working tree clean (add-only, nothing left dirty).
+    const git = simpleGit(vault);
+    const log = await git.log();
+    expect(log.latest?.message).toContain('capture: 1 item(s) [in-app-panel]');
+    expect((await git.status()).isClean()).toBe(true);
+  });
+
+  it('CAPTURE-6: records arrival provenance + content hash in the captured event', async () => {
+    const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'hello' }]);
+    const meta = await readCapturedMeta(path.join(vault, 'inbox', res.ids[0]));
+    expect(meta.kind).toBe('text');
+    expect(meta.raw).toBe('raw.txt');
+    expect(meta.surface).toBe('in-app-panel');
+    expect(meta.mimeType).toBe('text/plain');
+    expect(meta.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(meta.captureBatch).toBe(res.captureBatch);
+    expect(() => new Date(meta.capturedAt).toISOString()).not.toThrow();
+  });
+
+  it('CAPTURE-4/6: stores file bytes verbatim with original name, mime, size, hash', async () => {
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
+    const payload: CapturePayload = { kind: 'file', name: 'screenshot.png', data: bytes };
+    const res = await captureToInbox(vault, 'in-app-panel', [payload]);
+
+    const unit = path.join(vault, 'inbox', res.ids[0]);
+    const stored = await fs.readFile(path.join(unit, 'raw.png'));
+    expect(new Uint8Array(stored)).toEqual(bytes); // byte-for-byte immutable
+
+    const meta = await readCapturedMeta(unit);
+    expect(meta.kind).toBe('file');
+    expect(meta.raw).toBe('raw.png');
+    expect(meta.originalName).toBe('screenshot.png');
+    expect(meta.mimeType).toBe('image/png');
+    expect(meta.bytes).toBe(8);
+  });
+
+  it('CAPTURE-5/14: one capture with N payloads → N units, distinct ULIDs, shared captureBatch', async () => {
+    const payloads: CapturePayload[] = [
+      { kind: 'text', text: 'caption for the shots' },
+      { kind: 'file', name: 'a.png', data: new Uint8Array([1, 2, 3]) },
+      { kind: 'file', name: 'b.png', data: new Uint8Array([4, 5, 6]) },
+    ];
+    const res = await captureToInbox(vault, 'in-app-panel', payloads);
+    expect(res.ids).toHaveLength(3);
+    expect(new Set(res.ids).size).toBe(3); // distinct identities
+
+    for (const id of res.ids) {
+      const meta = await readCapturedMeta(path.join(vault, 'inbox', id));
+      expect(meta.captureBatch).toBe(res.captureBatch); // all linked by one batch
+    }
+    // a single commit for the gesture
+    const log = await simpleGit(vault).log();
+    expect(log.latest?.message).toContain('capture: 3 item(s)');
+  });
+
+  it('CAPTURE-5: capture is add-only — a second capture leaves the first untouched', async () => {
+    const a = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'first' }]);
+    const b = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'second' }]);
+    const units = await inboxUnits(vault);
+    expect(units).toEqual([a.ids[0], b.ids[0]].sort());
+    expect(await fs.readFile(path.join(vault, 'inbox', a.ids[0], 'raw.txt'), 'utf8')).toBe('first');
+  });
+
+  it('files with no extension fall back to raw.bin', async () => {
+    const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'README', data: new Uint8Array([7]) }]);
+    expect(await pathExists(path.join(vault, 'inbox', res.ids[0], 'raw.bin'))).toBe(true);
+  });
+
+  it('rejects an empty capture', async () => {
+    await expect(captureToInbox(vault, 'in-app-panel', [])).rejects.toThrow(/nothing to capture/);
+  });
+});
+
+describe('readCapturedMeta error handling', () => {
+  it('throws when the audit file is empty', async () => {
+    const dir = await makeTempDir();
+    try {
+      await fs.writeFile(path.join(dir, 'audit.jsonl'), '\n');
+      await expect(readCapturedMeta(dir)).rejects.toThrow(/no captured event/);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('throws when the captured event is malformed', async () => {
+    const dir = await makeTempDir();
+    try {
+      await fs.writeFile(path.join(dir, 'audit.jsonl'), JSON.stringify({ action: 'captured' }) + '\n');
+      await expect(readCapturedMeta(dir)).rejects.toThrow(/malformed/);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
