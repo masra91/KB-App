@@ -20,11 +20,24 @@ const COPILOT_TIMEOUT_MS = 60_000;
 /** Injectable runner: given the composed prompt, return the session's stdout. */
 export type CopilotRunner = (prompt: string) => Promise<string>;
 
+/** The model we launch with, or undefined to let Copilot pick its own default. We can
+ *  faithfully record the *requested* model; the *resolved* model Copilot chooses when
+ *  unpinned is not reported back to us, so it reads as `default` until pinned (ORCH-16). */
+function requestedModel(): string | undefined {
+  return process.env.KB_COPILOT_MODEL || undefined;
+}
+
+/** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace. */
+function launchFlags(): string[] {
+  const model = requestedModel();
+  return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
+}
+
 const defaultRunner: CopilotRunner = async (prompt) => {
-  const args = ['-p', prompt, '--no-ask-user'];
-  const model = process.env.KB_COPILOT_MODEL;
-  if (model) args.push('--model', model);
-  const { stdout } = await exec('copilot', args, { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+  const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
+    timeout: COPILOT_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+  });
   return stdout;
 };
 
@@ -82,11 +95,22 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
         available = false;
       }
     }
-    if (!available) return deterministicDecide(meta);
+    if (!available) {
+      return { ...deterministicDecide(meta), agent: { via: 'deterministic', error: 'copilot unavailable' } };
+    }
+
+    // ORCH-16: record what we launched and what happened on every model invocation.
+    const model = requestedModel() ?? 'default';
+    const params = launchFlags();
+    const at = new Date().toISOString();
+    const t0 = Date.now();
     try {
-      return parseDecision(await run(buildPrompt(meta)), meta);
-    } catch {
-      return deterministicDecide(meta); // ORCH-8 resilience
+      const decision = parseDecision(await run(buildPrompt(meta)), meta);
+      return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at } };
+    } catch (err) {
+      // ORCH-8 resilience: fall back, but record the failure for posterity.
+      const error = err instanceof Error ? err.message : String(err);
+      return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model, params, ok: false, error, ms: Date.now() - t0, at } };
     }
   };
 }

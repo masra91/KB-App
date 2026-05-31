@@ -2,7 +2,7 @@
 // renderer (SPEC-0013 §3). No FS/git.
 import { describe, it, expect } from 'vitest';
 import { deterministicDecide } from './archivist';
-import { renderSourceMd, bodyFor } from './sourceDoc';
+import { renderSourceMd, bodyFor, archivedByLabel } from './sourceDoc';
 import type { CapturedMeta } from './ingest';
 
 const textMeta: CapturedMeta = {
@@ -30,9 +30,24 @@ const fileMeta: CapturedMeta = {
 };
 
 describe('deterministicDecide (ORCH-7 / CAPTURE-10)', () => {
-  it('returns conservative primary/global/internal defaults, echoing kind', () => {
-    expect(deterministicDecide(textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal' });
-    expect(deterministicDecide(fileMeta)).toEqual({ kind: 'file', class: 'primary', scope: 'global', sensitivity: 'internal' });
+  it('returns conservative primary/global/internal defaults, echoing kind + a deterministic trace', () => {
+    expect(deterministicDecide(textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal', agent: { via: 'deterministic' } });
+    expect(deterministicDecide(fileMeta).kind).toBe('file');
+  });
+});
+
+describe('archivedByLabel (ORCH-16)', () => {
+  it('labels a successful copilot decision with its model', () => {
+    expect(archivedByLabel({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true })).toBe('copilot (default)');
+    expect(archivedByLabel({ via: 'copilot', model: 'gpt-5', ok: true })).toBe('copilot (gpt-5)');
+  });
+  it('labels a deterministic fallback after a copilot failure with the reason', () => {
+    expect(archivedByLabel({ via: 'deterministic', runtime: 'copilot', ok: false, error: 'timeout' })).toBe('deterministic (copilot failed: timeout)');
+  });
+  it('labels copilot-unavailable and plain deterministic', () => {
+    expect(archivedByLabel({ via: 'deterministic', error: 'copilot unavailable' })).toBe('deterministic (copilot unavailable)');
+    expect(archivedByLabel({ via: 'deterministic' })).toBe('deterministic');
+    expect(archivedByLabel(undefined)).toBe('deterministic');
   });
 });
 
@@ -71,6 +86,13 @@ describe('renderSourceMd (SPEC-0013 §3)', () => {
     expect(md).toContain('mimeType: image/png');
     expect(md).toContain('bytes: 48213');
     expect(md).toContain('![[raw.png]]');
+  });
+
+  it('ORCH-16: archivedBy reflects the decision agent (copilot vs deterministic)', () => {
+    const copilot = { ...deterministicDecide(textMeta), agent: { via: 'copilot' as const, model: 'default', ok: true } };
+    expect(renderSourceMd(textMeta, copilot, 'now', 'x')).toContain('archivedBy: copilot (default)');
+    const det = deterministicDecide(textMeta);
+    expect(renderSourceMd(textMeta, det, 'now', 'x')).toContain('archivedBy: deterministic');
   });
 
   it('quotes YAML-significant scalars (e.g. a name with a colon)', () => {
