@@ -17,6 +17,7 @@ import { ensureGitIdentity } from './vault';
 import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
+import { Mutex } from './stageLock';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'archivist');
 const WORK_BRANCH = 'kb/archive-work';
@@ -27,19 +28,6 @@ export interface PipelineStatusData {
   processing: string | null;
   lastArchived: string | null;
   updatedAt: string | null;
-}
-
-/** A tiny async mutex: serializes git operations so two never race on `index.lock`. */
-class Mutex {
-  private tail: Promise<unknown> = Promise.resolve();
-  run<T>(fn: () => Promise<T>): Promise<T> {
-    const prev = this.tail;
-    let release: () => void = () => {};
-    this.tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return prev.then(fn, fn).finally(release);
-  }
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -173,16 +161,22 @@ export async function readStatus(root: string): Promise<PipelineStatusData> {
 export class Orchestrator {
   private readonly root: string;
   private readonly decider: ArchivistDecider;
-  private readonly lock = new Mutex();
+  private readonly lock: Mutex;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
   private lastArchived: string | null = null;
 
-  constructor(root: string, decider: ArchivistDecider = deterministicDecider) {
+  /**
+   * @param lock the shared per-vault canonical-writer lock (SPEC-0014 §5). Pass the SAME
+   *   instance to every stage of a vault so their canonical-ref advances serialize. Defaults
+   *   to a private lock for standalone use (e.g. tests with only the archivist).
+   */
+  constructor(root: string, decider: ArchivistDecider = deterministicDecider, lock: Mutex = new Mutex()) {
     this.root = path.resolve(root);
     this.decider = decider;
+    this.lock = lock;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
