@@ -69,7 +69,7 @@ function validEntity(v: unknown, i: number): EntityDecision {
   };
 }
 
-function validSignal(v: unknown, i: number): SignalDecision {
+export function validSignal(v: unknown, i: number): SignalDecision {
   if (typeof v !== 'object' || v === null) throw new Error(`decompose: signals[${i}] must be an object`);
   const o = v as Record<string, unknown>;
   // type: OPEN vocabulary — only "non-empty string" is enforced (DECOMP-10). NEVER allow-list.

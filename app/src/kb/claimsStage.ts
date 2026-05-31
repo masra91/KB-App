@@ -1,0 +1,378 @@
+// The Claims stage runtime (SPEC-0016) — the THIRD user of the SPEC-0014 harness: the SAME
+// deterministic pattern as the archivist + Decompose (worktree isolation, fresh disposable
+// session per item, orchestrator-owns-effects, ff-advance under the shared canonical-writer
+// lock), pointed at a different work-list + instruction file (ORCH-9 / CLAIMS-2).
+//
+// Work unit = an ENTITY (CLAIMS-5). For each entity we feed the agent the node + the WHOLE
+// source it derives from, and record the claims the source makes ABOUT it.
+//
+// Queue model (v1): like Decompose, the durable work list is DERIVED, not a `queue/` folder
+// (SPEC-0016 §3 note). An entity is "queued for claims" iff its source's append-only
+// `audit.jsonl` has no terminal `claims` marker for that entityId yet. Committing the claim
+// files + the regenerated entity block + the `claimed` marker in ONE commit IS the
+// commit-to-dequeue (CLAIMS-16): the next sweep skips it. Idempotent restart for free
+// (ORCH-13). A failed attempt appends a `failed` event (durable count); after K it appends a
+// terminal `setaside` marker so a poison entity never head-of-line-blocks (CLAIMS-12/ORCH-12).
+//
+// Sources are NEVER mutated (CLAIMS-11): we only append to the source's append-only
+// `audit.jsonl` (where Decompose already writes) and write NEW files under `claims/`. The one
+// entity-node write is the regenerated, delimited claims block — never the identity (CLAIMS-9/11).
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import simpleGit from 'simple-git';
+import { ulid, dateShard } from './ulid';
+import { ensureGitIdentity } from './vault';
+import { readCapturedMeta } from './ingest';
+import { renderClaimMd, applyClaimsBlock, oneLine, type ClaimBacklink } from './claimDoc';
+import { makeClaimsDecider, type ClaimsDecider, type EntityInput } from './claimsAgent';
+import type { SourceInput } from './decomposeAgent';
+import { Mutex } from './stageLock';
+
+const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'claims');
+const WORK_BRANCH = 'kb/claims-work';
+const STAGE = 'claims';
+/** Default attempts before a poison entity is set aside (CLAIMS-12). */
+export const DEFAULT_MAX_ATTEMPTS = 3;
+
+/** A terminal marker means the entity has left the derived queue (success or set-aside). */
+const TERMINAL_EVENTS = new Set(['claimed', 'setaside']);
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** One parsed line of a source's audit.jsonl that this stage cares about (keyed by entityId). */
+interface AuditLine {
+  stage?: string;
+  event?: string;
+  entityId?: string;
+}
+
+/** Read one entity's claims audit state from its SOURCE's append-only audit.jsonl. */
+async function readClaimsState(sourceDir: string, entityId: string): Promise<{ terminal: boolean; failures: number }> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(sourceDir, 'audit.jsonl'), 'utf8');
+  } catch {
+    return { terminal: false, failures: 0 };
+  }
+  let terminal = false;
+  let failures = 0;
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: AuditLine;
+    try {
+      obj = JSON.parse(line) as AuditLine;
+    } catch {
+      continue;
+    }
+    if (obj.stage !== STAGE || obj.entityId !== entityId) continue;
+    if (obj.event && TERMINAL_EVENTS.has(obj.event)) terminal = true;
+    if (obj.event === 'failed') failures += 1;
+  }
+  return { terminal, failures };
+}
+
+/** Recursively find every entity node file (`entities/.../<ULID>.md`), repo-relative. */
+export async function findEntityFiles(root: string): Promise<string[]> {
+  const entitiesRoot = path.join(path.resolve(root), 'entities');
+  const out: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory() && !e.name.startsWith('.')) await walk(full);
+      else if (e.isFile() && e.name.endsWith('.md')) out.push(path.relative(path.resolve(root), full));
+    }
+  }
+  await walk(entitiesRoot);
+  return out;
+}
+
+interface EntityRef {
+  kind: string;
+  name: string;
+  derivedFrom: string; // repo-relative source dir (provenance; CLAIMS-5)
+}
+
+function parseScalarValue(raw: string): string {
+  const t = raw.trim();
+  if (t.startsWith('"')) {
+    try {
+      return JSON.parse(t) as string;
+    } catch {
+      return t;
+    }
+  }
+  return t;
+}
+
+/** Extract `kind`, `name`, and `provenance.derivedFrom[0]` from an entity node's frontmatter. */
+export function parseEntityNode(md: string): EntityRef {
+  const fmEnd = md.indexOf('\n---', 3);
+  const fm = fmEnd === -1 ? md : md.slice(0, fmEnd);
+  let kind = '';
+  let name = '';
+  let derivedFrom = '';
+  for (const line of fm.split('\n')) {
+    const k = line.match(/^kind:\s*(.+)$/);
+    if (k) kind = parseScalarValue(k[1]);
+    const n = line.match(/^name:\s*(.+)$/);
+    if (n) name = parseScalarValue(n[1]);
+    const d = line.match(/^\s+derivedFrom:\s*(\[.*\])\s*$/);
+    if (d) {
+      try {
+        const arr = JSON.parse(d[1]) as unknown[];
+        if (Array.isArray(arr) && arr.length > 0) derivedFrom = String(arr[0]);
+      } catch {
+        /* leave empty → caught below */
+      }
+    }
+  }
+  if (!kind || !name) throw new Error('claims: entity node missing kind/name');
+  if (!derivedFrom) throw new Error('claims: entity node missing provenance.derivedFrom');
+  return { kind, name, derivedFrom };
+}
+
+/**
+ * The claims work queue (CLAIMS-16): entity nodes with no terminal claims marker (for that
+ * entityId, in their source's audit) and fewer than `maxAttempts` failures. Returned as
+ * repo-relative entity paths, sorted by entity id (the file name) so drains are deterministic.
+ */
+export async function readClaimsQueue(root: string, maxAttempts = DEFAULT_MAX_ATTEMPTS): Promise<string[]> {
+  root = path.resolve(root);
+  const files = await findEntityFiles(root);
+  const queued: string[] = [];
+  for (const rel of files) {
+    const entityId = path.basename(rel, '.md');
+    let ref: EntityRef;
+    try {
+      ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+    } catch {
+      continue; // unreadable/foreign node — skip (not our well-formed unit)
+    }
+    const sourceDir = path.join(root, ref.derivedFrom);
+    const { terminal, failures } = await readClaimsState(sourceDir, entityId);
+    if (terminal || failures >= maxAttempts) continue;
+    queued.push(rel);
+  }
+  return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
+}
+
+/** Ensure a healthy persistent claims worktree on WORK_BRANCH; recreate if broken. */
+async function ensureWorktree(root: string): Promise<{ wt: string; branch: string }> {
+  const git = simpleGit(root);
+  await ensureGitIdentity(git);
+  const branch = (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
+  const wt = path.join(root, WORKTREE_REL);
+  try {
+    await git.raw('worktree', 'prune');
+  } catch {
+    /* none registered yet */
+  }
+  const healthy =
+    (await pathExists(wt)) &&
+    (await simpleGit(wt)
+      .revparse(['--is-inside-work-tree'])
+      .then(() => true)
+      .catch(() => false));
+  if (!healthy) {
+    if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
+    await fs.mkdir(path.dirname(wt), { recursive: true });
+    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, branch);
+  }
+  return { wt, branch };
+}
+
+/** The rigid audit envelope (SPEC-0016 §3.4) — orchestrator-owned fields wrap freeform payloads. */
+function auditLine(fields: Record<string, unknown>): string {
+  return JSON.stringify({ ts: new Date().toISOString(), stage: STAGE, ...fields }) + '\n';
+}
+
+/** Build the agent's view of the source from its captured meta + raw text (text only in v1). */
+async function readSourceInput(sourceDir: string): Promise<SourceInput> {
+  const meta = await readCapturedMeta(sourceDir);
+  const text = meta.kind === 'text' ? await fs.readFile(path.join(sourceDir, meta.raw), 'utf8') : null;
+  return { sourceId: meta.id, kind: meta.kind, originalName: meta.originalName, mimeType: meta.mimeType, text };
+}
+
+export interface ClaimsOneResult {
+  entityId: string;
+  ok: boolean;
+  claimIds: string[];
+  setAside: boolean;
+}
+
+/**
+ * Derive claims for ONE entity. MUST be called serialized via the shared canonical-writer
+ * lock so the canonical branch does not move mid-cycle (the final ff-advance must always apply).
+ */
+export async function claimsOne(
+  root: string,
+  entityRel: string,
+  decider: ClaimsDecider,
+  maxAttempts = DEFAULT_MAX_ATTEMPTS,
+): Promise<ClaimsOneResult> {
+  root = path.resolve(root);
+  const { wt, branch } = await ensureWorktree(root);
+  const wtGit = simpleGit(wt);
+  const rootGit = simpleGit(root);
+  await wtGit.raw('reset', '--hard', branch); // sync to canonical HEAD
+
+  const entityId = path.basename(entityRel, '.md');
+  const entityPathWt = path.join(wt, entityRel);
+  const entityMd = await fs.readFile(entityPathWt, 'utf8');
+  const ref = parseEntityNode(entityMd);
+  const sourceDirWt = path.join(wt, ref.derivedFrom);
+  const auditPath = path.join(sourceDirWt, 'audit.jsonl');
+  const runId = ulid();
+
+  try {
+    const source = await readSourceInput(sourceDirWt);
+    const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source };
+    const decision = await decider(input);
+    const model = decision.agent?.model ?? 'default';
+    const sourceId = source.sourceId;
+
+    // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6).
+    const createdAt = new Date().toISOString();
+    const claimIds: string[] = [];
+    const backlinks: ClaimBacklink[] = [];
+    for (const claim of decision.claims) {
+      const id = ulid();
+      const rel = path.join('claims', dateShard(id), `${id}.md`);
+      const dest = path.join(wt, rel);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      await fs.writeFile(
+        dest,
+        renderClaimMd(claim, { id, subject: entityRel, derivedFrom: ref.derivedFrom, createdAt, agent: decision.agent }),
+        'utf8',
+      );
+      claimIds.push(id);
+      backlinks.push({ claimPath: rel, statement: claim.statement, status: claim.status, confidence: claim.confidence });
+    }
+
+    // Regenerate the entity node's delimited claims block (CLAIMS-9): canonical data lives in
+    // claims/; this is the regenerable Obsidian-readable back-link. Identity is untouched (CLAIMS-11).
+    await fs.writeFile(entityPathWt, applyClaimsBlock(entityMd, backlinks), 'utf8');
+
+    // Append audit (envelope-wrapped): start, every signal (audit-only; CLAIMS-13), terminal
+    // `claimed` marker keyed by entityId. Signals NEVER touch claims/entity/source (CLAIMS-11/13).
+    let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
+    for (const sig of decision.signals ?? []) {
+      audit += auditLine({ runId, entityId, sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
+    }
+    audit += auditLine({ runId, entityId, sourceId, model, event: 'claimed', claims: claimIds.length });
+    await fs.appendFile(auditPath, audit, 'utf8');
+
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`claims: ${claimIds.length} about ${entityId} from ${sourceId}`);
+    await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+    return { entityId, ok: true, claimIds, setAside: false };
+  } catch (err) {
+    // CLAIMS-12 / ORCH-12: never lose the entity. Discard any partial worktree writes, then
+    // record the failed attempt durably; set aside after K so it can't head-of-line-block.
+    await wtGit.raw('reset', '--hard', branch);
+    const error = err instanceof Error ? err.message : String(err);
+    const priorFailures = (await readClaimsState(sourceDirWt, entityId)).failures;
+    const attempt = priorFailures + 1;
+    const setAside = attempt >= maxAttempts;
+    let audit = auditLine({ runId, entityId, event: 'failed', attempt, error: oneLine(error) });
+    if (setAside) audit += auditLine({ runId, entityId, event: 'setaside', attempts: attempt });
+    await fs.appendFile(auditPath, audit, 'utf8');
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`claims: failed ${entityId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
+    await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
+    return { entityId, ok: false, claimIds: [], setAside };
+  }
+}
+
+/**
+ * Owns a vault's Claims stage: a poke/sweep drain loop sharing the canonical-writer lock with
+ * the archivist + Decompose (SPEC-0014 §5). Restartable: re-reads the derived queue and resumes.
+ */
+export class ClaimsStage {
+  private readonly root: string;
+  private readonly decider: ClaimsDecider;
+  private readonly lock: Mutex;
+  private readonly maxAttempts: number;
+  private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private draining = false;
+  private pending = false;
+  private current: Promise<void> | null = null;
+
+  constructor(
+    root: string,
+    decider: ClaimsDecider = makeClaimsDecider(),
+    lock: Mutex = new Mutex(),
+    maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+  ) {
+    this.root = path.resolve(root);
+    this.decider = decider;
+    this.lock = lock;
+    this.maxAttempts = maxAttempts;
+  }
+
+  /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
+  start(sweepMs = 30_000): void {
+    void this.poke();
+    if (this.sweepTimer == null) {
+      this.sweepTimer = setInterval(() => void this.poke(), sweepMs);
+      this.sweepTimer.unref?.();
+    }
+  }
+
+  stop(): void {
+    if (this.sweepTimer) {
+      clearInterval(this.sweepTimer);
+      this.sweepTimer = null;
+    }
+  }
+
+  /** Drain the queue, coalescing concurrent pokes; resolves only once fully idle. */
+  poke(): Promise<void> {
+    this.pending = true;
+    if (!this.draining) {
+      this.draining = true;
+      this.current = this.runDrains();
+    }
+    return this.current ?? Promise.resolve();
+  }
+
+  private async runDrains(): Promise<void> {
+    try {
+      while (this.pending) {
+        this.pending = false;
+        await this.drainOnce();
+      }
+    } finally {
+      this.draining = false;
+      this.current = null;
+    }
+  }
+
+  private async drainOnce(): Promise<void> {
+    let queue = await readClaimsQueue(this.root, this.maxAttempts);
+    while (queue.length > 0) {
+      const entityRel = queue[0];
+      try {
+        await this.lock.run(() => claimsOne(this.root, entityRel, this.decider, this.maxAttempts));
+      } catch {
+        // Unexpected (claimsOne handles its own failures) — stop this pass; a later poke/sweep
+        // retries rather than spinning.
+        return;
+      }
+      queue = await readClaimsQueue(this.root, this.maxAttempts);
+    }
+  }
+}
