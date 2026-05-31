@@ -47,7 +47,7 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     expect(destRel).toBe(path.join('sources', dateShard(id), id));
 
     const dest = path.join(vault, destRel);
-    expect(await fs.readFile(path.join(dest, 'raw.txt'), 'utf8')).toBe('call Steve re: Q3 budget');
+    expect(await fs.readFile(path.join(dest, 'raw.md'), 'utf8')).toBe('call Steve re: Q3 budget');
     const sourceMd = await fs.readFile(path.join(dest, 'source.md'), 'utf8');
     expect(sourceMd).toContain('class: primary');
     expect(sourceMd).toContain('surface: in-app-panel');

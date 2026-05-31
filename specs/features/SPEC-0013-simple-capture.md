@@ -68,7 +68,7 @@ simplest input kinds, so every richer surface and stage builds on a trusted base
 **What capture writes (preservation-first; each payload is its own self-contained unit):**
 ```
 <vault>/inbox/<ULID>/
-    raw.txt              # typed/pasted text, verbatim         (text item)
+    raw.md               # typed/pasted text, verbatim, saved as Markdown (text item)
     raw.<ext>            # dropped file bytes, verbatim         (file item)
     audit.jsonl          # {action: "captured", surface, ts, originalName, contentHash, captureBatch}
 ```
@@ -91,7 +91,7 @@ simplest input kinds, so every richer surface and stage builds on a trusted base
 **What the engine (archivist stage, SPEC-0014) does, per item:**
 ```
 sources/<YYYY>/<MM>/<DD>/<ULID>/        # date-shard derived from the ULID's UTC time
-    raw.txt | raw.<ext>  # the same immutable bytes, moved (never rewritten)
+    raw.md | raw.<ext>   # the same immutable bytes, moved (never rewritten)
     source.md            # catalog record (below)
     audit.jsonl          # capture event + {action: "archived", ts, decisions}
 ```
@@ -104,7 +104,7 @@ class: primary             # primary (Principal) | secondary (agent/research)  �
 kind: text                 # text | file
 scope: global              # v1 conservative default
 sensitivity: internal      # v1 conservative default
-raw: raw.txt
+raw: raw.md                # text → raw.md (Markdown); files → raw.<ext>
 contentHash: sha256:9f86d0…
 capturedAt: 2026-05-30T18:22:04Z
 archivedAt: 2026-05-30T18:22:09Z
@@ -139,7 +139,7 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
 | CAPTURE-1  | must     | An in-app panel lets the Principal capture **typed/pasted text and/or dropped files** | none-yet | VISION-1,2 |
 | CAPTURE-2  | must     | Capture is **fire-and-forget**: it confirms as soon as the item is preserved, never blocking on downstream processing | test:src/kb/orchestrator.test.ts | VISION-1,13 |
 | CAPTURE-3  | must     | Each item is written as a self-contained unit into the vault **inbox** and **committed before any processing** | test:src/kb/ingest.test.ts | INGEST-2; LIFE-2 |
-| CAPTURE-4  | must     | The raw payload is stored **byte-for-byte immutable** (text→`raw.txt`, file→`raw.<ext>`) and never edited | test:src/kb/ingest.test.ts | DATA-2; INGEST-2 |
+| CAPTURE-4  | must     | The raw payload is stored **byte-for-byte immutable** (text→`raw.md`, file→`raw.<ext>`) and never edited | test:src/kb/ingest.test.ts | DATA-2; INGEST-2 |
 | CAPTURE-5  | must     | Each item gets a **globally-unique id** and its own folder; capture is **add-only** so concurrent capture/archiving never conflict | test:src/kb/ingest.test.ts | DATA-9; ORCH-6 |
 | CAPTURE-6  | must     | Capture records **arrival provenance** (surface, timestamp, original filename, content hash) with the item | test:src/kb/ingest.test.ts | INGEST-3; DATA-5 |
 | CAPTURE-7  | must     | Once committed to inbox, the item is **durably preserved even if archiving never runs or fails** | test:src/kb/orchestrator.test.ts | INGEST-8; PRIN-1 |
@@ -247,3 +247,6 @@ call Steve re: Q3 budget     # text → body carries the content;  file → body
 - 2026-05-31 — `source.md` `archivedBy` is now **truthful** (SPEC-0014 ORCH-16): it
   reflects the actual decider — `copilot (<model>)` or `deterministic[ (copilot failed:
   …)]` — instead of a hardcoded string, and the same trace is recorded in `audit.jsonl`.
+- 2026-05-31 — typed text is now saved as **`raw.md`** (`text/markdown`) instead of
+  `raw.txt`, so Obsidian renders captured notes (text is valid Markdown). Dropped files
+  are unchanged (`raw.<ext>`).

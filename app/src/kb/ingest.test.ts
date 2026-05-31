@@ -45,7 +45,7 @@ describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
     expect(res.ids).toHaveLength(1);
 
     const unit = path.join(vault, 'inbox', res.ids[0]);
-    expect(await fs.readFile(path.join(unit, 'raw.txt'), 'utf8')).toBe('call Steve re: Q3 budget');
+    expect(await fs.readFile(path.join(unit, 'raw.md'), 'utf8')).toBe('call Steve re: Q3 budget');
 
     // Committed (CAPTURE-3) and working tree clean (add-only, nothing left dirty).
     const git = simpleGit(vault);
@@ -58,9 +58,9 @@ describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
     const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'hello' }]);
     const meta = await readCapturedMeta(path.join(vault, 'inbox', res.ids[0]));
     expect(meta.kind).toBe('text');
-    expect(meta.raw).toBe('raw.txt');
+    expect(meta.raw).toBe('raw.md');
     expect(meta.surface).toBe('in-app-panel');
-    expect(meta.mimeType).toBe('text/plain');
+    expect(meta.mimeType).toBe('text/markdown');
     expect(meta.contentHash).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(meta.captureBatch).toBe(res.captureBatch);
     expect(() => new Date(meta.capturedAt).toISOString()).not.toThrow();
@@ -107,7 +107,7 @@ describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
     const b = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'second' }]);
     const units = await inboxUnits(vault);
     expect(units).toEqual([a.ids[0], b.ids[0]].sort());
-    expect(await fs.readFile(path.join(vault, 'inbox', a.ids[0], 'raw.txt'), 'utf8')).toBe('first');
+    expect(await fs.readFile(path.join(vault, 'inbox', a.ids[0], 'raw.md'), 'utf8')).toBe('first');
   });
 
   it('files with no extension fall back to raw.bin', async () => {
