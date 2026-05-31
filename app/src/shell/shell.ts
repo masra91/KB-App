@@ -4,9 +4,10 @@
 // a single content region, mounts each view lazily once, and switches by toggling
 // visibility (which is what lets in-progress capture text survive a switch — SHELL-8).
 import { createNavModel } from './navModel';
-import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
+import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_REVIEWS, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
 import { esc } from './html';
 import { mountCapture } from './views/captureView';
+import { mountReviews } from './views/reviewsView';
 import { mountPlaceholder } from './views/placeholderView';
 import { mountSettings } from './views/settingsView';
 
@@ -16,6 +17,7 @@ type MountFn = (container: HTMLElement) => void | Promise<void>;
 export function mountShell(root: HTMLElement, vaultPath: string, name: string): void {
   const mounts: Record<string, MountFn> = {
     [VIEW_CAPTURE]: (c) => mountCapture(c, vaultPath, name),
+    [VIEW_REVIEWS]: mountReviews,
     [VIEW_PLACEHOLDER]: mountPlaceholder,
     [VIEW_SETTINGS]: mountSettings,
   };

@@ -1,0 +1,132 @@
+// The Review store + answer flow (SPEC-0018). Shell-agnostic: the main process (IPC) and the
+// stages call these; no electron/obsidian import (STACK-6).
+//
+// Reviews live at `reviews/<dateShard(id)>/<id>/review.json` — canonical JSON (a workflow
+// artifact the app reads, not Obsidian-native knowledge), so no bespoke YAML parser (ENG).
+// Raising is done by the originating stage inside its worktree (so the review + park marker
+// commit atomically with the stage's other effects). Answering runs in the main process and
+// goes through the SHARED canonical-writer lock so it never races a stage's ff-advance (§5).
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import simpleGit from 'simple-git';
+import { dateShard } from './ulid';
+import { ensureGitIdentity } from './vault';
+import { captureToInbox } from './ingest';
+import { validReviewAnswerInput, type Review } from './reviews';
+import type { Mutex } from './stageLock';
+
+/** Repo-relative directory for a review id. */
+export function reviewRel(id: string): string {
+  return path.join('reviews', dateShard(id), id);
+}
+
+/** Write a review artifact as JSON into `dir` (its own directory). */
+export async function writeReviewFile(dir: string, review: Review): Promise<void> {
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'review.json'), JSON.stringify(review, null, 2) + '\n', 'utf8');
+}
+
+async function readReviewFile(file: string): Promise<Review | null> {
+  try {
+    return JSON.parse(await fs.readFile(file, 'utf8')) as Review;
+  } catch {
+    return null;
+  }
+}
+
+/** Recursively collect every `review.json` under `reviews/`, repo-relative dir + parsed. */
+async function allReviews(root: string): Promise<Review[]> {
+  const out: Review[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory() && !e.name.startsWith('.')) await walk(full);
+      else if (e.isFile() && e.name === 'review.json') {
+        const r = await readReviewFile(full);
+        if (r) out.push(r);
+      }
+    }
+  }
+  await walk(path.join(path.resolve(root), 'reviews'));
+  return out;
+}
+
+/** The "needs you" queue: open reviews, newest first (REVIEW-9). */
+export async function findOpenReviews(root: string): Promise<Review[]> {
+  const open = (await allReviews(root)).filter((r) => r.status === 'open');
+  return open.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+/** Load one review by id (from its canonical location). */
+export async function getReview(root: string, id: string): Promise<Review | null> {
+  return readReviewFile(path.join(path.resolve(root), reviewRel(id), 'review.json'));
+}
+
+export interface AnswerReviewResult {
+  ok: boolean;
+  message: string;
+  /** The stage to poke so the parked item resumes (REVIEW-6), when successful. */
+  stage?: string;
+  review?: Review;
+}
+
+/**
+ * Answer a review (REVIEW-6/7). Under the shared canonical-writer lock:
+ *  1. (if a note) capture it as a PRIMARY source via Ingest — propagates independently (REVIEW-7);
+ *  2. write the answer onto the review artifact (status → answered);
+ *  3. append a `review-answered` marker to the parked item's audit — SUPERSEDING the park so
+ *     the item re-enters its stage's derived queue (REVIEW-6);
+ *  4. commit. Idempotent: answering an already-answered review is a no-op.
+ * The caller (pipeline) pokes `result.stage` so the item resumes promptly.
+ */
+export async function answerReview(root: string, lock: Mutex, id: string, answerInput: unknown): Promise<AnswerReviewResult> {
+  root = path.resolve(root);
+  const { verdict, note } = validReviewAnswerInput(answerInput);
+  return lock.run(async () => {
+    const dir = path.join(root, reviewRel(id));
+    const review = await readReviewFile(path.join(dir, 'review.json'));
+    if (!review) return { ok: false, message: `review ${id} not found` };
+    if (review.status === 'answered') return { ok: true, message: 'already answered', stage: review.raisedBy.stage, review };
+
+    // 1. The note becomes a primary source (origin: principal), propagating on its own (REVIEW-7).
+    let noteSourceId: string | undefined;
+    if (note) {
+      const cap = await captureToInbox(root, 'review-note', [{ kind: 'text', text: note }]);
+      noteSourceId = cap.ids[0];
+    }
+
+    // 2. Record the answer on the artifact.
+    const answeredAt = new Date().toISOString();
+    review.status = 'answered';
+    review.answer = { verdict, ...(note ? { note } : {}), ...(noteSourceId ? { noteSourceId } : {}), answeredAt };
+    await writeReviewFile(dir, review);
+
+    // 3. Supersede the park: a `review-answered` marker on the parked item's audit re-enqueues it.
+    const auditAbs = path.join(root, review.raisedBy.auditRel);
+    const marker =
+      JSON.stringify({
+        ts: answeredAt,
+        stage: review.raisedBy.stage,
+        event: 'review-answered',
+        reviewId: id,
+        question: review.question,
+        verdict,
+        note: note ?? null,
+        ...review.raisedBy.markerKey,
+      }) + '\n';
+    await fs.appendFile(auditAbs, marker, 'utf8');
+
+    // 4. Commit on the canonical tree (serialized by the lock, so no race with stage ff-advances).
+    const git = simpleGit(root);
+    await ensureGitIdentity(git);
+    await git.raw('add', '-A');
+    await git.commit(`review answered: ${id} (${verdict})`);
+    return { ok: true, message: 'answered', stage: review.raisedBy.stage, review };
+  });
+}

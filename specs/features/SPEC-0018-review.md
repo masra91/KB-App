@@ -227,20 +227,20 @@ SHELL-5):
 
 | ID         | Priority | Statement (short)                                                  | Verify   | Traces |
 | ---------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
-| REVIEW-1   | must     | Any harness stage can **raise a review** — a yes/no question + context — surfaced in the shared "needs you" queue | none-yet | AUTO-10; LIFE-6 |
-| REVIEW-2   | must     | A review is a **boolean** question; the answer is `confirm | reject` plus an **optional note** — never open-ended | none-yet | LIFE-6; PRIN-4 |
-| REVIEW-3   | must     | A review carries agent **context**: a one-line `question` + an expandable `detail` (why it cares / what a verdict means) | none-yet | LIFE-6; AUTO-8 |
-| REVIEW-4   | must     | Reviews are first-class **git-backed artifacts** in `reviews/` (`open → answered`) with provenance (raising stage/run + subject) | none-yet | DATA-9,10; LIFE-9 |
-| REVIEW-5   | must     | Raising a review **parks only the raising work item** (non-terminal marker); every other item in the stage keeps draining | none-yet | ORCH-6; LIFE-6 |
-| REVIEW-6   | must     | Answering (`confirm`/`reject`) **resumes** the parked item — re-runs it with the answer as context; **the verdict alone resumes** (no wait on note propagation) | none-yet | LIFE-6; ORCH-13 |
-| REVIEW-7   | must     | An answer **note is captured as a primary Source** (origin: principal) via Ingest, linked from the review, and propagates through Enrich **independently** of the resume | none-yet | LIFE-7; DATA-2 |
-| REVIEW-8   | must     | A resumed re-run **may raise a follow-up review** (cascade) by the same mechanism; a per-item round cap bounds runaway cascades | none-yet | LIFE-6; ORCH-12 |
-| REVIEW-9   | must     | The full review lifecycle (raised, answered, verdict, note) is **audited**; the queue is a **derived view** over open reviews, not a parallel notifier | none-yet | AUTO-8,10; DATA-10 |
-| REVIEW-10  | must     | A **Reviews view** in the shell lists open reviews with **expandable context** and **confirm/reject + optional note**; added by one registration (no edits to existing views) | none-yet | SHELL-5; AUTO-10 |
-| REVIEW-11  | must     | Reviews surface via the **typed IPC contract** (`listReviews`/`answerReview`); the main process owns the store, the renderer stays thin | none-yet | STACK-2,6; SHELL-6 |
-| REVIEW-12  | must     | Reviews and answers **never mutate sources or prior derived identity**; the review artifact + note-source are purely additive | none-yet | DATA-2; LIFE-2 |
-| REVIEW-13  | should   | Park/resume is **idempotent / restartable** on the harness: a parked item stays parked across restart; an answered one re-enters the queue exactly once | none-yet | ORCH-4,13 |
-| REVIEW-14  | should   | The agent raises a review via the **decision channel** (`reviews[]`), so any thin-agent stage gains it with no bespoke wiring; v1 demonstrates via Claims | none-yet | ORCH-7; AUTO-2 |
+| REVIEW-1   | must     | Any harness stage can **raise a review** — a yes/no question + context — surfaced in the shared "needs you" queue | test:claimsStage.test.ts | AUTO-10; LIFE-6 |
+| REVIEW-2   | must     | A review is a **boolean** question; the answer is `confirm | reject` plus an **optional note** — never open-ended | test:reviews.test.ts | LIFE-6; PRIN-4 |
+| REVIEW-3   | must     | A review carries agent **context**: a one-line `question` + an expandable `detail` (why it cares / what a verdict means) | test:reviews.test.ts, claims.test.ts | LIFE-6; AUTO-8 |
+| REVIEW-4   | must     | Reviews are first-class **git-backed artifacts** in `reviews/` (`open → answered`) with provenance (raising stage/run + subject) | test:claimsStage.test.ts | DATA-9,10; LIFE-9 |
+| REVIEW-5   | must     | Raising a review **parks only the raising work item** (non-terminal marker); every other item in the stage keeps draining | test:claimsStage.test.ts | ORCH-6; LIFE-6 |
+| REVIEW-6   | must     | Answering (`confirm`/`reject`) **resumes** the parked item — re-runs it with the answer as context; **the verdict alone resumes** (no wait on note propagation) | test:claimsStage.test.ts | LIFE-6; ORCH-13 |
+| REVIEW-7   | must     | An answer **note is captured as a primary Source** (origin: principal) via Ingest, linked from the review, and propagates through Enrich **independently** of the resume | test:claimsStage.test.ts | LIFE-7; DATA-2 |
+| REVIEW-8   | must     | A resumed re-run **may raise a follow-up review** (cascade) by the same mechanism; a per-item round cap bounds runaway cascades | test:claimsStage.test.ts | LIFE-6; ORCH-12 |
+| REVIEW-9   | must     | The full review lifecycle (raised, answered, verdict, note) is **audited**; the queue is a **derived view** over open reviews, not a parallel notifier | test:claimsStage.test.ts | AUTO-8,10; DATA-10 |
+| REVIEW-10  | must     | A **Reviews view** in the shell lists open reviews with **expandable context** and **confirm/reject + optional note**; added by one registration (no edits to existing views) | test:app/src/shell/navModel.test.ts | SHELL-5; AUTO-10 |
+| REVIEW-11  | must     | Reviews surface via the **typed IPC contract** (`listReviews`/`answerReview`); the main process owns the store, the renderer stays thin | test:claimsStage.test.ts | STACK-2,6; SHELL-6 |
+| REVIEW-12  | must     | Reviews and answers **never mutate sources or prior derived identity**; the review artifact + note-source are purely additive | test:claimsStage.test.ts | DATA-2; LIFE-2 |
+| REVIEW-13  | should   | Park/resume is **idempotent / restartable** on the harness: a parked item stays parked across restart; an answered one re-enters the queue exactly once | test:claimsStage.test.ts | ORCH-4,13 |
+| REVIEW-14  | should   | The agent raises a review via the **decision channel** (`reviews[]`), so any thin-agent stage gains it with no bespoke wiring; v1 demonstrates via Claims | test:claims.test.ts, claimsAgent.test.ts | ORCH-7; AUTO-2 |
 | REVIEW-15  | may      | Open reviews drive **batched notifications** (dock/tray) — deferred; the derived queue + view is the v1 surface | none-yet | AUTO-10 |
 
 ### REVIEW-2 — Boolean questions only
@@ -364,3 +364,15 @@ Inherits SPEC-0014 §5 / SPEC-0016 §5:
   avoids a bespoke YAML parser (ENG simplicity). §3.2 example + raise/answer flow updated to
   match; added `raisedBy.auditRel`/`markerKey` so the answer path supersedes the park
   generically.
+- 2026-05-31 — **implemented** (`app/src/kb/reviews.ts`, `reviewStore.ts`; the `reviews[]`
+  decision channel + park/resume/cascade in `claims.ts`/`claimsAgent.ts`/`claimsStage.ts`;
+  `answerActiveReview`/`listActiveReviews` in `main/pipeline.ts`; `kb:listReviews`/
+  `kb:answerReview` IPC; the **Reviews view** `shell/views/reviewsView.ts` registered in
+  the nav rail). Demonstrated end-to-end via Claims: raise → per-item park → answer
+  (verdict resumes; note → primary source) → resume with the answer as context → cascade,
+  bounded by a round cap. Graduated `Verify:` of REVIEW-1..14 → `test:` (36 requirement-
+  traced tests; injected deciders keep CI credential-free). **Honest coverage note:** the
+  graduated tests cover the domain mechanism + the view registration (REVIEW-10) + the
+  store/answer logic behind the IPC (REVIEW-11); the **DOM rendering of the Reviews view and
+  the Electron IPC glue are covered by e2e (CI), not unit tests** — matching the SHELL/CAPTURE
+  precedent (TEST-9). REVIEW-15 (notifications) stays deferred.

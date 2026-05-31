@@ -78,6 +78,28 @@ export interface PipelineStatus {
   updatedAt: string | null;
 }
 
+// --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
+
+/** One open review as the Reviews view needs it (REVIEW-10). */
+export interface ReviewSummary {
+  id: string;
+  question: string; // the yes/no question
+  detail: string; // expandable context (REVIEW-3)
+  stage: string; // which stage raised it
+  refs: string[]; // subject entity names / mentions
+  createdAt: string;
+}
+
+export interface AnswerReviewRequest {
+  id: string;
+  verdict: 'confirm' | 'reject';
+  note?: string; // optional; captured as a primary source (REVIEW-7)
+}
+export interface AnswerReviewResult {
+  ok: boolean;
+  message: string;
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -86,4 +108,6 @@ export interface KbApi {
   create(opts: CreateKbOptions): Promise<CreateKbResult>;
   capture(req: CaptureRequest): Promise<CaptureResult>;
   pipelineStatus(): Promise<PipelineStatus>;
+  listReviews(): Promise<ReviewSummary[]>;
+  answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
 }

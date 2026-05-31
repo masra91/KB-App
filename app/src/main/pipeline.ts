@@ -17,8 +17,16 @@ import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
 import { Mutex } from '../kb/stageLock';
+import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
+import type { Review } from '../kb/reviews';
 
-let active: { path: string; orch: Orchestrator; decompose: DecomposeStage; claims: ClaimsStage } | null = null;
+let active: {
+  path: string;
+  orch: Orchestrator;
+  decompose: DecomposeStage;
+  claims: ClaimsStage;
+  lock: Mutex;
+} | null = null;
 
 /** Start (or reuse) the pipeline for `vaultPath`, replacing any prior one. Archivist +
  *  Decompose + Claims stages share one canonical-writer lock and each run a Copilot session per
@@ -36,13 +44,29 @@ export function startPipeline(vaultPath: string): Orchestrator {
   orch.start();
   decompose.start();
   claims.start();
-  active = { path: vaultPath, orch, decompose, claims };
+  active = { path: vaultPath, orch, decompose, claims, lock };
   return orch;
 }
 
 /** The archivist orchestrator for the loaded KB, or null if none is active. */
 export function activePipeline(): Orchestrator | null {
   return active?.orch ?? null;
+}
+
+/** The open "needs you" queue for the loaded KB (SPEC-0018 REVIEW-10/11). */
+export async function listActiveReviews(): Promise<Review[]> {
+  return active ? findOpenReviews(active.path) : [];
+}
+
+/**
+ * Answer an open review (REVIEW-6): records the verdict (+ optional note → primary source),
+ * supersedes the park, then pokes the owning stage so the parked item resumes promptly.
+ */
+export async function answerActiveReview(id: string, answerInput: unknown): Promise<AnswerReviewResult> {
+  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  const result = await answerReviewInVault(active.path, active.lock, id, answerInput);
+  if (result.ok && result.stage === 'claims') void active.claims.poke(); // resume the unparked item
+  return result;
 }
 
 /** Stop and clear the active pipeline (used on shutdown / vault switch). */

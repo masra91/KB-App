@@ -11,6 +11,7 @@
 // validator is shared with decompose.ts rather than duplicated.
 import type { AgentTrace } from './archivist';
 import { type SignalDecision, validSignal } from './decompose';
+import { type ReviewRequest, validReviewRequests } from './reviews';
 
 /** The CLOSED set of epistemic statuses a claim may carry (CLAIMS-8; DATA-7 / PRIN-3). */
 export const CLAIM_STATUSES = ['fact', 'interpretation', 'hypothesis'] as const;
@@ -33,6 +34,9 @@ export interface ClaimsDecision {
   entityId: string;
   claims: ClaimDecision[];
   signals?: SignalDecision[];
+  /** Yes/no escalations the agent raises instead of guessing (SPEC-0018 REVIEW-14). When
+   *  present, the orchestrator PARKS this item and applies no claims until answered. */
+  reviews?: ReviewRequest[];
   /** Provenance of the decision itself (ORCH-16), filled by the decider. */
   agent?: AgentTrace;
 }
@@ -114,8 +118,10 @@ export function parseClaimsDecision(stdout: string, expectedEntityId?: string): 
     if (!Array.isArray(obj.signals)) throw new Error('claims: signals must be an array when present');
     signals = obj.signals.map((s, i) => validSignal(s, i));
   }
+  const reviews = validReviewRequests(obj.reviews); // [] when absent (REVIEW-14)
 
   const decision: ClaimsDecision = { entityId: obj.entityId, claims };
   if (signals && signals.length > 0) decision.signals = signals;
+  if (reviews.length > 0) decision.reviews = reviews;
   return decision;
 }

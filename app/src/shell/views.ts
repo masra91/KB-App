@@ -7,16 +7,18 @@ import type { NavView } from './navModel';
 
 /** Stable view ids — referenced by the shell's mount map and by tests. */
 export const VIEW_CAPTURE = 'capture';
+export const VIEW_REVIEWS = 'reviews';
 export const VIEW_PLACEHOLDER = 'placeholder';
 export const VIEW_SETTINGS = 'settings';
 
 /**
- * The three v1 views, in rail order. Capture is first and is the default on launch
- * (SHELL-4): launch always lands on Capture, not the last-open view — a deliberate
- * behavior recorded in SPEC-0017 §5.
+ * The v1 views, in rail order. Capture is first and is the default on launch (SHELL-4):
+ * launch always lands on Capture, not the last-open view — a deliberate behavior recorded
+ * in SPEC-0017 §5. Reviews is the "needs you" queue (SPEC-0018 REVIEW-10).
  */
 export const NAV_VIEWS: NavView[] = [
   { id: VIEW_CAPTURE, label: 'Capture', icon: '📥' },
+  { id: VIEW_REVIEWS, label: 'Reviews', icon: '🔍' },
   { id: VIEW_PLACEHOLDER, label: 'Coming soon', icon: '✨' },
   { id: VIEW_SETTINGS, label: 'Settings', icon: '⚙️' },
 ];

@@ -24,8 +24,10 @@ import { ulid, dateShard } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { readCapturedMeta } from './ingest';
 import { renderClaimMd, applyClaimsBlock, oneLine, type ClaimBacklink } from './claimDoc';
-import { makeClaimsDecider, type ClaimsDecider, type EntityInput } from './claimsAgent';
+import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
 import type { SourceInput } from './decomposeAgent';
+import { reviewRel, writeReviewFile } from './reviewStore';
+import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'claims');
@@ -33,6 +35,8 @@ const WORK_BRANCH = 'kb/claims-work';
 const STAGE = 'claims';
 /** Default attempts before a poison entity is set aside (CLAIMS-12). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
+/** Default review rounds (parks) on one entity before it is set aside (REVIEW-8 cascade cap). */
+export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
 /** A terminal marker means the entity has left the derived queue (success or set-aside). */
 const TERMINAL_EVENTS = new Set(['claimed', 'setaside']);
@@ -51,18 +55,43 @@ interface AuditLine {
   stage?: string;
   event?: string;
   entityId?: string;
+  reviewId?: string;
+  reviewIds?: string[];
+  question?: string;
+  verdict?: string;
+  note?: string | null;
+}
+
+/** One review the Principal has answered for an entity (fed back on a resumed run; REVIEW-6). */
+export interface AnsweredReviewState {
+  reviewId: string;
+  question: string;
+  verdict: string;
+  note?: string | null;
+}
+
+export interface ClaimsState {
+  terminal: boolean; // claimed / set aside — leaves the queue for good
+  failures: number; // failed attempts (CLAIMS-12)
+  parked: boolean; // an open `awaiting-review` whose reviews aren't all answered (REVIEW-5)
+  rounds: number; // number of review parks so far (REVIEW-8 cascade cap)
+  answered: AnsweredReviewState[]; // answered reviews, to feed a resumed re-run (REVIEW-6)
 }
 
 /** Read one entity's claims audit state from its SOURCE's append-only audit.jsonl. */
-async function readClaimsState(sourceDir: string, entityId: string): Promise<{ terminal: boolean; failures: number }> {
+async function readClaimsState(sourceDir: string, entityId: string): Promise<ClaimsState> {
   let raw: string;
   try {
     raw = await fs.readFile(path.join(sourceDir, 'audit.jsonl'), 'utf8');
   } catch {
-    return { terminal: false, failures: 0 };
+    return { terminal: false, failures: 0, parked: false, rounds: 0, answered: [] };
   }
   let terminal = false;
   let failures = 0;
+  let rounds = 0;
+  const parkRounds: string[][] = []; // reviewIds raised per `awaiting-review` round
+  const answeredIds = new Set<string>();
+  const answered: AnsweredReviewState[] = [];
   for (const line of raw.split('\n')) {
     if (line.trim().length === 0) continue;
     let obj: AuditLine;
@@ -73,9 +102,18 @@ async function readClaimsState(sourceDir: string, entityId: string): Promise<{ t
     }
     if (obj.stage !== STAGE || obj.entityId !== entityId) continue;
     if (obj.event && TERMINAL_EVENTS.has(obj.event)) terminal = true;
-    if (obj.event === 'failed') failures += 1;
+    else if (obj.event === 'failed') failures += 1;
+    else if (obj.event === 'awaiting-review') {
+      rounds += 1;
+      parkRounds.push(obj.reviewIds ?? []);
+    } else if (obj.event === 'review-answered' && obj.reviewId) {
+      answeredIds.add(obj.reviewId);
+      answered.push({ reviewId: obj.reviewId, question: obj.question ?? '', verdict: obj.verdict ?? '', note: obj.note ?? null });
+    }
   }
-  return { terminal, failures };
+  // Parked iff any park round still has an unanswered review (REVIEW-5/6).
+  const parked = !terminal && parkRounds.some((ids) => ids.some((id) => !answeredIds.has(id)));
+  return { terminal, failures, parked, rounds, answered };
 }
 
 /** Recursively find every entity node file (`entities/.../<ULID>.md`), repo-relative. */
@@ -162,8 +200,9 @@ export async function readClaimsQueue(root: string, maxAttempts = DEFAULT_MAX_AT
       continue; // unreadable/foreign node — skip (not our well-formed unit)
     }
     const sourceDir = path.join(root, ref.derivedFrom);
-    const { terminal, failures } = await readClaimsState(sourceDir, entityId);
-    if (terminal || failures >= maxAttempts) continue;
+    const { terminal, failures, parked } = await readClaimsState(sourceDir, entityId);
+    // Skip done (terminal), exhausted (failures), and PARKED items (awaiting an answer; REVIEW-5).
+    if (terminal || parked || failures >= maxAttempts) continue;
     queued.push(rel);
   }
   return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
@@ -211,6 +250,8 @@ export interface ClaimsOneResult {
   ok: boolean;
   claimIds: string[];
   setAside: boolean;
+  /** True when the agent raised a review and the item was parked (REVIEW-5), not claimed. */
+  parked?: boolean;
 }
 
 /**
@@ -222,6 +263,7 @@ export async function claimsOne(
   entityRel: string,
   decider: ClaimsDecider,
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
 ): Promise<ClaimsOneResult> {
   root = path.resolve(root);
   const { wt, branch } = await ensureWorktree(root);
@@ -239,10 +281,58 @@ export async function claimsOne(
 
   try {
     const source = await readSourceInput(sourceDirWt);
-    const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source };
+    const sourceId = source.sourceId;
+    // Feed any already-answered reviews back to the resumed run as authoritative context (REVIEW-6).
+    const priorState = await readClaimsState(sourceDirWt, entityId);
+    const priorReviews: AnsweredReview[] = priorState.answered.map((a) => ({ question: a.question, verdict: a.verdict, note: a.note }));
+    const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source, ...(priorReviews.length > 0 ? { priorReviews } : {}) };
     const decision = await decider(input);
     const model = decision.agent?.model ?? 'default';
-    const sourceId = source.sourceId;
+
+    // REVIEW-5: if the agent raised any reviews, PARK this item — apply NO claims until answered.
+    if (decision.reviews && decision.reviews.length > 0) {
+      // Cascade cap (REVIEW-8): too many parks on one item → set aside, never loop forever.
+      if (priorState.rounds >= maxReviewRounds) {
+        let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
+        audit += auditLine({ runId, entityId, event: 'setaside', reason: 'review-cascade-cap', rounds: priorState.rounds });
+        await fs.appendFile(auditPath, audit, 'utf8');
+        await wtGit.raw('add', '-A');
+        await wtGit.commit(`claims: set aside ${entityId} (review cascade cap)`);
+        await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
+        return { entityId, ok: false, claimIds: [], setAside: true };
+      }
+      const createdAtR = new Date().toISOString();
+      const reviewIds: string[] = [];
+      let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
+      for (const req of decision.reviews) {
+        const id = ulid();
+        const review: Review = {
+          id,
+          status: 'open',
+          question: req.question,
+          detail: req.detail,
+          raisedBy: {
+            stage: STAGE,
+            runId,
+            item: { kind: 'entity', ref: entityRel },
+            auditRel: path.join(ref.derivedFrom, 'audit.jsonl'),
+            markerKey: { entityId },
+          },
+          subject: { ...(req.refs ? { refs: req.refs } : {}), sources: [ref.derivedFrom] },
+          createdAt: createdAtR,
+        };
+        await writeReviewFile(path.join(wt, reviewRel(id)), review);
+        reviewIds.push(id);
+        audit += auditLine({ runId, entityId, sourceId, model, event: 'review-raised', reviewId: id, question: req.question });
+      }
+      // The non-terminal park marker: skips just this item until every raised review is answered.
+      audit += auditLine({ runId, entityId, event: 'awaiting-review', reviewIds, round: priorState.rounds + 1 });
+      await fs.appendFile(auditPath, audit, 'utf8');
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`claims: parked ${entityId} for review (${reviewIds.length})`);
+      await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
+      return { entityId, ok: true, claimIds: [], setAside: false, parked: true };
+    }
 
     // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6).
     const createdAt = new Date().toISOString();
