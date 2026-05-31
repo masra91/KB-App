@@ -6,7 +6,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import simpleGit from 'simple-git';
-import { ulid } from './ulid';
+import { ulid, isUlid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { mimeForName, rawNameFor } from './media';
 
@@ -31,6 +31,7 @@ export interface CapturedMeta {
   capturedAt: string; // ISO 8601
   surface: string;
   captureBatch: string; // links payloads from one capture gesture (CAPTURE-14)
+  origin?: 'principal' | 'external'; // who produced it; defaults to principal (DATA-2/5)
   originalName?: string;
   mimeType?: string;
   bytes?: number;
@@ -120,4 +121,63 @@ export async function readCapturedMeta(unitDir: string): Promise<CapturedMeta> {
   const obj = JSON.parse(first) as Partial<CapturedMeta> & { action?: string };
   if (!obj.id || !obj.kind || !obj.raw) throw new Error(`malformed captured event in ${unitDir}`);
   return obj as CapturedMeta;
+}
+
+/**
+ * Adopt foreign drops (SPEC-0014 ORCH-14): the inbox is a contract that also accepts loose
+ * files dropped by another app / directly on disk (no ULID, no audit). Wrap each into a
+ * canonical `inbox/<ULID>/` unit (`origin: external`, `surface: folder-drop`) and commit,
+ * so the archivist can process them like any capture. Idempotent: canonical `<ULID>/`
+ * units are left untouched. Returns the ids minted this pass.
+ */
+export async function normalizeInbox(root: string, now: number = Date.now()): Promise<string[]> {
+  root = path.resolve(root);
+  const inbox = path.join(root, 'inbox');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(inbox, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const minted: string[] = [];
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue; // skip hidden/system files (e.g. .DS_Store)
+    if (e.isDirectory() && isUlid(e.name)) continue; // already a canonical unit
+    if (!e.isFile()) continue; // non-canonical dirs: left for the archivist's failure path
+
+    const id = ulid(now);
+    const dir = path.join(inbox, id);
+    await fs.mkdir(dir, { recursive: true });
+    const raw = rawNameFor(e.name);
+    const data = await fs.readFile(path.join(inbox, e.name));
+
+    const meta: CapturedMeta = {
+      id,
+      kind: 'file',
+      raw,
+      contentHash: sha256(data),
+      capturedAt: new Date(now).toISOString(),
+      surface: 'folder-drop',
+      captureBatch: id,
+      origin: 'external',
+      originalName: e.name,
+      mimeType: mimeForName(e.name),
+      bytes: data.byteLength,
+    };
+    // Write the canonical unit fully BEFORE removing the original — the raw bytes are
+    // never at risk (the original survives until its copy + audit are on disk).
+    await fs.writeFile(path.join(dir, raw), data);
+    await fs.writeFile(path.join(dir, 'audit.jsonl'), JSON.stringify({ action: 'captured', ...meta }) + '\n', 'utf8');
+    await fs.rm(path.join(inbox, e.name));
+    minted.push(id);
+  }
+
+  if (minted.length > 0) {
+    const git = simpleGit(root);
+    await ensureGitIdentity(git);
+    await git.raw('add', 'inbox');
+    await git.commit(`normalize: ${minted.length} foreign drop(s)`);
+  }
+  return minted;
 }

@@ -98,16 +98,16 @@ Three layers; only one has a brain.
 | ORCH-2   | must     | Stage work runs in a dedicated git **worktree of the vault repo**, isolating dirty state from the canonical tree | test:src/kb/orchestrator.test.ts | DATA-9 |
 | ORCH-3   | must     | The canonical vault (root) tree advances **only** by completed, committed work; it is never left dirty for the user | test:src/kb/orchestrator.test.ts | VISION-4; DATA-9 |
 | ORCH-4   | must     | A known queue **folder is the durable work list**; an item leaves it only once its processed result is committed | test:src/kb/orchestrator.test.ts | INGEST-8; PRIN-1 |
-| ORCH-5   | must     | Each work item is handled in a **fresh, isolated agent session** (empty context) — no cross-item contamination | none-yet | AUTO-2 |
+| ORCH-5   | must     | Each work item is handled in a **fresh, isolated agent session** (empty context) — no cross-item contamination | test:src/kb/copilotAgent.test.ts | AUTO-2 |
 | ORCH-6   | should   | v1 drains each stage **serially** (one item at a time); conflict-freedom comes from globally-unique item ids | test:src/kb/orchestrator.test.ts | DATA-9 |
 | ORCH-7   | must     | The orchestrator (deterministic) owns all git/file **effects**; in v1 the agent session is **cognition-only** (thin agent) | test:src/kb/sourceDoc.test.ts | AUTO-3,4 |
-| ORCH-8   | must     | Agent sessions use the **BYOA Copilot CLI non-interactively**, reusing the user's existing credentials (no separate auth in our flow) | none-yet | AUTO-11 |
+| ORCH-8   | must     | Agent sessions use the **BYOA Copilot CLI non-interactively**, reusing the user's existing credentials (no separate auth in our flow) | test:src/kb/copilotAgent.test.ts | AUTO-11 |
 | ORCH-9   | must     | The engine is **stage-agnostic**: the same harness drives later stages via a different instruction file + queue folder | none-yet | LIFE-1,3,8 |
 | ORCH-10  | must     | The engine exposes **observable status** (queue depth, current item, processing state) for the app UI | test:src/kb/orchestrator.test.ts | VISION-11 |
 | ORCH-11  | must     | Every pipeline action **emits an append-only audit event** (start, commit, failure), colocated with the item | test:src/kb/orchestrator.test.ts | DATA-10; LIFE-9 |
 | ORCH-12  | must     | A **failed item is never lost**: it stays preserved and is flagged for review/retry, not dropped | test:src/kb/orchestrator.test.ts | INGEST-8,9; LIFE-6 |
 | ORCH-13  | must     | The orchestrator is **idempotent / restartable**: re-poke or restart resumes from queue state without duplicating work | test:src/kb/orchestrator.test.ts | PRIN-1 |
-| ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | none-yet | VISION-3; INGEST-7 |
+| ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | test:src/kb/ingest.test.ts | VISION-3; INGEST-7 |
 | ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | test:src/kb/orchestrator.test.ts | VISION-10 |
 
 ### ORCH-3 — The canonical vault is always clean
@@ -129,7 +129,7 @@ Three layers; only one has a brain.
   into the next; per-item isolation keeps each archival/enrichment honest and makes
   the session boundary double as the crash + commit boundary.
 - **Traces:** AUTO-2
-- **Verify:** none-yet
+- **Verify:** test:src/kb/copilotAgent.test.ts
 
 ### ORCH-7 — Thin agent in v1 (deterministic effects)
 - **Status:** draft · **Priority:** must
@@ -189,3 +189,12 @@ Three layers; only one has a brain.
   worktree lives under the already-gitignored **`.kb/cache/worktrees/archivist`** (no
   `.gitignore` churn). Graduated `Verify:` of ORCH-2/3/4/6/7/10/11/12/13/15 → `test:`;
   ORCH-1/5/8/9/14 await Phase B (Copilot session, normalize) + e2e.
+- 2026-05-31 — **Phase B implemented** (`app/kb/copilotAgent.ts`): the archivist runs a
+  disposable single-shot `copilot -p` session per item (ORCH-5/8), reusing existing
+  Copilot credentials, returning a validated JSON decision; any failure (no CLI, timeout,
+  bad output) falls back to the deterministic decision. Harness-focused — the decision
+  stays conservative (CAPTURE-10); the value is the proven disposable-session + parse +
+  fallback pattern Enrich will reuse. Added foreign-drop `normalizeInbox` (ORCH-14):
+  loose inbox files are adopted into canonical `origin: external` units and committed.
+  Subprocess is injectable → CI stays deterministic, no real creds. Graduated ORCH-5/8/14
+  → `test:`. Still `none-yet`: ORCH-1 (headless main, e2e) and ORCH-9 (needs a 2nd stage).

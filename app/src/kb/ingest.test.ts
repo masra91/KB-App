@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import simpleGit from 'simple-git';
 import { createKb } from './vault';
-import { captureToInbox, readCapturedMeta, type CapturePayload } from './ingest';
+import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload } from './ingest';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 
 function gitInstalledSync(): boolean {
@@ -117,6 +117,45 @@ describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
 
   it('rejects an empty capture', async () => {
     await expect(captureToInbox(vault, 'in-app-panel', [])).rejects.toThrow(/nothing to capture/);
+  });
+
+  it('ORCH-14: normalizeInbox adopts a loose dropped file into a canonical external unit', async () => {
+    // Simulate another app / disk drop: a loose file directly in inbox/, no ULID, no audit.
+    await fs.mkdir(path.join(vault, 'inbox'), { recursive: true });
+    await fs.writeFile(path.join(vault, 'inbox', 'report.pdf'), Buffer.from([1, 2, 3, 4]));
+
+    const minted = await normalizeInbox(vault);
+    expect(minted).toHaveLength(1);
+
+    const unit = path.join(vault, 'inbox', minted[0]);
+    expect(await pathExists(path.join(vault, 'inbox', 'report.pdf'))).toBe(false); // moved in
+    expect(new Uint8Array(await fs.readFile(path.join(unit, 'raw.pdf')))).toEqual(new Uint8Array([1, 2, 3, 4]));
+
+    const meta = await readCapturedMeta(unit);
+    expect(meta.origin).toBe('external');
+    expect(meta.surface).toBe('folder-drop');
+    expect(meta.originalName).toBe('report.pdf');
+    expect(meta.mimeType).toBe('application/pdf');
+
+    // committed (preservation-first) and nothing left dirty
+    const git = simpleGit(vault);
+    expect((await git.log()).latest?.message).toContain('normalize: 1 foreign drop(s)');
+    expect((await git.status()).isClean()).toBe(true);
+  });
+
+  it('ORCH-14: normalizeInbox ignores hidden/system files (e.g. .DS_Store)', async () => {
+    await fs.mkdir(path.join(vault, 'inbox'), { recursive: true });
+    await fs.writeFile(path.join(vault, 'inbox', '.DS_Store'), 'junk');
+    expect(await normalizeInbox(vault)).toEqual([]);
+    expect(await pathExists(path.join(vault, 'inbox', '.DS_Store'))).toBe(true); // left alone
+  });
+
+  it('ORCH-14: normalizeInbox leaves canonical units untouched (idempotent, no commit)', async () => {
+    await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'canonical' }]);
+    const headBefore = (await simpleGit(vault).log()).latest?.hash;
+    const minted = await normalizeInbox(vault);
+    expect(minted).toEqual([]);
+    expect((await simpleGit(vault).log()).latest?.hash).toBe(headBefore); // no new commit
   });
 });
 

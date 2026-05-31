@@ -35,7 +35,7 @@ export function renderSourceMd(
   fm.push(`capturedAt: ${meta.capturedAt}`);
   fm.push(`archivedAt: ${archivedAt}`);
   fm.push('provenance:');
-  fm.push('  origin: principal');
+  fm.push(`  origin: ${meta.origin ?? 'principal'}`);
   fm.push(`  surface: ${scalar(meta.surface)}`);
   fm.push(`  captureBatch: ${meta.captureBatch}`);
   fm.push(`  archivedBy: ${scalar('archivist (deterministic v1)')}`);

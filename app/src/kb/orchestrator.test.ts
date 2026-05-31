@@ -1,7 +1,7 @@
 // Orchestration engine tests (SPEC-0014 ORCH-2/3/4/6/11/12/13; SPEC-0013 CAPTURE-9).
 // Real FS + real git + real worktrees against a throwaway temp vault (TEST-18). Skips if
 // git is absent.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import simpleGit from 'simple-git';
 import { createKb } from './vault';
 import { captureToInbox, readCapturedMeta } from './ingest';
 import { Orchestrator, archiveOne, readQueue, readStatus } from './orchestrator';
+import { makeCopilotDecider } from './copilotAgent';
 import { dateShard } from './ulid';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 
@@ -144,6 +145,52 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     expect((await readStatus(vault)).processing).toBeNull();
     // and the raw item is still intact
     expect((await readCapturedMeta(path.join(vault, 'inbox', ids[0]))).kind).toBe('text');
+  });
+
+  async function collectSourceDocs(vault: string): Promise<string[]> {
+    const found: string[] = [];
+    async function walk(p: string): Promise<void> {
+      let dirents;
+      try {
+        dirents = await fs.readdir(p, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of dirents) {
+        if (!e.isDirectory()) continue;
+        const child = path.join(p, e.name);
+        if (await pathExists(path.join(child, 'source.md'))) found.push(path.join(child, 'source.md'));
+        else await walk(child);
+      }
+    }
+    await walk(path.join(vault, 'sources'));
+    return found;
+  }
+
+  it('ORCH-14 end-to-end: a loose dropped file is normalized then archived with origin external', async () => {
+    await fs.mkdir(path.join(vault, 'inbox'), { recursive: true });
+    await fs.writeFile(path.join(vault, 'inbox', 'notes.txt'), 'dropped by another app');
+
+    await new Orchestrator(vault).poke();
+
+    expect(await readQueue(vault)).toEqual([]);
+    const docs = await collectSourceDocs(vault);
+    expect(docs).toHaveLength(1);
+    const md = await fs.readFile(docs[0], 'utf8');
+    expect(md).toContain('origin: external');
+    expect(md).toContain('surface: folder-drop');
+  });
+
+  it('ORCH-8: drains with a Copilot decider (mocked session), one fresh session per item', async () => {
+    await captureToInbox(vault, 'in-app-panel', [
+      { kind: 'text', text: 'a' },
+      { kind: 'text', text: 'b' },
+    ]);
+    const run = vi.fn(async () => '{"kind":"text","class":"primary","scope":"global","sensitivity":"internal"}');
+    await new Orchestrator(vault, makeCopilotDecider({ available: true, run })).poke();
+
+    expect(await readQueue(vault)).toEqual([]);
+    expect(run).toHaveBeenCalledTimes(2); // ORCH-5: a disposable session per item
   });
 
   it('reuses a healthy persistent worktree across items', async () => {
