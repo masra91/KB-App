@@ -15,7 +15,8 @@
 //
 // INTEGRATION SEAM (KB-Architect owns this): per CANON, all stages eventually work on the
 // `staging` branch and a promotion gate advances `main`. Until that lands, Connect bases its
-// worktree on `BASE_BRANCH` below. KB-Architect flips this ONE constant to 'staging' during
+// worktree on the resolved base branch (`BASE_BRANCH` override, else the vault's current
+// branch). KB-Architect flips the ONE `BASE_BRANCH` constant to 'staging' during
 // the staging retarget; nothing else here changes. This file is NOT wired into pipeline.ts
 // here — KB-Architect registers ConnectStage when the staging slices merge.
 import { promises as fs } from 'node:fs';
@@ -39,11 +40,24 @@ import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 
 /**
- * The branch Connect's worktree is based on and fast-forwards into. v1 = 'main' (today's
- * single-branch reality). KB-Architect flips this to 'staging' in ONE place during the CANON
- * staging retarget (SPEC-0019 / SPEC-0021); the rest of Connect is base-ref-agnostic.
+ * The branch Connect's worktree is based on and fast-forwards into.
+ *
+ * `null` (the v1 default) means "the vault's CURRENT branch" — resolved at runtime via
+ * `rev-parse --abbrev-ref HEAD`, exactly as decomposeStage/claimsStage do. This is correct on
+ * any vault regardless of its default branch name (`main`, `master`, a CI PR ref, …) — the
+ * earlier hardcoded `'main'` broke on vaults whose branch wasn't literally `main`.
+ *
+ * KB-Architect flips this to `'staging'` in ONE place during the CANON staging retarget
+ * (SPEC-0019 / SPEC-0021) so Connect bases its worktree on `staging` and the promotion gate
+ * advances `main`; the rest of Connect is base-ref-agnostic.
  */
-export const BASE_BRANCH = 'main';
+export const BASE_BRANCH: string | null = null;
+
+/** Resolve the base branch: the explicit override, else the vault's current branch. */
+async function resolveBaseBranch(git: ReturnType<typeof simpleGit>): Promise<string> {
+  if (BASE_BRANCH) return BASE_BRANCH;
+  return (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
+}
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'connect');
 const WORK_BRANCH = 'kb/connect-work';
@@ -218,9 +232,10 @@ export async function readConnectQueue(root: string, maxAttempts = DEFAULT_MAX_A
 
 // ── Worktree + audit helpers (mirror decomposeStage/claimsStage) ───────────────────────────
 
-async function ensureWorktree(root: string): Promise<{ wt: string }> {
+async function ensureWorktree(root: string): Promise<{ wt: string; base: string }> {
   const git = simpleGit(root);
   await ensureGitIdentity(git);
+  const base = await resolveBaseBranch(git);
   const wt = path.join(root, WORKTREE_REL);
   try {
     await git.raw('worktree', 'prune');
@@ -236,9 +251,9 @@ async function ensureWorktree(root: string): Promise<{ wt: string }> {
   if (!healthy) {
     if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
     await fs.mkdir(path.dirname(wt), { recursive: true });
-    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, BASE_BRANCH);
+    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, base);
   }
-  return { wt };
+  return { wt, base };
 }
 
 /** The rigid audit envelope (SPEC-0020 §3.9) — orchestrator-owned fields wrap freeform payloads. */
@@ -348,10 +363,10 @@ export async function connectOne(
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
 ): Promise<ConnectOneResult> {
   root = path.resolve(root);
-  const { wt } = await ensureWorktree(root);
+  const { wt, base } = await ensureWorktree(root);
   const wtGit = simpleGit(wt);
   const rootGit = simpleGit(root);
-  await wtGit.raw('reset', '--hard', BASE_BRANCH); // sync to the base branch HEAD
+  await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
   await wtGit.raw('clean', '-fd', 'candidates', 'entities'); // drop stray files from a prior aborted run
 
   const runId = ulid();
@@ -528,7 +543,7 @@ export async function connectOne(
     // CONNECT-14 / ORCH-12: never lose candidates. Discard partial worktree writes, record the
     // failed attempt durably; set aside after K so a poison block can't head-of-line-block.
     try {
-      await wtGit.raw('reset', '--hard', BASE_BRANCH);
+      await wtGit.raw('reset', '--hard', base);
       await wtGit.raw('clean', '-fd');
     } catch {
       /* best-effort cleanup; the failed/setaside commit below is what matters */
