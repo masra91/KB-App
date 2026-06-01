@@ -33,6 +33,7 @@ and a unique `key` here.
 | SPEC-0018 | REVIEW  | Review & Disambiguation ("needs you" queue) | feature | draft | `features/` |
 | SPEC-0019 | CANON   | Evergreen Canonical & Working-State Isolation | architecture | draft | `architecture/` |
 | SPEC-0020 | CONNECT | Connect & Expand (Enrich v3)                | feature | draft | `features/` |
+| SPEC-0021 | STAGING | Staging Branch & Promotion Gate             | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
