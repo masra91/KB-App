@@ -32,6 +32,7 @@ and a unique `key` here.
 | SPEC-0017 | SHELL   | App Navigation Shell                        | architecture | draft | `architecture/` |
 | SPEC-0018 | REVIEW  | Review & Disambiguation ("needs you" queue) | feature | draft | `features/` |
 | SPEC-0019 | CANON   | Evergreen Canonical & Working-State Isolation | architecture | draft | `architecture/` |
+| SPEC-0020 | CONNECT | Connect & Expand (Enrich v3)                | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -47,7 +48,7 @@ assigned at creation time.
 | ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
 | ~~CLAIMS~~ | _written → SPEC-0016 (key CLAIMS)_ | feature | Enrich  | Claims (Enrich v2) — internal substance about entities |
 | RESEARCH   | Enrich & Research                | feature | Enrich    | external corroboration/expansion (egress, AUTO-4; thick agent) — was `ENRICH` |
-| CONNECT    | Connect & Expand                 | feature | Enrich    | entity resolution / dedup / typed links; **sole writer of evergreen `entities/` + promotion gate (SPEC-0019 CANON-5) — pulled forward**; was `EXPAND` |
+| ~~CONNECT~~ | _written → SPEC-0020 (key CONNECT)_ | feature | Enrich  | Connect & Expand (Enrich v3) — sole writer of evergreen `entities/` + promotion gate (SPEC-0019 CANON-5) |
 | ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
