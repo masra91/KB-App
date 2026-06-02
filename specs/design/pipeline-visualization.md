@@ -201,6 +201,15 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
 - **Siding item** — oxide badge + `stage · name` + reason + **Retry** / **Dismiss**. Single-flight
   (buttons disable while acting); Dismiss confirms first. Reuses the existing OBS-17
   `kb:pipelineControl` contract — no new mutation surface.
+- **Stuck-lock alarm** (the headline "silent stall, made loud" — OBS-11/VIZ-1). A stuck
+  canonical-writer lock is *the* silent-stall case (it was the #163 P0). When the view-model reports
+  `lock.stuck` (held past the watchdog threshold — `LockState.stuck`/`heldMs`/holder, shipped in
+  #170), The Line raises it as the **primary alarm**: **oxide**, prominent, reading **"stuck — held
+  by `<holder>` for `<heldMs→Ns>`"** with the holder label real (e.g. `connect:afterDrain`, not "a
+  stage") and the elapsed in tabular mono. It pairs with the **overall=stalled** state — a stalled
+  pipeline points straight at *what* is wedged, not just *that* it is. A healthy held-but-moving lock
+  and calm idle stay quiet; only `stuck` escalates to the alarm. (Turns a silent P0-class wedge into
+  a named, surfaced state — the whole reason this surface exists.)
 
 ### Implementation guardrails — keep it from regressing to generic (GATE-1 watch-item 2)
 
@@ -293,6 +302,11 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   chrome" implementation guardrails (§6); concrete measured contrast ratios + the rule that state
   hues never color small text — which caught that **oxide** (3.96:1), not ember, was the actual
   sub-AA case (§3). Awaiting GATE 2 (KB-QD, flow coverage).
+- 2026-06-02 — **Stuck-lock alarm added** (§6) now that #170 (`f2ae987`) shipped
+  `LockState.stuck`/`heldMs`/holder-label: a stuck canonical-writer lock (the #163 P0 class) renders
+  as the primary oxide alarm — "stuck — held by `<holder>` for `<Ns>`" — paired with overall=stalled,
+  realizing the surface's headline "silent stall, made loud" (OBS-11/VIZ-1). Renders an
+  existing-and-now-enriched view-model field; no change to the inFlight/conversion/push contract.
 - 2026-06-02 — **Funnel unit semantics clarified** (§2/§6) resolving DEV-3's #169 question:
   `captured`/`promoted` are the same unit (sources) = the throughput spine + completion rate;
   candidates/entities/claims are intermediate transformation yields; **`promoted` = sources-on-main**
