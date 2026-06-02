@@ -454,6 +454,11 @@ export class ClaimsStage {
     }
   }
 
+  /** Is this stage actively draining right now? (OBS-5 per-stage `running` state.) */
+  busy(): boolean {
+    return this.draining;
+  }
+
   /** Drain the queue, coalescing concurrent pokes; resolves only once fully idle. */
   poke(): Promise<void> {
     this.pending = true;

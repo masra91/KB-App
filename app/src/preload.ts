@@ -9,6 +9,7 @@ const kbApi: KbApi = {
   create: (opts) => ipcRenderer.invoke('kb:create', opts),
   capture: (req) => ipcRenderer.invoke('kb:capture', req),
   pipelineStatus: () => ipcRenderer.invoke('kb:pipelineStatus'),
+  pipelineStatusView: () => ipcRenderer.invoke('kb:pipelineStatusView'),
   listReviews: () => ipcRenderer.invoke('kb:listReviews'),
   answerReview: (req) => ipcRenderer.invoke('kb:answerReview', req),
   fullReplay: () => ipcRenderer.invoke('kb:fullReplay'),

@@ -196,6 +196,11 @@ export class Orchestrator {
     return res;
   }
 
+  /** Is the archivist actively draining right now? (OBS-5 per-stage `running` state.) */
+  busy(): boolean {
+    return this.draining;
+  }
+
   status(): Promise<PipelineStatusData> {
     return readStatus(this.root);
   }

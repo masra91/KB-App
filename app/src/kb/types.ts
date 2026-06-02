@@ -11,8 +11,10 @@ import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo } from './pipelineStatusView';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
+export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo };
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -259,6 +261,8 @@ export interface KbApi {
   create(opts: CreateKbOptions): Promise<CreateKbResult>;
   capture(req: CaptureRequest): Promise<CaptureResult>;
   pipelineStatus(): Promise<PipelineStatus>;
+  // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).
+  pipelineStatusView(): Promise<PipelineStatusView | null>;
   listReviews(): Promise<ReviewSummary[]>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   fullReplay(): Promise<FullReplayResult>;
