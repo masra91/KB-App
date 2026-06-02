@@ -1,0 +1,81 @@
+/* === KB-App Design System — "The Line" instrument language ===================================== */
+/* The SHARED, surface-agnostic visual foundation (SPEC-0033 DESIGN-7; DESIGN-VIZ §3/§4/§5/§6).
+   ONE source of truth that BOTH SPEC-0032 "The Line" (pipeline viz) and SPEC-0028 "The Field Desk"
+   (researchers) import — tokens + bundled-font type roles + flat-ink primitives + motion tokens +
+   state-semantics conventions. Surface-specific components (carriages, gauge-rails, researcher strips,
+   clearance ladders, …) are built ON these, in their own surface files — NOT here (the boundary rule:
+   reused by a 2nd surface → here; this-view's composition → the surface file).
+
+   Bundled faces: @fontsource Saira Condensed / IBM Plex Mono / IBM Plex Sans (self-hosted, imported in
+   renderer.ts — pinned, OFL, no CDN). The §4 shape-matched fallback stacks below mean a load miss
+   degrades gracefully without collapsing the identity. */
+
+/* 1. Color tokens (§3) — role-named, dark default + light ("draughting paper") override. State hues
+   color fills / glyphs / borders / large+display text ONLY (all ≥3:1); small body text stays --viz-ink
+   (14:1). In particular oxide (3.96:1) MUST NOT color normal-size text. */
+:root {
+  --viz-field: #15171a;     /* warm graphite — the ground */
+  --viz-rule: #2b2f35;      /* spine, ticks, registration marks */
+  --viz-idle: #6b7178;      /* at-rest */
+  --viz-ember: #e8743b;     /* the signature heat — active work */
+  --viz-patina: #5fa38c;    /* settled / promoted */
+  --viz-brass: #c7a24a;     /* blocked / waiting */
+  --viz-oxide: #d2452f;     /* error / set-aside (fill/glyph/border/display only) */
+  --viz-ink: #e6e3dc;       /* labels, body */
+  --viz-ink-muted: #9298a0; /* secondary, units */
+
+  /* 2. Type roles (§4) — bundled faces + shape-matched fallbacks (identity-preserving on a load miss). */
+  --viz-font-signage: 'Saira Condensed', 'Arial Narrow', sans-serif;
+  --viz-font-numeric: 'IBM Plex Mono', ui-monospace, monospace;
+  --viz-font-body: 'IBM Plex Sans', system-ui, sans-serif;
+
+  /* 3. Motion tokens (§5) — durations + easings; one reduced-motion reset (below) zeroes them all. */
+  --viz-dur-index: 220ms;     /* the signature "it moved" index hop */
+  --viz-dur-breathe: 1.8s;    /* the single ambient ember pulse */
+  --viz-dur-odometer: 400ms;  /* count/bar rolls */
+  --viz-dur-state: 240ms;     /* state-change crossfades */
+  --viz-ease-index: cubic-bezier(0.2, 0.8, 0.2, 1); /* ease-out w/ a hint of stepper-seat overshoot */
+  --viz-ease-state: ease-in-out;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --viz-field: #f4f1ea; --viz-rule: #cfc9bc; --viz-idle: #8a8473; --viz-ember: #c2541f;
+    --viz-patina: #3e7d67; --viz-brass: #9a7b2e; --viz-oxide: #b02a18; --viz-ink: #1c1b18; --viz-ink-muted: #6a6557;
+  }
+}
+
+/* Type-role utilities (apply the §4 roles without re-stating the stack). */
+.viz-signage { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; }
+.viz-numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* fixed-width so rolling counts never reflow */
+.viz-body { font-family: var(--viz-font-body); }
+
+/* Flat-ink instrument primitives (§6 guardrails) — ruled structure, NO card chrome, ember focus. */
+.viz-surface { background: var(--viz-field); color: var(--viz-ink); font-family: var(--viz-font-body); }
+.viz-ruled { border: 0; border-top: 1px solid var(--viz-rule); }   /* a structural rule, not a card edge */
+.viz-spine { border-left: 2px solid var(--viz-rule); }             /* the spine stations/strips hang off */
+.viz-no-chrome { border-radius: 0; box-shadow: none; background: transparent; } /* kill UI-kit card tells */
+.viz-focusable:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: 1px; } /* never the framework indigo */
+
+/* Badge / chip base — uppercase signage, ruled, muted; state carried by glyph + hue + fill, never color alone (§3 DESIGN-4). */
+.viz-chip { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem; border: 1px solid var(--viz-rule); padding: 0.05rem 0.4rem; color: var(--viz-ink-muted); }
+/* Button base — the only rounding allowed off-structure is a ≤4px button radius; hover/active tint with state hues, not blue. */
+.viz-btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; background: transparent; color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 3px; padding: 0.25rem 0.7rem; cursor: pointer; }
+.viz-btn:hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* State-semantics utilities (§3) — the canonical hue per state; pair with a glyph + fill at the call site. */
+.viz-state-idle { color: var(--viz-idle); }
+.viz-state-running { color: var(--viz-ember); }
+.viz-state-blocked { color: var(--viz-brass); }
+.viz-state-settled { color: var(--viz-patina); }
+.viz-state-error { color: var(--viz-oxide); }
+
+/* Motion: the single ambient ember breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
+   own active element (e.g. .viz-breathe .viz-cell-current). */
+@keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+/* The one reduced-motion reset (§5) — full functional parity: every viz animation/transition becomes
+   an instant state change (state still reads via glyph + hue + fill, so nothing is lost). */
+@media (prefers-reduced-motion: reduce) {
+  .viz-surface, .viz-surface * { animation: none !important; transition: none !important; }
+}
