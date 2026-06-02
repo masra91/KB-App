@@ -174,6 +174,29 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
 
 ## 9. Changelog
 
+- 2026-06-02 — **Slice 3 (M365/WorkIQ researcher) design locked** (KB-PM-signed-off; KB-Developer-3).
+  The M365 researcher is an adapter behind the existing `ResearchFn` seam (registered into
+  `selectResearchFn`'s per-template switch, alongside Web/Code — no `makeResearchDeps` change),
+  mirroring the Web adapter: asserts `egressTier === 'internal-tenant'`, builds a **request-only**
+  query via `buildOutboundQuery` (D6a — `what`+`context` only, never KB content), runs a Copilot
+  session that frames returned mail/docs as **DATA, never instructions** (RESEARCH-12), returns a
+  cited findings-note ingested as an externally-sourced secondary source via `runResearcher`
+  (RESEARCH-5/6), graceful no-finding on any error. **Decisions (PM rulings):**
+  (1) **OAuth-MCP** via the Copilot SDK's `SessionConfig.mcpServers` (an M365 Graph **read-only** MCP
+  server registered on the session; `availableTools` allow-list keeps it read-only — RESEARCH-9/10);
+  the server is an **injectable seam** (deterministic stub for unit tests; concrete server chosen at
+  env-time). (2) **OAuth owned by the Electron main process** — the token **never** touches the
+  renderer and is **redacted** in the dev log (PRIN-19). (3) **Egress = internal-tenant, request-only
+  + tenant-allowlist** — the M365 analog of the Web domain-allowlist; the adapter enforces the
+  configured `tenantId` (the user's **own tenant only**), so it ships under request-only **regardless**
+  of the open content-feeding ruling (RESEARCH-8). (4) **MCP server choice deferred to env-time**
+  (Microsoft-published Graph MCP if read-only-scopable + E1-vettable, else a thin one we control —
+  a supply-chain call escalated to the Principal with the env ask). **Build-now vs env-gated:**
+  build the adapter + injectable MCP-session seam + tenant-allowlist + request-only + egress-tier
+  assertion + M365 skill + Manage-view config block + **unit tests** (deterministic injected
+  session); **env-gated** (waits on the Principal's M365 env/creds — Entra app w/ read-only Graph
+  scopes + a test tenant): the real Graph MCP wiring + OAuth flow + live tenant validation/e2e.
+  Discharges part of RESEARCH-16 (the third built-in) once the adapter lands.
 - 2026-06-02 — **Slice 1 design locked** (KB-PM-greenlit; KB-Developer-5). Resolved the open
   questions into decisions D1–D6a (§8): `research-request` schema on `signals[]`; dispatcher
   dedup ledger; deterministic self-nomination pre-filter + cache; conservative cited-findings-note
