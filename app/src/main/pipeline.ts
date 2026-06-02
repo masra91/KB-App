@@ -16,6 +16,8 @@ import { DecomposeStage } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
+import { ConnectStage } from '../kb/connectStage';
+import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
@@ -27,6 +29,7 @@ let active: {
   stagingWt: string; // the staging worktree — where every stage operates
   orch: Orchestrator;
   decompose: DecomposeStage;
+  connect: ConnectStage;
   claims: ClaimsStage;
   lock: Mutex;
 } | null = null;
@@ -41,6 +44,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   if (active?.vaultPath === vaultPath) return active.orch;
   active?.orch.stop();
   active?.decompose.stop();
+  active?.connect.stop();
   active?.claims.stop();
 
   const stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
@@ -49,12 +53,19 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, async () => {
     await promote(vaultPath);
   });
+  // The four stages all run on the staging worktree (root-agnostic) and serialize their
+  // canonical advances through the one shared lock (§5). Pipeline order is
+  // Decompose→Connect→Claims (SPEC-0020 reorder): Decompose emits candidates, Connect resolves
+  // them into evergreen `entities/`, Claims attaches to the resolved graph. They drain
+  // independently; the lock keeps their staging ff-advances from racing.
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
+  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock);
   const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock);
   orch.start();
   decompose.start();
+  connect.start();
   claims.start();
-  active = { vaultPath, stagingWt, orch, decompose, claims, lock };
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, lock };
   return orch;
 }
 
@@ -83,6 +94,7 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
 export function stopPipeline(): void {
   active?.orch.stop();
   active?.decompose.stop();
+  active?.connect.stop();
   active?.claims.stop();
   active = null;
 }

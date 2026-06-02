@@ -13,12 +13,14 @@
 // repoint on merge. Link-promotion ([[wikilinks]], CONNECT-12/13) is a DEFERRED later slice
 // (a Connect re-pass after Claims). This file writes NO links block.
 //
-// INTEGRATION SEAM (KB-Architect owns this): per CANON, all stages eventually work on the
-// `staging` branch and a promotion gate advances `main`. Until that lands, Connect bases its
-// worktree on the resolved base branch (`BASE_BRANCH` override, else the vault's current
-// branch). KB-Architect flips the ONE `BASE_BRANCH` constant to 'staging' during
-// the staging retarget; nothing else here changes. This file is NOT wired into pipeline.ts
-// here — KB-Architect registers ConnectStage when the staging slices merge.
+// INTEGRATION SEAM: per CANON, all stages work on the `staging` branch and a promotion gate
+// advances `main`. The staging retarget (SPEC-0021) realizes this by running every stage on the
+// persistent `staging` worktree — which is checked out ON `staging` (stagingWorktree.ts). Connect
+// bases its worktree on the resolved base branch (`BASE_BRANCH` override, else the vault's CURRENT
+// branch), so when pipeline.ts hands it the staging worktree the current branch IS `staging` and
+// Connect targets it with NO override needed — exactly like Decompose/Claims, which hardcode
+// nothing. `BASE_BRANCH` therefore stays `null` (see its doc below). pipeline.ts registers
+// ConnectStage on the staging worktree.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
@@ -47,9 +49,12 @@ import { Mutex } from './stageLock';
  * any vault regardless of its default branch name (`main`, `master`, a CI PR ref, …) — the
  * earlier hardcoded `'main'` broke on vaults whose branch wasn't literally `main`.
  *
- * KB-Architect flips this to `'staging'` in ONE place during the CANON staging retarget
- * (SPEC-0019 / SPEC-0021) so Connect bases its worktree on `staging` and the promotion gate
- * advances `main`; the rest of Connect is base-ref-agnostic.
+ * The CANON staging retarget (SPEC-0019 / SPEC-0021) does NOT need to flip this: it runs every
+ * stage on the persistent `staging` worktree (checked out on `staging`), so the current-branch
+ * default already resolves to `staging` and Connect's ff-advance moves `staging`; the promotion
+ * gate then advances `main`. Hardcoding `'staging'` here would be both redundant and wrong — it
+ * would break on any vault without a literal `staging` branch (e.g. the connectStage unit tests),
+ * the same hardcoded-branch hazard the `null` default was introduced to fix.
  */
 export const BASE_BRANCH: string | null = null;
 
