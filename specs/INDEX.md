@@ -42,6 +42,7 @@ and a unique `key` here.
 | SPEC-0027 | PANEL   | Control Panel (manage agents, sources & jobs) | feature | draft | `features/` |
 | SPEC-0028 | RESEARCH | Researchers (Enrich & Research)            | feature | draft | `features/` |
 | SPEC-0029 | AUDIT   | Audit & Activity (lineage + read-only views) | feature | draft | `features/` |
+| SPEC-0030 | OBS     | Pipeline Status & Diagnostics (status view + dev logs) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
