@@ -43,6 +43,8 @@ import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRe
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { stubResearchFn } from '../kb/researchStub';
+import { ResearcherScheduler } from '../kb/researcherScheduler';
+import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -68,6 +70,7 @@ interface ActivePipeline {
   connect: ConnectStage;
   claims: ClaimsStage;
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
+  researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
   lock: Mutex;
 }
 
@@ -82,6 +85,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.connect.start();
   a.claims.start();
   a.jobs.start(); // SPEC-0023: the autonomous-job scheduler tick (named-preset cadence)
+  a.researchers.start(); // SPEC-0028: the scheduled-researcher tick (standing external research)
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -91,6 +95,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.connect.stop();
   a.claims.stop();
   a.jobs.stop();
+  a.researchers.stop();
 }
 
 /**
@@ -152,7 +157,13 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // reach `main`). Jobs run concurrently with the live pipeline (ORCH-17) — never blocking
   // capture/Enrich. Inert until the Principal enables a job in the registry.
   const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, lock };
+  // SPEC-0028 RESEARCH-2: the scheduled-researcher tick. Standing researchers (a non-`off` cadence in
+  // the researcher registry) run a bounded pass via runResearcher — output is a cited secondary source
+  // via the ingest path (NOT the JobBehavior write-sink — Option (a), JOBS-10 intact). The Web cognition
+  // is the SDK adapter behind the seam (egress-gated + SSRF-safe); inert until a researcher is enabled
+  // with a schedule. Reaching outside the KB is read-only-world (AUTO-6).
+  const researchers = new ResearcherScheduler(stagingWt, makeWebResearchFn(), lock, log);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock };
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;
 }
