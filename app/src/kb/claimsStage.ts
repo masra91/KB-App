@@ -29,6 +29,7 @@ import type { SourceInput } from './decomposeAgent';
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
+import { epochScopedLines } from './replayEpoch';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'claims');
 const WORK_BRANCH = 'kb/claims-work';
@@ -92,7 +93,9 @@ async function readClaimsState(sourceDir: string, entityId: string): Promise<Cla
   const parkRounds: string[][] = []; // reviewIds raised per `awaiting-review` round
   const answeredIds = new Set<string>();
   const answered: AnsweredReviewState[] = [];
-  for (const line of raw.split('\n')) {
+  // Scope to the current replay epoch (REPLAY-6): a replayed source's prior `claimed`/park
+  // markers are ignored so its (freshly re-derived) entities re-enter the claims queue.
+  for (const line of epochScopedLines(raw)) {
     if (line.trim().length === 0) continue;
     let obj: AuditLine;
     try {

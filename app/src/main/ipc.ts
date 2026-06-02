@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
 import { readAppConfig, writeAppConfig } from './appConfig';
-import { startPipeline, activePipeline, listActiveReviews, answerActiveReview } from './pipeline';
+import { startPipeline, activePipeline, listActiveReviews, answerActiveReview, fullReplay } from './pipeline';
 import type { CapturePayload } from '../kb/ingest';
 import type {
   AppState,
@@ -16,6 +16,7 @@ import type {
   ReviewSummary,
   AnswerReviewRequest,
   AnswerReviewResult,
+  FullReplayResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -118,5 +119,15 @@ export function registerIpc(): void {
   ipcMain.handle('kb:answerReview', async (_e, req: AnswerReviewRequest): Promise<AnswerReviewResult> => {
     const { ok, message } = await answerActiveReview(req.id, { verdict: req.verdict, note: req.note });
     return { ok, message };
+  });
+
+  // SPEC-0022 REPLAY-1/2: Principal-initiated "clean & rebuild". The renderer gates this behind a
+  // confirm dialog; here we just run it (purge + epoch reset on staging, republish main, resume).
+  ipcMain.handle('kb:fullReplay', async (): Promise<FullReplayResult> => {
+    try {
+      return await fullReplay();
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
   });
 }
