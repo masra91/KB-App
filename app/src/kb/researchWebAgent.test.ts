@@ -52,6 +52,12 @@ describe('isAllowedUrl — egress gate (RESEARCH-8)', () => {
     expect(isPublicHost('example.com')).toBe(true); // DNS name
   });
 
+  it('rejects the hex-normalized IPv4-mapped IPv6 loopback (the smuggling form — KB-QD nit)', () => {
+    expect(isPublicHost('::ffff:7f00:1')).toBe(false); // == ::ffff:127.0.0.1
+    expect(isPublicHost('::ffff:a9fe:a9fe')).toBe(false); // == ::ffff:169.254.169.254 metadata
+    expect(isPublicHost('[::ffff:7f00:1]')).toBe(false); // bracketed form
+  });
+
   it('a configured allowlist NARROWS to those hosts + their subdomains', () => {
     const allow = ['example.com', 'docs.rs'];
     expect(isAllowedUrl('https://example.com/a', allow)).toBe(true);
