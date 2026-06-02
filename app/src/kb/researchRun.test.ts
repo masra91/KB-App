@@ -96,4 +96,22 @@ describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
       await expect(runResearcher(root, { ...web, id: '../evil' }, request, { research })).rejects.toThrow(/unsafe researcher id/);
     });
   });
+
+  it('a FAILED pass audits `research-failed` (not the silent `no-finding`) so failed≠empty (#160)', async () => {
+    await withVault(async (root) => {
+      // The cognition reports failure (e.g. packaged-app can't spawn copilot) — distinct from a no-finding.
+      const research: ResearchFn = async () => ({ found: false, note: '', citations: [], query: 'Project Atlas', failed: true, error: 'spawn copilot ENOENT' });
+      const res = await runResearcher(root, web, request, { research, now: () => '2026-06-02T01:00:00.000Z' });
+      expect(res.sourceIds).toEqual([]);
+      expect(res.failed).toBe(true);
+      expect(res.error).toMatch(/ENOENT/);
+      const audit = await readAudit(root);
+      const failed = audit.find((a) => a.eventType === 'research-failed');
+      expect(failed, 'a failure must emit research-failed').toBeDefined();
+      expect(failed!.actor).toBe('researcher');
+      expect((failed!.payload as Record<string, unknown>).error).toMatch(/ENOENT/);
+      // and it must NOT be miscounted as a legit no-finding (the bug that hid this).
+      expect(audit.some((a) => a.eventType === 'no-finding')).toBe(false);
+    });
+  });
 });

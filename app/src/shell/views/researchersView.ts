@@ -215,6 +215,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
             const res = await window.kbApi.runResearcherNow(id);
             let msg: string;
             if ('reason' in res) msg = `Could not run (${res.reason}).`;
+            else if (res.failed) msg = `Run failed${res.error ? ` — ${res.error}` : ''}.`; // failed ≠ empty (#160)
             else msg = res.sourceIds.length ? `Ran — added ${res.sourceIds.length} cited source(s).` : 'Ran — no new finding this pass.';
             await render(container);
             const after = container.querySelector<HTMLElement>(`.researcher[data-id="${id}"] .researcher-status`);

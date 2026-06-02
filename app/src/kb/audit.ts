@@ -358,8 +358,8 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
   },
   {
     actor: 'researcher',
-    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
-    emitters: ['researchRun'], // researchRun.ts emits via appendAuditEvent on each pass
+    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op); a `research-failed` event when the cognition errors (e.g. packaged-app cannot spawn the BYOA copilot — #160) so a failure is never a silent no-finding (OBS-4) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
+    emitters: ['researchRun'], // researchRun.ts emits via appendAuditEvent on each pass (researched / no-finding / research-failed)
     auditPath: CONTROL_AUDIT_REL,
     mutating: true, // reaches outside the KB + produces immutable secondary sources
     carriesWhy: true, // records the request (what + why) + citations behind each finding

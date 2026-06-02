@@ -27,6 +27,15 @@ export interface ResearchFindings {
   citations: string[];
   /** The outbound query actually used (built from the request only — D6a; recorded for audit). */
   query: string;
+  /**
+   * The pass FAILED (SDK/CLI unavailable, session error) rather than legitimately finding nothing
+   * (#160 / BUG #65 class). A failure MUST stay distinguishable from a no-finding — a packaged-app
+   * that can't spawn the BYOA copilot should surface an error, not a silent "no new finding". The
+   * cognition adapter sets this + logs the cause; `runResearcher` audits it as `research-failed`.
+   */
+  failed?: boolean;
+  /** The failure cause (when `failed`) — recorded in the audit so it's never silent (OBS-4). */
+  error?: string;
 }
 
 /** The cognition seam: run one external research pass for `r` answering `req`. Production = the Web
@@ -44,6 +53,10 @@ export interface RunResearcherResult {
   sourceIds: string[];
   /** One-liner outcome for the dispatcher's summary / caller audit. */
   note: string;
+  /** The pass failed (vs a legit no-finding) — so the caller/UI surfaces an error, not "no finding". */
+  failed?: boolean;
+  /** The failure cause, when `failed`. */
+  error?: string;
 }
 
 /**
@@ -57,6 +70,20 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
   const now = deps.now ?? (() => new Date().toISOString());
 
   const findings = await deps.research(r, req);
+
+  if (findings.failed) {
+    // The cognition FAILED (e.g. packaged-app can't spawn the BYOA copilot — #160 / BUG #65), not a
+    // legit empty result. Audit it as a DISTINCT `research-failed` event (never the silent `no-finding`
+    // that hid this in the live build) so the Activity feed + OBS surface the error (AUDIT-2, OBS-4).
+    await appendAuditEvent(root, {
+      actor: 'researcher',
+      eventType: 'research-failed',
+      ts: now(),
+      subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
+      payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier, error: findings.error ?? 'unknown error' },
+    });
+    return { sourceIds: [], note: `research failed: ${findings.error ?? 'unknown error'}`, failed: true, ...(findings.error ? { error: findings.error } : {}) };
+  }
 
   if (!findings.found || findings.note.trim().length === 0) {
     // RESEARCH-4: not relevant / nothing found → no-op, but audited (no silent actions, AUDIT-2).
