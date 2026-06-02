@@ -4,10 +4,20 @@
   Hardened-runtime entitlements for the macOS signed build (SPEC-0034 MACOS-3; #56).
   NON-sandboxed (MACOS-4): no App Sandbox / security-scoped-bookmark entitlements — the pipeline
   spawns git/copilot subprocesses + touches user-chosen folders, which the sandbox can't allow.
-  These three are what an Electron (V8) app needs under the hardened runtime, and they let the
-  spawned git/copilot children run (library validation gates *loading*, not *spawning*) so the
-  TCC folder grant propagates to them (MACOS-5 — verified empirically, #163/#56 §5). Verified to
-  produce a stable identity-based designated requirement that persists TCC grants across rebuilds.
+  - allow-jit + allow-unsigned-executable-memory: the standard V8 pair (JIT'd code) every Electron
+    app needs under the hardened runtime.
+  - disable-library-validation: required because KB-App loads native node modules (`.node`) under the
+    hardened runtime — incl. the copilot SDK's vendored clipboard addon
+    (`@github/copilot/.../@teddyzhu/clipboard-darwin-arm64.node`) + fsevents. Library validation
+    requires every LOADED dylib/.node be signed by this app's Team ID; re-signing every
+    transitively-vendored addon same-team is fragile, so this re-permits loading them. (It gates
+    dylib *loading*, NOT subprocess *spawning* — git/copilot run as separate processes regardless;
+    MACOS-5 propagation is the TCC grant + signature, not this entitlement.) Exposure is bounded by
+    the OnlyLoadAppFromAsar / EmbeddedAsarIntegrityValidation / RunAsNode:false fuses (forge.config).
+    TODO(MACOS-8): before notarizing, re-verify it's still necessary (drop if the signed build loads
+    all bundled .node same-identity-signed without it).
+  Verified (#56 §5 / #181) to produce a stable identity-based designated requirement that persists
+  TCC grants across same-identity rebuilds.
 -->
 <plist version="1.0">
   <dict>
