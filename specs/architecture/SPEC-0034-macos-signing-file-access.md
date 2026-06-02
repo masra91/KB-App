@@ -119,10 +119,12 @@ regress.
 - **KB-Developer-3** (author): this spec; the **subprocess-propagation + bookmark-resolve**
   requirements (MACOS-4/5) and their verification.
 - **KB-Developer-2** (#25 signing/distribution): `forge.config.ts` `osxSign`, the hardened-runtime
-  entitlements plist, the dev-identity + Developer-ID/notarization mechanics (MACOS-3/6/7), and the
-  empirical run (§5).
-- **KB-Developer-4** (the #56 permission UX): MACOS-7 — the first-launch grant flow + the
-  denial-fallback surface (warn/steer + System-Settings guidance).
+  entitlements plist, the folder usage-description strings, and the dev-identity + Developer-ID +
+  notarization mechanics (MACOS-3/6/8), and the empirical run (§5). MACOS-6 (usage strings) is DEV-2's
+  as the **enabler** that makes the MACOS-7 prompt fire.
+- **KB-Developer-4** (the #56 permission UX): **MACOS-7** — the first-launch grant flow + the
+  denial-fallback surface (warn/steer + System-Settings guidance). (PM-routed; the renderer/UX side,
+  adjacent to the MACOS-1 warn fallback.)
 - **KB-Lead / Principal:** **notarization credentials** (a `notarytool` / App-Store-Connect API
   profile) — unblocks notarized *distribution* (MACOS-8) only. The signing certs are already present
   (DEV-2 verified), so nothing else waits on the Principal. Plus the two product calls in §8.
