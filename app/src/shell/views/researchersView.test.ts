@@ -96,6 +96,34 @@ describe('Field Desk — render (RESEARCH-15)', () => {
   });
 });
 
+describe('Field Desk — escalation deep-link (RESEARCH-11; no dead affordance)', () => {
+  const escalatedRow: ResearcherView = { ...webRow, lastRun: { ts: '2026-06-02T01:00:00.000Z', eventType: 'escalated', what: 'Atlas', citations: 0, reviewId: 'REV123' } };
+
+  it('an escalated last-run renders an actionable "open review" link; a non-escalated one does NOT', async () => {
+    listResearchers = vi.fn(async () => [escalatedRow]);
+    setApi();
+    const c = await mount();
+    const link = c.querySelector<HTMLButtonElement>('.rdesk-review-link');
+    expect(link).not.toBeNull(); // the escalation is actionable, not just a status line
+    expect(link?.dataset.reviewId).toBe('REV123');
+    // a ceiling-reached pause has no Review to open → no link
+    listResearchers = vi.fn(async () => [{ ...webRow, lastRun: { ts: '2026-06-02T01:00:00.000Z', eventType: 'ceiling-reached', what: 'Atlas', citations: 0 } }]);
+    setApi();
+    const c2 = await mount();
+    expect(c2.querySelector('.rdesk-review-link')).toBeNull();
+  });
+
+  it('clicking "open review" navigates to the Reviews view (dispatches kb:navigate)', async () => {
+    listResearchers = vi.fn(async () => [escalatedRow]);
+    setApi();
+    const c = await mount();
+    let navigatedTo: string | null = null;
+    document.addEventListener('kb:navigate', (e) => (navigatedTo = (e as CustomEvent).detail?.view), { once: true });
+    c.querySelector<HTMLButtonElement>('.rdesk-review-link')!.click();
+    expect(navigatedTo).toBe('reviews'); // VIEW_REVIEWS — opens the queue where the Review awaits
+  });
+});
+
 describe('Field Desk — §6 anti-generic guardrails (GATE-1 watch-items)', () => {
   it('uses NO native <select> anywhere — kind, clearance, schedule, autonomy are all custom components', async () => {
     listResearchers = vi.fn(async () => [webRow, codeRow]);

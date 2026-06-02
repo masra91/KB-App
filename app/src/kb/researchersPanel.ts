@@ -85,6 +85,7 @@ export function lastRunFromEvent(event: AuditEvent | undefined): ResearcherLastR
     eventType: event.eventType,
     what: typeof p.what === 'string' ? p.what : '',
     ...(event.subjects.sourceId ? { sourceId: event.subjects.sourceId } : {}),
+    ...(event.subjects.reviewId ? { reviewId: event.subjects.reviewId } : {}), // depth-escalation Review (RESEARCH-11)
     citations,
   };
 }

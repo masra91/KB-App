@@ -19,6 +19,7 @@ import {
   VIEW_SETTINGS,
 } from './views';
 import { esc } from './html';
+import { NAVIGATE_EVENT, type NavigateDetail } from './nav';
 import { reviewBadgeText, reviewBadgeAria } from './reviewBadge';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
@@ -51,6 +52,10 @@ function railHtml(views: readonly NavView[]): string {
 /** Mount a view's content into its (freshly created) container. */
 type MountFn = (container: HTMLElement) => void | Promise<void>;
 
+/** The active shell's `kb:navigate` handler — module-scoped so a vault switch (re-mount) removes the
+ *  prior shell's handler before binding the new model, never leaking listeners / firing a stale model. */
+let navHandler: ((e: Event) => void) | null = null;
+
 export function mountShell(root: HTMLElement, vaultPath: string, name: string): void {
   const mounts: Record<string, MountFn> = {
     [VIEW_CAPTURE]: (c) => mountCapture(c, vaultPath, name),
@@ -66,6 +71,16 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
   };
 
   const model = createNavModel(NAV_VIEWS, DEFAULT_VIEW_ID);
+
+  // View→view deep-links (SHELL): a view dispatches `kb:navigate` (e.g. the Field Desk escalation report
+  // → Reviews); we select the named view if it's a real one. Re-bind per mount (vault switch) so the
+  // handler always drives the CURRENT model — remove the prior shell's first (no leak / stale select).
+  if (navHandler) document.removeEventListener(NAVIGATE_EVENT, navHandler);
+  navHandler = (e: Event): void => {
+    const view = (e as CustomEvent<NavigateDetail>).detail?.view;
+    if (typeof view === 'string' && view in mounts) model.select(view);
+  };
+  document.addEventListener(NAVIGATE_EVENT, navHandler);
 
   document.body.classList.add('shell-active');
   root.innerHTML = `
