@@ -47,5 +47,17 @@ export function renderSourceMd(
   fm.push(`  surface: ${scalar(meta.surface)}`);
   fm.push(`  captureBatch: ${meta.captureBatch}`);
   fm.push(`  archivedBy: ${scalar(archivedByLabel(decision.agent))}`);
+  // Citation-rich research provenance on a secondary source (SPEC-0028 RESEARCH-6): which
+  // researcher, the request answered, the outbound query, and the external sources it cites.
+  if (meta.research) {
+    const r = meta.research;
+    fm.push('  research:');
+    fm.push(`    researcherId: ${scalar(r.researcherId)}`);
+    fm.push(`    requestId: ${scalar(r.requestId)}`);
+    fm.push(`    query: ${scalar(r.query)}`);
+    fm.push(`    fetchedAt: ${r.fetchedAt}`);
+    fm.push('    citations:');
+    for (const c of r.citations) fm.push(`      - ${scalar(c)}`);
+  }
   return `---\n${fm.join('\n')}\n---\n\n${body}\n`;
 }

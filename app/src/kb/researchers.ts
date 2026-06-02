@@ -89,6 +89,23 @@ export interface ResearcherConfig {
   config?: Record<string, unknown>;
 }
 
+/**
+ * Citation-rich provenance stamped on a secondary source a researcher produces (RESEARCH-6): which
+ * researcher, the request it answered, the outbound query, the external origin(s)/URL(s) it rests
+ * on, and when. Findings are marked externally-sourced (RESEARCH-12). Carried on the capture meta so
+ * it lands in the secondary source's `source.md` and re-enters the pipeline cited.
+ */
+export interface ResearchProvenance {
+  researcherId: string;
+  requestId: string;
+  /** The outbound query/term actually researched (built from the request only, D6a). */
+  query: string;
+  /** External sources the finding cites (URLs / external refs) — RESEARCH-6. */
+  citations: string[];
+  /** ISO timestamp the external fetch happened. */
+  fetchedAt: string;
+}
+
 /** The signal type a producer emits to request research (D1). Carried on the existing `signals[]`. */
 export const RESEARCH_REQUEST_SIGNAL = 'research-request';
 
