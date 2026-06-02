@@ -320,6 +320,35 @@ describe.skipIf(!gitAvailable)('failure never loses the entity; set aside after 
   });
 });
 
+describe.skipIf(!gitAvailable)('BUG #135 — an incomplete/missing source is set aside, never poison-loops (ORCH-12)', () => {
+  it('an entity whose derivedFrom source dir is ABSENT sets aside after K — the drain recovers (no 172× loop)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Seed a resolved entity pointing at a source dir that was NEVER archived — the incomplete-source
+      // condition #135 hit. Claims' `readSourceInput` ENOENTs; before the fix the set-aside marker ALSO
+      // ENOENTed (appendFile into the missing dir) → the marker never persisted → `failures` never
+      // incremented → the entity retried forever (the 172× `claims.drain-error` wedge). It must now recover.
+      const ghostSrc = 'sources/2026/06/02/01GHOSTSRCMISSINGAUDIT0';
+      const [orphan] = await seedEntities(root, ghostSrc, ['Orphan']);
+      const srcAbsent = await fs
+        .access(path.join(root, ghostSrc))
+        .then(() => false)
+        .catch(() => true);
+      expect(srcAbsent).toBe(true); // the source dir is genuinely absent
+
+      const stage = new ClaimsStage(root, claimsDeciderFor([aClaim()]), new Mutex(), DEFAULT_MAX_ATTEMPTS);
+      for (let n = 0; n < DEFAULT_MAX_ATTEMPTS + 1; n++) await stage.poke(); // must NOT throw or hang
+
+      // ORCH-12: set aside after K → the queue DRAINS. Pre-fix it never drained (the set-aside threw) →
+      // the poison-loop. Now an empty queue proves the stage recovered.
+      expect(await readClaimsQueue(root)).toHaveLength(0);
+      expect(await readClaimFiles(root)).toHaveLength(0); // nothing fabricated for the orphan
+      // The orphan node's identity is untouched — no claims block (CLAIMS-11).
+      expect(await fs.readFile(path.join(root, orphan), 'utf8')).not.toContain('kb:claims:start');
+    });
+  });
+});
+
 describe.skipIf(!gitAvailable)('shares the canonical-writer lock with Decompose (SPEC-0014 §5)', () => {
   it('decompose + claims advance the same canonical ref without racing', async () => {
     await withTempVault(async (root) => {
