@@ -310,6 +310,15 @@ inside the entity node so its substance reads in place:
   writes and the node block is regenerated whole, so re-processing is idempotent at the
   block level (it does **not** dedup prior claim *files* — that's Connect).
 - **Window closed** — Claims runs headless on the orchestrator like every stage (ORCH-1).
+- **User recovery of a set-aside item (#137 escape hatch)** — a set-aside entity is not a dead
+  end. The Principal can **retry** it — a per-entity `reopened` marker supersedes the prior
+  `setaside`/`failed` count so the entity re-enters the queue and re-derives, with **siblings of
+  the same source untouched** (per-ENTITY, *not* a source-wide `replay-reset` epoch, which would
+  re-derive every entity of that source) — or **dismiss** it: a **terminal `dismissed`** marker
+  permanently retires it (never retried, never re-derived; distinct from the recoverable
+  `setaside`). Both are **append-only** on the source audit (CLAIMS-11) and committed **under the
+  canonical-writer lock** (CLAIMS-15). `listSetAsideItems` enumerates the recoverable set; the
+  Status view surfaces it and offers the actions (SPEC-0030 OBS-17). (CLAIMS-20)
 
 ## 4. Requirements
 
@@ -334,6 +343,7 @@ inside the entity node so its substance reads in place:
 | CLAIMS-17  | should   | **No cross-_source_ dedup**: the same assertion from two **different sources** yields two claims (independent provenance); cross-source merge/retraction stays a Connect/Reflect concern, fed by `possible-duplicate` signals. (Within-_source_ near-dupes are now collapsed — CLAIMS-19.) | test:claimsStage.test.ts, claimDedup.test.ts | DATA-3; LIFE-8 |
 | CLAIMS-18  | should   | The Claims work-list is discovered by a **derived sweep of `entities/`** in v1 (terminal `claims` marker in the source audit, keyed by `entityId`); the eventual seam is a **`queue/claims/` folder + per-entity poke** (DECOMP-16) — later stages attach with no change to Claims | test:claimsStage.test.ts | ORCH-9,15; DECOMP-16 |
 | CLAIMS-19  | should   | **Within-source near-duplicate claim collapse**: claims that share the **same source provenance** AND normalize to the **same statement** collapse to one canonical (fact>interpretation>hypothesis, then confidence, then earliest id); the rest are deleted and the affected nodes' claims blocks regenerated. Deterministic + idempotent; runs as **Connect's post-Claims pass** (SPEC-0016 §6). Symmetric-relationship rewordings ("A↔B") are NOT collapsed — deferred to typed links (SPEC-0020 CONNECT-20); the residual is logged | test:claimDedup.test.ts, connectStage.test.ts | DATA-3; LIFE-8; SPEC-0020 |
+| CLAIMS-20  | should   | A **set-aside claims item is user-recoverable** (the #137 escape hatch): `retryClaimsItem` appends a **per-entity `reopened`** marker that supersedes the prior `setaside`/`failed` count so the entity re-enters the queue and re-derives (per-ENTITY, **not** a source-wide replay epoch — siblings untouched); `dismissClaimsItem` appends a **terminal `dismissed`** marker (permanently retired, never re-derived, distinct from the recoverable `setaside`); `listSetAsideItems` enumerates the recoverable set. All append-only on the source audit (CLAIMS-11), committed under the canonical-writer lock (CLAIMS-15) | test:claimsStage.test.ts | ORCH-12; SPEC-0030 OBS-17; [#137](https://github.com/masra91/KB-App/issues/137) |
 
 ### CLAIMS-5 — The work unit is an entity + its whole source
 - **Status:** draft · **Priority:** must
@@ -511,6 +521,14 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 
 ## 8. Changelog
 
+- 2026-06-02 — **CLAIMS-20: set-aside items are user-recoverable** (#137 escape hatch backing
+  SPEC-0030 OBS-17). Added `retryClaimsItem` (per-entity `reopened` marker → re-enters the queue,
+  siblings untouched — deliberately *not* a source-wide `replay-reset` epoch, which would
+  re-derive every entity of the source), `dismissClaimsItem` (terminal `dismissed` marker →
+  permanently retired), and `listSetAsideItems` (the recoverable list); exported `readClaimsState`
+  with a `terminalReason` (`claimed`/`setaside`/`dismissed`). All append-only on the source audit
+  (CLAIMS-11), committed under the canonical-writer lock via the same optimistic-advance machinery
+  as a normal claims commit. The Status-view surface that calls these is DEV-3's OBS-17 half.
 - 2026-05-30 — created (draft). Second Enrich stage and third user of the SPEC-0014
   harness. Entity-driven: one entity node + its **whole** derived-from source → thin
   cognition-only agent → validated claims decision → orchestrator-written `claims/` files

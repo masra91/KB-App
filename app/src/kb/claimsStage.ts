@@ -39,8 +39,9 @@ export const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default review rounds (parks) on one entity before it is set aside (REVIEW-8 cascade cap). */
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
-/** A terminal marker means the entity has left the derived queue (success or set-aside). */
-const TERMINAL_EVENTS = new Set(['claimed', 'setaside']);
+/** A terminal marker means the entity has left the derived queue: `claimed` (success), `setaside`
+ *  (poison, recoverable — CLAIMS-12), or `dismissed` (user-retired, CLAIMS-20). */
+const TERMINAL_EVENTS = new Set(['claimed', 'setaside', 'dismissed']);
 
 /** One parsed line of a source's audit.jsonl that this stage cares about (keyed by entityId). */
 interface AuditLine {
@@ -62,16 +63,25 @@ export interface AnsweredReviewState {
   note?: string | null;
 }
 
+/** Which terminal marker an entity reached (CLAIMS-20): `setaside` is recoverable, `dismissed` is
+ *  user-retired, `claimed` succeeded. Undefined when the entity is not terminal. */
+export type ClaimsTerminalReason = 'claimed' | 'setaside' | 'dismissed';
+
 export interface ClaimsState {
-  terminal: boolean; // claimed / set aside — leaves the queue for good
+  terminal: boolean; // claimed / set aside / dismissed — leaves the queue for good
+  terminalReason?: ClaimsTerminalReason; // which terminal marker (CLAIMS-20); undefined if not terminal
   failures: number; // failed attempts (CLAIMS-12)
   parked: boolean; // an open `awaiting-review` whose reviews aren't all answered (REVIEW-5)
   rounds: number; // number of review parks so far (REVIEW-8 cascade cap)
   answered: AnsweredReviewState[]; // answered reviews, to feed a resumed re-run (REVIEW-6)
 }
 
-/** Read one entity's claims audit state from its SOURCE's append-only audit.jsonl. */
-async function readClaimsState(sourceDir: string, entityId: string): Promise<ClaimsState> {
+/**
+ * Read one entity's claims audit state from its SOURCE's append-only audit.jsonl. Exported so the
+ * Status-view recovery surface (SPEC-0030 OBS-17) can read terminal/recoverable state through the
+ * same reducer the queue uses — no parallel marker logic in the UI (CLAIMS-20).
+ */
+export async function readClaimsState(sourceDir: string, entityId: string): Promise<ClaimsState> {
   let raw: string;
   try {
     raw = await fs.readFile(path.join(sourceDir, 'audit.jsonl'), 'utf8');
@@ -79,11 +89,12 @@ async function readClaimsState(sourceDir: string, entityId: string): Promise<Cla
     return { terminal: false, failures: 0, parked: false, rounds: 0, answered: [] };
   }
   let terminal = false;
+  let terminalReason: ClaimsTerminalReason | undefined;
   let failures = 0;
   let rounds = 0;
-  const parkRounds: string[][] = []; // reviewIds raised per `awaiting-review` round
-  const answeredIds = new Set<string>();
-  const answered: AnsweredReviewState[] = [];
+  let parkRounds: string[][] = []; // reviewIds raised per `awaiting-review` round
+  let answeredIds = new Set<string>();
+  let answered: AnsweredReviewState[] = [];
   // Scope to the current replay epoch (REPLAY-6): a replayed source's prior `claimed`/park
   // markers are ignored so its (freshly re-derived) entities re-enter the claims queue.
   for (const line of epochScopedLines(raw)) {
@@ -95,8 +106,21 @@ async function readClaimsState(sourceDir: string, entityId: string): Promise<Cla
       continue;
     }
     if (obj.stage !== STAGE || obj.entityId !== entityId) continue;
-    if (obj.event && TERMINAL_EVENTS.has(obj.event)) terminal = true;
-    else if (obj.event === 'failed') failures += 1;
+    if (obj.event === 'reopened') {
+      // CLAIMS-20 (user retry, OBS-17): a per-entity `reopened` marker supersedes ALL prior claims
+      // state for THIS entity (terminal/failures/park) so it re-enters the queue and re-derives.
+      // Per-entity by construction — siblings of the same source (their own audit lines) are untouched.
+      terminal = false;
+      terminalReason = undefined;
+      failures = 0;
+      rounds = 0;
+      parkRounds = [];
+      answeredIds = new Set<string>();
+      answered = [];
+    } else if (obj.event && TERMINAL_EVENTS.has(obj.event)) {
+      terminal = true;
+      terminalReason = obj.event as ClaimsTerminalReason;
+    } else if (obj.event === 'failed') failures += 1;
     else if (obj.event === 'awaiting-review') {
       rounds += 1;
       parkRounds.push(obj.reviewIds ?? []);
@@ -107,7 +131,7 @@ async function readClaimsState(sourceDir: string, entityId: string): Promise<Cla
   }
   // Parked iff any park round still has an unanswered review (REVIEW-5/6).
   const parked = !terminal && parkRounds.some((ids) => ids.some((id) => !answeredIds.has(id)));
-  return { terminal, failures, parked, rounds, answered };
+  return { terminal, terminalReason, failures, parked, rounds, answered };
 }
 
 /** Recursively find every entity node file (`entities/.../<ULID>.md`), repo-relative. */
@@ -398,6 +422,98 @@ export async function claimsOne(
 
   await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
   return result;
+}
+
+/**
+ * Append ONE per-entity audit event to the entity's SOURCE audit.jsonl and commit it under the
+ * canonical-writer lock, via the same optimistic-advance machinery as a normal claims commit
+ * (CLAIMS-15, ORCH-17/18). Shared by the CLAIMS-20 recovery primitives. The source dir is
+ * `mkdir -p`'d first because a set-aside item's source may be incomplete/absent (BUG #135) — the
+ * marker must persist regardless. A rare same-path collision retries; exhaustion throws (a manual,
+ * one-at-a-time recovery action shouldn't exhaust — surface it rather than silently drop).
+ */
+async function appendEntityAudit(
+  root: string,
+  entityRel: string,
+  fields: Record<string, unknown>,
+  commitMessage: (entityId: string) => string,
+  lock: Mutex,
+): Promise<void> {
+  root = path.resolve(root);
+  const entityId = path.basename(entityRel, '.md');
+  const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
+    const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
+    const auditPath = path.join(wt, ref.derivedFrom, 'audit.jsonl');
+    await fs.mkdir(path.dirname(auditPath), { recursive: true }); // BUG #135: source dir may be absent
+    await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, ...fields }), 'utf8');
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(commitMessage(entityId));
+    return true;
+  };
+  const onExhausted = async (): Promise<void> => {
+    throw new Error(`claims recovery: could not advance ${String(fields.event)} for ${entityId} — canonical too contended`);
+  };
+  await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
+}
+
+/**
+ * CLAIMS-20 (OBS-17 escape hatch) — user-driven **retry** of a set-aside claims item. Appends a
+ * per-entity `reopened` marker that supersedes the prior `setaside`/`failed` count (see
+ * {@link readClaimsState}), so the entity re-enters the claims queue and re-derives on the next
+ * sweep. Per-ENTITY by construction — siblings of the same source are untouched (deliberately NOT
+ * a source-wide `replay-reset` epoch, which would re-derive every entity of that source).
+ */
+export async function retryClaimsItem(root: string, entityRel: string, lock: Mutex = new Mutex(), log: DevLog = noopDevLog): Promise<void> {
+  await appendEntityAudit(root, entityRel, { event: 'reopened' }, (id) => `claims: reopened ${id} (retry)`, lock);
+  log.info('claims.reopened', { itemId: path.basename(entityRel, '.md') });
+}
+
+/**
+ * CLAIMS-20 (OBS-17 escape hatch) — user-driven **dismiss** of a set-aside claims item. Appends a
+ * TERMINAL `dismissed` marker: the entity leaves the recoverable (set-aside) list permanently and
+ * is never retried or re-derived — distinct from `setaside`, which stays recoverable. Sources are
+ * unmutated beyond the append-only audit (CLAIMS-11).
+ */
+export async function dismissClaimsItem(root: string, entityRel: string, lock: Mutex = new Mutex(), log: DevLog = noopDevLog): Promise<void> {
+  await appendEntityAudit(root, entityRel, { event: 'dismissed' }, (id) => `claims: dismissed ${id}`, lock);
+  log.info('claims.dismissed', { itemId: path.basename(entityRel, '.md') });
+}
+
+/** One recoverable set-aside item for the Status-view recovery panel (CLAIMS-20 / OBS-17). */
+export interface SetAsideItem {
+  entityRel: string; // repo-relative entity node path (the handle for retry/dismiss)
+  entityId: string;
+  kind: string;
+  name: string;
+  derivedFrom: string; // the source dir it derives from (provenance)
+  failures: number; // failed attempts recorded before set-aside
+  rounds: number; // review-park rounds (REVIEW-8), if it was set aside on the review-cascade cap
+}
+
+/**
+ * CLAIMS-20 (OBS-17) — the recoverable set-aside list: every entity whose CURRENT claims state is
+ * terminal via `setaside` (NOT a `claimed` success, NOT a user-`dismissed` item). The Status view
+ * renders these and offers {@link retryClaimsItem} / {@link dismissClaimsItem} on each. Reads through
+ * {@link readClaimsState} so it honors retries/dismisses/replay-epochs with no parallel logic.
+ */
+export async function listSetAsideItems(root: string): Promise<SetAsideItem[]> {
+  root = path.resolve(root);
+  const out: SetAsideItem[] = [];
+  for (const rel of await findEntityFiles(root)) {
+    let ref: EntityRef;
+    try {
+      ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+    } catch {
+      continue; // unreadable/foreign node — not our well-formed unit
+    }
+    const entityId = path.basename(rel, '.md');
+    const state = await readClaimsState(path.join(root, ref.derivedFrom), entityId);
+    if (state.terminal && state.terminalReason === 'setaside') {
+      out.push({ entityRel: rel, entityId, kind: ref.kind, name: ref.name, derivedFrom: ref.derivedFrom, failures: state.failures, rounds: state.rounds });
+    }
+  }
+  return out.sort((a, b) => (a.entityId < b.entityId ? -1 : 1));
 }
 
 /**

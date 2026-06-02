@@ -18,7 +18,7 @@ import { DecomposeStage } from './decomposeStage';
 import type { DecomposeDecider } from './decomposeAgent';
 import { renderEntityNode, entityFileRel } from './connectDoc';
 import { ulid } from './ulid';
-import { claimsOne, readClaimsQueue, findEntityFiles, parseEntityNode, ClaimsStage, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
+import { claimsOne, readClaimsQueue, readClaimsState, findEntityFiles, parseEntityNode, ClaimsStage, retryClaimsItem, dismissClaimsItem, listSetAsideItems, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision, ClaimsDecision } from './claims';
 import { findOpenReviews, answerReview, getReview } from './reviewStore';
@@ -533,6 +533,126 @@ describe.skipIf(!gitAvailable)('cascade: a resumed run may raise a follow-up (RE
       const res = await claimsOne(root, entityRels[0], alwaysRaise); // round cap reached
       expect(res.setAside).toBe(true);
       expect(await readClaimsQueue(root)).toHaveLength(0); // set aside — no longer queued
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('CLAIMS-20 — set-aside items are user-recoverable (retry / dismiss; OBS-17 / #137)', () => {
+  // A decider whose cognition always throws → the entity fails every attempt and is set aside after K.
+  const boom: ClaimsDecider = async () => {
+    throw new Error('boom');
+  };
+
+  /** Drive one entity to set-aside by failing it K times (one cognition attempt per claimsOne call). */
+  async function setAside(root: string, entityRel: string, lock: Mutex): Promise<void> {
+    for (let i = 0; i < DEFAULT_MAX_ATTEMPTS; i++) await claimsOne(root, entityRel, boom, lock);
+  }
+
+  it('retry re-enqueues a set-aside item, which then derives claims on a fresh good run', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']);
+      const rel = entityRels[0];
+
+      await setAside(root, rel, lock);
+      // Set aside: out of the work queue, ON the recoverable list with its failure count.
+      expect(await readClaimsQueue(root)).not.toContain(rel);
+      const list = await listSetAsideItems(root);
+      expect(list.map((i) => i.entityRel)).toEqual([rel]);
+      expect(list[0].failures).toBe(DEFAULT_MAX_ATTEMPTS);
+      expect(list[0].name).toBe('Steve');
+
+      // Retry → re-enters the queue, leaves the recoverable list (terminal cleared, failures reset).
+      await retryClaimsItem(root, rel, lock);
+      expect(await readClaimsQueue(root)).toContain(rel);
+      expect(await listSetAsideItems(root)).toHaveLength(0);
+
+      // A fresh GOOD run now claims it — proving the `reopened` marker truly reset the count.
+      const res = await claimsOne(root, rel, claimsDeciderFor([aClaim()]), lock);
+      expect(res.ok).toBe(true);
+      expect(res.claimIds).toHaveLength(1);
+      expect(await readClaimFiles(root)).toHaveLength(1);
+      expect(await readClaimsQueue(root)).not.toContain(rel); // claimed → terminal again
+    });
+  });
+
+  it('retry is PER-ENTITY — a sibling derived from the same source stays set aside', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      // Two entities, SAME source (same audit.jsonl) — the case a source-wide epoch reset would break.
+      const { entityRels } = await setup(root, 'Steve and Dana ran the project', ['Steve', 'Dana']);
+      const [a, b] = entityRels;
+      await setAside(root, a, lock);
+      await setAside(root, b, lock);
+      expect((await listSetAsideItems(root)).map((i) => i.entityRel).sort()).toEqual([a, b].sort());
+
+      await retryClaimsItem(root, a, lock); // retry ONLY a
+      const queue = await readClaimsQueue(root);
+      expect(queue).toContain(a); // a re-enqueued
+      expect(queue).not.toContain(b); // b untouched — still set aside
+      expect((await listSetAsideItems(root)).map((i) => i.entityRel)).toEqual([b]);
+    });
+  });
+
+  it('dismiss permanently retires a set-aside item — off the recoverable list, never re-derived', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']);
+      const rel = entityRels[0];
+      await setAside(root, rel, lock);
+
+      await dismissClaimsItem(root, rel, lock);
+      expect(await listSetAsideItems(root)).toHaveLength(0); // off the recoverable list
+      expect(await readClaimsQueue(root)).not.toContain(rel); // not re-enqueued
+
+      // A full drain with a GOOD decider must NOT resurrect it (dismissed is terminal).
+      const before = (await readClaimFiles(root)).length;
+      await new ClaimsStage(root, claimsDeciderFor([aClaim()]), lock, DEFAULT_MAX_ATTEMPTS).poke();
+      expect(await readClaimFiles(root)).toHaveLength(before); // nothing derived
+      const ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+      const state = await readClaimsState(path.join(root, ref.derivedFrom), path.basename(rel, '.md'));
+      expect(state.terminalReason).toBe('dismissed'); // distinct from the recoverable `setaside`
+    });
+  });
+
+  it('listSetAsideItems returns ONLY set-aside items — not claimed successes, not dismissed', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve, Dana, and Cleo', ['Steve', 'Dana', 'Cleo']);
+      const [claimed, stuck, dismissed] = entityRels;
+      await claimsOne(root, claimed, claimsDeciderFor([aClaim()]), lock); // claimed (success → terminal)
+      await setAside(root, stuck, lock); // set aside (recoverable)
+      await setAside(root, dismissed, lock);
+      await dismissClaimsItem(root, dismissed, lock); // dismissed (retired)
+
+      const list = await listSetAsideItems(root);
+      expect(list.map((i) => i.entityRel)).toEqual([stuck]); // only the set-aside one
+      expect(list[0].name).toBe('Dana');
+      expect(list[0].derivedFrom).toBeTruthy();
+    });
+  });
+
+  it('retry then re-fail sets it aside again (the failure count restarts cleanly)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']);
+      const rel = entityRels[0];
+
+      await setAside(root, rel, lock);
+      await retryClaimsItem(root, rel, lock);
+      // After the reopen the count is back to 0 — a fresh K failures are needed to set it aside again.
+      const ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+      const sourceDir = path.join(root, ref.derivedFrom);
+      expect((await readClaimsState(sourceDir, path.basename(rel, '.md'))).failures).toBe(0);
+
+      await setAside(root, rel, lock); // fail K more times
+      expect((await listSetAsideItems(root)).map((i) => i.entityRel)).toEqual([rel]); // recoverable again
+      expect((await readClaimsState(sourceDir, path.basename(rel, '.md'))).terminalReason).toBe('setaside');
     });
   });
 });
