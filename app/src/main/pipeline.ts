@@ -39,7 +39,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, type DevLogLevel } from '../kb/instanceConfig';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
@@ -500,11 +500,13 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   if (!active) return defaultInstanceConfig();
   const root = active.stagingWt;
   if (!isAutonomyPosture(settings.autonomyDefault)) return readInstanceConfig(root); // reject invalid
-  // OBS-10: dev-log verbosity — drop an unknown level to the safe default (fail-safe).
-  const devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : DEFAULT_DEV_LOG_LEVEL;
   let prior: InstanceSettings = defaultInstanceConfig();
+  let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
   await active.lock.run(async () => {
     prior = await readInstanceConfig(root);
+    // OBS-10: keep a valid level. Server-side merge (QA-2 hardening / the #102 lesson): an
+    // omitted/invalid level PRESERVES the prior — no caller can clobber a field by omission.
+    devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : prior.devLogLevel;
     await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel });
     await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel}`);
   });
@@ -514,6 +516,16 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       eventType: 'instance-config-change',
       subjects: {},
       payload: { field: 'autonomyDefault', from: prior.autonomyDefault, to: settings.autonomyDefault, why: 'Principal change via Control Panel' },
+    });
+  }
+  // OBS-10 + AUDIT-2: audit a verbosity change too — `→ debug` is security-relevant (it logs
+  // redaction-protected `sensitive` fields verbatim), so it's never silent (QA-2 #2).
+  if (prior.devLogLevel !== devLogLevel) {
+    await appendAuditEvent(root, {
+      actor: 'panel',
+      eventType: 'instance-config-change',
+      subjects: {},
+      payload: { field: 'devLogLevel', from: prior.devLogLevel, to: devLogLevel, why: 'Principal change via Control Panel' },
     });
   }
   return readInstanceConfig(root);
