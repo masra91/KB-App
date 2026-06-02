@@ -44,7 +44,7 @@ export function stepperCells(stage: StageId): CellState[] {
   });
 }
 
-export type FunnelDirection = 'reduce' | 'expand' | 'flat';
+export type FunnelDirection = 'reduce' | 'expand' | 'flat' | 'complete';
 
 /** One transition between adjacent funnel points, with its directional caption (VIZ-3). */
 export interface FunnelSegment {
@@ -53,7 +53,8 @@ export interface FunnelSegment {
   fromCount: number;
   toCount: number;
   direction: FunnelDirection;
-  /** Human caption: `−N deduped` at a reduction, `+N (×R)` at a fan-out, `→` when flat. */
+  /** Human caption: `−N deduped` (reduction), `+N (×R)` (fan-out), `→` (flat), or — for the terminal
+   *  →promoted segment — the completion ratio `promoted/captured · P%` (Design-Lead #171). */
   caption: string;
 }
 
@@ -76,7 +77,13 @@ export function funnelSegments(c: Conversion): FunnelSegment[] {
     const delta = toCount - fromCount;
     let direction: FunnelDirection;
     let caption: string;
-    if (delta < 0) {
+    if (to === 'promoted') {
+      // Terminal segment is the COMPLETION RATIO, not a delta (Design-Lead #171): `promoted` is
+      // sources-on-main (same unit as `captured`), so claims→promoted would be a cross-unit compare.
+      direction = 'complete';
+      const pct = c.captured > 0 ? Math.round((c.promoted / c.captured) * 100) : 0;
+      caption = `${c.promoted}/${c.captured} · ${pct}%`;
+    } else if (delta < 0) {
       direction = 'reduce';
       caption = `−${-delta} deduped`;
     } else if (delta > 0) {

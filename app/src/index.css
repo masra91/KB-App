@@ -618,6 +618,7 @@ option { background: var(--card); color: var(--fg); }
 .viz-delta-reduce .viz-delta-caption { color: var(--viz-brass); }
 .viz-delta-expand .viz-delta-caption { color: var(--viz-patina); }
 .viz-delta-flat .viz-delta-caption { color: var(--viz-ink-muted); }
+.viz-delta-complete .viz-delta-caption { color: var(--viz-patina); } /* terminal completion ratio (#171) */
 /* Ember breathe — the single active carriage/step pulses (VIZ-6). Animate opacity only (VIZ-9). */
 .viz-breathe .viz-cell-current { animation: viz-breathe 1.8s ease-in-out infinite; }
 @keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }

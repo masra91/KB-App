@@ -47,6 +47,18 @@ describe('funnelSegments (VIZ-3 — directional deltas)', () => {
   it('produces one segment per adjacent funnel pair (5 points → 4 segments)', () => {
     expect(funnelSegments(C)).toHaveLength(4);
   });
+
+  it('renders the terminal →promoted segment as a completion ratio, not a delta (#171)', () => {
+    const seg = funnelSegments(C).find((s) => s.to === 'promoted')!;
+    expect(seg.direction).toBe('complete');
+    expect(seg.caption).toBe('5/10 · 50%'); // promoted/captured · pct — not claims→promoted (cross-unit)
+    expect(seg.caption).not.toContain('deduped');
+  });
+
+  it('completion ratio guards a zero capture (no NaN%)', () => {
+    const seg = funnelSegments({ captured: 0, candidates: 0, entities: 0, claims: 0, promoted: 0 }).find((s) => s.to === 'promoted')!;
+    expect(seg.caption).toBe('0/0 · 0%');
+  });
 });
 
 describe('splitCarriages (VIZ-9 — virtualize beyond 12)', () => {
