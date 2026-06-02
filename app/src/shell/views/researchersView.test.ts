@@ -6,7 +6,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
+const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
+const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -192,6 +193,39 @@ describe('#108 polish — run-now state machine (PANEL-10) + short option labels
     const opt = c.querySelector<HTMLOptionElement>('.researcher-egress-sel option[value="local-only"]')!;
     expect(opt.textContent).toBe('Local only'); // no parenthetical clutter
     expect(opt.title).toContain('Never leaves this machine');
+  });
+});
+
+describe('Code researcher repoPath config (Slice 2a)', () => {
+  it('shows a repoPath input ONLY for code researchers, prefilled from config', async () => {
+    listResearchers = vi.fn(async () => [codeRow]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toBe('/repos/app');
+  });
+
+  it('a web researcher has no repoPath field (template-specific)', async () => {
+    const c = await mount(); // default webRow
+    expect(c.querySelector('.researcher-repopath')).toBeNull();
+  });
+
+  it('saves repoPath alongside instructions/scope for a code researcher (no confirm)', async () => {
+    listResearchers = vi.fn(async () => [codeRow]);
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLInputElement>('.researcher-repopath')!.value = '/repos/other';
+    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
+    await flush();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true); // steering, not risky
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/other' });
+  });
+
+  it('escapes a hostile repoPath value', async () => {
+    listResearchers = vi.fn(async () => [{ ...codeRow, repoPath: '"><img src=x onerror=alert(1)>' }]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('img')).toBeNull();
+    expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toContain('<img');
   });
 });
 

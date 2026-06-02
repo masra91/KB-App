@@ -74,6 +74,7 @@ export function buildResearcherViews(
     template: r.template,
     label: r.label ?? r.template,
     prompt: r.prompt,
+    repoPath: typeof r.config?.repoPath === 'string' ? r.config.repoPath : '',
     egressTier: r.egressTier,
     scope: r.scope,
     enabled: r.enabled,
@@ -124,9 +125,10 @@ const RESEARCHER_AUDIT_WHY = 'Principal change via Control Panel';
  * (egress `local-only`), so e.g. creating a public-web researcher records local-only→public-web.
  */
 export function researcherConfigAuditEvents(
-  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier' | 'scope' | 'prompt'> | undefined,
+  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier' | 'scope' | 'prompt' | 'config'> | undefined,
   patch: ResearcherConfigPatch,
 ): AuditEventInput[] {
+  const priorRepoPath = typeof prior?.config?.repoPath === 'string' ? prior.config.repoPath : '';
   const base = {
     enabled: prior?.enabled ?? false,
     schedule: prior?.schedule ?? 'off',
@@ -134,11 +136,13 @@ export function researcherConfigAuditEvents(
     egressTier: prior?.egressTier ?? ('local-only' as EgressTier),
     scope: prior?.scope ?? '',
     prompt: prior?.prompt ?? '',
+    repoPath: priorRepoPath,
   };
   const events: AuditEventInput[] = [];
-  // scope + prompt (RESEARCH-17) are steering config the Principal edits in the Manage view — audited
-  // too (AUDIT-2: a change to what a researcher does / which scope it serves is never silent).
-  for (const field of ['enabled', 'schedule', 'posture', 'egressTier', 'scope', 'prompt'] as const) {
+  // scope + prompt (RESEARCH-17) + repoPath (Slice 2a Code config) are steering config the Principal
+  // edits in the Manage view — audited too (AUDIT-2: a change to what a researcher does / which scope
+  // or repo it serves is never silent).
+  for (const field of ['enabled', 'schedule', 'posture', 'egressTier', 'scope', 'prompt', 'repoPath'] as const) {
     const to = patch[field];
     if (to === undefined || to === base[field]) continue;
     events.push({
