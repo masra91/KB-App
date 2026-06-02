@@ -5,8 +5,9 @@
 // DOM, that risky changes (enable, posture→Autonomous, Run now) gate behind a confirm before calling
 // IPC, and that non-risky changes (disable, cadence) apply directly. The pure merge/risk logic is
 // covered separately in `kb/jobsPanel.test.ts`.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountJobs } from './jobsView';
+import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { JobView, KbApi } from '../../kb/types';
 
 function job(over: Partial<JobView> & Pick<JobView, 'id'>): JobView {
@@ -187,6 +188,38 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
       runJobNow: vi.fn(),
     });
     await mountJobs(root);
-    expect(root.querySelector('.error')?.textContent).toContain('Could not load jobs');
+    expect(root.querySelector('.load-error')?.textContent).toContain('Couldn’t load'); // retryable fallback (#145)
+    expect(root.querySelector('.load-retry')).toBeTruthy();
+  });
+});
+
+describe('Jobs view · #145 load resilience (no infinite spinner on a hung IPC)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('times out a hung listJobs → retryable error, and Retry re-loads successfully', async () => {
+    const listJobs = vi.fn<KbApi['listJobs']>().mockReturnValueOnce(new Promise<JobView[]>(() => {})); // hangs
+    setApi({ listJobs, setJobConfig: vi.fn(), runJobNow: vi.fn() });
+    const mounted = mountJobs(root); // blocked on the hung load
+    expect(root.textContent).toContain('Loading…'); // spinner initially
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
+    await mounted;
+    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.load-error')).toBeTruthy();
+
+    // Retry succeeds → the list renders.
+    listJobs.mockResolvedValueOnce([job({ id: 'reflect' })]);
+    root.querySelector<HTMLButtonElement>('.load-retry')!.click();
+    await vi.advanceTimersByTimeAsync(0); // flush the (resolved) reload
+    expect(root.querySelector('.job[data-id="reflect"]')).toBeTruthy();
   });
 });

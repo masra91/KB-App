@@ -11,6 +11,7 @@
 // per the #86 dogfood). Thin DOM over the typed IPC; `esc()` on every interpolation (XSS-safe);
 // render helpers are pure (data → HTML string) so they unit-test without a DOM.
 import { esc } from '../html';
+import { withTimeout } from '../loadGuard';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo } from '../../kb/types';
 
 const POLL_MS = 2500;
@@ -62,7 +63,9 @@ async function load(container: HTMLElement): Promise<void> {
     renderBody(container);
   }
   try {
-    view = await window.kbApi.pipelineStatusView();
+    // #145: bound the wait — a hung `pipelineStatusView` must surface as an error, not an infinite
+    // "Loading…". The live poll (POLL_MS) then auto-retries, so no manual retry button is needed here.
+    view = await withTimeout(window.kbApi.pipelineStatusView());
     errorMsg = '';
   } catch (err) {
     errorMsg = err instanceof Error ? err.message : String(err);

@@ -8,6 +8,7 @@
 // view degrades to a friendly message when no KB is active or IPC fails. Read-only viewing needs no
 // confirm. Run now executes the real egress-gated cognition (no synthetic data ever reaches a vault).
 import { esc } from '../html';
+import { withTimeout, renderLoadError } from '../loadGuard';
 import {
   schedulePresetLabel,
   SCHEDULE_OPTIONS,
@@ -37,9 +38,10 @@ export async function mountResearchers(container: HTMLElement): Promise<void> {
 async function render(container: HTMLElement): Promise<void> {
   let researchers: ResearcherView[];
   try {
-    researchers = await window.kbApi.listResearchers();
+    // #145: bound the wait so a hung `listResearchers` shows a retryable error, never an infinite spinner.
+    researchers = await withTimeout(window.kbApi.listResearchers());
   } catch {
-    container.innerHTML = `<div class="card">${HEADER}<p class="error">Could not load researchers right now.</p></div>`;
+    renderLoadError(container, HEADER, () => void render(container));
     return;
   }
   const list = researchers.length

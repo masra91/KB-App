@@ -4,6 +4,7 @@
 // PANEL-9: a light poll keeps running/idle status fresh (updated in place to avoid flicker); it stops
 // when the view is detached. Degrades to a friendly message when no KB / IPC fails (PANEL-9).
 import { esc } from '../html';
+import { withTimeout, renderLoadError } from '../loadGuard';
 import type { AgentView } from '../../kb/types';
 
 export async function mountAgents(container: HTMLElement): Promise<void> {
@@ -25,9 +26,10 @@ export async function mountAgents(container: HTMLElement): Promise<void> {
 async function render(container: HTMLElement): Promise<void> {
   let agents: AgentView[];
   try {
-    agents = await window.kbApi.listAgents();
+    // #145: bound the wait so a hung `listAgents` shows a retryable error, never an infinite spinner.
+    agents = await withTimeout(window.kbApi.listAgents());
   } catch {
-    container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="error">Could not load agents right now.</p></div>`;
+    renderLoadError(container, '<h1>🤖 Agents</h1>', () => void render(container));
     return;
   }
   const header = `<h1>🤖 Agents</h1><p class="muted">The librarian agents that run your pipeline. Observe-only — configuration is coming.</p>`;
