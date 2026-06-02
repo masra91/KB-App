@@ -175,6 +175,22 @@ describe.skipIf(!gitAvailable)('signals route to the audit log only (DECOMP-9, D
       expect(cands).not.toContain('which Austin?');
     });
   });
+
+  it('emits a research-request signal with its what/context into the audit (SPEC-0028 RESEARCH-3)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const srcRel = await archiveText(root, 'we shipped on Atlas');
+      await decomposeOne(root, srcRel, deciderFor([], [{ type: 'research-request', note: 'unexplained term', what: 'Atlas', context: 'we shipped on Atlas' }]));
+
+      const audit = await fs.readFile(path.join(root, srcRel, 'audit.jsonl'), 'utf8');
+      const sigLine = audit
+        .split('\n')
+        .map((l) => (l.trim() ? JSON.parse(l) : null))
+        .find((o) => o && o.event === 'signal' && o.type === 'research-request');
+      // The structured fields the dispatcher reads back must ride along on the signal line.
+      expect(sigLine).toMatchObject({ type: 'research-request', note: 'unexplained term', what: 'Atlas', context: 'we shipped on Atlas' });
+    });
+  });
 });
 
 describe.skipIf(!gitAvailable)('empty result is valid (SPEC-0015 §3.5)', () => {

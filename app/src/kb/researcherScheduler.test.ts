@@ -3,6 +3,7 @@
 // JobScheduler but the body is runResearcher (ingest), keeping JOBS-10 intact.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
@@ -61,7 +62,7 @@ describe.skipIf(!gitAvailable)('ResearcherScheduler.tick (RESEARCH-2, Option a)'
   it('runs a due researcher → writes a secondary source + audit, then is not due within the interval', async () => {
     await withVault(async (root) => {
       await upsertResearcher(root, web({ id: 'web-1', schedule: 'daily', enabled: true }));
-      const sched = new ResearcherScheduler(root, stub);
+      const sched = new ResearcherScheduler(root, { researchFn: stub });
       const t0 = Date.parse('2026-06-02T00:00:00.000Z');
 
       const fired1 = await sched.tick(t0);
@@ -78,7 +79,7 @@ describe.skipIf(!gitAvailable)('ResearcherScheduler.tick (RESEARCH-2, Option a)'
   it('re-runs the same standing topic after the interval (cadence, NOT dedup-blocked)', async () => {
     await withVault(async (root) => {
       await upsertResearcher(root, web({ id: 'web-1', schedule: 'daily', enabled: true }));
-      const sched = new ResearcherScheduler(root, stub);
+      const sched = new ResearcherScheduler(root, { researchFn: stub });
       const t0 = Date.parse('2026-06-02T00:00:00.000Z');
       await sched.tick(t0);
       const after = await sched.tick(t0 + DAY + 1000); // a day later → due again
@@ -92,8 +93,26 @@ describe.skipIf(!gitAvailable)('ResearcherScheduler.tick (RESEARCH-2, Option a)'
     await withVault(async (root) => {
       await upsertResearcher(root, web({ id: 'off', schedule: 'off', enabled: true }));
       await upsertResearcher(root, web({ id: 'disabled', schedule: 'daily', enabled: false }));
-      const fired = await new ResearcherScheduler(root, stub).tick(Date.now());
+      const fired = await new ResearcherScheduler(root, { researchFn: stub }).tick(Date.now());
       expect(fired).toEqual([]);
+    });
+  });
+
+  // The inline trigger (RESEARCH-3): a stage emits a research-request signal; the tick's sweep routes
+  // it through the dispatcher to an enabled researcher. Uses an `off`-schedule researcher so no
+  // standing pass fires — isolating the inline path. Cognition is the injected stub (no network).
+  it('runs an inline research-request from the audit on tick (off-schedule → no standing pass)', async () => {
+    await withVault(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1', schedule: 'off', enabled: true, topics: [] }));
+      await fs.mkdir(path.join(root, '.kb'), { recursive: true });
+      const sig = JSON.stringify({ ts: '2026-06-02T00:00:00.000Z', stage: 'decompose', event: 'signal', type: 'research-request', what: 'Atlas', note: 'unexplained term', context: 'ship on Atlas', sourceId: 'S1' }) + '\n';
+      await fs.appendFile(path.join(root, '.kb', 'audit.jsonl'), sig, 'utf8');
+
+      const fired = await new ResearcherScheduler(root, { researchFn: stub }).tick(Date.parse('2026-06-02T01:00:00.000Z'));
+      expect(fired).toEqual([]); // off-schedule → no standing pass fired
+      // ...but the inline sweep dispatched the request: a `researched` event for web-1 now exists.
+      const researched = (await readEvents(root, { actors: ['researcher'], subjectId: 'web-1' })).filter((e) => e.eventType === 'researched');
+      expect(researched.length).toBe(1);
     });
   });
 });

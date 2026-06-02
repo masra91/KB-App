@@ -44,7 +44,6 @@ import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgress
 import { runResearcher } from '../kb/researchRun';
 import { stubResearchFn } from '../kb/researchStub';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
-import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -157,12 +156,15 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // reach `main`). Jobs run concurrently with the live pipeline (ORCH-17) — never blocking
   // capture/Enrich. Inert until the Principal enables a job in the registry.
   const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen, log);
-  // SPEC-0028 RESEARCH-2: the scheduled-researcher tick. Standing researchers (a non-`off` cadence in
-  // the researcher registry) run a bounded pass via runResearcher — output is a cited secondary source
-  // via the ingest path (NOT the JobBehavior write-sink — Option (a), JOBS-10 intact). The Web cognition
-  // is the SDK adapter behind the seam (egress-gated + SSRF-safe); inert until a researcher is enabled
-  // with a schedule. Reaching outside the KB is read-only-world (AUTO-6).
-  const researchers = new ResearcherScheduler(stagingWt, makeWebResearchFn(), lock, log);
+  // SPEC-0028 RESEARCH-2/3: the researcher tick. Each tick first runs an inline sweep (routes any
+  // pending `research-request` signals a stage emitted through the dedup dispatcher), then a standing
+  // pass for every due scheduled researcher. Both execute via runResearcher — output is a cited
+  // secondary source via the ingest path (NOT the JobBehavior write-sink — Option (a), JOBS-10
+  // intact). The default cognition is the Web SDK adapter behind the seam (egress-gated + SSRF-safe);
+  // passing no `researchFn`/`session` leaves the live web fetch gated (piece-1, throws → no-finding)
+  // so the inline trigger is wired + audited without making a live call yet. Reaching outside the KB
+  // is read-only-world (AUTO-6).
+  const researchers = new ResearcherScheduler(stagingWt, {}, lock, log);
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock };
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;

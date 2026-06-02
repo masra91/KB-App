@@ -15,6 +15,8 @@ import { PRESET_INTERVAL_MS } from './jobs';
 import { readResearcherRegistry } from './researcherRegistry';
 import { readEvents } from './activityIndex';
 import { runResearcher, type ResearchFn } from './researchRun';
+import { makeWebResearchFn } from './researchWebAgent';
+import { runInlineResearchSweep, type ResearchDepsOptions } from './researchInline';
 import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { ulid } from './ulid';
 import { Mutex } from './stageLock';
@@ -39,18 +41,23 @@ export function standingRequest(r: ResearcherConfig, id: string, ts: string): Re
 
 export class ResearcherScheduler {
   private readonly root: string;
+  private readonly opts: ResearchDepsOptions;
   private readonly research: ResearchFn;
   private readonly log: DevLog;
   private readonly inFlight = new Set<string>(); // single-flight per researcher id (across ticks)
   private tickTimer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  private sweeping = false; // single-flight for the inline sweep (across ticks)
 
-  /** `root` is the staging worktree (where the registry + audit live + researchers write). `research`
-   *  is the cognition (the Web SDK ResearchFn in prod; injected in tests). `lock` reserved for future
+  /** `root` is the staging worktree (where the registry + audit live + researchers write). `opts`
+   *  carries the injected cognition (self-nomination runner, Web SDK options, or a `researchFn`
+   *  override for tests) — shared by BOTH the inline sweep (via the dispatcher) and the standing
+   *  passes (via `runResearcher`), so the same fake drives both in tests. `lock` reserved for future
    *  serialization with stages; runResearcher's ingest commits are add-only (unique ULID units). */
-  constructor(root: string, research: ResearchFn, _lock: Mutex = new Mutex(), log: DevLog = noopDevLog) {
+  constructor(root: string, opts: ResearchDepsOptions = {}, _lock: Mutex = new Mutex(), log: DevLog = noopDevLog) {
     this.root = path.resolve(root);
-    this.research = research;
+    this.opts = opts;
+    this.research = opts.researchFn ?? makeWebResearchFn(opts.web);
     this.log = log;
   }
 
@@ -69,13 +76,16 @@ export class ResearcherScheduler {
     }
   }
 
-  /** One tick: run a standing pass for every enabled+scheduled+due researcher, serially, each
-   *  single-flight. Returns the ids it fired. Ticks never overlap (`ticking` guard). */
+  /** One tick: first an inline sweep (route pending `research-request` signals through the
+   *  dispatcher, RESEARCH-3), then a standing pass for every enabled+scheduled+due researcher,
+   *  serially, each single-flight. Returns the ids of the standing passes it fired. Ticks never
+   *  overlap (`ticking` guard). */
   async tick(now: number = Date.now()): Promise<string[]> {
     if (this.ticking) return [];
     this.ticking = true;
     const fired: string[] = [];
     try {
+      await this.inlineSweep();
       const researchers = await readResearcherRegistry(this.root);
       for (const r of researchers) {
         if (this.inFlight.has(r.id)) continue; // single-flight (JOBS-6 analogue)
@@ -87,6 +97,23 @@ export class ResearcherScheduler {
       this.ticking = false;
     }
     return fired;
+  }
+
+  /** Route any pending `research-request` signals through the dispatcher (RESEARCH-3), reusing the
+   *  scheduler's injected cognition. Single-flight (`sweeping`) so a slow sweep can't overlap itself
+   *  across ticks. Cheap + idempotent — the dispatcher's persistent dedup ledger coalesces a request
+   *  already fanned out on an earlier sweep. Never throws into the tick: a failed sweep is logged so
+   *  the standing passes still run. Public so the pipeline can poke it right after a stage drain. */
+  async inlineSweep(): Promise<void> {
+    if (this.sweeping) return;
+    this.sweeping = true;
+    try {
+      await runInlineResearchSweep(this.root, this.opts);
+    } catch (err) {
+      this.log.child({ scope: 'researcher-scheduler' }).error('inline-sweep-failed', { err });
+    } finally {
+      this.sweeping = false;
+    }
   }
 
   /** Run one standing pass (single-flight-guarded). Never throws into the tick loop — a failed pass

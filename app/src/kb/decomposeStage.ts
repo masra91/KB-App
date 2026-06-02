@@ -185,7 +185,9 @@ export async function decomposeOne(
 
       let audit = auditLine({ runId, sourceId: input.sourceId, model, event: 'start' });
       for (const sig of decision.signals ?? []) {
-        audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
+        // Carry the research-request fields (what/context) when present so the dispatcher can read a
+        // structured request from the signal (SPEC-0028 RESEARCH-3); other signals omit them.
+        audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs, ...(sig.what ? { what: sig.what } : {}), ...(sig.context ? { context: sig.context } : {}) });
       }
       audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'decomposed', candidates: candidateIds.length });
       await fs.appendFile(auditPath, audit, 'utf8');
