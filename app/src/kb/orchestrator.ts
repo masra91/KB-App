@@ -18,6 +18,7 @@ import { renderSourceMd, bodyFor } from './sourceDoc';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
 import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
+import { noopDevLog, type DevLog } from './devlog';
 
 const STATUS_REL = path.join('.kb', 'cache', 'status.json');
 
@@ -137,6 +138,7 @@ export class Orchestrator {
   private readonly lock: Mutex;
   private readonly afterDrain?: () => Promise<void>;
   private readonly cap: number;
+  private readonly log: DevLog;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -156,12 +158,14 @@ export class Orchestrator {
     lock: Mutex = new Mutex(),
     afterDrain?: () => Promise<void>,
     cap: number = DEFAULT_STAGE_CAP,
+    log: DevLog = noopDevLog,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.afterDrain = afterDrain;
     this.cap = cap;
+    this.log = log.child({ scope: 'archive' });
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -231,7 +235,10 @@ export class Orchestrator {
       try {
         await Promise.all(batch.map((id) => archiveOne(this.root, id, this.decider, this.lock)));
         this.lastArchived = batch[batch.length - 1];
-      } catch {
+      } catch (err) {
+        // OBS-4: archive failed — the item stays in the inbox (ORCH-12). Surface the cause so this
+        // is never a silent "N in queue, nothing happened" stall (the bug that motivated SPEC-0030).
+        this.log.error('archive.drain-error', { itemId: batch[0], err });
         await this.updateStatus(queue.length, null);
         return;
       }

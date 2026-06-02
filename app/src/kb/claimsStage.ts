@@ -30,6 +30,7 @@ import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
+import { noopDevLog, type DevLog } from './devlog';
 
 const STAGE = 'claims';
 /** Default attempts before a poison entity is set aside (CLAIMS-12). */
@@ -236,6 +237,7 @@ export async function claimsOne(
   lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
+  log: DevLog = noopDevLog,
 ): Promise<ClaimsOneResult> {
   root = path.resolve(root);
   const entityId = path.basename(entityRel, '.md');
@@ -271,6 +273,7 @@ export async function claimsOne(
           await fs.appendFile(auditPath, audit, 'utf8');
           await wtGit.raw('add', '-A');
           await wtGit.commit(`claims: set aside ${entityId} (review cascade cap)`);
+          log.warn('claims.setaside', { runId, itemId: entityId, reason: 'review-cascade-cap', rounds: priorState.rounds });
           result = { entityId, ok: false, claimIds: [], setAside: true };
           return true;
         }
@@ -351,6 +354,8 @@ export async function claimsOne(
       let audit = auditLine({ runId, entityId, event: 'failed', attempt, error: oneLine(error) });
       if (setAside) audit += auditLine({ runId, entityId, event: 'setaside', attempts: attempt });
       await fs.appendFile(auditPath, audit, 'utf8');
+      // OBS-4: verbose cause for the structured failed/setaside audit, cross-linked by runId (OBS-3).
+      log.error('claims.failed', { runId, itemId: entityId, attempt, setAside, err });
       await wtGit.raw('add', '-A');
       await wtGit.commit(`claims: failed ${entityId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
       result = { entityId, ok: false, claimIds: [], setAside };
@@ -373,6 +378,7 @@ export async function claimsOne(
       await wtGit.commit(`claims: set aside ${entityId} (collision-exhausted)`);
       await lock.run(() => advanceOrCollide(root, workBranch, base));
     });
+    log.warn('claims.setaside', { itemId: entityId, reason: 'collision-exhausted' });
     result = { ...result, ok: false, setAside: true };
   };
 
@@ -391,6 +397,7 @@ export class ClaimsStage {
   private readonly maxAttempts: number;
   private readonly afterDrain?: () => Promise<void>;
   private readonly cap: number;
+  private readonly log: DevLog;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -409,6 +416,7 @@ export class ClaimsStage {
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     afterDrain?: () => Promise<void>,
     cap: number = DEFAULT_STAGE_CAP,
+    log: DevLog = noopDevLog,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -416,6 +424,7 @@ export class ClaimsStage {
     this.maxAttempts = maxAttempts;
     this.afterDrain = afterDrain;
     this.cap = cap;
+    this.log = log.child({ scope: 'claims' });
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -465,9 +474,14 @@ export class ClaimsStage {
       // retry), so a settled batch never rejects; an unexpected throw stops this pass for a later sweep.
       const batch = queue.slice(0, this.cap);
       try {
-        await Promise.all(batch.map((entityRel) => claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts)));
+        await Promise.all(
+          batch.map((entityRel) =>
+            claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log),
+          ),
+        );
         worked = true;
-      } catch {
+      } catch (err) {
+        this.log.error('claims.drain-error', { err });
         return;
       }
       queue = await readClaimsQueue(this.root, this.maxAttempts);

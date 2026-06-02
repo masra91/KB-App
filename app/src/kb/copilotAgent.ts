@@ -34,11 +34,18 @@ function launchFlags(): string[] {
 }
 
 const defaultRunner: CopilotRunner = async (prompt) => {
-  const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
-    timeout: COPILOT_TIMEOUT_MS,
-    maxBuffer: 4 * 1024 * 1024,
-  });
-  return stdout;
+  try {
+    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
+      timeout: COPILOT_TIMEOUT_MS,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return stdout;
+  } catch (err) {
+    // Surface the subprocess stderr on the error so the failure trace records the real cause (OBS-4).
+    const stderr = (err as { stderr?: unknown }).stderr;
+    if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
+    throw err;
+  }
 };
 
 /** The versioned per-stage instruction template (SPEC-0014 Q9), composed per item. */
