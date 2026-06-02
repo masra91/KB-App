@@ -9,8 +9,9 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { gitAvailable } from '../../test/gitEnv';
 import { ensureGitIdentity } from './vault';
-import { canonicalHead, advanceOrCollide, withOptimisticAdvance, withConcurrentAdvance, withEphemeralWorktree, type AdvanceOutcome } from './canonicalAdvance';
+import { canonicalHead, advanceOrCollide, withOptimisticAdvance, withConcurrentAdvance, withEphemeralWorktree, reapEphemeralWorktrees, type AdvanceOutcome } from './canonicalAdvance';
 import { Mutex } from './stageLock';
+import { ulid } from './ulid';
 
 /** A canonical worktree (`root`) on branch `canon` with one initial commit. */
 async function makeCanonicalRepo(dir: string): Promise<string> {
@@ -385,6 +386,101 @@ describe.skipIf(!gitAvailable)('withConcurrentAdvance — ephemeral-worktree wra
       expect(attempts).toBe(3); // maxCollisionRetries(2) + 1
       expect(await fs.readFile(path.join(root, 'entities/p/steve.md'), 'utf8')).toContain('racer');
       expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+describe.skipIf(!gitAvailable)('reapEphemeralWorktrees — #135 cascade recovery (leaked ephemeral worktrees)', () => {
+  it('reaps leaked <stage>-<ULID> worktrees + kb/*-work-* branches; preserves staging + job worktrees', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      const git = simpleGit(root);
+      const wtRoot = path.join(root, '.kb', 'cache', 'worktrees');
+      const u1 = ulid();
+      const u2 = ulid();
+      // Two leaked ephemeral worktrees, as a crash/kill mid-item leaves them (dir + admin + branch).
+      await git.raw('worktree', 'add', '--force', '-B', `kb/claims-work-${u1}`, path.join(wtRoot, `claims-${u1}`), base);
+      await git.raw('worktree', 'add', '--force', '-B', `kb/decompose-work-${u2}`, path.join(wtRoot, `decompose-${u2}`), base);
+      // Persistent worktrees that MUST survive a reap: the staging worktree + a per-job worktree.
+      await git.raw('worktree', 'add', '--force', '-B', 'staging', path.join(wtRoot, 'staging'), base);
+      await git.raw('worktree', 'add', '--force', '-B', 'kb/job-reflect', path.join(wtRoot, 'job-reflect'), base);
+
+      const { worktrees, branches } = await reapEphemeralWorktrees(root);
+      expect(worktrees).toBe(2);
+      expect(branches).toBe(2);
+      // Ephemeral worktrees + their work branches are gone.
+      expect(await exists(root, path.join('.kb/cache/worktrees', `claims-${u1}`))).toBe(false);
+      expect(await exists(root, path.join('.kb/cache/worktrees', `decompose-${u2}`))).toBe(false);
+      const local = (await git.branchLocal()).all;
+      expect(local).not.toContain(`kb/claims-work-${u1}`);
+      expect(local).not.toContain(`kb/decompose-work-${u2}`);
+      // Persistent worktrees + their branches survive untouched.
+      expect(await exists(root, '.kb/cache/worktrees/staging')).toBe(true);
+      expect(await exists(root, '.kb/cache/worktrees/job-reflect')).toBe(true);
+      expect(local).toContain('staging');
+      expect(local).toContain('kb/job-reflect');
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('is a no-op on a clean repo (nothing leaked)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      expect(await reapEphemeralWorktrees(root)).toEqual({ worktrees: 0, branches: 0 });
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('drives the kb/*-work-* sweep back to O(0) — locks the O(leaked-N)-per-add churn regression', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      const git = simpleGit(root);
+      // Simulate the #135 accumulation: many leaked work branches — what EVERY `worktree add` then
+      // sweeps one `git branch -D` at a time (`pruneStaleWorktreeBranches`). That O(leaked-N) cost
+      // per item is the hang mechanism; the reaper must drive it back to ~0.
+      const N = 40;
+      for (let i = 0; i < N; i++) await git.raw('branch', `kb/claims-work-${ulid()}`, base);
+      const workBranchCount = async (): Promise<number> =>
+        (await git.raw('for-each-ref', '--format=%(refname:short)', 'refs/heads/kb/'))
+          .split('\n')
+          .filter((b) => /-work-[^/]+$/.test(b.trim())).length;
+      expect(await workBranchCount()).toBe(N);
+
+      const { branches } = await reapEphemeralWorktrees(root);
+      expect(branches).toBe(N);
+      expect(await workBranchCount()).toBe(0); // sweep cost now O(0), not O(N) — churn regression locked
+
+      // A normal ephemeral run does NOT re-accumulate (teardown removes its own branch).
+      await withEphemeralWorktree(root, 'claims', base, async () => 'ok');
+      expect(await workBranchCount()).toBe(0);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('clears a leaked worktree DIR even when its git admin entry is broken (fs.rm fallback)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const u = ulid();
+      const leaked = path.join(root, '.kb', 'cache', 'worktrees', `claims-${u}`);
+      // A dir that looks ephemeral but is NOT a registered worktree (admin entry gone) — `git worktree
+      // remove` can't handle it, so the raw fs.rm fallback must still clear it (else it piles up).
+      await fs.mkdir(leaked, { recursive: true });
+      await fs.writeFile(path.join(leaked, '.git'), 'gitdir: /nonexistent/.git/worktrees/claims-broken\n');
+      await fs.writeFile(path.join(leaked, 'stale'), 'x');
+      const { worktrees } = await reapEphemeralWorktrees(root);
+      expect(worktrees).toBe(1);
+      expect(await exists(root, path.join('.kb/cache/worktrees', `claims-${u}`))).toBe(false);
     } finally {
       await rmTempDir(dir);
     }

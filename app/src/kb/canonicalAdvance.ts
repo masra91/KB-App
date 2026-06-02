@@ -12,6 +12,7 @@ import simpleGit from 'simple-git';
 import { Mutex } from './stageLock';
 import { ulid } from './ulid';
 import { ensureGitIdentity } from './vault';
+import { noopDevLog, type DevLog } from './devlog';
 
 /** Default same-path collision retries before an item is set aside (ORCH-19). */
 export const DEFAULT_MAX_COLLISION_RETRIES = 3;
@@ -20,6 +21,21 @@ export const DEFAULT_MAX_COLLISION_RETRIES = 3;
  *  pre-concurrency engine); a higher cap lets a stage run that many items' cognition at once,
  *  their advances still serialized by the shared lock. Raised deliberately by pipeline.ts. */
 export const DEFAULT_STAGE_CAP = 1;
+
+/** Cap any single git invocation in the worktree lifecycle / enumeration (#135 cascade): if a git
+ *  child produces no output for this long it is killed, so a pathological worktree, lock, or
+ *  prompt can never hang the pipeline or a status read indefinitely. Generous — normal ops are
+ *  sub-second; this only ever fires on a genuine stall. */
+const WORKTREE_GIT_TIMEOUT_MS = 20_000;
+
+/** A simple-git handle whose every command is time-bounded (see {@link WORKTREE_GIT_TIMEOUT_MS}). */
+export function boundedGit(dir: string): ReturnType<typeof simpleGit> {
+  return simpleGit(dir, { timeout: { block: WORKTREE_GIT_TIMEOUT_MS } });
+}
+
+/** Matches an EPHEMERAL per-item worktree dir name — `<stage>-<26-char ULID>` (e.g. `claims-01JZ…`).
+ *  Excludes the persistent `staging` and per-job `job-<id>` worktrees, which must never be reaped. */
+const EPHEMERAL_WT_NAME = /-[0-9A-Za-z]{26}$/;
 
 /**
  * Run `fn` against a FRESH, isolated git worktree for ONE in-flight item (ORCH-17/20): a unique
@@ -51,7 +67,7 @@ export async function withEphemeralWorktree<T>(
   const id = ulid();
   const workBranch = `kb/${stage}-work-${id}`;
   const wt = path.join(root, '.kb', 'cache', 'worktrees', `${stage}-${id}`);
-  const git = simpleGit(root);
+  const git = boundedGit(root);
   await ensureGitIdentity(git);
   await git.raw('worktree', 'prune'); // reap any orphan worktree dir from a prior crash before adding
   await pruneStaleWorktreeBranches(git); // …then reap orphan work branches a failed teardown left
@@ -60,10 +76,63 @@ export async function withEphemeralWorktree<T>(
   try {
     return await fn({ wt, workBranch });
   } finally {
+    // #135 cascade — cleanup-on-failure MUST NOT leak the worktree dir. `worktree remove --force`
+    // can fail (concurrent git state, a half-broken admin entry); when it does, fall back to a raw
+    // `fs.rm` of the dir so the ephemeral worktree never accumulates — then `prune` reconciles the
+    // now-missing dir's admin entry. (A leaked dir is what `worktree prune` can't reap, so it would
+    // pile up and degrade every later add.) All best-effort + time-bounded so teardown can't hang.
     await git.raw('worktree', 'remove', '--force', wt).catch(() => {});
+    await fs.rm(wt, { recursive: true, force: true }).catch(() => {});
     await git.raw('branch', '-D', workBranch).catch(() => {});
     await git.raw('worktree', 'prune').catch(() => {});
   }
+}
+
+/**
+ * Reap LEAKED ephemeral per-item worktrees + their work branches under `<root>/.kb/cache/worktrees/`
+ * (#135 cascade recovery). An ephemeral `<stage>-<ULID>` worktree must never outlive the item that
+ * created it — but a crash or kill mid-item (e.g. the #135 poison-loop being force-stopped while
+ * worktrees were live) leaves the dir + its git admin entry behind, and `worktree prune` will NOT
+ * reap it (the dir still exists). They then accumulate, and because every `worktree add` first runs
+ * {@link pruneStaleWorktreeBranches} (one `git branch -D` per leaked `kb/*-work-*` branch), each new
+ * item gets slower as the leak grows — eventually starving the pipeline / the IPC event loop so the
+ * Jobs UI reads as hung. Run this at a QUIESCENT point (boot / staging provision) where no ephemeral
+ * worktree is legitimately in flight, so removing them all is safe.
+ *
+ * NEVER touches the persistent `staging` or per-job `job-<id>` worktrees (only `<stage>-<ULID>` names
+ * match {@link EPHEMERAL_WT_NAME}). Best-effort + time-bounded so a broken entry can't hang boot:
+ * `worktree remove --force` then a raw `fs.rm` fallback (the dir is what prune can't reap), then one
+ * `worktree prune` to reconcile admin entries, then delete the now-orphan `kb/*-work-*` branches.
+ */
+export async function reapEphemeralWorktrees(root: string, log: DevLog = noopDevLog): Promise<{ worktrees: number; branches: number }> {
+  root = path.resolve(root);
+  const git = boundedGit(root);
+  const wtRoot = path.join(root, '.kb', 'cache', 'worktrees');
+  // Missing worktrees dir → no dirs to reap, but leaked work BRANCHES can still exist (and are the
+  // O(leaked-N)-per-add churn), so fall through to the branch sweep rather than returning early.
+  const entries = await fs.readdir(wtRoot, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
+  let worktrees = 0;
+  for (const e of entries) {
+    if (!e.isDirectory() || !EPHEMERAL_WT_NAME.test(e.name)) continue; // skip `staging`, `job-<id>`, files
+    const wt = path.join(wtRoot, e.name);
+    await git.raw('worktree', 'remove', '--force', wt).catch(() => {});
+    await fs.rm(wt, { recursive: true, force: true }).catch(() => {}); // fallback when remove failed
+    worktrees++;
+  }
+  await git.raw('worktree', 'prune').catch(() => {});
+  // Delete leaked ephemeral work branches (skips any still checked out in a LIVE worktree).
+  const refs = await git.raw('for-each-ref', '--format=%(refname:short)', 'refs/heads/kb/').catch(() => '');
+  let branches = 0;
+  for (const b of refs.split('\n').map((s) => s.trim()).filter((s) => /-work-[^/]+$/.test(s))) {
+    await git
+      .raw('branch', '-D', b)
+      .then(() => {
+        branches++;
+      })
+      .catch(() => {});
+  }
+  if (worktrees > 0 || branches > 0) log.info('worktree.reaped-leaked', { worktrees, branches });
+  return { worktrees, branches };
 }
 
 /** Read the canonical worktree's current HEAD commit — the checkpoint a stage prepares off. */

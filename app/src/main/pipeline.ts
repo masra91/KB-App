@@ -27,6 +27,7 @@ import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
+import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
@@ -134,6 +135,12 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     log.child({ scope: 'pipeline' }).error('startup.worktree-provision-failed', { itemId: vaultPath, err });
     throw err; // unchanged behavior — but no longer silent
   }
+  // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
+  // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
+  // poison-loop's leak that degraded staging + wedged the Jobs UI). Best-effort — never block startup.
+  await reapEphemeralWorktrees(stagingWt, log.child({ scope: 'pipeline' })).catch((err) =>
+    log.child({ scope: 'pipeline' }).warn('startup.worktree-reap-failed', { itemId: vaultPath, err }),
+  );
   const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
   // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
   // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
@@ -236,9 +243,10 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
     const wt = path.join(root, e.name);
     let branch: string | undefined;
     try {
-      branch = (await simpleGit(wt).revparse(['--abbrev-ref', 'HEAD'])).trim();
+      // #135 cascade: time-bounded so a broken/leaked worktree can't hang the read-only status path.
+      branch = (await boundedGit(wt).revparse(['--abbrev-ref', 'HEAD'])).trim();
     } catch {
-      /* not a worktree / detached — leave branch undefined */
+      /* not a worktree / detached / timed-out — leave branch undefined */
     }
     out.push({ path: path.join('.kb', 'cache', 'worktrees', e.name), ...(branch ? { branch } : {}) });
   }
