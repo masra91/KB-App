@@ -361,6 +361,12 @@ export async function claimsOne(
       const setAside = attempt >= maxAttempts;
       let audit = auditLine({ runId, entityId, event: 'failed', attempt, error: oneLine(error) });
       if (setAside) audit += auditLine({ runId, entityId, event: 'setaside', attempts: attempt });
+      // BUG #135: the failure may BE an incomplete/missing source dir (e.g. `readSourceInput` ENOENT on
+      // a source whose audit.jsonl/dir isn't present). Writing the failed/set-aside marker straight to
+      // `auditPath` then ENOENTs itself (appendFile creates the file, not parent dirs) → the marker never
+      // persists → `failures` never increments → the entity retries FOREVER (the 172× poison-loop) instead
+      // of setting aside (ORCH-12). Ensure the dir exists so the durable failure record always lands.
+      await fs.mkdir(path.dirname(auditPath), { recursive: true });
       await fs.appendFile(auditPath, audit, 'utf8');
       // OBS-4: verbose cause for the structured failed/setaside audit, cross-linked by runId (OBS-3).
       log.error('claims.failed', { runId, itemId: entityId, attempt, setAside, err });
