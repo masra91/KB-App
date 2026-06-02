@@ -124,6 +124,7 @@ export async function fullReplay(): Promise<FullReplayResult> {
   // Pause every sweep before the purge; the in-flight commit (if any) drains as we take the lock.
   active.orch.stop();
   active.decompose.stop();
+  active.connect.stop();
   active.claims.stop();
   try {
     const counts = await runFullReplay(vaultPath, stagingWt, lock);
@@ -145,6 +146,7 @@ export async function fullReplay(): Promise<FullReplayResult> {
     if (active) {
       active.orch.start();
       active.decompose.start();
+      active.connect.start();
       active.claims.start();
     }
     replaying = false;

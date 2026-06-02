@@ -15,10 +15,18 @@ import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
 import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeStage';
 import { findEntityFiles } from './claimsStage';
-import { readCandidates } from './connectStage';
+import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
+import type { ConnectDecider, CandidateSet } from './connectAgent';
+
+/** Resolve every candidate in a block into one canonical node (mirrors connectStage.test.ts). */
+const oneClusterDecider = (canonicalName: string): ConnectDecider => async (set: CandidateSet) => ({
+  blockKey: set.blockKey,
+  clusters: [{ canonicalName, memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
+  agent: { via: 'copilot', model: 'test' },
+});
 
 function gitInstalledSync(): boolean {
   try {
@@ -205,6 +213,67 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
       const replayAudit = await fs.readFile(path.join(stagingWt, 'replay', 'audit.jsonl'), 'utf8');
       expect(replayAudit.split('\n').filter((l) => l.trim()).length).toBe(2); // two recorded replays
       expect((await simpleGit(stagingWt).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  // ── REPLAY-14: the rebuild runs the unmodified production pipeline in capture (ULID) order ──
+
+  it('re-queues every Source for the unmodified pipeline in chronological capture (ULID) order (REPLAY-14)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, async () => {
+        await promote(root);
+      });
+      // Capture three Sources in sequence → three ULIDs in ascending capture-time order.
+      await orch.capture('test', [{ kind: 'text', text: 'first about Ada' }]);
+      await orch.capture('test', [{ kind: 'text', text: 'second about Ada' }]);
+      await orch.capture('test', [{ kind: 'text', text: 'third about Ada' }]);
+      await orch.poke();
+      // Decompose all three (queue is capture-ordered); they leave the queue.
+      for (const rel of await readDecomposeQueue(stagingWt)) await decomposeOne(stagingWt, rel, decompDecider);
+      expect((await readDecomposeQueue(stagingWt)).length).toBe(0);
+
+      await runFullReplay(root, stagingWt, lock, { replayId: 'EPOCH_ORDER' });
+
+      // After replay the SAME production reader re-queues all three, sorted by ULID = capture order.
+      const queued = (await readDecomposeQueue(stagingWt)).map((r) => path.basename(r));
+      expect(queued.length).toBe(3);
+      expect([...queued].sort()).toEqual(queued); // already ascending — no replay-specific reordering
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('clears resolved entities from `main` via deletion-aware promote, then re-derives (REPLAY-4/8/14)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      const stagingWt = await seedDecomposed(root); // archived source + one candidate on staging
+      const lock = new Mutex();
+
+      // Run the real Connect stage so an entity is resolved on staging, then promote it to main
+      // (entities is evergreen post-#30: EVERGREEN_PATHS=['sources','entities','claims']).
+      const block = (await readConnectQueue(stagingWt))[0];
+      await connectOne(stagingWt, block.blockKey, oneClusterDecider('Ada'));
+      await promote(root);
+      expect((await findEntityFiles(stagingWt)).length).toBe(1); // resolved on staging
+      expect((await findEntityFiles(root)).length).toBe(1); // …and published to main
+
+      await runFullReplay(root, stagingWt, lock, { replayId: 'EPOCH_MAIN' });
+
+      // REPLAY-4/8: entities purged on staging AND cleared from main (deletion-aware promote, #29/#30).
+      expect((await findEntityFiles(stagingWt)).length).toBe(0);
+      expect((await findEntityFiles(root)).length).toBe(0);
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+      // Sources survive on main (REPLAY-3); the block re-derives through the unmodified pipeline.
+      expect((await findSourceDirs(root)).length).toBe(1);
+      expect((await readDecomposeQueue(stagingWt)).length).toBe(1); // re-queued from the start (REPLAY-14)
     } finally {
       await rmTempDir(dir);
     }

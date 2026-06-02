@@ -40,6 +40,7 @@ import { makeConnectDecider, type ConnectDecider, type CandidateSet, type Existi
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
+import { epochScopedLines } from './replayEpoch';
 
 /**
  * The branch Connect's worktree is based on and fast-forwards into.
@@ -188,7 +189,9 @@ async function readConnectState(root: string, key: string): Promise<ConnectState
   let rounds = 0;
   const parkRounds: string[][] = [];
   const answered = new Set<string>();
-  for (const line of raw.split('\n')) {
+  // Scope to the current replay epoch (REPLAY-6): a replayed block's prior terminal/park markers
+  // are ignored so the (re-emitted) candidates re-resolve through the unmodified pipeline (REPLAY-14).
+  for (const line of epochScopedLines(raw)) {
     if (line.trim().length === 0) continue;
     let o: AuditLine;
     try {
