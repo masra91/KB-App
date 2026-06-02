@@ -184,8 +184,13 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
     (sole router) refuses to run a pass when `depth > budget.maxDepth` (no egress).
   - **Escalate-to-Review** — at the depth limit the dispatcher raises a single gated yes/no Review
     ("Continue researching X?"), idempotent per request, audited `escalated`. **Raising + gating the
-    chain IS the RESEARCH-11 bound;** *resume-on-confirm* (a consumer of the `review-answered` marker
-    that re-dispatches one level deeper) is a **fast-follow**, not part of this requirement.
+    chain IS the RESEARCH-11 bound.** Because that Review is an **actionable** control (it renders in
+    the Reviews view with confirm/reject), *resume-on-confirm* was delivered as the immediate fast-follow
+    so the affordance isn't dead: on **confirm**, `resumeApprovedResearchEscalation` reconstructs the
+    request from the review's markerKey and re-runs `runResearcher` exactly one level deeper (a direct
+    call bypasses the dispatcher's depth gate by design, still bounded by the per-Instance ceiling); on
+    **reject**, the chain stops. A finding that spawns a yet-deeper request re-escalates — so every level
+    stays Principal-gated.
   - **Global per-Instance ceiling** — a **persistent rolling-window** cap (default **100 passes / 24h**,
     **tunable**) on total passes (egress) across all researchers, layered on the per-dispatch burst cap
     (24). Enforced at `runResearcher` so it bounds inline dispatch **and** scheduled standing passes; a
@@ -201,11 +206,16 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
   **global per-Instance egress ceiling** (a persistent rolling-window backstop, 100 passes/24h tunable,
   enforced at `runResearcher` so it bounds inline + standing passes alike, self-healing). All bounds are
   deterministically enforced, never prompt-advisory (decision **D7**). Forks (ceiling semantics =
-  persistent rolling-window; escalation = raise+gate, resume-on-confirm deferred; cost/rate = cadence +
-  calls, no token meter) were brought to + ratified by KB-PM. `Verify` graduates `none-yet → test:`
-  (researchDispatcher / researchEscalate / researchCeiling / researchInline / researchRun /
-  researchWebAgent). New `escalated` + `ceiling-reached` researcher audit events (AUDIT-11). Resume-on-
-  confirm of a depth-escalation Review is a tracked **fast-follow**.
+  persistent rolling-window; escalation = raise+gate; cost/rate = cadence + calls, no token meter) were
+  brought to + ratified by KB-PM. `Verify` graduates `none-yet → test:` (researchDispatcher /
+  researchEscalate / researchCeiling / researchInline / researchRun / researchWebAgent). New `escalated`
+  + `ceiling-reached` researcher audit events (AUDIT-11).
+- 2026-06-02 — **Resume-on-confirm delivered** (RESEARCH-11 fast-follow; KB-PM-ruled). The depth-escalation
+  Review is an actionable control, so a confirmed "Continue researching X?" now actually continues:
+  `resumeApprovedResearchEscalation` reconstructs the request from the review markerKey + re-runs one
+  level deeper (`researchResume.ts`), wired into `answerActiveReview` (self-gating, like the consolidation
+  resume). Reject stops the chain; deeper findings re-escalate (every level Principal-gated). Tested
+  confirm/reject/unanswered/non-research (`researchResume.test`).
 - 2026-06-02 — **Slice 3 (M365/WorkIQ researcher) design locked** (KB-PM-signed-off; KB-Developer-3).
   The M365 researcher is an adapter behind the existing `ResearchFn` seam (registered into
   `selectResearchFn`'s per-template switch, alongside Web/Code — no `makeResearchDeps` change),
