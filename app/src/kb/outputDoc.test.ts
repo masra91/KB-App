@@ -39,26 +39,46 @@ describe('buildRecallOutput (ASK-6)', () => {
     expect(markdown).toContain('## Evidence');
   });
 
-  it('renders a cited ENTITY as a [[wikilink]] (provenance into the graph) — by label, else basename', () => {
-    const byLabel = buildRecallOutput(result(), 'OUT1', NOW);
-    expect(byLabel.markdown).toContain('- [[Ada Lovelace]]');
-    const byBase = buildRecallOutput(result({ citations: [{ kind: 'entity', ref: 'entities/x/grace-hopper.md' }] }), 'OUT2', NOW);
-    expect(byBase.markdown).toContain('- [[grace-hopper]]');
-  });
-
-  it('renders claims/sources as path refs (not wikilinks)', () => {
+  it('numbers each Evidence line to match the answer’s inline [n] marker (ASK-13/14)', () => {
     const { markdown } = buildRecallOutput(
       result({
+        answer: 'A. [1] B. [2]',
         citations: [
+          { kind: 'entity', ref: 'entities/person/ada-lovelace.md', label: 'Ada Lovelace' },
           { kind: 'claim', ref: 'claims/person/ada/c1.md', label: 'first programmer' },
-          { kind: 'source', ref: 'sources/2026/01/abc/' },
         ],
       }),
+      'OUTN',
+      NOW,
+    );
+    expect(markdown).toContain('- [1] [[Ada Lovelace]]');
+    expect(markdown).toContain('- [2] [[c1]] — first programmer');
+  });
+
+  it('renders a cited ENTITY as a [[wikilink]] (provenance into the graph) — by label, else basename', () => {
+    const byLabel = buildRecallOutput(result(), 'OUT1', NOW);
+    expect(byLabel.markdown).toContain('- [1] [[Ada Lovelace]]');
+    const byBase = buildRecallOutput(result({ citations: [{ kind: 'entity', ref: 'entities/x/grace-hopper.md' }] }), 'OUT2', NOW);
+    expect(byBase.markdown).toContain('- [1] [[grace-hopper]]');
+  });
+
+  it('rewrites a cited CLAIM to a [[wikilink]] too (ASK-14 — works inside the vault), label as a note', () => {
+    const { markdown } = buildRecallOutput(
+      result({ citations: [{ kind: 'claim', ref: 'claims/person/ada/c1.md', label: 'first programmer' }] }),
       'OUT3',
       NOW,
     );
-    expect(markdown).toContain('- Claim: `claims/person/ada/c1.md` — first programmer');
-    expect(markdown).toContain('- Source: `sources/2026/01/abc/`');
+    expect(markdown).toContain('- [1] [[c1]] — first programmer'); // basename wikilink + human label
+  });
+
+  it('renders a SOURCE (a directory, not a note) as a path ref — no wikilink', () => {
+    const { markdown } = buildRecallOutput(
+      result({ citations: [{ kind: 'source', ref: 'sources/2026/01/abc/' }] }),
+      'OUT3b',
+      NOW,
+    );
+    expect(markdown).toContain('- [1] Source: `sources/2026/01/abc/`');
+    expect(markdown).not.toContain('[[sources'); // a dir is never a wikilink
   });
 
   it('flags an ungrounded answer prominently and records grounded:false (saving is allowed, F4)', () => {

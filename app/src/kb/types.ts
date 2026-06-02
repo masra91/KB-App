@@ -151,6 +151,13 @@ export interface SaveRecallOutputResult {
   message: string;
 }
 
+/** Result of opening a citation in Obsidian (ASK-14). `ok:false` carries a `reason` for inline surfacing
+ *  (no active vault, the ref escaped containment, or the OS had no handler for the `obsidian://` scheme). */
+export interface OpenCitationResult {
+  ok: boolean;
+  reason?: 'no-vault' | 'invalid-ref' | 'open-failed';
+}
+
 // --- Control Panel · Jobs (SPEC-0027 PANEL-2; over the SPEC-0023 registry) ---
 
 /** Last-run summary for a job, derived from its run-state journal (JOBS-7/8) for display. */
@@ -271,6 +278,9 @@ export interface KbApi {
   ask(req: AskRequest): Promise<AskResult>;
   // SPEC-0026 ASK-6: save a grounded recall answer as a KB Output.
   saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult>;
+  // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian (obsidian:// deep-link). The
+  // renderer passes the citation's vault-relative `ref`; main resolves + contains it, then opens it.
+  openCitation(ref: string): Promise<OpenCitationResult>;
   // Control Panel · Jobs (SPEC-0027 PANEL-2)
   listJobs(): Promise<JobView[]>;
   setJobConfig(patch: JobConfigPatch): Promise<JobView[]>;

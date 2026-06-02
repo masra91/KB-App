@@ -83,7 +83,7 @@ a larger budget than a stage) equipped with:
 | ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | test:app/src/kb/recall.test.ts | AUTO-8; LIFE-9 |
 | ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | test:app/src/kb/recallAgent.test.ts | ORCH-21,22; ENG-7 |
 | ASK-13  | should   | Answers use **Wikipedia-style inline numbered citations** (`[1] [2]…`) + a References list; the agent is prompted/skilled to **cite the specific KB source/entity** each claim grounds on, by number | test:app/src/kb/recall.test.ts | ASK-7; VISION-9 |
-| ASK-14  | should   | Citations are **dual-rendered** from one canonical target (the source/entity path): in the **Ask panel** each is a clickable link via the **Obsidian URI** (`obsidian://open?path=…`, opened with `shell.openExternal`) that jumps to the page in Obsidian; in a **saved Output** they are rewritten to native **`[[wikilinks]]`** so they work inside the vault | none-yet | ASK-6; VAULT-12,13 |
+| ASK-14  | should   | Citations are **dual-rendered** from one canonical target (the source/entity path): in the **Ask panel** each is a clickable link via the **Obsidian URI** (`obsidian://open?path=…`, opened with `shell.openExternal`) that jumps to the page in Obsidian; in a **saved Output** they are rewritten to native **`[[wikilinks]]`** so they work inside the vault | test:app/src/kb/citationLink.test.ts | ASK-6; ASK-13; VAULT-12,13 |
 | ASK-15  | should   | The Ask panel **renders markdown** (so citations/emphasis/lists display, not raw `**`) via a lightweight pinned renderer | none-yet | SHELL; ENG-2,4 |
 
 ## 4a. Design decisions (slice 1 — greenlit by KB-PM 2026-06-02)
@@ -259,3 +259,20 @@ behind it substrate-agnostic and unit-testable.
   `javascript:` URLs) before it touches the DOM (E1). Deps pinned exact + ≥7-day-old:
   `marked@18.0.4`, `dompurify@3.4.5`. The saved Output (ASK-6) stays raw `.md` (Obsidian renders it).
   `askView.test.ts` covers render + sanitization.
+- 2026-06-02 — **ASK-14 dual-render citations landed.** One canonical citation `ref`, two surfaces,
+  from a shared pure helper (`kb/citationLink.ts`). **Ask panel:** each inline `[n]` becomes an
+  href-less, class-tagged anchor (`linkifyCitationMarkers`, run *before* DOMPurify so the `obsidian:`
+  scheme never enters the DOM); clicking (or Enter/Space) hits a new `kb:openCitation(ref)` IPC →
+  main resolves the **vault-relative `ref` to an absolute path with #30 containment** (`resolveContainedRel`
+  — a crafted `..`/symlink ref can't deep-link outside the vault) → `shell.openExternal('obsidian://open?path='
+  + encodeURIComponent(abs))`. A numbered **References** list renders from `citations[]` (same handler).
+  **Saved Output:** `outputDoc` rewrites entities + claims to native `[[wikilinks]]` (a `source` is a
+  directory → path ref), numbered `[n]` to match the answer's markers. The inline-panel deep-link maps
+  `[n] → citations[n-1]` **by index**, which is correct because **ASK-13 (#121, now on main) enforces
+  it**: `finalizeCitations` verifies-resolves (ASK-7), dedups by `ref`, and **dense-renumbers** the
+  markers so they're gap-free + 1:1 with `citations[]` (no dangling markers) — so index-mapping needs
+  no explicit key. (This PR was briefly held `none-yet` until ASK-13 landed, per QA-2 + KB-PM; now
+  delivered whole — References + saved-Output wikilinks + inline deep-links all correct.) Covered by
+  `citationLink.test.ts` (URI encoding + wikilink targets), `ipc.test.ts` (resolve/contain/open +
+  escape rejection), `askView.test.ts` (clickable markers, References list, click/keyboard → IPC),
+  `outputDoc.test.ts` (wikilink rewrite).

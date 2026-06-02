@@ -2,10 +2,12 @@
 // by KB-PM). Pure: given an AskResult + an id + timestamp, produce the markdown + its repo-relative
 // path — so the format is node-tested without touching the fs/pipeline. The Output is **inert** (F2):
 // it lives in `outputs/`, not `sources/`, and carries `generated: recall`, so the autonomous stages
-// (which queue off `sources/`) never re-enrich it. Cited entities render as `[[wikilinks]]` so the
-// saved report threads back into the graph (provenance); claims/sources render as path refs.
-import path from 'node:path';
+// (which queue off `sources/`) never re-enrich it. Cited entities + claims render as `[[wikilinks]]`
+// (ASK-14 — the saved-Output surface of the one canonical citation target, so the report threads back
+// into the vault graph); a source is a directory, so it has no single note to link and renders as a
+// path ref. Evidence lines are numbered `[n]` to match the answer's dense inline markers (DEV-3).
 import type { AskResult, Citation } from './recall';
+import { wikilinkTarget } from './citationLink';
 
 /** The directory recall Outputs live in (repo-relative; under the evergreen `outputs/` tree). */
 export const RECALL_OUTPUT_DIR = 'outputs/recall';
@@ -24,20 +26,18 @@ function titleFromQuestion(question: string): string {
   return t.length > 80 ? `${t.slice(0, 79).trimEnd()}…` : t;
 }
 
-/** Last path segment without extension — the fallback wikilink target / display name. */
-function baseName(rel: string): string {
-  return path.basename(rel).replace(/\.md$/i, '');
-}
-
-/** One evidence line. Entities → `[[wikilink]]` (threads into the graph); claims/sources → path ref. */
-function renderCitation(c: Citation): string {
-  if (c.kind === 'entity') {
-    const name = c.label && c.label.trim().length > 0 ? c.label.trim() : baseName(c.ref);
-    return `- [[${name}]]`;
+/** One numbered evidence line (ASK-13/14). The `[n]` matches the answer's inline marker. Entities +
+ *  claims → `[[wikilink]]` (the shared canonical target); a source (a directory) → a path ref. */
+function renderCitation(c: Citation, n: number): string {
+  const target = wikilinkTarget(c.kind, c.ref, c.label);
+  if (target !== null) {
+    // For a claim the wikilink is the note basename, so keep the human label as a trailing note;
+    // for an entity the label IS the link text, so there's nothing left to append.
+    const tail = c.kind !== 'entity' && c.label && c.label.trim().length > 0 ? ` — ${c.label.trim()}` : '';
+    return `- [${n}] [[${target}]]${tail}`;
   }
   const tail = c.label && c.label.trim().length > 0 ? ` — ${c.label.trim()}` : '';
-  const noun = c.kind === 'claim' ? 'Claim' : 'Source';
-  return `- ${noun}: \`${c.ref}\`${tail}`;
+  return `- [${n}] Source: \`${c.ref}\`${tail}`;
 }
 
 /**
@@ -52,7 +52,8 @@ export function buildRecallOutput(result: AskResult, id: string, nowIso: string)
   const banner = result.grounded
     ? `> Saved from a grounded recall on ${nowIso} — grounded against ${result.citations.length} citation${result.citations.length === 1 ? '' : 's'}.`
     : `> ⚠️ Not grounded — inferred. Saved from a recall on ${nowIso}; no verified KB citations.`;
-  const evidence = result.citations.length > 0 ? `\n\n## Evidence\n${result.citations.map(renderCitation).join('\n')}` : '';
+  const evidence =
+    result.citations.length > 0 ? `\n\n## Evidence\n${result.citations.map((c, i) => renderCitation(c, i + 1)).join('\n')}` : '';
 
   const frontmatter = [
     '---',

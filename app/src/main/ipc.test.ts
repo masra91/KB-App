@@ -27,6 +27,7 @@ const state = vi.hoisted(() => ({
 }));
 
 const mocks = vi.hoisted(() => ({
+  openExternal: vi.fn(async () => undefined), // ASK-14: shell.openExternal for the obsidian:// deep-link
   startPipeline: vi.fn(async () => undefined),
   recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
   // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
@@ -40,6 +41,7 @@ vi.mock('electron', () => ({
   app: { getPath: (): string => state.userData },
   ipcMain: { handle: (channel: string, fn: Handler) => state.handlers.set(channel, fn) },
   dialog: { showOpenDialog: vi.fn(async () => state.dialogResult) },
+  shell: { openExternal: mocks.openExternal },
   BrowserWindow: { fromWebContents: (): null => null },
 }));
 
@@ -60,7 +62,8 @@ vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 
 import { registerIpc, initPipeline } from './ipc';
 import { createKb } from '../kb/vault';
-import type { ActivityFeedResult, AuditEvent, Lineage } from '../kb/types';
+import { obsidianOpenUri } from '../kb/citationLink';
+import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const fn = state.handlers.get(channel);
@@ -78,6 +81,7 @@ beforeEach(async () => {
   state.stagingRoot = null;
   mocks.startPipeline.mockClear();
   mocks.recall.mockClear();
+  mocks.openExternal.mockClear();
   delete process.env.KB_ASK_E2E_STUB;
   registerIpc();
 });
@@ -203,6 +207,50 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     expect(res.grounded).toBe(true);
     expect(res.citations[0].ref).toBe('claims/person/ada-lovelace.md');
     expect(mocks.recall).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC-0026 ASK-14 — kb:openCitation opens an Obsidian deep-link', () => {
+  async function configureVault(p: string): Promise<void> {
+    await fs.writeFile(path.join(state.userData, 'kb-app.config.json'), JSON.stringify({ activeVaultPath: p }) + '\n');
+  }
+
+  it('resolves a contained ref to an absolute path and opens the percent-encoded obsidian:// URI', async () => {
+    await configureVault(vaultDir);
+    const res = await invoke<OpenCitationResult>('kb:openCitation', 'entities/person/ada lovelace.md');
+    expect(res).toEqual({ ok: true });
+    // the URI is built from the ABSOLUTE vault path + encoded (the space → %20)
+    const expectedAbs = path.join(path.resolve(vaultDir), 'entities/person/ada lovelace.md');
+    const expectedUri = obsidianOpenUri(expectedAbs);
+    expect(expectedUri).toContain('%20'); // the space is percent-encoded, not a raw URI break
+    expect(mocks.openExternal).toHaveBeenCalledWith(expectedUri);
+  });
+
+  it('refuses a ref that escapes the vault (containment, #30) — no open', async () => {
+    await configureVault(vaultDir);
+    const res = await invoke<OpenCitationResult>('kb:openCitation', '../../etc/passwd');
+    expect(res).toEqual({ ok: false, reason: 'invalid-ref' });
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('refuses an empty/non-string ref', async () => {
+    await configureVault(vaultDir);
+    expect(await invoke<OpenCitationResult>('kb:openCitation', '')).toEqual({ ok: false, reason: 'invalid-ref' });
+    expect(await invoke<OpenCitationResult>('kb:openCitation', 42)).toEqual({ ok: false, reason: 'invalid-ref' });
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('returns no-vault when no KB is configured (nothing opened)', async () => {
+    const res = await invoke<OpenCitationResult>('kb:openCitation', 'entities/x.md');
+    expect(res).toEqual({ ok: false, reason: 'no-vault' });
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+  });
+
+  it('maps a failed open to open-failed (never rejects the renderer)', async () => {
+    await configureVault(vaultDir);
+    mocks.openExternal.mockRejectedValueOnce(new Error('no handler for obsidian://'));
+    const res = await invoke<OpenCitationResult>('kb:openCitation', 'entities/x.md');
+    expect(res).toEqual({ ok: false, reason: 'open-failed' });
   });
 });
 

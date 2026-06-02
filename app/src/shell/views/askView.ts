@@ -22,12 +22,30 @@ function renderMarkdown(md: string): string {
   return DOMPurify.sanitize(marked.parse(md, { async: false }) as string);
 }
 
+/**
+ * Make inline `[n]` citation markers clickable (ASK-14, Ask-panel surface). Runs BEFORE markdown
+ * parsing: each `[n]` becomes a class-tagged anchor carrying the 1-based index in `data-cite` — the
+ * delegated handler maps it to `citations[n-1]` (DEV-3's contract: markers are dense + gap-free,
+ * 1:1 with `citations[]`). The anchor has NO `href`: the `obsidian://` deep-link is built and opened
+ * in the main process (`shell.openExternal`), so the `obsidian:` scheme never enters the DOM and
+ * DOMPurify's default URL allowlist stays untouched (ASK-15/#93). `n` is a bare integer from the
+ * regex, so nothing untrusted reaches the attribute; wrapping it also stops markdown from
+ * reinterpreting a bare `[1]` as a link-reference. Pure + exported for unit testing.
+ */
+export function linkifyCitationMarkers(answer: string, turnIndex: number): string {
+  return answer.replace(
+    /\[(\d+)\]/g,
+    (_m, n: string) => `<a class="cite-link" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}">[${n}]</a>`,
+  );
+}
+
 interface Turn {
   question: string;
   result: AskResult | null; // null while in flight
   error?: string;
   savedRel?: string; // set once saved as an Output (ASK-6) — its repo path
   saveError?: string; // a failed save, surfaced inline
+  citeError?: string; // a failed citation deep-link (ASK-14), surfaced inline
 }
 
 // View-local, ephemeral session state (F5). The shell mounts once + toggles visibility.
@@ -52,14 +70,57 @@ export function mountAsk(container: HTMLElement): void {
     e.preventDefault();
     void onAsk(container);
   });
-  // ASK-6: delegated "Save as report" — the transcript <ul> persists across re-renders, so one
-  // listener handles every turn's button (keyed by data-turn index).
-  container.querySelector<HTMLElement>('#askTranscript')?.addEventListener('click', (e) => {
-    const btn = (e.target as HTMLElement).closest<HTMLElement>('.ask-save');
-    if (!btn) return;
-    void saveTurn(container, Number(btn.dataset.turn));
+  // ASK-6/14: delegated handlers — the transcript <ul> persists across re-renders, so one listener
+  // each handles every turn's "Save as report" button (ASK-6) and every citation deep-link (ASK-14),
+  // keyed by data-turn / data-cite indices.
+  const transcript = container.querySelector<HTMLElement>('#askTranscript');
+  transcript?.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest<HTMLElement>('.ask-save');
+    if (btn) {
+      void saveTurn(container, Number(btn.dataset.turn));
+      return;
+    }
+    const cite = target.closest<HTMLElement>('.cite-link, .cite-ref');
+    if (cite) {
+      e.preventDefault();
+      void openCitation(container, Number(cite.dataset.turn), Number(cite.dataset.cite));
+    }
+  });
+  // Keyboard parity (ASK-14): citation anchors are role=button/tabindex=0 — open on Enter/Space.
+  transcript?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const cite = (e.target as HTMLElement).closest<HTMLElement>('.cite-link, .cite-ref');
+    if (!cite) return;
+    e.preventDefault();
+    void openCitation(container, Number(cite.dataset.turn), Number(cite.dataset.cite));
   });
   renderTranscript(container);
+}
+
+const CITE_ERRORS: Record<string, string> = {
+  'no-vault': 'No active knowledge base.',
+  'invalid-ref': 'That citation could not be opened.',
+  'open-failed': 'Could not open Obsidian — is it installed?',
+};
+
+/**
+ * Open a citation's canonical target in Obsidian (ASK-14). Maps the clicked marker's 1-based index to
+ * `citations[n-1]` (dense/gap-free per DEV-3) and hands its vault-relative `ref` to main, which
+ * resolves + contains it and opens the `obsidian://` deep-link. Failures surface inline (never throw).
+ */
+async function openCitation(container: HTMLElement, turnIndex: number, citeIndex: number): Promise<void> {
+  const t = turns[turnIndex];
+  const c = t?.result?.citations[citeIndex - 1];
+  if (!t || !c) return;
+  t.citeError = undefined;
+  try {
+    const res = await window.kbApi.openCitation(c.ref);
+    if (!res.ok) t.citeError = CITE_ERRORS[res.reason ?? ''] ?? 'That citation could not be opened.';
+  } catch (err) {
+    t.citeError = err instanceof Error ? err.message : String(err);
+  }
+  if (t.citeError) renderTranscript(container);
 }
 
 /** Save a completed turn's answer as a KB Output (ASK-6) — once; updates the turn + re-renders. */
@@ -122,20 +183,30 @@ function setBusy(container: HTMLElement, on: boolean): void {
   if (input) input.disabled = on;
 }
 
-function renderCitations(citations: Citation[]): string {
+/** The References list (ASK-13/14) — one entry per citation, numbered to match the inline `[n]`
+ *  markers (DEV-3's dense/gap-free contract). Each is a deep-link into Obsidian (data-cite index;
+ *  the handler opens it via main), mirroring the inline markers from the same canonical target. */
+function renderReferences(citations: Citation[], turnIndex: number): string {
   if (citations.length === 0) return '';
   const items = citations
-    .map((c) => `<li><code>${esc(c.kind)}</code> ${esc(c.ref)}${c.label ? ` — ${esc(c.label)}` : ''}</li>`)
+    .map((c, i) => {
+      const n = i + 1;
+      const label = c.label ? ` — ${esc(c.label)}` : '';
+      return `<li><a class="cite-ref" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="Open in Obsidian"><span class="cite-num">[${n}]</span> <code>${esc(c.kind)}</code> ${esc(c.ref)}${label}</a></li>`;
+    })
     .join('');
-  return `<div class="ask-citations"><span class="muted">Evidence</span><ul>${items}</ul></div>`;
+  return `<div class="ask-citations"><span class="muted">References</span><ul>${items}</ul></div>`;
 }
 
-function renderAnswer(r: AskResult): string {
+function renderAnswer(r: AskResult, turnIndex: number, citeError?: string): string {
   const flags: string[] = [];
   if (!r.grounded) flags.push('⚠ not grounded in the KB');
   if (r.truncated) flags.push('partial — retrieval budget reached');
   const flagHtml = flags.length ? `<div class="ask-flags muted">${flags.map(esc).join(' · ')}</div>` : '';
-  return `<div class="ask-answer">${renderMarkdown(r.answer)}</div>${renderCitations(r.citations)}${flagHtml}`;
+  // ASK-14: linkify the inline `[n]` BEFORE sanitizing, so each marker is a clickable deep-link.
+  const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex));
+  const citeErr = citeError ? `<div class="ask-cite-status error">${esc(citeError)}</div>` : '';
+  return `<div class="ask-answer">${answerHtml}</div>${renderReferences(r.citations, turnIndex)}${citeErr}${flagHtml}`;
 }
 
 /** The save-as-Output affordance for a completed turn (ASK-6): a button, or the saved confirmation. */
@@ -153,7 +224,7 @@ function renderTurn(t: Turn, index: number): string {
   if (t.error) body = `<div class="ask-answer error">Sorry — recall failed: ${esc(t.error)}</div>`;
   else if (t.result === null) body = `<div class="ask-answer muted">Thinking…</div>`;
   else {
-    body = renderAnswer(t.result);
+    body = renderAnswer(t.result, index, t.citeError);
     saveRow = renderSaveRow(t, index); // grounded OR ungrounded — saving an ungrounded answer is allowed (F4)
   }
   return `<li class="ask-turn"><div class="ask-q"><span class="muted">You</span> ${esc(t.question)}</div><div class="ask-a">${body}${saveRow}</div></li>`;

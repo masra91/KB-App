@@ -361,6 +361,13 @@ button:disabled {
 .ask-citations { margin-top: 0.5rem; font-size: 0.9em; }
 .ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
 .ask-flags { margin-top: 0.4rem; font-size: 0.85em; }
+/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. */
+.cite-link { color: var(--accent, #6ab); text-decoration: none; cursor: pointer; font-weight: 600; }
+.cite-link:hover, .cite-link:focus { text-decoration: underline; }
+.cite-ref { color: inherit; text-decoration: none; cursor: pointer; }
+.cite-ref:hover, .cite-ref:focus { text-decoration: underline; }
+.cite-ref .cite-num { color: var(--accent, #6ab); font-weight: 600; }
+.ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--error); }
 .ask-form { display: flex; gap: 0.5rem; }
 .ask-input { flex: 1; }
 /* Save-as-Output (ASK-6) */
