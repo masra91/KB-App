@@ -1,0 +1,224 @@
+// Derived activity index (SPEC-0029 AUDIT-4/7/10). Real FS + git against throwaway temp vaults
+// (TEST-18). Two tiers: (1) hand-written audit files exercise the walker / cap / cache / freshness
+// / filter precisely; (2) an integration test runs REAL stages so the normalizer is proven against
+// the shapes the emitters actually write — not just hand-crafted ones.
+import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import simpleGit from 'simple-git';
+import { makeTempDir, rmTempDir } from '../../test/tempVault';
+import { createKb } from './vault';
+import { captureToInbox } from './ingest';
+import { archiveOne, readQueue } from './orchestrator';
+import { deterministicDecider } from './archivist';
+import { decomposeOne, readDecomposeQueue } from './decomposeStage';
+import type { DecomposeDecider } from './decomposeAgent';
+import {
+  buildActivityIndex,
+  loadActivityIndex,
+  readAllAuditEvents,
+  readActivityIndexCache,
+  writeActivityIndexCache,
+  filterEvents,
+  ACTIVITY_INDEX_REL,
+  ACTIVITY_INDEX_VERSION,
+} from './activityIndex';
+
+function gitInstalledSync(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const gitAvailable = gitInstalledSync();
+
+async function withTempVault(fn: (root: string) => Promise<void>): Promise<void> {
+  const dir = await makeTempDir();
+  try {
+    await fn(path.join(dir, 'vault'));
+  } finally {
+    await rmTempDir(dir);
+  }
+}
+
+/** Append JSONL lines to a vault-relative audit file (creating dirs). */
+async function writeAudit(root: string, rel: string, lines: Record<string, unknown>[]): Promise<void> {
+  const abs = path.join(root, rel);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.appendFile(abs, lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+}
+
+/** Commit everything on the vault's current branch so HEAD advances (for freshness tests). */
+async function commitAll(root: string, msg: string): Promise<void> {
+  const git = simpleGit(root);
+  await git.raw('add', '-A');
+  await git.commit(msg);
+}
+
+/** A spread of realistic audit across all source files. */
+async function seedAudit(root: string): Promise<void> {
+  await writeAudit(root, path.join('sources', '2026', '01', 'S1', 'audit.jsonl'), [
+    { action: 'archived', id: 'S1', archivedAt: '2026-01-01T00:00:00.000Z', decision: { route: 'keep' }, agent: { via: 'deterministic' } },
+    { ts: '2026-01-01T00:01:00.000Z', stage: 'decompose', runId: 'D1', sourceId: 'S1', model: 'm', event: 'decomposed', candidates: 2 },
+    { ts: '2026-01-01T00:02:00.000Z', stage: 'claims', runId: 'C1', entityId: 'E1', sourceId: 'S1', model: 'm', event: 'claimed', claims: 3 },
+  ]);
+  await writeAudit(root, path.join('connect', 'audit.jsonl'), [
+    { ts: '2026-01-01T00:03:00.000Z', stage: 'connect', runId: 'N1', blockKey: 'person|atlas', model: 'm', event: 'resolved', node: 'entities/2026/01/E1.md', candidates: 2, merged: 1 },
+  ]);
+  await writeAudit(root, path.join('.kb', 'jobs', 'reflect', 'journal.jsonl'), [
+    { ts: '2026-01-01T00:04:00.000Z', runId: 'J1', inspected: 5, applied: 1, deferred: 0 },
+  ]);
+  await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [
+    { ts: '2026-01-01T00:05:00.000Z', event: 'recall', question: 'who is Atlas?', grounded: true },
+  ]);
+}
+
+describe.skipIf(!gitAvailable)('readAllAuditEvents — the walker (AUDIT-4/10)', () => {
+  it('aggregates every audit source into canonical events, newest-first', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedAudit(root);
+      const events = await readAllAuditEvents(root);
+      expect(events.map((e) => e.actor)).toEqual(['recall', 'job', 'connect', 'claims', 'decompose', 'archivist']);
+      // working-zone (.kb, connect) AND evergreen (sources) are both covered (AUDIT-10).
+      expect(events.find((e) => e.actor === 'archivist')!.subjects.sourceId).toBe('S1');
+      expect(events.find((e) => e.actor === 'job')!.subjects.jobId).toBe('reflect');
+      expect(events.find((e) => e.actor === 'connect')!.subjects.entityId).toBe('E1');
+      // provenance points back at the raw line for drill-down.
+      expect(events.find((e) => e.actor === 'decompose')!.provenance).toEqual({ file: path.join('sources', '2026', '01', 'S1', 'audit.jsonl'), line: 1 });
+    });
+  });
+
+  it('tolerates malformed lines and an empty/absent vault', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      expect(await readAllAuditEvents(root)).toEqual([]); // nothing audited yet
+      await writeAudit(root, path.join('connect', 'audit.jsonl'), []);
+      await fs.appendFile(path.join(root, 'connect', 'audit.jsonl'), 'not json\n{"ts":"2026-01-01T00:00:00.000Z","stage":"connect","event":"connected","clusters":1}\n');
+      const events = await readAllAuditEvents(root);
+      expect(events).toHaveLength(1); // the malformed line is skipped
+      expect(events[0].eventType).toBe('connected');
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('buildActivityIndex — cap + determinism (AUDIT-4)', () => {
+  it('is deterministic: same audit on disk → identical events', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedAudit(root);
+      const a = await buildActivityIndex(root, { now: () => 'T' });
+      const b = await buildActivityIndex(root, { now: () => 'T' });
+      expect(a).toEqual(b);
+      expect(a.total).toBe(6);
+      expect(a.truncated).toBe(false);
+    });
+  });
+
+  it('caps to the recent window and surfaces truncation — never silently (Q3)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedAudit(root);
+      const idx = await buildActivityIndex(root, { window: 2 });
+      expect(idx.events).toHaveLength(2);
+      expect(idx.total).toBe(6);
+      expect(idx.truncated).toBe(true);
+      // the newest two survive (recall @00:05, job @00:04).
+      expect(idx.events.map((e) => e.actor)).toEqual(['recall', 'job']);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('loadActivityIndex — cache + HEAD-poke freshness (AUDIT-4 / Q2)', () => {
+  it('serves the cache while HEAD is unchanged, rebuilds when HEAD moves', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q1' }]);
+      await commitAll(root, 'audit a');
+
+      const idx1 = await loadActivityIndex(root);
+      expect(idx1.total).toBe(1);
+      expect(await readActivityIndexCache(root)).not.toBeNull(); // cache was written
+
+      // Append more audit but DON'T commit — HEAD unchanged → the poke returns the cache as-is.
+      await fs.appendFile(path.join(root, '.kb', 'ask', 'audit.jsonl'), JSON.stringify({ ts: '2026-01-02T00:00:00.000Z', event: 'recall', question: 'q2' }) + '\n');
+      const idx2 = await loadActivityIndex(root);
+      expect(idx2.total).toBe(1); // still cached
+
+      // Commit → HEAD moves → rebuild picks up the new event.
+      await commitAll(root, 'audit b');
+      const idx3 = await loadActivityIndex(root);
+      expect(idx3.total).toBe(2);
+    });
+  });
+
+  it('discards a cache written by an older shape version', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await writeActivityIndexCache(root, { version: ACTIVITY_INDEX_VERSION + 99, builtAt: 'x', head: 'h', total: 1, truncated: false, events: [] });
+      expect(await readActivityIndexCache(root)).toBeNull(); // stale shape → ignored
+    });
+  });
+
+  it('writes the cache under the gitignored .kb/cache (never promoted)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q' }]);
+      await commitAll(root, 'a');
+      await loadActivityIndex(root);
+      expect(ACTIVITY_INDEX_REL.startsWith(path.join('.kb', 'cache'))).toBe(true);
+      await expect(fs.access(path.join(root, ACTIVITY_INDEX_REL))).resolves.toBeUndefined();
+    });
+  });
+});
+
+describe('filterEvents — filter/search (AUDIT-7)', () => {
+  it('filters by actor, event-type, subject id, time range, and free text', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedAudit(root);
+      const all = await readAllAuditEvents(root);
+
+      expect(filterEvents(all, { actors: ['claims', 'connect'] }).map((e) => e.actor).sort()).toEqual(['claims', 'connect']);
+      expect(filterEvents(all, { eventTypes: ['recall'] })).toHaveLength(1);
+      expect(filterEvents(all, { subjectId: 'E1' }).map((e) => e.actor).sort()).toEqual(['claims', 'connect']);
+      expect(filterEvents(all, { subjectId: 'S1' }).length).toBe(3); // archived + decomposed + claimed all name S1
+      expect(filterEvents(all, { since: '2026-01-01T00:04:00.000Z' }).map((e) => e.actor)).toEqual(['recall', 'job']);
+      expect(filterEvents(all, { until: '2026-01-01T00:01:00.000Z' }).map((e) => e.actor)).toEqual(['decompose', 'archivist']);
+      expect(filterEvents(all, { text: 'atlas' }).length).toBeGreaterThan(0); // matches connect blockKey/recall question
+      expect(filterEvents(all, {})).toHaveLength(all.length); // empty filter = identity
+    });
+  }, 20_000);
+});
+
+describe.skipIf(!gitAvailable)('integration — index over REAL stage emission (AUDIT-1/4)', () => {
+  it('captures archived + decomposed events the actual stages wrote', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Archive a text source via the real archivist, then decompose it via the real stage.
+      await captureToInbox(root, 'in-app-panel', [{ kind: 'text', text: 'Atlas is a project led by Mira.' }]);
+      const queue = await readQueue(root);
+      const sourceRel = await archiveOne(root, queue[queue.length - 1], deterministicDecider);
+
+      const decider: DecomposeDecider = async (input) => ({
+        sourceId: input.sourceId,
+        entities: [{ kind: 'person', name: 'Mira', confidence: 0.9, mentions: ['Mira'] }],
+        agent: { via: 'copilot', model: 'test' },
+      });
+      const dq = await readDecomposeQueue(root);
+      expect(dq.length).toBeGreaterThan(0);
+      await decomposeOne(root, dq[0], decider);
+
+      const idx = await buildActivityIndex(root);
+      const kinds = idx.events.map((e) => `${e.actor}:${e.eventType}`);
+      expect(kinds).toContain('archivist:archived');
+      expect(kinds).toContain('decompose:decomposed');
+      // the archivist event names the real source id.
+      const archived = idx.events.find((e) => e.eventType === 'archived')!;
+      expect(archived.subjects.sourceId).toBe(path.basename(sourceRel));
+    });
+  }, 30_000);
+});
