@@ -1,0 +1,125 @@
+// The canonical entity-merge core (SPEC-0020 CONNECT-10/11) — extracted so it has ONE impl with
+// two callers: Connect's `connectOne` (merge two existing nodes during resolution) and Reflect's
+// approved consolidation (SPEC-0024 REFLECT-5/7, execute a Principal-approved merge). Pure FS in a
+// worktree; the caller owns the commit + canonical ff-advance. Merging = repoint the losers' claims
+// to the canonical node, regenerate the canonical's claims block, and delete the loser files (no
+// tombstones — recoverable via git; the deletion mirrors to `main` via the deletion-aware gate).
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { applyClaimsBlock, type ClaimBacklink } from './claimDoc';
+
+/** Minimal claim view for repointing + regenerating the canonical node's claims block. */
+interface ClaimRef {
+  rel: string; // repo-relative claim file path
+  subject: string; // current subject (entity rel path)
+  statement: string;
+  status: string;
+  confidence: number;
+}
+
+function parseClaim(md: string, rel: string): ClaimRef | null {
+  const fmEnd = md.indexOf('\n---', 3);
+  if (fmEnd === -1) return null;
+  const fm = md.slice(0, fmEnd);
+  const body = md.slice(fmEnd + 4).trim();
+  let subject = '';
+  let status = '';
+  let confidence = 0;
+  for (const line of fm.split('\n')) {
+    let m: RegExpMatchArray | null;
+    if ((m = line.match(/^subject:\s*(.+)$/))) subject = m[1].trim().replace(/^"|"$/g, '');
+    else if ((m = line.match(/^status:\s*(.+)$/))) status = m[1].trim();
+    else if ((m = line.match(/^confidence:\s*(.+)$/))) confidence = Number(m[1].trim()) || 0;
+  }
+  if (!subject) return null;
+  return { rel, subject, statement: body, status, confidence };
+}
+
+/** Every claim under `wtRoot/claims`, repo-relative. */
+async function readClaims(wtRoot: string): Promise<ClaimRef[]> {
+  const out: ClaimRef[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory() && !e.name.startsWith('.')) await walk(full);
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        const c = parseClaim(await fs.readFile(full, 'utf8'), path.relative(wtRoot, full));
+        if (c) out.push(c);
+      }
+    }
+  }
+  await walk(path.join(wtRoot, 'claims'));
+  return out;
+}
+
+/** Rewrite a claim file's `subject:` to the canonical node path (CONNECT-11). */
+async function repointClaimSubject(wtRoot: string, claimRel: string, newSubject: string): Promise<void> {
+  const file = path.join(wtRoot, claimRel);
+  const md = await fs.readFile(file, 'utf8');
+  await fs.writeFile(file, md.replace(/^subject:\s*.+$/m, `subject: ${newSubject}`), 'utf8');
+}
+
+/** Regenerate the canonical node's claims block from all claims now pointing at it (CONNECT-11). */
+async function regenClaimsBlock(wtRoot: string, nodeRel: string, claims: ClaimRef[]): Promise<void> {
+  const file = path.join(wtRoot, nodeRel);
+  const md = await fs.readFile(file, 'utf8');
+  const links: ClaimBacklink[] = claims.map((c) => ({
+    claimPath: c.rel,
+    statement: c.statement,
+    status: c.status as ClaimBacklink['status'],
+    confidence: c.confidence,
+  }));
+  await fs.writeFile(file, applyClaimsBlock(md, links), 'utf8');
+}
+
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Loser rels actually deleted by a merge (those that existed). */
+export interface MergeResult {
+  deleted: string[];
+}
+
+/**
+ * Merge `loserRels` into `canonicalRel` within worktree `wt` (CONNECT-10/11): repoint every claim
+ * whose subject is a loser → the canonical node, regenerate the canonical's claims block, then
+ * delete the loser node files. Idempotent: a loser that is already gone is simply skipped (an
+ * already-merged plan → empty `deleted`). The caller commits + ff-advances the canonical (so the
+ * deletion mirrors to `main` via the deletion-aware promotion gate). The canonical itself is never
+ * a loser (callers exclude it).
+ */
+export async function mergeNodes(wt: string, canonicalRel: string, loserRels: readonly string[]): Promise<MergeResult> {
+  const losers = loserRels.filter((r) => r && r !== canonicalRel);
+  if (losers.length === 0) return { deleted: [] };
+  const loserSet = new Set(losers);
+
+  // Repoint the losers' claims to the canonical node (CONNECT-11).
+  for (const claim of await readClaims(wt)) {
+    if (loserSet.has(claim.subject)) await repointClaimSubject(wt, claim.rel, canonicalRel);
+  }
+  // Regenerate the canonical's claims block from everything now pointing at it.
+  const claimsForCanonical = (await readClaims(wt)).filter((c) => c.subject === canonicalRel);
+  if (claimsForCanonical.length > 0) await regenClaimsBlock(wt, canonicalRel, claimsForCanonical);
+
+  // Delete the loser node files (no tombstones; recoverable via git history — CONNECT-10).
+  const deleted: string[] = [];
+  for (const rel of losers) {
+    if (await pathExists(path.join(wt, rel))) {
+      await fs.rm(path.join(wt, rel), { force: true });
+      deleted.push(rel);
+    }
+  }
+  return { deleted };
+}
