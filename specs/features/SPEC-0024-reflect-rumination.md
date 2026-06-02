@@ -110,19 +110,19 @@ that finds nothing actionable records an audit event and exits.
 
 | ID         | Priority | Statement (short)                                                                  | Verify   | Traces |
 | ---------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
-| REFLECT-1  | must     | Reflect is an **autonomous job** on the SPEC-0023 engine — scheduled, bounded, single-flight, **concurrent** (optimistic, ORCH-17/18), richly audited — **not** an interactive stage | none-yet | JOBS-1,3,5; LIFE-8 |
-| REFLECT-2  | must     | Each run operates on a **bounded working set, never the whole KB** — the agent **adaptively** chooses, per run via the job journal, between **recency/churn** and **aged sampling** of an under-visited area (lean into churn when busy, drift to aged areas when quiet); coverage accrues over many runs | none-yet | JOBS-4,7; PRIN-5; VISION-8 |
-| REFLECT-3  | must     | Reflect detects at minimum: **missed entities/claims**, **missing/lost connections**, **emergent topics** (by the **agent's judgment** over the working set — no embeddings/preprocessing), **stale derived metadata** (tags/labels/classifications), and **low-traction topics** | none-yet | LIFE-8; PRIN-7,22 |
-| REFLECT-4  | must     | **Additive, high-confidence** findings (missed claim, restored link, emergent grouping) are **applied autonomously and audited** | none-yet | AUTO-2,3; LIFE-3 |
-| REFLECT-5  | must     | Under the **default "Guarded" posture**, **destructive** findings (retire/merge/consolidate/delete) and **all low-confidence/high-risk** findings **route to the Review queue** — never auto-applied; approved consolidation/merge **reuses Connect's merge machinery** | none-yet | AUTO-1,3,10; SPEC-0018; CONNECT |
-| REFLECT-6  | must     | A run **may make no changes** — finding nothing actionable is a valid, expected outcome (maintenance, not production) | none-yet | PRIN-7 |
+| REFLECT-1  | must     | Reflect is an **autonomous job** on the SPEC-0023 engine — scheduled, bounded, single-flight, **concurrent** (optimistic, ORCH-17/18), richly audited — **not** an interactive stage | test:reflectJob.test.ts | JOBS-1,3,5; LIFE-8 |
+| REFLECT-2  | must     | Each run operates on a **bounded working set, never the whole KB** — the agent **adaptively** chooses, per run via the job journal, between **recency/churn** and **aged sampling** of an under-visited area (lean into churn when busy, drift to aged areas when quiet); coverage accrues over many runs | test:reflectJob.test.ts | JOBS-4,7; PRIN-5; VISION-8 |
+| REFLECT-3  | must     | Reflect detects at minimum: **missed entities/claims**, **missing/lost connections**, **emergent topics** (by the **agent's judgment** over the working set — no embeddings/preprocessing), **stale derived metadata** (tags/labels/classifications), and **low-traction topics** | test:reflectAgent.test.ts, reflectJob.test.ts | LIFE-8; PRIN-7,22 |
+| REFLECT-4  | must     | **Additive, high-confidence** findings (missed claim, restored link, emergent grouping) are **applied autonomously and audited** | test:reflectJob.test.ts | AUTO-2,3; LIFE-3 |
+| REFLECT-5  | must     | Under the **default "Guarded" posture**, **destructive** findings (retire/merge/consolidate/delete) and **all low-confidence/high-risk** findings **route to the Review queue** — never auto-applied; approved consolidation/merge **reuses Connect's merge machinery** | test:reflectJob.test.ts, jobStage.test.ts | AUTO-1,3,10; SPEC-0018; CONNECT |
+| REFLECT-6  | must     | A run **may make no changes** — finding nothing actionable is a valid, expected outcome (maintenance, not production) | test:reflectAgent.test.ts, reflectJob.test.ts | PRIN-7 |
 | REFLECT-7  | must     | Reflect writes on `staging`; changes publish via the gate, and retire/consolidate **deletions propagate to `main`** (deletion-aware promotion) | none-yet | STAGING-10; CANON-1,3 |
-| REFLECT-8  | must     | Every run records its findings + reasoning in the **audit log** (the *why*) and updates the **job journal** (visited areas, cursor, deferrals) for the next run | none-yet | JOBS-7,8; AUTO-8 |
-| REFLECT-9  | must     | Review items Reflect raises are **bounded decisions** (yes/no or small choice sets) with **provenance** to the entities/sources involved, consistent with SPEC-0018 | none-yet | REVIEW-?; AUTO-10 |
-| REFLECT-10 | should   | A manual **"Ruminate now"** trigger runs one bounded pass on demand (test/inspection affordance) | none-yet | JOBS-11 |
+| REFLECT-8  | must     | Every run records its findings + reasoning in the **audit log** (the *why*) and updates the **job journal** (visited areas, cursor, deferrals) for the next run | test:reflectJob.test.ts, jobStage.test.ts | JOBS-7,8; AUTO-8 |
+| REFLECT-9  | must     | Review items Reflect raises are **bounded decisions** (yes/no or small choice sets) with **provenance** to the entities/sources involved, consistent with SPEC-0018 | test:jobStage.test.ts | REVIEW-?; AUTO-10 |
+| REFLECT-10 | should   | A manual **"Ruminate now"** trigger runs one bounded pass on demand (test/inspection affordance) | test:jobScheduler.test.ts | JOBS-11 |
 | REFLECT-11 | should   | Reflect is the **convergence point** for deferred cross-KB concerns — Connect recooks/re-clustering (CONNECT-19), cross-source claim dedup (CLAIMS-17), vocabulary/kind curation — pulled in over later versions | none-yet | CONNECT-19; CLAIMS-17; DECOMP |
-| REFLECT-12 | must     | Reflect's autonomy is a **configurable posture** with a **safe default** (JOBS-15 / AUTO-12): **Guarded** (REFLECT-5) by default; the Principal may **opt in** to **Autonomous**, where the agent's judgment governs all dispositions, incl. destructive | none-yet | JOBS-15; AUTO-12 |
-| REFLECT-13 | must     | **The KB biases toward growth, not shrink**: staleness work targets **derived metadata** (tags/labels/classifications), not entity deletion; **retiring/merging/deleting entities is a rare, Review-gated act of curation**, never routine expiry | none-yet | PRIN-1; DATA-1,2 |
+| REFLECT-12 | must     | Reflect's autonomy is a **configurable posture** with a **safe default** (JOBS-15 / AUTO-12): **Guarded** (REFLECT-5) by default; the Principal may **opt in** to **Autonomous**, where the agent's judgment governs all dispositions, incl. destructive | test:jobs.test.ts, reflectJob.test.ts | JOBS-15; AUTO-12 |
+| REFLECT-13 | must     | **The KB biases toward growth, not shrink**: staleness work targets **derived metadata** (tags/labels/classifications), not entity deletion; **retiring/merging/deleting entities is a rare, Review-gated act of curation**, never routine expiry | test:reflectJob.test.ts | PRIN-1; DATA-1,2 |
 
 ## 5. Open questions
 
@@ -159,3 +159,16 @@ that finds nothing actionable records an audit event and exits.
   the LLM**, no embeddings/preprocessing. Working-set: **adaptive, journal-driven** (REFLECT-2).
   Runs **concurrently** (REFLECT-1 → ORCH-17/18), not idle-deferred. Still open: concrete
   "stale" signal thresholds; working-set size/cadence defaults.
+- 2026-06-02 — **implemented slice 1** (detection + additive-auto + destructive→Review-raise) on the
+  JOBS engine (SPEC-0023). `reflectAgent.ts`: a thin single-shot `copilot -p` decider over ONE
+  bounded working set (no tools/SDK — single pass, per #43), returning findings (additive `writes`
+  / destructive `review`); no fabrication (throws on bad output). `reflectJob.ts`: a `JobBehavior`
+  that selects a **bounded** slice via the journal cursor (round-robin aged sampling + a churn hint
+  when the KB grew; never the whole KB, REFLECT-2), runs the decider, and maps findings onto the
+  engine's `JobFinding`s — the JobStage runner enforces posture (Guarded: additive-high-conf→auto,
+  destructive/low-conf→Review; REFLECT-4/5/12), journals + audits (REFLECT-8), promotes additive
+  outputs to `main` (REFLECT-7 additive). Registered `reflect` in `pipeline.ts`'s behavior resolver.
+  Graduated REFLECT-1/2/3/4/5/6/8/9/10/12/13 → `test:`. **Deferred:** REFLECT-7 deletion propagation
+  + consolidation **execution** (answerReview→Connect merge) = slice 2; REFLECT-11 convergence =
+  later. Folded two JOBS follow-ups: JobStage `onExhausted` now bounded-re-advances the set-aside
+  (mirrors #47's hardened Connect path). Full suite 351 green.

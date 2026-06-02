@@ -11,7 +11,7 @@ import simpleGit from 'simple-git';
 import { ulid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { Mutex } from './stageLock';
-import { withOptimisticAdvance, advanceOrCollide, canonicalHead } from './canonicalAdvance';
+import { withOptimisticAdvance, advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import {
@@ -185,18 +185,24 @@ export async function runJobOnce(
   };
 
   // Same-path collision exhaustion (ORCH-19): record a set-aside journal line, never half-apply.
+  // The set-aside advance is itself bounded-retried against a moving canonical (mirrors #47's
+  // hardened Connect path) so it can't be silently dropped — though for a job it's effectively
+  // always ff/replay (the per-job journal path is disjoint + single-flight).
   const onExhausted = async (): Promise<void> => {
-    const wt = await ensureJobWorktree(root, job.id);
-    const wtGit = simpleGit(wt);
-    const base = await canonicalHead(root);
-    await wtGit.raw('reset', '--hard', base);
-    const entry: JournalEntry = { ts: new Date().toISOString(), runId, inspected: result.inspected, applied: 0, deferred: 0, note: 'collision-exhausted' };
-    const journalPath = path.join(wt, journalRel(job.id));
-    await fs.mkdir(path.dirname(journalPath), { recursive: true });
-    await fs.appendFile(journalPath, JSON.stringify(entry) + '\n', 'utf8');
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`job ${job.id}: set aside run ${runId} (collision-exhausted)`);
-    await lock.run(() => advanceOrCollide(root, branch, base));
+    for (let attempt = 0; attempt <= DEFAULT_MAX_COLLISION_RETRIES; attempt++) {
+      const wt = await ensureJobWorktree(root, job.id);
+      const wtGit = simpleGit(wt);
+      const base = await canonicalHead(root);
+      await wtGit.raw('reset', '--hard', base);
+      const entry: JournalEntry = { ts: new Date().toISOString(), runId, inspected: result.inspected, applied: 0, deferred: 0, note: 'collision-exhausted' };
+      const journalPath = path.join(wt, journalRel(job.id));
+      await fs.mkdir(path.dirname(journalPath), { recursive: true });
+      await fs.appendFile(journalPath, JSON.stringify(entry) + '\n', 'utf8');
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`job ${job.id}: set aside run ${runId} (collision-exhausted)`);
+      if ((await lock.run(() => advanceOrCollide(root, branch, base))) === 'advanced') break;
+      // The set-aside advance itself collided — re-sync to the moved canonical and retry (bounded).
+    }
     result = { ...result, outcome: 'setaside' };
   };
 
