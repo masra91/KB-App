@@ -281,7 +281,7 @@ structure that keeps the log queryable even though signal content is freeform.
 | DECOMP-14  | should   | v1 mints **fresh nodes with no cross-source resolution**; dedup/merge/linking ("which Steve?") is deferred to Connect and fed by `ambiguity` signals | test:decomposeStage.test.ts | DATA-3; LIFE-6 |
 | DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage (now specced: **SPEC-0016 CLAIMS-7**) | test:entityDoc.test.ts | DATA-7 |
 | DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage; the **Decompose→Claims item is a minted entity ULID** — Decompose pokes `queue/claims/` **per entity** (SPEC-0016 CLAIMS-18) | test:decomposeStage.test.ts | ORCH-9,15; INGEST-6 |
-| DECOMP-17  | must     | The instruction file states an explicit **node-vs-attribute granularity policy**: a node is a referent with **independent identity**; roles/descriptors/properties/relationships **predicated of** an entity are NOT nodes (they are Claims), and the agent is biased toward **fewer, higher-confidence** nodes (when unsure → attribute). Prevents over-extraction (e.g. `concept/first-computer-programmer`) | test:decomposeAgent.test.ts | DATA-3,6; LIFE-3 |
+| DECOMP-17  | must     | The instruction file states an explicit **node-vs-attribute granularity policy**: a node is a referent with **independent identity**; roles/descriptors/properties/relationships **predicated of** an entity are NOT nodes (they are Claims), and the agent is biased toward **fewer, higher-confidence** nodes (when unsure → attribute). Prevents over-extraction (e.g. `concept/first-computer-programmer`) | test:decomposeAgent.test.ts, enrichEval.test.ts; eval:enrichQuality.eval.ts | DATA-3,6; LIFE-3 |
 
 ### DECOMP-3 — Thin agent in v1
 - **Status:** draft · **Priority:** must
@@ -349,8 +349,15 @@ structure that keeps the log queryable even though signal content is freeform.
   nodes, and degrades felt quality. The fix is a sharper **prompt-level** boundary, not a code
   gate: `kind` stays an open, emergent vocabulary (DECOMP-7) — only the node/attribute *line*
   is drawn. Substance about an entity is not lost; it lands as Claims, where it belongs.
+- **Behavioral verification:** because granularity is **LLM-judged**, the deterministic tests prove
+  the prompt *says* the right thing, not that extraction *behaves*. The behavioral close is an
+  **opt-in golden-set eval** (`app/eval/`, runs the real `decompose/v2` over curated sources N≥3×):
+  per fixture it hard-asserts a *must-be-node* set (recall) and a *must-NOT-be-node* set
+  (roles/descriptors → Claims, e.g. the "first computer programmer" case) and reports node counts
+  vs a loose bound. Opt-in (needs a BYOA copilot), so it is not the CI gate — the deterministic
+  prompt-policy + the eval's pure scoring logic are. (KB-QD owns the pass-bar + fixture review.)
 - **Traces:** DATA-3 (nodes = the index of things), DATA-6 (open kinds preserved), LIFE-3
-- **Verify:** test:decomposeAgent.test.ts
+- **Verify:** test:decomposeAgent.test.ts (prompt policy), enrichEval.test.ts (eval scoring); eval:enrichQuality.eval.ts (behavioral golden set, opt-in)
 
 ### DECOMP-13 — Idempotent, commit-to-dequeue
 - **Status:** draft · **Priority:** must
@@ -469,6 +476,14 @@ sources/ ─poke→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)        
   (DECOMP-7), schema unchanged. Graduated DECOMP-17 `none-yet → test:decomposeAgent.test.ts`.
   (Part 1 of the enrich-quality felt-gap work; claim dedup tracked separately — its boundary
   is specced at Connect/Reflect per SPEC-0016 CLAIMS-17/§2/§6.)
+- 2026-06-02 — **DECOMP-17 behavioral eval.** Added the **opt-in golden-set eval** that closes
+  DECOMP-17 behaviorally (granularity is LLM-judged): pure scoring logic in `src/kb/enrichEval.ts`
+  (+ `enrichEval.test.ts`, the CI-gated deterministic part) and an opt-in runner `app/eval/`
+  (`enrichQuality.eval.ts` + `granularityFixtures.ts` + `npm run eval:enrich`, `KB_EVAL=1`) that
+  runs `decompose/v2` over a curated set N≥3× and hard-asserts the must-be / must-NOT-be node sets
+  (recall + precision) per KB-QD's pass-bar — reporting node counts vs a loose bound. Not in CI
+  (needs a BYOA copilot, like the e2e). Headline fixture is the dogfood "2 sentences → was 6 nodes
+  → expect ≤3, descriptor as a claim".
 - 2026-05-30 — **implemented.** Built on the existing SPEC-0014 harness (archivist #7/#8,
   ORCH-16 #10): extracted the canonical-writer `Mutex` into a shared `stageLock` injected
   into both the archivist and the new Decompose stage (§5 serialized writer); added the
