@@ -348,7 +348,8 @@ source" assumption (the open question SPEC-0016 §7 deferred "to Connect"). v1 r
 > candidate pass, triggered by Claims' `afterDrain` poke (plus the periodic sweep backstop).
 > Resolution is **deterministic** (CONNECT-20 typed-link-as-object stays deferred): each
 > `relatesTo` name resolves by normalized name to a canonical node — exactly-one match → a
-> `[[wikilink]]`; zero/ambiguous → a `note` signal, never a dangling guess (CONNECT-13). The
+> `[[wikilink]]`; zero match → a `note` signal; **ambiguous (>1 same-named entity) → a yes/no
+> Review** (CONNECT-15) — never a dangling guess (CONNECT-13). The
 > block is regenerated WHOLE (idempotent — re-poke/replay re-promote the delta only). The
 > resolver core (§3.2–3.6) shipped first (slices 1–2); this is slice 3.
 
@@ -619,10 +620,15 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
   it reads each canonical node's claims' `relatesTo` hints and resolves them **deterministically**
   (no agent) by normalized name to a canonical node — exactly-one match → a real Obsidian
   `[[entities/<kind>/<slug>]]` link in a delimited, regenerated-WHOLE `kb:links:start/end` block
-  (`applyLinksBlock`, mirroring the claims block); zero/ambiguous → a `note` signal, never a
-  dangling guess (CONNECT-13). Idempotent (byte-stable node ⇒ no-op, no churn). Triggered by
-  Claims' `afterDrain` poke (the Connect-before-Claims reorder means hints only exist post-Claims)
-  + the sweep backstop; the slice-1 promote-hook publishes linked nodes → `main`, so Obsidian's
-  graph view connects. CONNECT-12/13 graduated `Verify: deferred-slice → test:`. **Still deferred:**
-  CONNECT-20 typed-link-as-object, agent `links[]` consumption, and Review escalation for
-  ambiguous links (CONNECT-15 path) — tracked fast-follows. Full suite green (250 tests).
+  (`applyLinksBlock`, mirroring the claims block); zero match → a `note` signal; ambiguous (>1
+  same-named entity) → a yes/no Review (CONNECT-15); never a dangling guess (CONNECT-13). Idempotent
+  (byte-stable node ⇒ no-op, no churn). Triggered by Claims' `afterDrain` poke (the
+  Connect-before-Claims reorder means hints only exist post-Claims) + the sweep backstop; the
+  slice-1 promote-hook publishes linked nodes → `main`, so Obsidian's graph view connects.
+  CONNECT-12/13 graduated `Verify: deferred-slice → test:`. **CONNECT-15 link-escalation now
+  implemented (#13):** an ambiguous hint raises ONE yes/no Review proposing the first deterministic
+  match (markerKey `{kind:'link', nodeRel, hint, targetRel}`); the link pass is idempotent — it
+  never re-asks an existing hint, renders the link on `confirm`, and declines (→ `note`) on
+  `reject`. Resume rides the existing per-drain link pass (the sweep/`afterDrain`-poke re-runs it
+  and reads the answered Review — no new resume primitive). **Still deferred:** CONNECT-20
+  typed-link-as-object + agent `links[]` consumption — tracked fast-follows.

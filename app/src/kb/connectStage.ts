@@ -40,7 +40,7 @@ import {
 import { mergeNodes } from './mergeNodes';
 import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
-import { reviewRel, writeReviewFile } from './reviewStore';
+import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
@@ -625,9 +625,10 @@ export async function connectOne(
 
 export interface LinkOneResult {
   nodeRel: string;
-  changed: boolean; // false when the regenerated node was byte-identical (idempotent no-op)
+  changed: boolean; // false when the node was byte-identical AND no review was raised (idempotent no-op)
   links: number; // resolved [[wikilink]]s rendered
-  unresolved: string[]; // hint names with zero/ambiguous matches → note signals (CONNECT-13)
+  unresolved: string[]; // hints left as `note` signals: zero-match unknowns + reject-declined ambiguities (CONNECT-13)
+  reviewsRaised: number; // ambiguous (>1 match) hints escalated to a yes/no Review this pass (CONNECT-15)
 }
 
 /**
@@ -648,9 +649,13 @@ export async function readLinkQueue(root: string): Promise<string[]> {
 /**
  * Promote ONE canonical node's claims' `relatesTo` hints into a regenerated `[[wikilinks]]` block
  * (CONNECT-12). DETERMINISTIC (no agent): each hint name is resolved by normalized name to a
- * canonical node — exactly-one match → a wikilink; zero or ambiguous (>1) → recorded as a `note`
- * signal, never a dangling guess (CONNECT-13). The block is regenerated WHOLE, so the node is
- * byte-stable across re-pokes: if nothing changed, it is a no-op (no commit, no repeated note).
+ * canonical node — exactly-one match → a wikilink; zero match (unknown) → a `note` signal, never a
+ * dangling guess (CONNECT-13). An **ambiguous** hint (>1 same-named entity) is never guessed: it
+ * escalates to a yes/no Review proposing the first match (CONNECT-15) and renders nothing until the
+ * Principal answers — confirm → render that target, reject → leave a `note`. The Review's plan rides
+ * in its `markerKey` ({kind:'link', nodeRel, hint, targetRel}); this pass is idempotent — it reads
+ * the node's existing link-Reviews and never re-raises a hint already asked. The block is
+ * regenerated WHOLE, so the node is byte-stable across re-pokes: nothing-to-do is a no-op.
  * MUST be called serialized via the shared canonical-writer lock so the base branch is steady.
  * NOTE: unlike the other stages, the link pass stays COARSE-LOCKED (whole cycle under the lock) —
  * it CONSUMES Claims' `relatesTo` output, so making it optimistic/concurrent with Claims is a
@@ -669,7 +674,7 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
   try {
     nodeMd = await fs.readFile(nodePath, 'utf8');
   } catch {
-    return { nodeRel, changed: false, links: 0, unresolved: [] }; // node gone (merged away) — nothing to do
+    return { nodeRel, changed: false, links: 0, unresolved: [], reviewsRaised: 0 }; // node gone (merged away) — nothing to do
   }
 
   // Collect this node's claims' relatesTo hints (de-duped, order-preserved).
@@ -679,47 +684,105 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
     claims.filter((c) => c.subject === nodeRel).flatMap((c) => c.relatesTo),
   );
 
-  // Index every OTHER canonical node by normalized name for deterministic target resolution.
+  // Index every OTHER canonical node by normalized name (target resolution) + every node by rel
+  // (display names + existence checks). Sort each name group so the "first match" we propose for an
+  // ambiguous hint is deterministic across runs.
   const byName = new Map<string, string[]>();
+  const nameByRel = new Map<string, string>();
   for (const n of await readEntityNodes(wt)) {
+    nameByRel.set(n.rel, n.name);
     if (n.rel === nodeRel) continue; // never self-link
     const key = normalizeName(n.name);
     const arr = byName.get(key);
     if (arr) arr.push(n.rel);
     else byName.set(key, [n.rel]);
   }
+  for (const arr of byName.values()) arr.sort();
+
+  // CONNECT-15: this node's existing link-Reviews, keyed by hint — so an ambiguous hint already
+  // asked is never re-raised, an answered one renders/declines, and an open one stays parked.
+  const reviewByHint = new Map<string, Review>();
+  for (const r of await readAllReviews(wt)) {
+    const mk = r.raisedBy.markerKey;
+    if (mk.kind === 'link' && mk.nodeRel === nodeRel && mk.hint) reviewByHint.set(mk.hint, r);
+  }
 
   const links: NodeLink[] = [];
-  const unresolved: string[] = [];
+  const unresolved: string[] = []; // zero-match unknowns + reject-declined ambiguities → note (CONNECT-13)
+  const toRaise: { hint: string; targetRel: string; candidateRels: string[] }[] = [];
   const linkedTargets = new Set<string>();
+  const addLink = (rel: string): void => {
+    if (!linkedTargets.has(rel)) {
+      links.push({ targetRel: rel });
+      linkedTargets.add(rel);
+    }
+  };
   for (const hint of hints) {
     const matches = byName.get(normalizeName(hint)) ?? [];
     if (matches.length === 1) {
-      if (!linkedTargets.has(matches[0])) {
-        links.push({ targetRel: matches[0] });
-        linkedTargets.add(matches[0]);
-      }
+      addLink(matches[0]);
+    } else if (matches.length === 0) {
+      unresolved.push(hint); // unknown target → note, never a dangling guess (CONNECT-13)
     } else {
-      unresolved.push(hint); // zero (unknown) or ambiguous (>1) → note, never a dangling guess (CONNECT-13)
+      // Ambiguous: >1 entity shares this normalized name (e.g. two distinct "John Smith"). Never
+      // guess which — escalate to a yes/no Review (CONNECT-15), resuming from any answer.
+      const existing = reviewByHint.get(hint);
+      if (existing?.status === 'answered') {
+        const target = existing.raisedBy.markerKey.targetRel;
+        if (existing.answer?.verdict === 'confirm' && target && target !== nodeRel && nameByRel.has(target)) {
+          addLink(target); // Principal confirmed the proposed target (still present) → render it
+        } else {
+          unresolved.push(hint); // rejected, or the confirmed target has since merged away → note
+        }
+      } else if (existing?.status === 'open') {
+        // parked — awaiting the Principal; render nothing, raise nothing
+      } else {
+        toRaise.push({ hint, targetRel: matches[0], candidateRels: matches }); // first encounter → ask
+      }
     }
   }
   links.sort((a, b) => (a.targetRel < b.targetRel ? -1 : 1)); // deterministic block order
 
   const newMd = applyLinksBlock(nodeMd, links);
-  if (newMd === nodeMd) return { nodeRel, changed: false, links: links.length, unresolved };
+  const nodeChanged = newMd !== nodeMd;
+  if (!nodeChanged && toRaise.length === 0) {
+    return { nodeRel, changed: false, links: links.length, unresolved, reviewsRaised: 0 }; // byte-stable + nothing to ask
+  }
 
-  await fs.writeFile(nodePath, newMd, 'utf8');
   const runId = ulid();
+  if (nodeChanged) await fs.writeFile(nodePath, newMd, 'utf8');
   let audit = auditLine({ runId, event: 'links-start', node: nodeRel });
+
+  // Escalate each newly-ambiguous hint to a yes/no Review proposing the first match (CONNECT-15);
+  // the markerKey carries the plan so a later (post-answer) link pass renders or declines it.
+  for (const { hint, targetRel, candidateRels } of toRaise) {
+    const id = ulid();
+    const nodeName = nameByRel.get(nodeRel) ?? nodeRel;
+    const targetName = nameByRel.get(targetRel) ?? targetRel;
+    const candidateNames = candidateRels.map((r) => nameByRel.get(r) ?? r).join(', ');
+    const review: Review = {
+      id,
+      status: 'open',
+      question: `Should "${nodeName}" link to "${targetName}"?`,
+      detail: `"${nodeName}" relates to "${hint}", which matches multiple entities: ${candidateNames}. Confirm to link it to "${targetName}" (${targetRel}); reject to leave it unlinked.`,
+      raisedBy: { stage: STAGE, runId, item: { kind: 'link', ref: nodeRel }, auditRel: AUDIT_REL, markerKey: { kind: 'link', nodeRel, hint, targetRel } },
+      subject: {},
+      createdAt: new Date().toISOString(),
+    };
+    await writeReviewFile(path.join(wt, reviewRel(id)), review);
+    audit += auditLine({ runId, event: 'link-review-raised', node: nodeRel, hint, target: targetRel, reviewId: id });
+  }
   for (const u of unresolved) {
     audit += auditLine({ runId, event: 'signal', type: 'note', note: `unresolved link target: ${u}`, node: nodeRel });
   }
-  audit += auditLine({ runId, event: 'linked', node: nodeRel, links: links.length, unresolved: unresolved.length });
+  audit += auditLine({ runId, event: 'linked', node: nodeRel, links: links.length, unresolved: unresolved.length, reviewsRaised: toRaise.length });
   await appendAudit(wt, audit);
   await wtGit.raw('add', '-A');
-  await wtGit.commit(`connect: links ${nodeRel} → ${links.length} link(s)${unresolved.length ? `, ${unresolved.length} unresolved` : ''}`);
+  await wtGit.commit(
+    `connect: links ${nodeRel} → ${links.length} link(s)${toRaise.length ? `, ${toRaise.length} ambiguous→review` : ''}${unresolved.length ? `, ${unresolved.length} unresolved` : ''}`,
+  );
   await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
-  return { nodeRel, changed: true, links: links.length, unresolved };
+  return { nodeRel, changed: true, links: links.length, unresolved, reviewsRaised: toRaise.length };
 }
 
 /**
