@@ -10,7 +10,6 @@ export const VIEW_CAPTURE = 'capture';
 export const VIEW_REVIEWS = 'reviews';
 export const VIEW_ACTIVITY = 'activity';
 export const VIEW_ASK = 'ask';
-export const VIEW_PLACEHOLDER = 'placeholder';
 // Control Panel — the "Manage" section of sibling views (SPEC-0027 PANEL-1).
 export const VIEW_JOBS = 'jobs';
 export const VIEW_AGENTS = 'agents';
@@ -29,13 +28,16 @@ export const GROUP_MANAGE = 'Manage';
  * grounded recall (SPEC-0026). The Control Panel (SPEC-0027) adds a "Manage" section of sibling
  * views — Jobs, Agents, Researchers, Sources, Settings — to observe + configure the machine;
  * Settings moves under Manage (elevated from the display-only stub, SHELL-7 → PANEL-5).
+ *
+ * The SHELL-3 "neutral placeholder" was a v1 scaffold proving the shell carries more than one view;
+ * it's retired now that the real view set (Capture/Reviews/Activity/Ask + the Manage section) proves
+ * that directly — no dead "Coming soon" item in the rail (SPEC-0017 SHELL-3 amended).
  */
 export const NAV_VIEWS: NavView[] = [
   { id: VIEW_CAPTURE, label: 'Capture', icon: '📥' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: '🔍' },
   { id: VIEW_ACTIVITY, label: 'Activity', icon: '📜' },
   { id: VIEW_ASK, label: 'Ask', icon: '💬' },
-  { id: VIEW_PLACEHOLDER, label: 'Coming soon', icon: '✨' },
   { id: VIEW_JOBS, label: 'Jobs', icon: '🛠️', group: GROUP_MANAGE },
   { id: VIEW_AGENTS, label: 'Agents', icon: '🤖', group: GROUP_MANAGE },
   { id: VIEW_RESEARCHERS, label: 'Researchers', icon: '🔬', group: GROUP_MANAGE },

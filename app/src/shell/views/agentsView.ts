@@ -14,6 +14,10 @@ export async function mountAgents(container: HTMLElement): Promise<void> {
       clearInterval(timer);
       return;
     }
+    // Skip the status IPC when the Agents view isn't the one showing (the shell mounts once + toggles
+    // `.hidden`, so the container stays in the DOM) or the window is backgrounded — don't poll status
+    // no one is looking at.
+    if (container.classList.contains('hidden') || document.hidden) return;
     void refreshStatus(container);
   }, 5000);
 }

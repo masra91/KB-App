@@ -10,7 +10,6 @@ import {
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
   VIEW_ASK,
-  VIEW_PLACEHOLDER,
   VIEW_JOBS,
   VIEW_AGENTS,
   VIEW_RESEARCHERS,
@@ -31,7 +30,6 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
       VIEW_REVIEWS,
       VIEW_ACTIVITY,
       VIEW_ASK,
-      VIEW_PLACEHOLDER,
       VIEW_JOBS,
       VIEW_AGENTS,
       VIEW_RESEARCHERS,
@@ -42,6 +40,10 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
 
   it('every view has a non-empty label (SHELL-3)', () => {
     for (const v of NAV_VIEWS) expect(v.label.length).toBeGreaterThan(0);
+  });
+
+  it('no leftover "Coming soon" placeholder — real views prove the multi-view shell (SHELL-3 amended)', () => {
+    expect(NAV_VIEWS.some((v) => v.id === 'placeholder' || v.label === 'Coming soon')).toBe(false);
   });
 
   it('the Control Panel views form a contiguous "Manage" group; Settings sits under it (PANEL-1)', () => {
