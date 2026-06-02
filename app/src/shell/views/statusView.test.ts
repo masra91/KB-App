@@ -58,7 +58,7 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     const h = overallHtml(STALLED);
     expect(h).toContain('Stalled');
     expect(h).toContain('status-stall-note'); // the loud "stuck" banner
-    expect(h).toContain('2026-06-02T00:00:00.000Z'); // since last activity
+    expect(h).not.toContain('2026-06-02T00:00:00.000Z'); // raw ISO replaced by a friendly time (#3)
   });
 
   it('stagesHtml shows state + queue + current item + set-aside (OBS-5/6)', () => {
@@ -70,7 +70,7 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   });
 
   it('lockHtml shows the holder + waiters (OBS-7)', () => {
-    expect(lockHtml(STALLED.lock)).toContain('held by <strong>connect</strong>');
+    expect(lockHtml(STALLED.lock)).toContain('held by <strong>Linking</strong>'); // display name (#4), holder id 'connect'
     expect(lockHtml(STALLED.lock)).toContain('1 waiting');
     expect(lockHtml({ held: false, waiters: 0 })).toContain('free');
   });
@@ -97,13 +97,13 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   it('setAsideHtml lists poison items with stage · name + reason, name preferred over id (OBS-17)', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }]);
     expect(h).toContain('Set aside — needs attention (1)');
-    expect(h).toContain('claims · Ada Lovelace'); // the friendly name is the visible label
+    expect(h).toContain('Claim extraction · Ada Lovelace'); // stage display name (#4) + friendly item name
     expect(h).toContain('set aside after 3 failed attempts');
   });
 
   it('setAsideHtml falls back to the item id when no name is known', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01NONAME' }]);
-    expect(h).toContain('claims · 01NONAME');
+    expect(h).toContain('Claim extraction · 01NONAME');
   });
 
   it('setAsideHtml renders retry/dismiss buttons carrying the stage + id (OBS-17 actions)', () => {
@@ -120,9 +120,9 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
       { stage: 'connect', itemId: 'block:engine', name: 'Analytical Engine' },
     ]);
     expect(h).toContain('Set aside — needs attention (2)');
-    expect(h).toContain('claims · Ada Lovelace');
-    expect(h).toContain('connect · Analytical Engine');
-    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect
+    expect(h).toContain('Claim extraction · Ada Lovelace'); // display name (#4); raw stage stays in data-stage
+    expect(h).toContain('Linking · Analytical Engine');
+    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect (raw id intact)
     expect(h).toContain('data-id="block:engine"');
   });
 
@@ -146,7 +146,7 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   it('bodyHtml includes the set-aside panel for the STALLED fixture (OBS-17)', () => {
     const h = bodyHtml({ view: STALLED, loading: false, errorMsg: '', expanded: new Set() });
     expect(h).toContain('Set aside — needs attention');
-    expect(h).toContain('claims · Ada Lovelace');
+    expect(h).toContain('Claim extraction · Ada Lovelace');
   });
 
   it('bodyHtml renders empty/loading/no-KB states', () => {

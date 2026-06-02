@@ -9,6 +9,7 @@
 // confirm. Run now executes the real egress-gated cognition (no synthetic data ever reaches a vault).
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
+import { formatTimestamp } from '../formatTime';
 import {
   schedulePresetLabel,
   SCHEDULE_OPTIONS,
@@ -60,7 +61,7 @@ function addForm(): string {
       <label>Add a researcher
         <select class="researcher-add-template">${opts}</select>
       </label>
-      <input class="researcher-add-id" type="text" placeholder="id (e.g. web-1)" aria-label="researcher id" />
+      <input class="researcher-add-id" type="text" placeholder="Name (e.g. Prior-art web search)" aria-label="researcher name" />
       <button type="button" class="btn researcher-add-btn">Add</button>
       <p class="muted researcher-add-status" role="status" aria-live="polite"></p>
     </div>`;
@@ -72,7 +73,7 @@ function researcherItem(r: ResearcherView): string {
   const postureOpts = (['guarded', 'autonomous'] as const).map((p) => `<option value="${p}"${p === r.posture ? ' selected' : ''}>${POSTURE_LABEL[p]}</option>`).join('');
   const egressOpts = EGRESS_TIERS.map((t) => `<option value="${esc(t)}" title="${esc(EGRESS_TIER_HINTS[t])}"${t === r.egressTier ? ' selected' : ''}>${esc(EGRESS_TIER_LABELS[t])}</option>`).join('');
   const last = r.lastRun
-    ? `Last run ${esc(r.lastRun.ts)} — ${esc(r.lastRun.eventType)}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
+    ? `Last run ${esc(formatTimestamp(r.lastRun.ts))} — ${esc(r.lastRun.eventType)}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
     : 'Never run';
   return `
     <li class="researcher" data-id="${esc(r.id)}">
@@ -89,14 +90,14 @@ function researcherItem(r: ResearcherView): string {
         </label>
         <label>Scope <input type="text" class="researcher-scope" value="${esc(r.scope)}" /></label>
         ${r.template === 'code' ? `<label>Repository path <input type="text" class="researcher-repopath" value="${esc(r.repoPath)}" placeholder="/absolute/path/to/local/repo" /></label>` : ''}
-        ${r.template === 'code' ? `<label>GitHub PR repo <input type="text" class="researcher-prrepo" value="${esc(r.prRepo)}" placeholder="owner/name (read PRs via your gh)" /></label>` : ''}
+        ${r.template === 'code' ? `<label>GitHub PR repo <input type="text" class="researcher-prrepo" value="${esc(r.prRepo)}" placeholder="owner/name (PRs read via the GitHub CLI)" /></label>` : ''}
         ${r.template === 'm365' ? `<label>M365 tenant <input type="text" class="researcher-tenant" value="${esc(r.tenantId)}" placeholder="your-org.onmicrosoft.com" /></label>` : ''}
         <button type="button" class="btn researcher-save">Save instructions</button>
       </div>
       <div class="researcher-controls">
         <label>Schedule <select class="researcher-schedule">${scheduleOpts}</select></label>
         <label>Autonomy <select class="researcher-posture">${postureOpts}</select></label>
-        <label>Egress <select class="researcher-egress-sel">${egressOpts}</select></label>
+        <label>Data reach <select class="researcher-egress-sel">${egressOpts}</select></label>
         <button type="button" class="btn researcher-run">Run now</button>
       </div>
       <p class="muted researcher-lastrun">${last}</p>
@@ -187,7 +188,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       const patch: ResearcherConfigPatch = { id, egressTier };
       if (isRiskyResearcherChange(asConfig(current), patch)) {
         askConfirm(
-          `Widen “${current.label}” egress to ${egressTier ? EGRESS_TIER_LABELS[egressTier] : ''}? More of your KB can leave to a less-trusted destination.`,
+          `Widen where “${current.label}” can send data to ${egressTier ? EGRESS_TIER_LABELS[egressTier] : ''}? More of your KB can leave to a less-trusted destination.`,
           () => apply(patch),
           () => (egressEl.value = current.egressTier),
         );
@@ -253,9 +254,12 @@ async function addResearcher(container: HTMLElement): Promise<void> {
   const idEl = container.querySelector<HTMLInputElement>('.researcher-add-id')!;
   const status = container.querySelector<HTMLElement>('.researcher-add-status')!;
   const template = templateEl.value as ResearcherConfigPatch['template'];
-  const id = idEl.value.trim();
+  // #6: the user types a friendly NAME; we slugify it into the canonical id behind the scenes — they
+  // never hand-craft a slug. (The stored id is the slug; the name lives on via the slug + future label.)
+  const name = idEl.value.trim();
+  const id = slugifyId(name);
   if (!id) {
-    status.textContent = 'Give the researcher an id (lowercase letters, digits, hyphens).';
+    status.textContent = 'Give the researcher a name (letters or digits).';
     return;
   }
   status.textContent = 'Adding…';
@@ -264,6 +268,11 @@ async function addResearcher(container: HTMLElement): Promise<void> {
     await window.kbApi.setResearcherConfig({ id, template, egressTier: template ? defaultEgressFor(template) : undefined, enabled: false });
     await render(container);
   } catch {
-    status.textContent = 'Could not add — check the id is a bare slug (no slashes/spaces).';
+    status.textContent = 'Could not add — try a simpler name (letters, digits, spaces).';
   }
+}
+
+/** Slugify a friendly name into a canonical researcher id ([a-z0-9-], no leading/trailing dashes). */
+function slugifyId(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }

@@ -15,6 +15,8 @@
 // render helpers are pure (data → HTML string) so they unit-test without a DOM.
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
+import { formatTimestamp } from '../formatTime';
+import { stageDisplayName } from '../stageLabels';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
@@ -162,9 +164,9 @@ export function bodyHtml(s: BodyState): string {
 export function overallHtml(v: PipelineStatusView): string {
   const label = { running: 'Running', idle: 'Idle', stalled: 'Stalled' }[v.overall];
   const stalledNote = v.stalled
-    ? `<p class="status-stall-note error">⚠️ Work is queued but nothing has progressed${v.lastActivity ? ` since ${esc(v.lastActivity)}` : ''} — the pipeline looks stuck. Check recent errors + the lock below.</p>`
+    ? `<p class="status-stall-note error">⚠️ Work is queued but nothing has progressed${v.lastActivity ? ` since ${esc(formatTimestamp(v.lastActivity))}` : ''} — the pipeline looks stuck. Check recent errors + the lock below.</p>`
     : '';
-  const last = v.lastActivity ? `<span class="status-lastact muted">last activity ${esc(v.lastActivity)}</span>` : '';
+  const last = v.lastActivity ? `<span class="status-lastact muted">last activity ${esc(formatTimestamp(v.lastActivity))}</span>` : '';
   return `<div class="status-overall status-overall-${esc(v.overall)}"><span class="status-badge status-${esc(v.overall)}">${esc(label)}</span>${last}</div>${stalledNote}`;
 }
 
@@ -176,7 +178,7 @@ export function stagesHtml(stages: StageStatus[]): string {
       const setAside = st.setAside > 0 ? `<span class="status-setaside error">${st.setAside} set aside</span>` : '';
       return `
         <li class="status-stage status-stage-${esc(st.state)}">
-          <span class="status-stage-name">${esc(st.stage)}</span>
+          <span class="status-stage-name" title="${esc(st.stage)}">${esc(stageDisplayName(st.stage))}</span>
           <span class="status-badge status-${esc(st.state)}">${esc(st.state)}</span>
           <span class="status-queue muted">queue ${st.queueDepth}</span>
           ${current}
@@ -204,7 +206,7 @@ export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; 
       return `
         <li class="status-setaside-item">
           <span class="status-badge status-setaside">set aside</span>
-          <span class="status-setaside-id">${esc(it.stage)} · ${esc(label)}</span>
+          <span class="status-setaside-id">${esc(stageDisplayName(it.stage))} · ${esc(label)}</span>
           ${it.reason ? `<span class="muted">${esc(it.reason)}</span>` : ''}
           <span class="status-setaside-actions">
             <button type="button" class="status-setaside-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
@@ -218,14 +220,16 @@ export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; 
 
 /** OBS-7: the canonical-writer lock — held/holder/waiters (so a stall's cause is visible). */
 export function lockHtml(lock: PipelineStatusView['lock']): string {
+  // "Write lock" is the user-facing label; the technical name rides in the tooltip (#7 softening).
+  const heading = `<h2 class="status-h2" title="Canonical-writer lock">Write lock</h2>`;
   if (!lock.held) {
     const waiting = lock.waiters > 0 ? ` <span class="muted">(${lock.waiters} waiting)</span>` : '';
-    return `<h2 class="status-h2">Canonical-writer lock</h2><p class="status-lock muted">free${waiting}</p>`;
+    return `${heading}<p class="status-lock muted">free${waiting}</p>`;
   }
-  const who = lock.holder ? esc(lock.holder) : 'a stage';
-  const since = lock.since ? ` since ${esc(lock.since)}` : '';
+  const who = lock.holder ? esc(stageDisplayName(lock.holder)) : 'a stage';
+  const since = lock.since ? ` since ${esc(formatTimestamp(lock.since))}` : '';
   const waiting = lock.waiters > 0 ? `, ${lock.waiters} waiting` : '';
-  return `<h2 class="status-h2">Canonical-writer lock</h2><p class="status-lock">held by <strong>${who}</strong>${esc(since)}${esc(waiting)}</p>`;
+  return `${heading}<p class="status-lock">held by <strong>${who}</strong>${since}${esc(waiting)}</p>`;
 }
 
 /** OBS-6: recent errors + set-aside markers, each expandable to its cause (drill-down). */
@@ -287,7 +291,8 @@ export function latencyHtml(v: PipelineStatusView): string {
 export function worktreesHtml(worktrees: WorktreeInfo[]): string {
   if (worktrees.length === 0) return '';
   const rows = worktrees
-    .map((w) => `<li class="muted"><code>${esc(w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
+    // Show the worktree dir basename (the full `.kb/cache/...` path is dev-noise); keep it as a tooltip.
+    .map((w) => `<li class="muted" title="${esc(w.path)}"><code>${esc(w.path.replace(/\/+$/, '').split('/').pop() ?? w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
     .join('');
   return `<h2 class="status-h2">Worktrees</h2><ul class="status-worktrees">${rows}</ul>`;
 }

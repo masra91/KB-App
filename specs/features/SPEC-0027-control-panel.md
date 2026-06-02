@@ -195,3 +195,21 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   em-dash vault info — graceful, never a spinner). Capture (a non-blocking status line) + Ask
   (on-demand recall, not a mount-gated load) are out of scope by design. Tests: per-view fake-timer
   hang→retry/fallback coverage (`reviewsView`/`settingsView`/`activityView`/new `sourcesView` tests).
+- 2026-06-02 — **UI clarity / de-jargon pass** (KB-PM-triaged dogfood of the Manage surface + Recall +
+  set-aside). Removed internal artifacts / dev jargon from user-facing copy, **display-layer only**
+  (never mutating the canonical `kind`/`stage`/path/`id` the vault/audit/wikilinks depend on — guarded
+  by unchanged-value tests). Two shared render helpers: `shell/formatTime.ts` (`formatTimestamp` →
+  friendly/relative "2 min ago" / short date, replacing raw ISO everywhere it showed — Status, Activity,
+  Researchers last-run) and `shell/stageLabels.ts` (`stageDisplayName` → readable stage/actor names:
+  claims→"Claim extraction", connect→"Linking", archivist→"Archiving", decompose→"Decompose",
+  panel→"Control Panel"; raw id kept in a `title`). Plus: Settings dropped the `(SPEC-0030)` id + "Dev-log"→
+  "Diagnostic detail" + "egress payloads"→"data sent to external services"; **Recall References**
+  (SPEC-0026) lead with the human label + capitalized kind, raw vault path demoted to a tooltip (the
+  deep-link still uses the canonical `ref` via the index); Researchers "Egress"→"Data reach" (config
+  chrome only — the egress *security control* stays "egress"), add-researcher now takes a **Name** and
+  slugifies the id behind the scenes (no hand-typed slug), "via your gh"→"the GitHub CLI"; **Status**
+  (SPEC-0030, stays a diagnostics surface) softened — cache paths → basenames (+ tooltip),
+  "Canonical-writer lock"→"Write lock" (technical name in tooltip), friendly times + stage names;
+  Activity "lineage"→"trace origin". Held per KB-PM: Sources "coming soon" rows + the raw audit
+  drill-down (intentional AUDIT-5 transparency). Tests: `formatTime.test.ts`, `stageLabels.test.ts`,
+  + updated view assertions (path-in-tooltip, slugify, display-name).

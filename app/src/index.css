@@ -367,6 +367,7 @@ button:disabled {
 .cite-ref { color: inherit; text-decoration: none; cursor: pointer; }
 .cite-ref:hover, .cite-ref:focus { text-decoration: underline; }
 .cite-ref .cite-num { color: var(--accent, #6ab); font-weight: 600; }
+.cite-ref .cite-kind { color: var(--muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
 .ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--error); }
 .ask-form { display: flex; gap: 0.5rem; }
 .ask-input { flex: 1; }
