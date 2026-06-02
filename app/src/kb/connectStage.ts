@@ -37,7 +37,7 @@ import {
   type NodeLink,
   type ParsedNode,
 } from './connectDoc';
-import { applyClaimsBlock, type ClaimBacklink } from './claimDoc';
+import { mergeNodes } from './mergeNodes';
 import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
 import { reviewRel, writeReviewFile } from './reviewStore';
@@ -354,27 +354,11 @@ async function readClaims(wtRoot: string): Promise<ClaimRef[]> {
   return out;
 }
 
-/** Rewrite a claim file's `subject:` line to the canonical node path (CONNECT-11). */
-async function repointClaimSubject(wtRoot: string, claimRel: string, newSubject: string): Promise<void> {
-  const file = path.join(wtRoot, claimRel);
-  const md = await fs.readFile(file, 'utf8');
-  const updated = md.replace(/^subject:\s*.+$/m, `subject: ${newSubject}`);
-  await fs.writeFile(file, updated, 'utf8');
-}
-
-/** Regenerate the canonical node's claims block from all claims now pointing at it (CONNECT-11). */
-async function regenClaimsBlock(wtRoot: string, nodeRel: string, claims: ClaimRef[]): Promise<void> {
-  const file = path.join(wtRoot, nodeRel);
-  const md = await fs.readFile(file, 'utf8');
-  const links: ClaimBacklink[] = claims.map((c) => ({
-    claimPath: c.rel,
-    statement: c.statement,
-    // ClaimBacklink.status is typed as ClaimStatus; claims come from the closed set already.
-    status: c.status as ClaimBacklink['status'],
-    confidence: c.confidence,
-  }));
-  await fs.writeFile(file, applyClaimsBlock(md, links), 'utf8');
-}
+// Claim repoint + canonical claims-block regeneration on merge now live in the shared `mergeNodes`
+// core (./mergeNodes) — one impl for Connect's resolve-time merge AND Reflect's approved
+// consolidation (SPEC-0024 REFLECT-7). `readClaims`/`parseClaim` above stay here because the
+// link-promotion pass (linkOne/readLinkQueue) needs the `relatesTo` hints they parse, which the
+// merge core doesn't carry.
 
 // ── Resolve ONE block ──────────────────────────────────────────────────────────────────────
 
@@ -517,12 +501,12 @@ export async function connectOne(
 
       // Merge targets: the fold-into node + any explicit merge-existing nodes (CONNECT-9/10).
       const mergeIds = unionOrdered(cluster.existingNodeId ? [cluster.existingNodeId] : [], cluster.mergeExistingNodeIds ?? []);
-      const mergeNodes = mergeIds.map((id) => nodeById.get(id)).filter((n): n is LocatedNode => !!n);
+      const mergeTargets = mergeIds.map((id) => nodeById.get(id)).filter((n): n is LocatedNode => !!n);
       // Canonical = the fold-into node if given & present, else the oldest (smallest id) merge node, else new.
       const canonical: LocatedNode | undefined =
         (cluster.existingNodeId ? nodeById.get(cluster.existingNodeId) : undefined) ??
-        [...mergeNodes].sort((a, b) => (a.id < b.id ? -1 : 1))[0];
-      const losers = mergeNodes.filter((n) => !canonical || n.id !== canonical.id);
+        [...mergeTargets].sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+      const losers = mergeTargets.filter((n) => !canonical || n.id !== canonical.id);
 
       const id = canonical?.id ?? ulid();
       const node: EntityNode = {
@@ -577,19 +561,13 @@ export async function connectOne(
       await fs.writeFile(dest, body ? `${rendered}\n${body}\n` : rendered, 'utf8');
       nodeRels.push(rel);
 
-      // CONNECT-10/11: repoint losers' claims to the canonical node, then delete loser files.
+      // CONNECT-10/11: repoint losers' claims to the canonical node, regenerate its claims block,
+      // then delete the loser files — via the shared `mergeNodes` core (one impl, also used by
+      // Reflect's approved consolidation, SPEC-0024 REFLECT-7). Losers here are located nodes that
+      // exist, so `deleted` mirrors the loser set; the deletion-aware gate propagates it to `main`.
       if (losers.length > 0) {
-        const claims = await readClaims(wt);
-        const loserRels = new Set(losers.map((l) => l.rel));
-        for (const claim of claims) {
-          if (loserRels.has(claim.subject)) await repointClaimSubject(wt, claim.rel, rel);
-        }
-        const claimsForCanonical = (await readClaims(wt)).filter((c) => c.subject === rel);
-        if (claimsForCanonical.length > 0) await regenClaimsBlock(wt, rel, claimsForCanonical);
-        for (const loser of losers) {
-          await fs.rm(path.join(wt, loser.rel), { force: true });
-          deletedNodeRels.push(loser.rel);
-        }
+        const { deleted } = await mergeNodes(wt, rel, losers.map((l) => l.rel));
+        deletedNodeRels.push(...deleted);
       }
 
       audit += auditLine({

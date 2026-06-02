@@ -114,9 +114,9 @@ that finds nothing actionable records an audit event and exits.
 | REFLECT-2  | must     | Each run operates on a **bounded working set, never the whole KB** — the agent **adaptively** chooses, per run via the job journal, between **recency/churn** and **aged sampling** of an under-visited area (lean into churn when busy, drift to aged areas when quiet); coverage accrues over many runs | test:reflectJob.test.ts | JOBS-4,7; PRIN-5; VISION-8 |
 | REFLECT-3  | must     | Reflect detects at minimum: **missed entities/claims**, **missing/lost connections**, **emergent topics** (by the **agent's judgment** over the working set — no embeddings/preprocessing), **stale derived metadata** (tags/labels/classifications), and **low-traction topics** | test:reflectAgent.test.ts, reflectJob.test.ts | LIFE-8; PRIN-7,22 |
 | REFLECT-4  | must     | **Additive, high-confidence** findings (missed claim, restored link, emergent grouping) are **applied autonomously and audited** | test:reflectJob.test.ts | AUTO-2,3; LIFE-3 |
-| REFLECT-5  | must     | Under the **default "Guarded" posture**, **destructive** findings (retire/merge/consolidate/delete) and **all low-confidence/high-risk** findings **route to the Review queue** — never auto-applied; approved consolidation/merge **reuses Connect's merge machinery** | test:reflectJob.test.ts, jobStage.test.ts | AUTO-1,3,10; SPEC-0018; CONNECT |
+| REFLECT-5  | must     | Under the **default "Guarded" posture**, **destructive** findings (retire/merge/consolidate/delete) and **all low-confidence/high-risk** findings **route to the Review queue** — never auto-applied; approved consolidation/merge **reuses Connect's merge machinery** | test:reflectJob.test.ts, jobStage.test.ts, mergeNodes.test.ts | AUTO-1,3,10; SPEC-0018; CONNECT |
 | REFLECT-6  | must     | A run **may make no changes** — finding nothing actionable is a valid, expected outcome (maintenance, not production) | test:reflectAgent.test.ts, reflectJob.test.ts | PRIN-7 |
-| REFLECT-7  | must     | Reflect writes on `staging`; changes publish via the gate, and retire/consolidate **deletions propagate to `main`** (deletion-aware promotion) | none-yet | STAGING-10; CANON-1,3 |
+| REFLECT-7  | must     | Reflect writes on `staging`; changes publish via the gate, and retire/consolidate **deletions propagate to `main`** (deletion-aware promotion) | test:executeApprovedConsolidation.test.ts, mergeNodes.test.ts | STAGING-10; CANON-1,3 |
 | REFLECT-8  | must     | Every run records its findings + reasoning in the **audit log** (the *why*) and updates the **job journal** (visited areas, cursor, deferrals) for the next run | test:reflectJob.test.ts, jobStage.test.ts | JOBS-7,8; AUTO-8 |
 | REFLECT-9  | must     | Review items Reflect raises are **bounded decisions** (yes/no or small choice sets) with **provenance** to the entities/sources involved, consistent with SPEC-0018 | test:jobStage.test.ts | REVIEW-?; AUTO-10 |
 | REFLECT-10 | should   | A manual **"Ruminate now"** trigger runs one bounded pass on demand (test/inspection affordance) | test:jobScheduler.test.ts | JOBS-11 |
@@ -168,7 +168,17 @@ that finds nothing actionable records an audit event and exits.
   engine's `JobFinding`s — the JobStage runner enforces posture (Guarded: additive-high-conf→auto,
   destructive/low-conf→Review; REFLECT-4/5/12), journals + audits (REFLECT-8), promotes additive
   outputs to `main` (REFLECT-7 additive). Registered `reflect` in `pipeline.ts`'s behavior resolver.
-  Graduated REFLECT-1/2/3/4/5/6/8/9/10/12/13 → `test:`. **Deferred:** REFLECT-7 deletion propagation
-  + consolidation **execution** (answerReview→Connect merge) = slice 2; REFLECT-11 convergence =
-  later. Folded two JOBS follow-ups: JobStage `onExhausted` now bounded-re-advances the set-aside
-  (mirrors #47's hardened Connect path). Full suite 351 green.
+  Graduated REFLECT-1/2/3/4/5/6/8/9/10/12/13 → `test:`. Folded two JOBS follow-ups: JobStage
+  `onExhausted` now bounded-re-advances the set-aside (mirrors #47's hardened Connect path).
+- **Slice 2 (consolidation execution, REFLECT-5/7):** extracted the entity-merge core to
+  `mergeNodes.ts` — ONE impl now shared by Connect's `connectOne` (resolve-time merge) and Reflect's
+  approved consolidation (DRY; "reuses Connect's merge machinery"). `executeApprovedConsolidation.ts`
+  runs a merge ONLY for a Review answered `verdict:'confirm'` whose markerKey is a consolidation plan
+  (canonicalRel + loserRels) — never autonomously (REFLECT-5 safety envelope); advances the canonical
+  under the shared lock via optimistic-advance, audits to `.kb/jobs/<id>/consolidations.jsonl`,
+  idempotent (already-merged → no-op). `pipeline.ts answerActiveReview` dispatches an approved
+  consolidation → execute + `promote`, so the loser deletions mirror to `main` via the deletion-aware
+  gate (REFLECT-7). Graduated REFLECT-7 → `test:`. **Deferred:** REFLECT-11 convergence = later; the
+  thin main-process `answerActiveReview` dispatch glue is covered via the unit-tested core +
+  packaged-app e2e (the `active` singleton isn't unit-harnessed, mirroring the existing review
+  dispatch).

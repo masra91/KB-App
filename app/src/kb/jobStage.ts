@@ -216,7 +216,11 @@ export async function runJobOnce(
             runId,
             item: { kind: 'job', ref: journalRel(job.id) },
             auditRel: journalRel(job.id),
-            markerKey: { jobId: job.id, runId },
+            // A consolidation finding carries its merge plan into the markerKey so an APPROVED
+            // Review can be executed by the dispatch (REFLECT-7); markerKey values are strings.
+            markerKey: finding.review?.consolidation
+              ? { jobId: job.id, runId, kind: 'consolidation', canonicalRel: finding.review.consolidation.canonicalRel, loserRels: finding.review.consolidation.loserRels.join('\n') }
+              : { jobId: job.id, runId },
           },
           subject: {},
           createdAt: now,

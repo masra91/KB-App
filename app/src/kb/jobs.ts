@@ -61,7 +61,10 @@ export interface JobFinding {
   confidence: number; // 0..1
   proposed: Disposition; // the behavior's proposed disposition (honored under `autonomous`)
   writes?: { rel: string; content: string }[]; // additive effects (relative to the worktree root)
-  review?: { question: string; detail?: string }; // raised when the finding routes to Review
+  // raised when the finding routes to Review. A `consolidation` target carries the merge plan an
+  // approved Review executes (SPEC-0024 REFLECT-7) — propagated into the Review's markerKey so the
+  // dispatch can run it via the entity-merge core; absent for non-consolidation reviews.
+  review?: { question: string; detail?: string; consolidation?: { canonicalRel: string; loserRels: string[] } };
 }
 
 /** What a bounded pass returns (JOBS-4/8): what it looked at, what it found, and a cursor for the

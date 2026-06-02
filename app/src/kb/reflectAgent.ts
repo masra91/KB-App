@@ -35,7 +35,9 @@ export interface ReflectFinding {
   kind: 'additive' | 'destructive';
   confidence: number; // 0..1 — agent-judged (no fixed numeric window in v1, REFLECT-3)
   writes?: { rel: string; content: string }[]; // additive effects (missed claim, emergent-topic node, tag refresh)
-  review?: { question: string; detail?: string }; // destructive/low-confidence → Review proposal
+  // destructive/low-confidence → Review proposal. A `consolidation` target names the merge an
+  // approved Review will execute (REFLECT-7): the survivor node + the loser(s) to fold into it.
+  review?: { question: string; detail?: string; consolidation?: { canonicalRel: string; loserRels: string[] } };
 }
 
 export interface ReflectResult {
@@ -129,6 +131,13 @@ export function parseReflectResult(stdout: string): ReflectResult {
       const ro = o.review as Record<string, unknown>;
       if (!isNonEmptyString(ro?.question)) throw new Error(`reflect: findings[${i}].review.question required`);
       finding.review = { question: ro.question, ...(isNonEmptyString(ro.detail) ? { detail: ro.detail } : {}) };
+      if (ro.consolidation !== undefined) {
+        const co = ro.consolidation as Record<string, unknown>;
+        if (!isNonEmptyString(co?.canonicalRel) || !Array.isArray(co?.loserRels) || !co.loserRels.every(isNonEmptyString)) {
+          throw new Error(`reflect: findings[${i}].review.consolidation must be { canonicalRel, loserRels[] }`);
+        }
+        finding.review.consolidation = { canonicalRel: co.canonicalRel, loserRels: co.loserRels as string[] };
+      }
     }
     return finding;
   });
