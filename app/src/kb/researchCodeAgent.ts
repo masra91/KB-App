@@ -10,11 +10,15 @@
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
 import { researcherWorkspace, cloneOrRefresh, gitRead, type CodeGitOptions } from './codeGit';
 import { ghRead as ghReadImpl, isSafeGhRepo, type GhReadOp, type GhReadResult, type GhReadOptions } from './ghRead';
+import { azRead as azReadImpl, isSafeAzTarget, type AzReadOp, type AzReadResult, type AzReadOptions, type AzdoTarget } from './azRead';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 /** The gh read seam — the real executor in prod; injected (fake) in unit tests (the live gh path is
  *  BYOA/network, validated in a gh-authed env, not units). */
 export type GhReadFn = (repo: string, op: GhReadOp, opts?: GhReadOptions) => Promise<GhReadResult>;
+
+/** The az read seam — same shape: real executor in prod, injected (fake) in unit tests. */
+export type AzReadFn = (target: AzdoTarget, op: AzReadOp, opts?: AzReadOptions) => Promise<AzReadResult>;
 
 export interface CodeResearchOptions {
   /** Passed through to the read-only git layer (clone/fetch depth, timeout, maxBuffer). */
@@ -23,6 +27,10 @@ export interface CodeResearchOptions {
   gh?: GhReadOptions;
   /** Inject the gh executor (tests); defaults to the real `ghRead`. */
   ghRead?: GhReadFn;
+  /** Passed through to the read-only az layer (timeout, maxBuffer). */
+  az?: AzReadOptions;
+  /** Inject the az executor (tests); defaults to the real `azRead`. */
+  azRead?: AzReadFn;
   /** Max file/PR citations on a finding (default 10). */
   maxCitations?: number;
   /** Max grep match lines to quote in the note (default 25). */
@@ -44,6 +52,16 @@ export function codePrRepoOf(r: ResearcherConfig): string | null {
   return typeof v === 'string' && isSafeGhRepo(v.trim()) ? v.trim() : null;
 }
 
+/** The configured Azure DevOps PR target for a `code` researcher (`config.azOrg`/`azProject`/`azRepo`),
+ *  or null — CONFIG-pinned (never LLM-supplied; KB-QD 2b gate). Validated by `isSafeAzTarget` (org-host
+ *  allowlist + name guards), so a malformed value is dropped (the researcher just does no Azure reads). */
+export function codeAzTargetOf(r: ResearcherConfig): AzdoTarget | null {
+  const c = r.config;
+  if (!c) return null;
+  const candidate = { org: typeof c.azOrg === 'string' ? c.azOrg.trim() : '', project: typeof c.azProject === 'string' ? c.azProject.trim() : '', repository: typeof c.azRepo === 'string' ? c.azRepo.trim() : '' };
+  return isSafeAzTarget(candidate) ? candidate : null;
+}
+
 /** One PR summary from `gh pr list --json` output. */
 interface PrSummary {
   number: number;
@@ -51,6 +69,58 @@ interface PrSummary {
   url: string;
   state?: string;
   author?: string;
+}
+
+/** One PR summary from `az repos pr list --output json`. Azure JSON has `pullRequestId`+`title`+
+ *  `status`; the web URL is constructed from the target + id (see buildAzPrNote). */
+interface AzPrSummary {
+  id: number;
+  title: string;
+  status?: string;
+}
+
+/** Parse `az repos pr list --output json` stdout into typed summaries, tolerating shape drift. */
+export function parseAzPrList(stdout: string): AzPrSummary[] {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(stdout);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: AzPrSummary[] = [];
+  for (const p of raw) {
+    if (p && typeof p === 'object') {
+      const o = p as Record<string, unknown>;
+      if (typeof o.pullRequestId === 'number') {
+        out.push({ id: o.pullRequestId, title: typeof o.title === 'string' ? o.title : '', status: typeof o.status === 'string' ? o.status : undefined });
+      }
+    }
+  }
+  return out;
+}
+
+/** Does an Azure PR's title mention the (lowercased) term? Title-only, request-only (D6a). */
+export function azPrMatchesTerm(pr: AzPrSummary, term: string): boolean {
+  return pr.title.toLowerCase().includes(term.toLowerCase());
+}
+
+/** The deterministic web URL for an Azure DevOps PR (the citation) — built from the CONFIG target +
+ *  id, so the citation can't be agent-fabricated. `<org>/<project>/_git/<repo>/pullrequest/<id>`. */
+function azPrUrl(target: AzdoTarget, id: number): string {
+  return `${target.org.replace(/\/+$/, '')}/${encodeURIComponent(target.project)}/_git/${encodeURIComponent(target.repository)}/pullrequest/${id}`;
+}
+
+/** Build the Azure-PR findings-note from REAL az data (titles + ids), citing constructed PR URLs. */
+export function buildAzPrNote(target: AzdoTarget, term: string, prs: readonly AzPrSummary[]): string {
+  return [
+    `# Code research (Azure DevOps PRs): ${term}`,
+    '',
+    `_Read-only Azure DevOps PR scan of \`${target.project}/${target.repository}\` for "${term}" (BYOA az)._`,
+    '',
+    `Matching PR(s):`,
+    ...prs.map((p) => `- !${p.id} ${p.title}${p.status ? ` (${p.status})` : ''} — ${azPrUrl(target, p.id)}`),
+  ].join('\n');
 }
 
 /** Parse `gh pr list --json …` stdout (a JSON array) into typed summaries, tolerating shape drift. */
@@ -178,11 +248,29 @@ async function prReadPart(prRepo: string, term: string, opts: CodeResearchOption
   }
 }
 
+/** Remote Azure DevOps PR read pass (Slice 2b): list PRs on the CONFIG-pinned target via the az layer,
+ *  keep title-matches, cite constructed PR URLs. az-unavailable (BYOA) / no match → null (graceful). */
+async function azReadPart(target: AzdoTarget, term: string, opts: CodeResearchOptions, maxCitations: number): Promise<FindingPart | null> {
+  const az = opts.azRead ?? azReadImpl;
+  try {
+    const res = await az(target, { kind: 'prList', status: 'all', top: 30 }, opts.az);
+    if (!res.ok) return null; // az-unavailable → skip gracefully (BYOA)
+    const matched = parseAzPrList(res.stdout)
+      .filter((p) => azPrMatchesTerm(p, term))
+      .slice(0, maxCitations);
+    if (matched.length === 0) return null;
+    return { note: buildAzPrNote(target, term, matched), citations: matched.map((p) => azPrUrl(target, p.id)) };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Build the Code `ResearchFn` (RESEARCH-16). Asserts `local-only` (defense-in-depth). Combines up to
- * two read sources — both gated to CONFIG-pinned targets, reached ONLY through the read-only layers:
+ * three read sources — ALL gated to CONFIG-pinned targets, reached ONLY through the read-only layers:
  *   - local repo (`config.repoPath`) → grep + log via codeGit (Slice 2a);
- *   - GitHub PRs (`config.prRepo`) → pr list via ghRead (Slice 2b; BYOA, graceful-degrade).
+ *   - GitHub PRs (`config.prRepo`) → pr list via ghRead (Slice 2b; BYOA, graceful-degrade);
+ *   - Azure DevOps PRs (`config.azOrg`/`azProject`/`azRepo`) → pr list via azRead (Slice 2b; BYOA).
  * Citations are REAL repo files / PR URLs. Missing config / no match / read error → graceful
  * no-finding; it NEVER fabricates. Findings re-enter marked externally-sourced via runResearcher.
  */
@@ -204,6 +292,11 @@ export function makeCodeResearchFn(root: string, opts: CodeResearchOptions = {})
     if (prRepo) {
       const pr = await prReadPart(prRepo, term, opts, maxCitations);
       if (pr) parts.push(pr);
+    }
+    const azTarget = codeAzTargetOf(r);
+    if (azTarget) {
+      const az = await azReadPart(azTarget, term, opts, maxCitations);
+      if (az) parts.push(az);
     }
 
     if (parts.length === 0) return { found: false, note: '', citations: [], query };
