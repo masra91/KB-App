@@ -38,6 +38,22 @@ export const WEB_FETCH_TOOL_NAME = 'fetch';
 export const WEB_SEARCH_TOOL_NAME = 'web_search';
 
 /**
+ * HARD retrieval-budget enforcement (RESEARCH-11; mirrors recall #113). The live session counts `fetch`
+ * tool calls and, once `maxToolCalls` are used, REFUSES further fetches and tells the agent to submit
+ * now. Diagnosed cause of the #51 `found:false`-despite-fetches: with the budget only ADVISORY (prompt
+ * text), the agent over-fetched (11/18 vs 8), wandered, and never converged to `submitFindings`; the
+ * one in-budget run found a finding. Enforcing the cap both bounds egress AND forces convergence.
+ */
+export function budgetExhausted(usedFetches: number, maxToolCalls: number): boolean {
+  return usedFetches >= maxToolCalls;
+}
+/** The message returned to the agent in place of a fetch once the budget is spent — instructs it to
+ *  stop fetching and submit, so the loop converges instead of wandering. */
+export function budgetExhaustedMessage(maxToolCalls: number): string {
+  return `Retrieval budget exhausted (${maxToolCalls} fetches used). Do not fetch any more — call submitFindings now with the citations you already have.`;
+}
+
+/**
  * The Web research SKILL (RESEARCH-12) — injected as the SDK session system message. It frames
  * fetched content as DATA and forbids following instructions embedded in pages (prompt-injection
  * defense), constrains the agent to report + cite, and reminds it of the request-only scope.
@@ -217,6 +233,7 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     const gatedFetch = makeGatedFetch({ allowedDomains });
     let submitted: { note: string; citations: string[] } | null = null;
+    let usedFetches = 0; // RESEARCH-11 hard budget — count fetch tool calls, refuse past maxToolCalls
 
     // Hold ONE process-global copilot slot for the whole session (ORCH-23): researchers are background +
     // fan-out-capable, the multiplicative-concurrency vector the semaphore guards. Released in finally.
@@ -231,6 +248,10 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
           overridesBuiltInTool: true, // our gated fetch IS the agent's fetch
           handler: async (args: unknown) => {
             const url = String((args as { url?: unknown }).url ?? '');
+            // RESEARCH-11 hard cap: once the budget is spent, refuse + steer to submitFindings (so the
+            // agent converges instead of wandering — the #51 found:false cause). Counts every call.
+            if (budgetExhausted(usedFetches, maxToolCalls)) return { error: budgetExhaustedMessage(maxToolCalls), url };
+            usedFetches++;
             try {
               const res = await gatedFetch(url); // isAllowedUrl + SSRF-Agent; throws on a blocked/SSRF URL
               return { url: res.url, status: res.status, text: res.text, truncated: res.truncated };

@@ -3,7 +3,7 @@
 // recallAgent; here we prove the egress gate, citation filtering, tier guard, and untrusted-content
 // skill framing.
 import { describe, it, expect } from 'vitest';
-import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL } from './researchWebAgent';
+import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL, budgetExhausted, budgetExhaustedMessage } from './researchWebAgent';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 const web = (over: Partial<ResearcherConfig> = {}): ResearcherConfig => ({
@@ -91,6 +91,23 @@ describe('WEB_RESEARCH_SKILL — untrusted-content posture (RESEARCH-12)', () =>
   it('pins findings capture to the submitFindings tool call — not a free reply (1d findings-capture fix)', () => {
     expect(WEB_RESEARCH_SKILL).toMatch(/calling the submitFindings tool/i);
     expect(WEB_RESEARCH_SKILL).toMatch(/only way your findings are recorded/i);
+  });
+});
+
+describe('retrieval budget — HARD enforcement (RESEARCH-11; #51 found:false root cause)', () => {
+  it('budgetExhausted gates exactly maxToolCalls fetches (the (max+1)th is refused)', () => {
+    // used 0..7 (< 8) proceed; used 8 (== budget) is exhausted → refuse the 9th call.
+    expect(budgetExhausted(0, 8)).toBe(false);
+    expect(budgetExhausted(7, 8)).toBe(false);
+    expect(budgetExhausted(8, 8)).toBe(true);
+    expect(budgetExhausted(18, 8)).toBe(true); // the over-fetch DEV-2 observed would now be refused
+  });
+  it('budgetExhaustedMessage steers the agent to stop fetching + submit (forces convergence)', () => {
+    const msg = budgetExhaustedMessage(8);
+    expect(msg).toMatch(/budget exhausted/i);
+    expect(msg).toContain('8');
+    expect(msg).toMatch(/call submitFindings now/i);
+    expect(msg).toMatch(/do not fetch any more/i);
   });
 });
 
