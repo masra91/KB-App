@@ -82,6 +82,9 @@ a larger budget than a stage) equipped with:
 | ASK-10  | should   | Recall honors **scope/sensitivity + surfacing** — answers respect the surfacing policy and scope partitions | none-yet | SCOPE-11; SCOPE-1 |
 | ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | test:app/src/kb/recall.test.ts | AUTO-8; LIFE-9 |
 | ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | test:app/src/kb/recallAgent.test.ts | ORCH-21,22; ENG-7 |
+| ASK-13  | should   | Answers use **Wikipedia-style inline numbered citations** (`[1] [2]…`) + a References list; the agent is prompted/skilled to **cite the specific KB source/entity** each claim grounds on, by number | none-yet | ASK-7; VISION-9 |
+| ASK-14  | should   | Citations are **dual-rendered** from one canonical target (the source/entity path): in the **Ask panel** each is a clickable link via the **Obsidian URI** (`obsidian://open?path=…`, opened with `shell.openExternal`) that jumps to the page in Obsidian; in a **saved Output** they are rewritten to native **`[[wikilinks]]`** so they work inside the vault | none-yet | ASK-6; VAULT-12,13 |
+| ASK-15  | should   | The Ask panel **renders markdown** (so citations/emphasis/lists display, not raw `**`) via a lightweight pinned renderer | none-yet | SHELL; ENG-2,4 |
 
 ## 4a. Design decisions (slice 1 — greenlit by KB-PM 2026-06-02)
 
