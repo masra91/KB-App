@@ -44,6 +44,7 @@ import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
+import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
 
 /**
  * The branch Connect's worktree is based on and fast-forwards into.
@@ -386,24 +387,51 @@ export interface ConnectOneResult {
 }
 
 /**
- * Resolve ONE candidate set. MUST be called serialized via the shared canonical-writer lock
- * so the base branch does not move mid-cycle (the final ff-advance must always apply).
+ * Resolve ONE candidate set under optimistic concurrency (SPEC-0014 ORCH-17/18/19). Cognition +
+ * the node/candidate/audit writes happen OFF the lock, synced to the canonical checkpoint; only the
+ * ff-advance runs under `lock`. As the SOLE writer of `entities/` (and an editor of nodes Claims
+ * also touches), Connect can same-path-collide — the advance then re-syncs and retries the whole
+ * block against the fresh canonical, bounded → set aside (ORCH-19). Uses an inline bounded retry
+ * (recursion via `collisionAttempt`) rather than the shared `withOptimisticAdvance` wrapper because
+ * the resolve body is large; the semantics are identical. `lock` defaults to a private mutex so a
+ * standalone call (tests) still serializes its own advance; the stage passes the shared lock.
  */
 export async function connectOne(
   root: string,
   key: string,
   decider: ConnectDecider,
+  lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
+  collisionAttempt = 0,
 ): Promise<ConnectOneResult> {
   root = path.resolve(root);
-  const { wt, base } = await ensureWorktree(root);
+  const checkpoint = await canonicalHead(root); // the canonical commit this block prepares off
+  const { wt } = await ensureWorktree(root);
   const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
-  await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
+  await wtGit.raw('reset', '--hard', checkpoint); // sync to the canonical checkpoint (OFF the lock)
   await wtGit.raw('clean', '-fd', 'candidates', 'entities'); // drop stray files from a prior aborted run
 
   const runId = ulid();
+
+  // Advance the prepared work-branch commit onto the canonical UNDER the lock (ORCH-18): ff when the
+  // canonical is unchanged, cherry-pick replay when it moved with disjoint paths. On a same-path
+  // collision, re-sync + retry the whole block (recursion) up to K, then set aside (ORCH-19).
+  const advance = async (onSuccess: ConnectOneResult): Promise<ConnectOneResult> => {
+    const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint));
+    if (outcome === 'advanced') return onSuccess;
+    if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
+      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1);
+    }
+    const cp = await canonicalHead(root);
+    await wtGit.raw('reset', '--hard', cp);
+    await wtGit.raw('clean', '-fd', 'candidates', 'entities');
+    await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
+    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp));
+    return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+  };
 
   // Re-derive the set INSIDE the worktree (authoritative view at this commit).
   const allCandidates = await readCandidates(wt);
@@ -438,8 +466,7 @@ export async function connectOne(
         await appendAudit(wt, audit);
         await wtGit.raw('add', '-A');
         await wtGit.commit(`connect: set aside ${key} (review cascade cap)`);
-        await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-        return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+        return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true });
       }
       const createdAt = new Date().toISOString();
       const reviewIds: string[] = [];
@@ -462,8 +489,7 @@ export async function connectOne(
       await appendAudit(wt, audit);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`connect: parked ${key} for review (${reviewIds.length})`);
-      await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-      return { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false, parked: true };
+      return advance({ blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false, parked: true });
     }
 
     const now = new Date().toISOString();
@@ -582,13 +608,12 @@ export async function connectOne(
 
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: ${key} → ${nodeRels.length} node(s)${deletedNodeRels.length ? `, merged ${deletedNodeRels.length}` : ''}`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
-    return { blockKey: key, ok: true, nodeRels, deletedNodeRels, setAside: false };
+    return advance({ blockKey: key, ok: true, nodeRels, deletedNodeRels, setAside: false });
   } catch (err) {
     // CONNECT-14 / ORCH-12: never lose candidates. Discard partial worktree writes, record the
     // failed attempt durably; set aside after K so a poison block can't head-of-line-block.
     try {
-      await wtGit.raw('reset', '--hard', base);
+      await wtGit.raw('reset', '--hard', checkpoint);
       await wtGit.raw('clean', '-fd');
     } catch {
       /* best-effort cleanup; the failed/setaside commit below is what matters */
@@ -601,8 +626,7 @@ export async function connectOne(
     await appendAudit(wt, audit);
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: failed ${key} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-    return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside };
+    return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside });
   }
 }
 
@@ -781,7 +805,9 @@ export class ConnectStage {
     while (queue.length > 0) {
       const key = queue[0].blockKey;
       try {
-        await this.lock.run(() => connectOne(this.root, key, this.decider, this.maxAttempts));
+        // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
+        // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
+        await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts);
         worked = true;
       } catch {
         return; // unexpected — stop this pass; a later poke/sweep retries rather than spinning
