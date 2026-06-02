@@ -41,6 +41,7 @@ and a unique `key` here.
 | SPEC-0026 | ASK     | Ask & Recall (grounded NL query v1)         | feature | draft | `features/` |
 | SPEC-0027 | PANEL   | Control Panel (manage agents, sources & jobs) | feature | draft | `features/` |
 | SPEC-0028 | RESEARCH | Researchers (Enrich & Research)            | feature | draft | `features/` |
+| SPEC-0029 | AUDIT   | Audit & Activity (lineage + read-only views) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -61,7 +62,7 @@ assigned at creation time.
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
 | ~~REFLECT~~ | _written → SPEC-0024 (key REFLECT)_ | feature | Reflect | Reflect & Rumination — runs on the Autonomous Jobs engine (SPEC-0023, key JOBS) |
-| AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
+| ~~AUDIT~~  | _written → SPEC-0029 (key AUDIT)_ | feature | Audit     | canonical audit model + coverage mandate + read-only Activity/Lineage views |
 | ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
 | ~~PANEL~~  | _written → SPEC-0027 (key PANEL)_ | feature | _x-cut_  | Manage section: Jobs/Agents/Sources/Settings views |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |

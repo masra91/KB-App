@@ -40,6 +40,7 @@ heading:
 ```
 [ Capture ]   ← default, sacred (SHELL-4)
 [ Reviews ]   ← the "needs you" queue (SPEC-0018), its own view
+[ Activity ]  ← read-only audit/lineage views (SPEC-0029), its own view
 ── Manage ──
 [ Jobs ]  [ Agents ]  [ Researchers ]  [ Sources ]  [ Settings ]
 ```
