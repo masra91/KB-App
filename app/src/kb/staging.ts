@@ -60,10 +60,12 @@ export async function promote(root: string, paths: readonly string[] = EVERGREEN
   const git = simpleGit(root);
   await ensureGitIdentity(git);
   for (const p of paths) {
-    // Drop main's current tracked copy of P (worktree + index). `--ignore-unmatch` makes a
-    // never-yet-promoted path a no-op rather than an error — so an absent `entities/`/`claims/`
-    // doesn't crash promotion (and lets the path stay absent if staging has none).
-    await git.raw('rm', '-r', '-f', '--ignore-unmatch', '--quiet', '--', p).catch(() => {});
+    // Drop main's current tracked copy of P (worktree + index) so removals mirror. `--ignore-unmatch`
+    // makes a never-yet-promoted (absent) path exit 0 — the expected no-op case — so we do NOT
+    // swallow errors here: an UNEXPECTED `git rm` failure must surface, because silently eating it
+    // could skip a deletion and leave a stale duplicate on `main` (the sole evergreen writer must
+    // not fail quietly). Consistent with the uncaught checkout/status/commit calls below.
+    await git.raw('rm', '-r', '-f', '--ignore-unmatch', '--quiet', '--', p);
     try {
       await git.raw('checkout', STAGING_BRANCH, '--', p); // restore staging's P (index + worktree)
     } catch {
