@@ -44,6 +44,8 @@ and a unique `key` here.
 | SPEC-0029 | AUDIT   | Audit & Activity (lineage + read-only views) | feature | draft | `features/` |
 | SPEC-0030 | OBS     | Pipeline Status & Diagnostics (status view + dev logs) | feature | draft | `features/` |
 | SPEC-0031 | VAULT   | Obsidian Vault Representation (the human view) | feature | draft | `features/` |
+| SPEC-0032 | VIZ     | Pipeline Visualization & Live Tracker         | feature | draft | `features/` |
+| SPEC-0033 | DESIGN  | Visual Design Language & Process              | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
