@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
-import { makeCodeResearchFn, codeRepoSourceOf, codePrRepoOf, parsePrList, prMatchesTerm, buildPrNote, type GhReadFn } from './researchCodeAgent';
+import { makeCodeResearchFn, codeRepoSourceOf, codePrRepoOf, parsePrList, prMatchesTerm, buildPrNote, codeAzTargetOf, parseAzPrList, azPrMatchesTerm, buildAzPrNote, type GhReadFn, type AzReadFn } from './researchCodeAgent';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 function gitInstalledSync(): boolean {
@@ -115,6 +115,61 @@ describe('makeCodeResearchFn — PR reads via injected gh (Slice 2b; config-pinn
       return prList(repo, op);
     };
     await makeCodeResearchFn('/vault', { ghRead: gh })(code({ egressTier: 'public-web', config: { prRepo: 'o/r' } }), req('Atlas'));
+    expect(called).toBe(false);
+  });
+});
+
+describe('codeAzTargetOf + az PR pure helpers (Slice 2b Azure)', () => {
+  it('codeAzTargetOf reads the CONFIG-pinned az target; rejects bad org/missing parts → null', () => {
+    expect(codeAzTargetOf(code({ config: { azOrg: 'https://dev.azure.com/contoso', azProject: 'P', azRepo: 'r' } }))).toEqual({ org: 'https://dev.azure.com/contoso', project: 'P', repository: 'r' });
+    expect(codeAzTargetOf(code({ config: { azOrg: 'https://evil.com/x', azProject: 'P', azRepo: 'r' } }))).toBeNull();
+    expect(codeAzTargetOf(code({ config: { azOrg: 'https://dev.azure.com/contoso', azProject: 'P' } }))).toBeNull(); // no repo
+    expect(codeAzTargetOf(code({ config: {} }))).toBeNull();
+  });
+  const listJson = JSON.stringify([
+    { pullRequestId: 12, title: 'Atlas: add flag', status: 'active' },
+    { pullRequestId: 13, title: 'Unrelated', status: 'completed' },
+  ]);
+  it('parseAzPrList + azPrMatchesTerm + buildAzPrNote', () => {
+    const prs = parseAzPrList(listJson);
+    expect(prs).toHaveLength(2);
+    expect(prs[0]).toMatchObject({ id: 12, title: 'Atlas: add flag' });
+    expect(azPrMatchesTerm(prs[0], 'atlas')).toBe(true);
+    expect(azPrMatchesTerm(prs[1], 'atlas')).toBe(false);
+    expect(parseAzPrList('garbage')).toEqual([]);
+    const note = buildAzPrNote({ org: 'https://dev.azure.com/contoso', project: 'P', repository: 'r' }, 'Atlas', prs.slice(0, 1));
+    expect(note).toContain('!12');
+    expect(note).toContain('https://dev.azure.com/contoso/P/_git/r/pullrequest/12'); // constructed URL
+  });
+});
+
+describe('makeCodeResearchFn — Azure PR reads via injected az (Slice 2b; config-pinned, only through azRead)', () => {
+  const azList: AzReadFn = async () => ({ ok: true, stdout: JSON.stringify([{ pullRequestId: 9, title: 'Atlas rollout', status: 'active' }]) });
+  const azCfg = { azOrg: 'https://dev.azure.com/contoso', azProject: 'Proj', azRepo: 'repo' };
+  it('lists the CONFIG-pinned az target → cited finding from constructed PR URLs', async () => {
+    let calledOrg = '';
+    const az: AzReadFn = async (target, op) => {
+      calledOrg = target.org;
+      return azList(target, op);
+    };
+    const res = await makeCodeResearchFn('/vault', { azRead: az })(code({ config: azCfg }), req('Atlas'));
+    expect(calledOrg).toBe('https://dev.azure.com/contoso'); // target from CONFIG
+    expect(res.found).toBe(true);
+    expect(res.citations).toContain('https://dev.azure.com/contoso/Proj/_git/repo/pullrequest/9');
+    expect(res.note).toContain('!9');
+  });
+  it('no title match → no-finding; az-unavailable → graceful no-finding', async () => {
+    expect(await makeCodeResearchFn('/vault', { azRead: azList })(code({ config: azCfg }), req('Nope-Zzz'))).toMatchObject({ found: false });
+    const azUnavail: AzReadFn = async () => ({ ok: false, reason: 'az-unavailable', detail: 'az not installed' });
+    expect(await makeCodeResearchFn('/vault', { azRead: azUnavail })(code({ config: azCfg }), req('Atlas'))).toMatchObject({ found: false });
+  });
+  it('does no az read for a non-local-only tier (defense-in-depth)', async () => {
+    let called = false;
+    const az: AzReadFn = async (target, op) => {
+      called = true;
+      return azList(target, op);
+    };
+    await makeCodeResearchFn('/vault', { azRead: az })(code({ egressTier: 'public-web', config: azCfg }), req('Atlas'));
     expect(called).toBe(false);
   });
 });
