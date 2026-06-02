@@ -87,6 +87,17 @@ export interface WorktreeInfo {
   branch?: string;
 }
 
+/** Cumulative funnel conversion counts (SPEC-0032 VIZ §9 / VIZ-3) — current-state tallies, raw; the
+ *  VIZ frontend computes the between-bucket deltas + dedup/fan-out ratios. Each is a conversion point,
+ *  not 1:1 with the 6 stations. */
+export interface ConversionCounts {
+  captured: number;
+  candidates: number;
+  entities: number;
+  claims: number;
+  promoted: number;
+}
+
 /** The assembled Status view-model (OBS-5/6/7/11/15). */
 export interface PipelineStatusView {
   /** Overall state (OBS-5/11). */
@@ -107,6 +118,8 @@ export interface PipelineStatusView {
   perf: PerfIndex;
   /** Set-aside / poison items with reason (OBS-17) — the actionable recovery list (claims-only v1). */
   setAsideItems: SetAsideView[];
+  /** Cumulative funnel conversion counts (SPEC-0032 VIZ-3). */
+  conversion: ConversionCounts;
   /** When this snapshot was assembled (ISO). */
   builtAt: string;
 }
@@ -146,6 +159,7 @@ export interface AssembleParts {
   worktrees: WorktreeInfo[];
   perf: PerfIndex;
   setAsideItems: SetAsideView[];
+  conversion: ConversionCounts;
   /** Most-recent activity timestamp (ISO) from any source (status, spans, dev log). */
   lastActivity?: string;
 }
@@ -201,6 +215,7 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     worktrees: parts.worktrees,
     perf: parts.perf,
     setAsideItems: parts.setAsideItems,
+    conversion: parts.conversion,
     builtAt,
   };
 }

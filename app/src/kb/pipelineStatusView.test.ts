@@ -18,9 +18,10 @@ const PERF: PerfIndex = {
   whereTimeGoes: { totalMs: 0, copilotMs: 0, otherMs: 0, copilotPct: 0 }, slowest: [],
 };
 const UNHELD: LockState = { held: false, waiters: 0 };
+const ZERO_CONV = { captured: 0, candidates: 0, entities: 0, claims: 0, promoted: 0 };
 
 function parts(over: Partial<AssembleParts> = {}): AssembleParts {
-  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, setAsideItems: [], ...over };
+  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, setAsideItems: [], conversion: ZERO_CONV, ...over };
 }
 const stage = (o: Partial<StageInput> & { stage: string }): StageInput => ({
   queueDepth: 0, setAside: 0, busy: false, hasError: false, ...o,
@@ -91,6 +92,7 @@ describe('assemblePipelineStatus (OBS-5/11)', () => {
         recentErrors: [{ ts: 'T', level: 'error', event: 'decompose.failed', stage: 'decompose', itemId: 'SRC1' }],
         worktrees: [{ path: '/v/.kb/cache/worktrees/staging', branch: 'staging' }],
         setAsideItems: [{ stage: 'claims', itemId: 'E9', reason: 'set aside after 3 attempts' }],
+        conversion: { captured: 10, candidates: 14, entities: 7, claims: 22, promoted: 6 },
       }),
       { now: () => 'BUILT' },
     );
@@ -98,6 +100,7 @@ describe('assemblePipelineStatus (OBS-5/11)', () => {
     expect(v.worktrees[0].branch).toBe('staging');
     expect(v.perf).toBe(PERF);
     expect(v.setAsideItems[0]).toMatchObject({ stage: 'claims', itemId: 'E9' }); // OBS-17 passthrough
+    expect(v.conversion).toEqual({ captured: 10, candidates: 14, entities: 7, claims: 22, promoted: 6 }); // VIZ-3 passthrough
     expect(v.builtAt).toBe('BUILT');
   });
 

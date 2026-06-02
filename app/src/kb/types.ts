@@ -11,11 +11,11 @@ import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView } from './pipelineStatusView';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts } from './pipelineStatusView';
 import type { DevLogLevel } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
-export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView };
+export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts };
 
 export const KB_CONFIG_VERSION = 1;
 
