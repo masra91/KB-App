@@ -10,6 +10,7 @@ import {
   VIEW_CAPTURE,
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
+  VIEW_STATUS,
   VIEW_ASK,
   VIEW_JOBS,
   VIEW_AGENTS,
@@ -22,6 +23,7 @@ import { reviewBadgeText, reviewBadgeAria } from './reviewBadge';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
 import { mountActivity } from './views/activityView';
+import { mountStatus } from './views/statusView';
 import { mountAsk } from './views/askView';
 import { mountJobs } from './views/jobsView';
 import { mountAgents } from './views/agentsView';
@@ -54,6 +56,7 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
     [VIEW_CAPTURE]: (c) => mountCapture(c, vaultPath, name),
     [VIEW_REVIEWS]: mountReviews,
     [VIEW_ACTIVITY]: mountActivity,
+    [VIEW_STATUS]: mountStatus,
     [VIEW_ASK]: mountAsk,
     [VIEW_JOBS]: mountJobs,
     [VIEW_AGENTS]: mountAgents,

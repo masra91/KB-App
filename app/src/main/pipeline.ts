@@ -13,17 +13,19 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { Orchestrator } from '../kb/orchestrator';
+import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
-import { DecomposeStage } from '../kb/decomposeStage';
+import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
-import { ClaimsStage } from '../kb/claimsStage';
+import { ClaimsStage, readClaimsQueue } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
-import { ConnectStage } from '../kb/connectStage';
+import { ConnectStage, readConnectQueue } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
-import { createVaultDevLog } from '../kb/devlog';
+import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
 import { createVaultTracer } from '../kb/tracing';
+import { loadPerfIndex } from '../kb/perfIndex';
+import { assemblePipelineStatus, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
@@ -196,6 +198,95 @@ export function activePipeline(): Orchestrator | null {
  *  promoted to `main`. The read root for the Audit & Activity views (SPEC-0029). Null if no active KB. */
 export function activeStagingRoot(): string | null {
   return active?.stagingWt ?? null;
+}
+
+/** Newest of a set of ISO timestamps (ignoring undefined/unparseable). Undefined if none. */
+function newestTs(candidates: Array<string | undefined>): string | undefined {
+  let best: string | undefined;
+  let bestMs = -Infinity;
+  for (const ts of candidates) {
+    if (!ts) continue;
+    const ms = Date.parse(ts);
+    if (Number.isFinite(ms) && ms > bestMs) {
+      bestMs = ms;
+      best = ts;
+    }
+  }
+  return best;
+}
+
+/** List the live worktrees under `<vault>/.kb/cache/worktrees/` + the branch each is on (OBS-7). */
+async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
+  const root = path.join(vaultPath, '.kb', 'cache', 'worktrees');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: WorktreeInfo[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const wt = path.join(root, e.name);
+    let branch: string | undefined;
+    try {
+      branch = (await simpleGit(wt).revparse(['--abbrev-ref', 'HEAD'])).trim();
+    } catch {
+      /* not a worktree / detached — leave branch undefined */
+    }
+    out.push({ path: path.join('.kb', 'cache', 'worktrees', e.name), ...(branch ? { branch } : {}) });
+  }
+  return out;
+}
+
+/**
+ * Assemble the live Pipeline Status view-model for the active KB (SPEC-0030 OBS-5/6/7/11/15), or
+ * null when no KB is open. Read-only (OBS-9): gathers per-stage queue depths + busy flags, the
+ * canonical-writer lock state, recent dev-log errors, the perf index, and the worktrees, then hands
+ * them to the pure {@link assemblePipelineStatus}. Queues + perf read the `staging` worktree (where
+ * the pipeline operates); the dev log + worktrees read the vault path.
+ */
+export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
+  if (!active) return null;
+  const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
+  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees] = await Promise.all([
+    readQueue(stagingWt),
+    readDecomposeQueue(stagingWt),
+    readConnectQueue(stagingWt),
+    readClaimsQueue(stagingWt),
+    orch.status(),
+    readRecentDevLogEntries(vaultPath, { limit: 25 }),
+    loadPerfIndex(stagingWt),
+    listWorktrees(vaultPath),
+  ]);
+
+  const recentErrors: RecentError[] = recentRaw.map((e) => ({
+    ts: e.ts,
+    level: e.level,
+    event: e.event,
+    ...(typeof e.scope === 'string' ? { stage: e.scope } : {}),
+    ...(typeof e.itemId === 'string' ? { itemId: e.itemId } : {}),
+    ...(typeof e.runId === 'string' ? { runId: e.runId } : {}),
+    ...(e.err?.message ? { message: e.err.message } : {}),
+  }));
+  const setAsideFor = (stage: string): number =>
+    recentErrors.filter((e) => e.stage === stage && e.event.includes('setaside')).length;
+  const hasErrorFor = (stage: string): boolean =>
+    recentErrors.some((e) => e.stage === stage && e.level === 'error');
+
+  const stages: StageInput[] = [
+    { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveStatus.processing ? { currentItem: archiveStatus.processing } : {}) },
+    { stage: 'decompose', queueDepth: decompQ.length, setAside: setAsideFor('decompose'), busy: decompose.busy(), hasError: hasErrorFor('decompose') },
+    { stage: 'connect', queueDepth: connectQ.length, setAside: setAsideFor('connect'), busy: connect.busy(), hasError: hasErrorFor('connect') },
+    { stage: 'claims', queueDepth: claimsQ.length, setAside: setAsideFor('claims'), busy: claims.busy(), hasError: hasErrorFor('claims') },
+  ];
+
+  // Last activity: the newest of the archivist status, the spans-file mtime (any stage's last span),
+  // and the newest dev-log entry — so a quietly-working pipeline isn't mistaken for stalled (OBS-11).
+  const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
+  const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
+
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /** The open "needs you" queue (SPEC-0018) — read from `staging`, where review state lives. */

@@ -890,6 +890,11 @@ export class ConnectStage {
     }
   }
 
+  /** Is this stage actively draining right now? (OBS-5 per-stage `running` state.) */
+  busy(): boolean {
+    return this.draining;
+  }
+
   poke(): Promise<void> {
     this.pending = true;
     if (!this.draining) {

@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
-import { createDevLog, noopDevLog, vaultLogDir, createVaultDevLog, createAppDevLog } from './devlog';
+import { createDevLog, noopDevLog, vaultLogDir, createVaultDevLog, createAppDevLog, readRecentDevLogEntries } from './devlog';
 
 const NOW = (): string => '2026-06-02T00:00:00.000Z';
 
@@ -124,5 +124,47 @@ describe('sink locations (SPEC-0030 OBS-2)', () => {
     await log.flush();
     expect(await pathExists(path.join(dir, 'logs', 'app.log'))).toBe(true);
     expect((await readLines(path.join(dir, 'logs'), 'app.log'))[0]).toMatchObject({ event: 'boot.init-pipeline-failed', level: 'error' });
+  });
+});
+
+describe('readRecentDevLogEntries (SPEC-0030 OBS-6 — recent errors for the Status view)', () => {
+  let vault: string;
+  beforeEach(async () => {
+    vault = await makeTempDir('kb-devlog-read-');
+  });
+  afterEach(async () => {
+    await rmTempDir(vault);
+  });
+
+  it('returns warn+error entries newest-first, filtering out info/debug, capped to limit', async () => {
+    const log = createVaultDevLog(vault, { level: 'debug', now: NOW }).child({ scope: 'decompose' });
+    log.debug('noise');
+    log.info('start', { itemId: 'SRC1' });
+    log.warn('decompose.setaside', { itemId: 'SRC2', reason: 'collision-exhausted' });
+    log.error('decompose.failed', { runId: 'R1', itemId: 'SRC3', err: new Error('copilot exploded') });
+    await log.flush();
+
+    const recent = await readRecentDevLogEntries(vault);
+    expect(recent).toHaveLength(2); // only warn + error (info/debug filtered)
+    expect(recent[0]).toMatchObject({ event: 'decompose.failed', level: 'error', itemId: 'SRC3', runId: 'R1' }); // newest-first
+    expect(recent[0].err?.message).toBe('copilot exploded'); // cause carried (OBS-3 cross-link)
+    expect(recent[0].scope).toBe('decompose');
+    expect(recent[1]).toMatchObject({ event: 'decompose.setaside', level: 'warn', itemId: 'SRC2' });
+  });
+
+  it('honors minLevel and limit', async () => {
+    const log = createVaultDevLog(vault, { level: 'debug', now: NOW });
+    log.warn('w1');
+    log.error('e1');
+    log.error('e2');
+    await log.flush();
+
+    expect(await readRecentDevLogEntries(vault, { minLevel: 'error' })).toHaveLength(2); // warns excluded
+    expect(await readRecentDevLogEntries(vault, { limit: 1 })).toHaveLength(1); // newest only
+    expect((await readRecentDevLogEntries(vault, { limit: 1 }))[0].event).toBe('e2');
+  });
+
+  it('a missing log yields an empty list (never throws)', async () => {
+    await expect(readRecentDevLogEntries(vault)).resolves.toEqual([]);
   });
 });
