@@ -3,14 +3,47 @@
 // Thin glue over the pure navModel (SHELL-6): it renders a persistent left rail and
 // a single content region, mounts each view lazily once, and switches by toggling
 // visibility (which is what lets in-progress capture text survive a switch — SHELL-8).
-import { createNavModel } from './navModel';
-import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_REVIEWS, VIEW_ASK, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
+import { createNavModel, type NavView } from './navModel';
+import {
+  NAV_VIEWS,
+  DEFAULT_VIEW_ID,
+  VIEW_CAPTURE,
+  VIEW_REVIEWS,
+  VIEW_ASK,
+  VIEW_PLACEHOLDER,
+  VIEW_JOBS,
+  VIEW_AGENTS,
+  VIEW_RESEARCHERS,
+  VIEW_SOURCES,
+  VIEW_SETTINGS,
+} from './views';
 import { esc } from './html';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
 import { mountAsk } from './views/askView';
 import { mountPlaceholder } from './views/placeholderView';
+import { mountJobs } from './views/jobsView';
+import { mountAgents } from './views/agentsView';
+import { mountResearchers } from './views/researchersView';
+import { mountSources } from './views/sourcesView';
 import { mountSettings } from './views/settingsView';
+
+/** Build the rail's inner HTML: a section heading before each new `group`, then one button per view. */
+function railHtml(views: readonly NavView[]): string {
+  let lastGroup: string | undefined;
+  let html = '';
+  for (const v of views) {
+    if (v.group && v.group !== lastGroup) {
+      html += `<div class="nav-group" role="presentation">${esc(v.group)}</div>`;
+    }
+    lastGroup = v.group;
+    html +=
+      `<button type="button" class="nav-item" data-view="${esc(v.id)}">` +
+      `<span class="nav-icon" aria-hidden="true">${esc(v.icon ?? '')}</span>` +
+      `<span class="nav-label">${esc(v.label)}</span></button>`;
+  }
+  return html;
+}
 
 /** Mount a view's content into its (freshly created) container. */
 type MountFn = (container: HTMLElement) => void | Promise<void>;
@@ -21,6 +54,10 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
     [VIEW_REVIEWS]: mountReviews,
     [VIEW_ASK]: mountAsk,
     [VIEW_PLACEHOLDER]: mountPlaceholder,
+    [VIEW_JOBS]: mountJobs,
+    [VIEW_AGENTS]: mountAgents,
+    [VIEW_RESEARCHERS]: mountResearchers,
+    [VIEW_SOURCES]: mountSources,
     [VIEW_SETTINGS]: mountSettings,
   };
 
@@ -30,12 +67,7 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
   root.innerHTML = `
     <div class="shell">
       <nav class="sidebar" aria-label="Primary">
-        ${NAV_VIEWS.map(
-          (v) =>
-            `<button type="button" class="nav-item" data-view="${esc(v.id)}">` +
-            `<span class="nav-icon" aria-hidden="true">${esc(v.icon ?? '')}</span>` +
-            `<span class="nav-label">${esc(v.label)}</span></button>`,
-        ).join('')}
+        ${railHtml(NAV_VIEWS)}
       </nav>
       <main class="content" id="viewHost"></main>
     </div>`;

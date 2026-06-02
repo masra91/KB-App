@@ -12,6 +12,12 @@ export interface NavView {
   label: string;
   /** Optional leading glyph for the rail. */
   icon?: string;
+  /**
+   * Optional section heading the view sits under in the rail (e.g. "Manage" — SPEC-0027 PANEL-1).
+   * Views with the same `group` render together under one heading; ungrouped views render at the
+   * top level. Purely presentational — the selection model ignores it (SHELL-2/6 are unaffected).
+   */
+  group?: string;
 }
 
 export interface NavModel {
