@@ -21,6 +21,7 @@ import { makeClaimsDecider } from '../kb/claimsAgent';
 import { ConnectStage } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
+import { createVaultDevLog } from '../kb/devlog';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
@@ -102,7 +103,17 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   if (active?.vaultPath === vaultPath) return active.orch;
   if (active) stopAllStages(active);
 
-  const stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
+  // OBS-1/2: per-vault diagnostic dev-log (<vault>/.kb/cache/logs/, gitignored, never promoted).
+  // Passed to every stage so failures land here with their cause (OBS-3/4); also captures the
+  // worktree-provision failure below — the silent-stall cause that motivated SPEC-0030.
+  const log = createVaultDevLog(vaultPath);
+  let stagingWt: string;
+  try {
+    stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
+  } catch (err) {
+    log.child({ scope: 'pipeline' }).error('startup.worktree-provision-failed', { itemId: vaultPath, err });
+    throw err; // unchanged behavior — but no longer silent
+  }
   const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
   // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
   // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
@@ -110,7 +121,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const promoteEvergreen = async (): Promise<void> => {
     await promote(vaultPath);
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen);
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, undefined, log);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen
@@ -118,21 +129,29 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // resolved graph. They drain independently; the lock keeps their staging ff-advances from
   // racing. Connect + Claims each carry the promotion gate as their afterDrain so resolved
   // entities and their claims become visible on `main` (the archivist already promotes sources/).
-  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
-  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen);
+  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, undefined, log);
+  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
   // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.)
-  const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, async () => {
-    await promoteEvergreen();
-    void connect.poke();
-  });
+  const claims = new ClaimsStage(
+    stagingWt,
+    makeClaimsDecider(),
+    lock,
+    undefined,
+    async () => {
+      await promoteEvergreen();
+      void connect.poke();
+    },
+    undefined,
+    log,
+  );
   // The autonomous-job scheduler (SPEC-0023): wakes registered jobs on their named-preset cadence,
   // each a bounded, single-flight pass in its own worktree sharing the canonical-writer lock (a
   // job's ff-advance never races a stage's; ORCH-18) and the promotion gate (evergreen job outputs
   // reach `main`). Jobs run concurrently with the live pipeline (ORCH-17) — never blocking
   // capture/Enrich. Inert until the Principal enables a job in the registry.
-  const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen);
+  const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen, log);
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, lock };
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;

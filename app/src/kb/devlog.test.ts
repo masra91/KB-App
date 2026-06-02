@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
-import { createDevLog, noopDevLog } from './devlog';
+import { createDevLog, noopDevLog, vaultLogDir, createVaultDevLog, createAppDevLog } from './devlog';
 
 const NOW = (): string => '2026-06-02T00:00:00.000Z';
 
@@ -93,5 +93,36 @@ describe('devlog (SPEC-0030 OBS-1/2/3)', () => {
     const log = createDevLog({ dir: path.join(filePath, 'sub'), now: NOW }); // mkdir will fail (ENOTDIR)
     expect(() => log.error('boom', {})).not.toThrow();
     await expect(log.flush()).resolves.toBeUndefined();
+  });
+});
+
+describe('sink locations (SPEC-0030 OBS-2)', () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await makeTempDir('kb-obs2-');
+  });
+  afterEach(async () => {
+    await rmTempDir(dir);
+  });
+
+  it('vaultLogDir is <vault>/.kb/cache/logs (gitignored under .kb/cache, never promoted)', () => {
+    expect(vaultLogDir('/some/vault')).toBe(path.join('/some/vault', '.kb', 'cache', 'logs'));
+  });
+
+  it('createVaultDevLog writes to <vault>/.kb/cache/logs/pipeline.log', async () => {
+    const log = createVaultDevLog(dir, { now: NOW });
+    log.error('x', { itemId: 'S1' });
+    await log.flush();
+    const p = path.join(dir, '.kb', 'cache', 'logs', 'pipeline.log');
+    expect(await pathExists(p)).toBe(true);
+    expect((await readLines(path.join(dir, '.kb', 'cache', 'logs')))[0]).toMatchObject({ event: 'x', itemId: 'S1' });
+  });
+
+  it('createAppDevLog writes to <userData>/logs/app.log (pre-vault/boot errors)', async () => {
+    const log = createAppDevLog(dir, { now: NOW });
+    log.error('boot.init-pipeline-failed', {});
+    await log.flush();
+    expect(await pathExists(path.join(dir, 'logs', 'app.log'))).toBe(true);
+    expect((await readLines(path.join(dir, 'logs'), 'app.log'))[0]).toMatchObject({ event: 'boot.init-pipeline-failed', level: 'error' });
   });
 });
