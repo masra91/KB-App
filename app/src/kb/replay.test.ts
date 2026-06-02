@@ -15,6 +15,7 @@ import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
 import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeStage';
 import { findEntityFiles } from './claimsStage';
+import { readCandidates } from './connectStage';
 import { runFullReplay } from './replay';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
@@ -35,7 +36,8 @@ const decompDecider: DecomposeDecider = async (i) => ({
   agent: { via: 'copilot', model: 'test' },
 });
 
-/** Drive a fresh vault to: one archived source on main+staging, decomposed into one entity on staging. */
+/** Drive a fresh vault to: one archived source on main+staging, decomposed into one candidate on
+ *  staging (post-#28, Decompose emits candidates; entities stay empty until Connect resolves). */
 async function seedDecomposed(root: string): Promise<string> {
   await createKb({ path: root, initGitIfNeeded: true });
   const stagingWt = await ensureStagingWorktree(root);
@@ -51,17 +53,18 @@ async function seedDecomposed(root: string): Promise<string> {
 }
 
 describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, republish main (SPEC-0022)', () => {
-  it('purges derived entities, preserves the Source, epoch-resets it, and re-queues for decompose', async () => {
+  it('purges derived candidates, preserves the Source, epoch-resets it, and re-queues for decompose', async () => {
     const dir = await makeTempDir();
     try {
       const root = path.join(dir, 'vault');
       const stagingWt = await seedDecomposed(root);
       const lock = new Mutex();
 
-      // Precondition: one source + one entity on staging; source queue is now empty (decomposed).
+      // Precondition: one source + one candidate on staging; source queue is now empty (decomposed).
       const srcDirs = await findSourceDirs(stagingWt);
       expect(srcDirs.length).toBe(1);
-      expect((await findEntityFiles(stagingWt)).length).toBe(1);
+      expect((await readCandidates(stagingWt)).length).toBe(1); // Decompose emitted a candidate (#28)
+      expect((await findEntityFiles(stagingWt)).length).toBe(0); // entities empty until Connect (CANON-4/10)
       expect((await readDecomposeQueue(stagingWt)).length).toBe(0); // terminal: decomposed
 
       const sourceDir = srcDirs[0];
@@ -70,9 +73,10 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
 
       const counts = await runFullReplay(root, stagingWt, lock, { replayId: 'TESTEPOCH1' });
 
-      // REPLAY-4: derived entities purged on staging (but the scaffold dir + .gitkeep survive).
-      expect((await findEntityFiles(stagingWt)).length).toBe(0);
-      expect(await pathExists(path.join(stagingWt, 'entities', '.gitkeep'))).toBe(true);
+      // REPLAY-4: derived candidates purged on staging; the scaffold entities/ dir + .gitkeep survive.
+      expect((await readCandidates(stagingWt)).length).toBe(0);
+      expect(await pathExists(path.join(stagingWt, 'candidates'))).toBe(false); // working dir removed
+      expect(await pathExists(path.join(stagingWt, 'entities', '.gitkeep'))).toBe(true); // scaffold kept
       // REPLAY-3: the Source is untouched — source.md identical, audit only GREW (append-only).
       expect(await fs.readFile(path.join(sourceDir, 'source.md'), 'utf8')).toBe(rawBefore);
       const auditAfter = await fs.readFile(path.join(sourceDir, 'audit.jsonl'), 'utf8');
@@ -83,7 +87,7 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
         path.basename(sourceDir),
       ]);
       // REPLAY-11: the replay action was recorded with counts.
-      expect(counts).toEqual({ replayId: 'TESTEPOCH1', sourcesReset: 1, purgedTrees: expect.arrayContaining(['entities']) });
+      expect(counts).toEqual({ replayId: 'TESTEPOCH1', sourcesReset: 1, purgedTrees: expect.arrayContaining(['candidates']) });
       const replayAudit = await fs.readFile(path.join(stagingWt, 'replay', 'audit.jsonl'), 'utf8');
       expect(replayAudit).toContain('"replayId":"TESTEPOCH1"');
       // REPLAY-8: main is evergreen + clean (the gate republished; entities never on main anyway).
@@ -96,7 +100,7 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
     }
   });
 
-  it('re-derives after replay: decomposing the re-queued source yields a fresh entity (REPLAY-9)', async () => {
+  it('re-derives after replay: decomposing the re-queued source yields a fresh candidate (REPLAY-9)', async () => {
     const dir = await makeTempDir();
     try {
       const root = path.join(dir, 'vault');
@@ -107,7 +111,7 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
       const srcRel = (await readDecomposeQueue(stagingWt))[0];
       expect(srcRel).toBeTruthy();
       await decomposeOne(stagingWt, srcRel, decompDecider); // the auto-resume sweep would do exactly this
-      expect((await findEntityFiles(stagingWt)).length).toBe(1); // rebuilt from the preserved Source
+      expect((await readCandidates(stagingWt)).length).toBe(1); // rebuilt from the preserved Source
       expect((await readDecomposeQueue(stagingWt)).length).toBe(0); // terminal again under the new epoch
       expect((await simpleGit(stagingWt).status()).isClean()).toBe(true);
     } finally {
