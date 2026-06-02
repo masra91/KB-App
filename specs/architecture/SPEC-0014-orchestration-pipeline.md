@@ -199,6 +199,17 @@ Three layers; only one has a brain.
 
 ## 6. Changelog
 
+- 2026-06-02 — **perf Phase 2: Connect is now cap-capable (ORCH-20; dogfood #4).** Migrated `connectOne`
+  from a shared persistent worktree to a **fresh ephemeral per-block worktree** (reusing
+  `withEphemeralWorktree`) so the drain can resolve up to `cap` blocks **concurrently** (cap=3 in
+  `pipeline.ts`, all three heavy stages now cap=3). Distinct blockKeys touch disjoint entity paths, so
+  concurrent advances replay onto canonical cleanly — linear history (ORCH-3), CONNECT-3
+  single-resolved-writer + `kind|normalizedName` blocking + `mergeNodes` containment all preserved; the
+  tested advance / collision-retry / set-aside logic is **byte-for-byte unchanged** (only shared→ephemeral
+  worktree). The serial post-drain passes (link-promotion, claim-dedup) keep the shared worktree. Bounded
+  ~1.7× per the Phase-1 measure (copilot is the limiter). New `connectStage` test proves a cap=2
+  concurrent drain: two distinct blocks land, each deduped to one node, queue empty, history linear, tree
+  clean. 750 tests green.
 - 2026-06-02 — **perf Phase 1 MEASURED (durable design fact — do not relitigate).** Live real-copilot A/B
   on the claims drain (same 21 entities, cap=1 vs cap=3): **cap=1 304s (14.5s/entity) → cap=3 177s
   (8.4s/entity) = 1.72× faster**. Crucially the speedup is **sub-linear** even though the semaphore had

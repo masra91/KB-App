@@ -147,11 +147,11 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // concurrently, cutting wall-time on a backlog (claims/decompose dominate it). The process-wide
   // `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across all stages
   // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
-  // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
-  // stays cap=1 until its ephemeral-worktree migration (Phase 2).
+  // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). All three
+  // heavy stages — decompose, connect (Phase 2: ephemeral-worktree migration), claims — run cap=3.
   const STAGE_CAP = 3;
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
-  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer);
+  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, STAGE_CAP, log, tracer);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
   // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.)

@@ -323,6 +323,41 @@ describe.skipIf(!gitAvailable)('connectOne — idempotent / restartable (CONNECT
   });
 });
 
+describe.skipIf(!gitAvailable)('ConnectStage — concurrent drain (cap>1, ORCH-20 Phase 2)', () => {
+  // Resolve each block to ONE node named after its candidates (dedups same-block members).
+  const eachBlockDecider: ConnectDecider = async (set) => ({
+    blockKey: set.blockKey,
+    clusters: [{ canonicalName: set.candidates[0].name, memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
+    agent: { via: 'copilot', model: 'test' },
+  });
+
+  it('cap=2: two distinct blocks resolve CONCURRENTLY → both land, dedup preserved, history linear, tree clean', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Block A (person|steve jobs): two same-block members → must dedup to ONE node.
+      await seedCandidate(root, 'person', 'Steve Jobs', '01S1');
+      await seedCandidate(root, 'person', 'steve  jobs', '01S2'); // same block (normalized)
+      // Block B (organization|apple): a separate block, also a dedup pair — disjoint entity path from A.
+      await seedCandidate(root, 'organization', 'Apple', '01S3');
+      await seedCandidate(root, 'organization', 'apple', '01S4'); // same block (normalized)
+      await commitAll(root, 'seed');
+
+      // cap=2 → both blocks' cognition runs in one concurrent batch (each in its own ephemeral worktree).
+      const stage = new ConnectStage(root, eachBlockDecider, new Mutex(), DEFAULT_MAX_ATTEMPTS, undefined, 2);
+      await stage.poke();
+
+      // CONNECT-1/3: each block deduped to exactly ONE canonical node; both written (single resolved writer).
+      expect((await listEntityFiles(root)).sort()).toEqual(['entities/organization/apple.md', 'entities/person/steve-jobs.md']);
+      // All candidates consumed — the queue is empty (commit-to-dequeue, even under concurrency).
+      expect(await readConnectQueue(root)).toHaveLength(0);
+      // ORCH-3: concurrent advances replay onto canonical with NO merge bubble — history stays linear.
+      expect((await simpleGit(root).raw('rev-list', '--merges', '--count', 'HEAD')).trim()).toBe('0');
+      // Canonical tree clean — no leaked ephemeral worktree state, no half-applied block.
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    });
+  });
+});
+
 describe.skipIf(!gitAvailable)('connectOne — signals route to the audit log only (CONNECT-18)', () => {
   it('writes signals into connect/audit.jsonl, never into the node', async () => {
     await withTempVault(async (root) => {
