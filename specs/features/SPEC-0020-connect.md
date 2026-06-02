@@ -257,7 +257,10 @@ mints no ids, and resolves only *within the set it was given*.
 - **`clusters[]`** (required): each is a set of candidates the agent judges to be **the same
   real thing**, plus the chosen `canonicalName`, an optional `existingNodeId` (fold into that
   node), and a `confidence`. The agent **splits** the loosely-blocked set into one cluster
-  per distinct real thing — so the block over-groups and the agent disambiguates.
+  per distinct real thing — so the block over-groups and the agent disambiguates. A **blank**
+  `existingNodeId`/`mergeExistingNodeIds` entry (`""`/whitespace) is **coerced to absent** — the
+  agent saying "no existing node to fold into" is benign (the cluster is born fresh), not a parse
+  error that should fail the block (#136 robustness; CONNECT-14).
 - **`links[]`** (optional): promotions of `relatesTo` hints — each names a source end (a
   cluster's `canonicalName`) and a target (`to`), an optional `predicate` (link text), and a
   `confidence`. The orchestrator resolves `to` against canonical nodes (§3.7).
@@ -582,6 +585,14 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
 
 ## 9. Changelog
 
+- 2026-06-02 — **#136 robustness:** a **blank** `existingNodeId` (and blank `mergeExistingNodeIds`
+  entries) in the agent verdict — `""`/whitespace, the agent's way of saying "no existing node to
+  fold into" — is now **coerced to absent** in `parseConnectDecision` rather than rejected, so the
+  block resolves (born-fresh) instead of failing+set-aside on every attempt and silently stalling.
+  Genuinely-malformed values (non-string id) still throw → connectOne's existing failed/set-aside
+  path (CONNECT-14/ORCH-12) recovers without wedging. Regression tests: connect.test.ts (parse
+  coercion + still-rejects-non-string) + connectStage.test.ts (a real-parse drain with
+  `existingNodeId:""` resolves, not set-aside).
 - 2026-05-31 — created (draft). Fourth Enrich stage and fourth user of the SPEC-0014 harness;
   the first that reasons across items (blocking + matching). **Sole writer of `entities/`**:
   Decompose emits candidates (amends SPEC-0015), Connect resolves them into canonical,

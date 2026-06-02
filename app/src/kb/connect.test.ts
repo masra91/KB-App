@@ -78,6 +78,37 @@ describe('optional channels (CONNECT-10, 15, 18)', () => {
     expect(d.clusters[0].mergeExistingNodeIds).toEqual(['N2']);
   });
 
+  it('coerces a blank existingNodeId to ABSENT instead of rejecting (#136 — agent "no existing node")', () => {
+    for (const blank of ['', '   ']) {
+      const d = parseConnectDecision(
+        JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], existingNodeId: blank, confidence: 0.9 }] }),
+      );
+      expect(d.clusters[0].existingNodeId).toBeUndefined(); // born fresh, NOT a parse error → no wedge
+    }
+    // a present, non-blank id is trimmed + kept; a non-string is still genuinely malformed → throw
+    const kept = parseConnectDecision(
+      JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], existingNodeId: '  N1  ', confidence: 0.9 }] }),
+    );
+    expect(kept.clusters[0].existingNodeId).toBe('N1');
+    expect(() =>
+      parseConnectDecision(JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], existingNodeId: 123, confidence: 0.9 }] })),
+    ).toThrow(/existingNodeId/);
+  });
+
+  it('drops blank entries from mergeExistingNodeIds (#136), but rejects a non-string element', () => {
+    const d = parseConnectDecision(
+      JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], mergeExistingNodeIds: ['N2', '', '  '], confidence: 0.9 }] }),
+    );
+    expect(d.clusters[0].mergeExistingNodeIds).toEqual(['N2']); // blanks dropped
+    const allBlank = parseConnectDecision(
+      JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], mergeExistingNodeIds: [''], confidence: 0.9 }] }),
+    );
+    expect(allBlank.clusters[0].mergeExistingNodeIds).toBeUndefined(); // all-blank → absent
+    expect(() =>
+      parseConnectDecision(JSON.stringify({ blockKey: 'k', clusters: [{ canonicalName: 'A', memberCandidateIds: ['01A'], mergeExistingNodeIds: ['N2', 5], confidence: 0.9 }] })),
+    ).toThrow(/mergeExistingNodeIds/);
+  });
+
   it('carries reviews (CONNECT-15) and signals (CONNECT-18), drops empty arrays', () => {
     const v = JSON.stringify({
       blockKey: 'k',
