@@ -6,6 +6,7 @@ import {
   assemblePipelineStatus,
   setAsideReason,
   toSetAsideViews,
+  buildInFlightRoster,
   DEFAULT_STALL_MS,
   DEFAULT_ERROR_FRESH_MS,
   type AssembleParts,
@@ -24,7 +25,7 @@ const UNHELD: LockState = { held: false, waiters: 0 };
 const ZERO_CONV = { captured: 0, candidates: 0, entities: 0, claims: 0, promoted: 0 };
 
 function parts(over: Partial<AssembleParts> = {}): AssembleParts {
-  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, setAsideItems: [], conversion: ZERO_CONV, ...over };
+  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, setAsideItems: [], conversion: ZERO_CONV, inFlight: [], ...over };
 }
 const stage = (o: Partial<StageInput> & { stage: string }): StageInput => ({
   queueDepth: 0, setAside: 0, busy: false, hasError: false, ...o,
@@ -188,5 +189,34 @@ describe('set-aside view mapping (OBS-17 / CLAIMS-20)', () => {
 
   it('toSetAsideViews is empty for no items', () => {
     expect(toSetAsideViews([], 'claims')).toEqual([]);
+  });
+});
+
+describe('buildInFlightRoster (SPEC-0032 VIZ-2)', () => {
+  it('marks the draining batch active (busy && index < cap) with sinceTs; queued items are calm', () => {
+    const r = buildInFlightRoster([
+      { stage: 'claims', items: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }], busy: true, cap: 3, since: 'T1' },
+    ]);
+    expect(r.map((x) => x.active ?? false)).toEqual([true, true, true, false]); // first 3 (cap) active
+    expect(r[0]).toEqual({ itemId: 'A', name: 'A', stage: 'claims', active: true, sinceTs: 'T1' });
+    expect(r[3]).toEqual({ itemId: 'D', name: 'D', stage: 'claims' }); // queued: no active, no sinceTs
+  });
+
+  it('an idle stage has no active carriages (busy=false → all queued, no sinceTs)', () => {
+    const r = buildInFlightRoster([{ stage: 'connect', items: [{ id: 'k1' }], busy: false, cap: 1, since: null }]);
+    expect(r[0]).toEqual({ itemId: 'k1', name: 'k1', stage: 'connect' });
+  });
+
+  it('uses a provided name, falls back to the id; omits sinceTs when active but since is null', () => {
+    const r = buildInFlightRoster([{ stage: 'decompose', items: [{ id: 'S1', name: 'Ada bio' }], busy: true, cap: 1, since: null }]);
+    expect(r[0]).toEqual({ itemId: 'S1', name: 'Ada bio', stage: 'decompose', active: true }); // no sinceTs (since null)
+  });
+
+  it('flattens multiple stages in order', () => {
+    const r = buildInFlightRoster([
+      { stage: 'archive', items: [{ id: 'src' }], busy: true, cap: 1, since: 'T0' },
+      { stage: 'claims', items: [{ id: 'e1' }], busy: false, cap: 3, since: null },
+    ]);
+    expect(r.map((x) => x.stage)).toEqual(['archive', 'claims']);
   });
 });

@@ -44,6 +44,7 @@ const STALLED: PipelineStatusView = {
   perf: PERF,
   setAsideItems: [{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }],
   conversion: { captured: 10, candidates: 14, entities: 7, claims: 22, promoted: 6 },
+  inFlight: [{ itemId: 'SRC9', name: 'SRC9', stage: 'decompose', active: true, sinceTs: '2026-06-02T00:02:30.000Z' }],
   builtAt: '2026-06-02T00:03:00.000Z',
 };
 

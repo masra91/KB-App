@@ -6,6 +6,7 @@
 // reports, it never mutates.
 import type { LockState } from './stageLock';
 import type { PerfIndex } from './perfIndex';
+import type { StageId } from './pipelineStages';
 
 /**
  * One set-aside (poison) item as the Status view renders it (OBS-17) — a thin PRESENTATION shape,
@@ -98,6 +99,49 @@ export interface ConversionCounts {
   promoted: number;
 }
 
+/** One in-flight item (SPEC-0032 VIZ-2) — a "carriage" on the Line: a live source/block at its
+ *  current `stage`. `active` marks the one(s) the stage is currently draining (only those ember-
+ *  breathe, VIZ-6); the rest are queued behind. `sinceTs` is the drain-start dwell, precise for
+ *  active carriages, omitted for queued (DEV-4: dwell is only rendered on the active one). */
+export interface InFlightItem {
+  itemId: string;
+  name: string;
+  stage: StageId;
+  sinceTs?: string;
+  active?: boolean;
+}
+
+/** One stage's contribution to the roster: its queue `items` in drain order (head drained first),
+ *  whether it's `busy`, its `cap` (the first `cap` items are the active batch while busy), and the
+ *  active batch's start time (`since`). */
+export interface StageRoster {
+  stage: StageId;
+  items: { id: string; name?: string }[];
+  busy: boolean;
+  cap: number;
+  since: string | null;
+}
+
+/** Build the in-flight carriage roster (SPEC-0032 VIZ-2, pure). Each stage's queue items become
+ *  carriages; `active = busy && index < cap` (the drain processes `queue[0..cap)`), and `sinceTs` is
+ *  the drain start for active carriages only. `name` falls back to the id. */
+export function buildInFlightRoster(stages: StageRoster[]): InFlightItem[] {
+  const out: InFlightItem[] = [];
+  for (const s of stages) {
+    s.items.forEach((it, i) => {
+      const active = s.busy && i < s.cap;
+      out.push({
+        itemId: it.id,
+        name: it.name ?? it.id,
+        stage: s.stage,
+        ...(active ? { active: true } : {}),
+        ...(active && s.since ? { sinceTs: s.since } : {}),
+      });
+    });
+  }
+  return out;
+}
+
 /** The assembled Status view-model (OBS-5/6/7/11/15). */
 export interface PipelineStatusView {
   /** Overall state (OBS-5/11). */
@@ -120,6 +164,8 @@ export interface PipelineStatusView {
   setAsideItems: SetAsideView[];
   /** Cumulative funnel conversion counts (SPEC-0032 VIZ-3). */
   conversion: ConversionCounts;
+  /** In-flight items (carriages) with their current stage (SPEC-0032 VIZ-2). */
+  inFlight: InFlightItem[];
   /** When this snapshot was assembled (ISO). */
   builtAt: string;
 }
@@ -180,6 +226,7 @@ export interface AssembleParts {
   perf: PerfIndex;
   setAsideItems: SetAsideView[];
   conversion: ConversionCounts;
+  inFlight: InFlightItem[];
   /** Most-recent activity timestamp (ISO) from any source (status, spans, dev log). */
   lastActivity?: string;
 }
@@ -241,6 +288,7 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     perf: parts.perf,
     setAsideItems: parts.setAsideItems,
     conversion: parts.conversion,
+    inFlight: parts.inFlight,
     builtAt,
   };
 }
