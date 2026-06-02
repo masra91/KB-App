@@ -222,3 +222,9 @@ behind it substrate-agnostic and unit-testable.
   allowed with a banner, **F6** template — all resolved by KB-PM. Graduated **ASK-6** `none-yet →
   test:` (`outputDoc.test.ts` doc builder; `askView.test.ts` save flow incl. failure + ungrounded).
   ASK-9/10 remain slice 4.
+- 2026-06-02 — **answer panel renders sanitized markdown (#93).** The Ask view previously showed raw
+  markdown (literal `**asterisks**`); it now renders the answer via `marked` (MD→HTML) → **DOMPurify**
+  (mandatory sanitize — the answer is LLM/ingested content; strips `<script>`, event handlers,
+  `javascript:` URLs) before it touches the DOM (E1). Deps pinned exact + ≥7-day-old:
+  `marked@18.0.4`, `dompurify@3.4.5`. The saved Output (ASK-6) stays raw `.md` (Obsidian renders it).
+  `askView.test.ts` covers render + sanitization.

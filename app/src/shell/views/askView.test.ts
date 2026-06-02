@@ -167,3 +167,51 @@ describe('Ask view · save-as-Output (SPEC-0026 ASK-6)', () => {
     expect(saveBtn()).toBeTruthy(); // save offered even when not grounded
   });
 });
+
+describe('Ask view · sanitized markdown rendering (#93)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  const answerWith = (answer: string): AskResult => ({ ...GROUNDED, answer });
+  async function ask(answer: string): Promise<void> {
+    setAsk(vi.fn(async () => answerWith(answer)));
+    mountAsk(root);
+    type(root, 'q');
+    submit(root);
+    await tick();
+  }
+
+  it('renders markdown (no literal `**`/`#` left in the panel)', async () => {
+    await ask('**Ada** was a _pioneer_.');
+    const panel = root.querySelector('.ask-answer')!;
+    expect(panel.querySelector('strong')?.textContent).toBe('Ada');
+    expect(panel.querySelector('em')?.textContent).toBe('pioneer');
+    expect(panel.innerHTML).not.toContain('**'); // raw markers gone
+  });
+
+  it('SANITIZES model output — strips an event-handler attribute (E1), keeps benign content', async () => {
+    await ask('Hello <img src=x onerror="window.__pwned=1"> world');
+    const panel = root.querySelector('.ask-answer')!;
+    expect(panel.querySelector('img')?.getAttribute('onerror') ?? null).toBeNull(); // onerror stripped
+    expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+    expect(panel.textContent).toContain('Hello'); // benign text + the safe <img src> survive
+  });
+
+  it('SANITIZES model output — strips <script> entirely (E1)', async () => {
+    await ask('before <script>window.__pwned=1</script> after');
+    const panel = root.querySelector('.ask-answer')!;
+    expect(panel.querySelector('script')).toBeNull();
+    expect(panel.innerHTML).not.toContain('<script');
+    expect(panel.textContent).toContain('before');
+    expect(panel.textContent).toContain('after');
+  });
+
+  it('keeps a safe markdown link but drops a javascript: URL', async () => {
+    await ask('[ok](https://example.com) and [bad](javascript:alert(1))');
+    const hrefs = Array.from(root.querySelectorAll('.ask-answer a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('https://example.com');
+    expect(hrefs.some((h) => h?.startsWith('javascript:'))).toBe(false);
+  });
+});

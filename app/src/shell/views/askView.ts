@@ -6,8 +6,21 @@
 //
 // Thin DOM over the typed IPC, matching the other views. Markdown/citation rich-rendering (F6) is
 // KB-Lead's slice-3 call — slice 2 renders the answer text + an evidence list.
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
 import { esc } from '../html';
 import type { AskResult, Citation, RecallTurn } from '../../kb/types';
+
+/**
+ * Render the recall answer's markdown to **sanitized** HTML (#93 — the panel previously showed raw
+ * `**markdown**`). The answer is LLM/ingested content, so this ALWAYS sanitizes: `marked` turns the
+ * markdown (incl. any embedded raw HTML) into HTML, then DOMPurify strips anything unsafe (scripts,
+ * event handlers, `javascript:` URLs) before it ever reaches the DOM. Never render model output as
+ * HTML un-sanitized (E1). Synchronous (`async:false`) so it slots into the string-built transcript.
+ */
+function renderMarkdown(md: string): string {
+  return DOMPurify.sanitize(marked.parse(md, { async: false }) as string);
+}
 
 interface Turn {
   question: string;
@@ -122,7 +135,7 @@ function renderAnswer(r: AskResult): string {
   if (!r.grounded) flags.push('⚠ not grounded in the KB');
   if (r.truncated) flags.push('partial — retrieval budget reached');
   const flagHtml = flags.length ? `<div class="ask-flags muted">${flags.map(esc).join(' · ')}</div>` : '';
-  return `<div class="ask-answer">${esc(r.answer)}</div>${renderCitations(r.citations)}${flagHtml}`;
+  return `<div class="ask-answer">${renderMarkdown(r.answer)}</div>${renderCitations(r.citations)}${flagHtml}`;
 }
 
 /** The save-as-Output affordance for a completed turn (ASK-6): a button, or the saved confirmation. */
