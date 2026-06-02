@@ -34,6 +34,13 @@ async function readReviewFile(file: string): Promise<Review | null> {
   }
 }
 
+/** Every review (open + answered), parsed. A stage that RESUMES from an answered review reads this
+ *  to act on the verdict — e.g. Connect's link pass renders a confirmed ambiguous-link Review and
+ *  declines a rejected one (CONNECT-15), keyed by `raisedBy.markerKey`. */
+export async function readAllReviews(root: string): Promise<Review[]> {
+  return allReviews(root);
+}
+
 /** Recursively collect every `review.json` under `reviews/`, repo-relative dir + parsed. */
 async function allReviews(root: string): Promise<Review[]> {
   const out: Review[] = [];

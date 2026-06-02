@@ -10,6 +10,7 @@ import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue } from './connectStage';
+import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
 import type { Candidate, ConnectDecision } from './connect';
 import { Mutex } from './stageLock';
@@ -407,20 +408,77 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
     });
   });
 
-  it('an ambiguous target (two nodes share the name) is NOT linked — note, never guess (CONNECT-13)', async () => {
+  it('an ambiguous target (two nodes share the name) escalates to a yes/no Review — never guessed (CONNECT-15)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
       await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']); // entities/organization/apple.md
-      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']); // entities/fruit/apple.md — same name
+      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']); // entities/fruit/apple.md — same name, distinct entity
       await seedClaimRelatesTo(root, steve.rel, 'Likes Apple.', ['Apple']);
       await commitAll(root, 'seed two same-name nodes');
 
       const res = await linkOne(root, steve.rel);
-      expect(res.links).toBe(0); // ambiguous → not linked
+      expect(res.reviewsRaised).toBe(1); // ambiguous → Review, NOT a silent note (the CONNECT-15 change)
+      expect(res.links).toBe(0);
+      expect(res.unresolved).not.toContain('Apple'); // escalated, not noted
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).not.toContain('[['); // nothing rendered while parked — never a guess
+
+      // A yes/no Review is open, carrying the merge plan (first match) in its markerKey.
+      const open = await findOpenReviews(root);
+      expect(open).toHaveLength(1);
+      expect(open[0].raisedBy.markerKey).toMatchObject({ kind: 'link', nodeRel: steve.rel, hint: 'Apple' });
+      expect(open[0].raisedBy.markerKey.targetRel).toMatch(/entities\/(organization|fruit)\/apple\.md/);
+      expect(open[0].question).toContain('Steve Jobs');
+
+      // Idempotent: a second pass does NOT raise a duplicate (the hint is already asked).
+      const again = await linkOne(root, steve.rel);
+      expect(again.reviewsRaised).toBe(0);
+      expect(again.changed).toBe(false);
+      expect(await findOpenReviews(root)).toHaveLength(1);
+    });
+  });
+
+  it('answering the ambiguous-link Review with CONFIRM renders the proposed [[wikilink]] (CONNECT-15)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']);
+      await seedClaimRelatesTo(root, steve.rel, 'Likes Apple.', ['Apple']);
+      await commitAll(root, 'seed');
+
+      await linkOne(root, steve.rel); // raises the review (parked)
+      const review = (await findOpenReviews(root))[0];
+      const target = review.raisedBy.markerKey.targetRel as string;
+      await answerReview(root, new Mutex(), review.id, { verdict: 'confirm' });
+
+      const res = await linkOne(root, steve.rel); // resume: render the Principal-approved link
+      expect(res.links).toBe(1);
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(LINKS_BLOCK_START);
+      expect(md).toContain(`[[${target}]]`); // exactly the confirmed target — not the other same-name node
+    });
+  });
+
+  it('answering the ambiguous-link Review with REJECT leaves it a note, no link (CONNECT-15)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']);
+      await seedClaimRelatesTo(root, steve.rel, 'Likes Apple.', ['Apple']);
+      await commitAll(root, 'seed');
+
+      await linkOne(root, steve.rel);
+      const review = (await findOpenReviews(root))[0];
+      await answerReview(root, new Mutex(), review.id, { verdict: 'reject' });
+
+      const res = await linkOne(root, steve.rel); // resume: declined → note, never linked
+      expect(res.links).toBe(0);
       expect(res.unresolved).toContain('Apple');
       const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
-      expect(md).not.toContain('[['); // no guessed link to either Apple
+      expect(md).not.toContain('[[');
     });
   });
 });
