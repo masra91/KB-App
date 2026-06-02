@@ -74,7 +74,7 @@ A sidebar view (SPEC-0017), read-only:
 | ID     | Priority | Statement (short)                                                                   | Verify   | Traces |
 | ------ | -------- | ----------------------------------------------------------------------------------- | -------- | ------ |
 | OBS-1  | must     | A **diagnostic dev-log** subsystem — leveled (debug/info/warn/error) — captures exceptions/stack traces, **subprocess stdout+stderr**, git output, worktree lifecycle, lock waits, timings; **separate** from the audit log | test:app/src/kb/devlog.test.ts | ORCH-11; PRIN-5 |
-| OBS-2  | must     | Dev logs live in `<vault>/.kb/cache/logs/` (gitignored, **never promoted**, rotated) **plus** a small **app-level log** in Electron userData for pre-vault/app errors | none-yet | STAGING-6; DATA-9 |
+| OBS-2  | must     | Dev logs live in `<vault>/.kb/cache/logs/` (gitignored, **never promoted**, rotated) **plus** a small **app-level log** in Electron userData for pre-vault/app errors | test:app/src/kb/devlog.test.ts | STAGING-6; DATA-9 |
 | OBS-3  | must     | Dev-log entries **cross-reference** the audit (`runId`/`itemId`) so a structured audit failure links to its verbose diagnostic detail | test:app/src/kb/obsWiring.test.ts | AUDIT-1; ORCH-12 |
 | OBS-4  | must     | Errors are **never silent**: every failure emits a **structured audit** event (set-aside, stage failed + attempt) **and** a dev-log entry with the cause | test:app/src/kb/obsWiring.test.ts | ORCH-12; AUTO-8; AUDIT-2 |
 | OBS-5  | must     | A **Pipeline Status view** shows the **live** pipeline — per-stage state (idle/running/blocked/error), **queue depth**, **current item**, progress/throughput, overall state (running/idle/**stalled**) | none-yet | ORCH-10; SHELL-1,2 |
@@ -157,3 +157,14 @@ A sidebar view (SPEC-0017), read-only:
   sinks (`<vault>/.kb/cache/logs/` + the app-level userData log) in `pipeline.ts`/`main.ts` + the
   boot-wrap of `initPipeline` (sequenced after the link-promotion + Reflect-2 work on `pipeline.ts`).
   The Status **view** (OBS-5/6/7/8/9/11) is a later slice (nav shell; coordinates with DEV-5 Activity).
+- 2026-06-02 — **slice 1c (sinks + boot-wrap)** — **OBS-2 → test:**. The dev-log is now live in
+  production: `pipeline.ts startPipeline` creates a per-vault `createVaultDevLog(<vault>/.kb/cache/logs/)`
+  and threads it into all 5 stage ctors (+ JobScheduler→JobRunner) — so the OBS-3/4 failure logging
+  from slice 1b actually writes. The boot path is wrapped: `startPipeline` logs a
+  `startup.worktree-provision-failed` cause (re-throws unchanged) and `main.ts` wraps the
+  fire-and-forget `void initPipeline()` to an **app-level** `createAppDevLog(<userData>/logs/app.log)`
+  — turning the silent boot stall (the bug that motivated SPEC-0030) into a recorded cause. Sink
+  locations are unit-tested (`devlog.test.ts`); the `pipeline.ts`/`main.ts` instantiation is
+  main-process glue (verified by typecheck + e2e/manual, per the codebase's main-glue coverage stance).
+  **SPEC-0030 slice 1 (the dev-log half: OBS-1/2/3/4) is complete**; the Status **view** (OBS-5–9/11)
+  + latency tracing (OBS-12–16) remain later slices.

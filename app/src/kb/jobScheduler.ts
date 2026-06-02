@@ -8,6 +8,7 @@ import { PRESET_INTERVAL_MS, type JobConfig, type JobBehavior } from './jobs';
 import { readJobRegistry } from './jobRegistry';
 import { JobRunner, readJournal, type JobRunResult } from './jobStage';
 import { Mutex } from './stageLock';
+import { noopDevLog, type DevLog } from './devlog';
 
 /** Resolve a job `type` to its behavior (pluggable). Returns null for an unknown/not-yet-built type
  *  (e.g. `reflect` before SPEC-0024 lands) — such jobs are skipped, not errored. */
@@ -29,6 +30,7 @@ export class JobScheduler {
   private readonly resolve: BehaviorResolver;
   private readonly lock: Mutex;
   private readonly afterRun?: () => Promise<void>;
+  private readonly log: DevLog;
   // Persistent runner per job id so single-flight (JOBS-6) holds ACROSS ticks; refreshed (when idle)
   // if the job's config changed in the registry. `sig` is the config snapshot the runner was built on.
   private readonly runners = new Map<string, { runner: JobRunner; sig: string }>();
@@ -36,11 +38,12 @@ export class JobScheduler {
   private ticking = false;
 
   /** `root` is the staging worktree (where the pipeline operates + the journal lives). */
-  constructor(root: string, resolve: BehaviorResolver, lock: Mutex = new Mutex(), afterRun?: () => Promise<void>) {
+  constructor(root: string, resolve: BehaviorResolver, lock: Mutex = new Mutex(), afterRun?: () => Promise<void>, log: DevLog = noopDevLog) {
     this.root = root;
     this.resolve = resolve;
     this.lock = lock;
     this.afterRun = afterRun;
+    this.log = log;
   }
 
   /** Start the periodic tick (default 1 min; coarse presets mean most ticks are no-ops). */
@@ -98,7 +101,7 @@ export class JobScheduler {
     const sig = JSON.stringify(job);
     const existing = this.runners.get(job.id);
     if (existing && (existing.sig === sig || existing.runner.inFlight)) return existing.runner;
-    const runner = new JobRunner(this.root, job, behavior, this.lock, this.afterRun);
+    const runner = new JobRunner(this.root, job, behavior, this.lock, this.afterRun, this.log);
     this.runners.set(job.id, { runner, sig });
     return runner;
   }

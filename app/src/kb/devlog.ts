@@ -175,6 +175,23 @@ export function createDevLog(opts: DevLogOptions): DevLog {
   return new DevLogImpl(sink, {});
 }
 
+/** The per-vault dev-log directory: `<vault>/.kb/cache/logs/` — gitignored (under `.kb/cache/`),
+ *  never promoted (OBS-2), co-located with the worktrees/state it describes. */
+export function vaultLogDir(vaultPath: string): string {
+  return path.join(vaultPath, '.kb', 'cache', 'logs');
+}
+
+/** A dev-log for one vault's pipeline diagnostics, at `<vault>/.kb/cache/logs/pipeline.log` (OBS-2). */
+export function createVaultDevLog(vaultPath: string, opts: Omit<DevLogOptions, 'dir'> = {}): DevLog {
+  return createDevLog({ ...opts, dir: vaultLogDir(vaultPath) });
+}
+
+/** An app-level dev-log in Electron userData, for errors BEFORE a vault is open — setup /
+ *  worktree-provision failures on boot that would otherwise vanish (OBS-2). */
+export function createAppDevLog(userDataDir: string, opts: Omit<DevLogOptions, 'dir' | 'file'> = {}): DevLog {
+  return createDevLog({ ...opts, dir: path.join(userDataDir, 'logs'), file: 'app.log' });
+}
+
 /** A logger that discards everything — the safe default when no dev-log is wired (tests / standalone stages). */
 export const noopDevLog: DevLog = {
   debug: () => {},

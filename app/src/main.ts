@@ -4,6 +4,7 @@ import started from 'electron-squirrel-startup';
 import { registerIpc, initPipeline } from './main/ipc';
 import { stopPipeline } from './main/pipeline';
 import { ensurePath } from './main/resolvePath';
+import { createAppDevLog } from './kb/devlog';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -40,7 +41,11 @@ app.on('ready', async () => {
     // Best-effort: a PATH-resolution failure must never block startup.
   }
   registerIpc();
-  void initPipeline(); // resume archiving a previously-configured KB on launch
+  // OBS-2/4: resume a previously-configured KB on launch. The app-level dev-log (userData) captures
+  // a boot failure (e.g. worktree provision) that this fire-and-forget would otherwise swallow —
+  // the silent-stall cause that motivated SPEC-0030.
+  const appLog = createAppDevLog(app.getPath('userData'));
+  void initPipeline().catch((err) => appLog.error('boot.init-pipeline-failed', { err }));
   createWindow();
 });
 
