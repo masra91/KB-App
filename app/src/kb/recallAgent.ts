@@ -12,7 +12,7 @@ import type { CopilotClientOptions, SessionConfig, SystemMessageConfig, Tool, To
 import type { RecallClient, RecallSession, RecallSessionConfig, RecallToolDef } from './recall';
 
 /** Version of the recall skill/instruction (for the audit trail; ORCH-16 / SPEC-0014 Q9). */
-export const RECALL_SKILL_VERSION = 'recall/v3-sdk';
+export const RECALL_SKILL_VERSION = 'recall/v4-sdk';
 
 /**
  * The recall SKILL (ASK-4): teaches the agent the KB's structure + how to ground/cite, so it
@@ -44,9 +44,15 @@ export const RECALL_SKILL = [
   'sources as evidence. If the KB does not support something, SAY SO — never present an',
   'unsupported statement as fact. Clearly distinguish KB-grounded facts from your own inference.',
   '',
-  'FINISH by calling the submitAnswer tool exactly once, with your markdown answer and the',
-  'citations (kind + repo-relative ref) it rests on. Set grounded:false and cite nothing if the',
-  'KB does not support an answer.',
+  'CITATIONS (Wikipedia-style inline numbers, ASK-13): write the markdown answer with inline',
+  'NUMBERED markers — [1], [2], … — on each grounded assertion, numbered in order of first',
+  'appearance. Provide the `citations` array in that SAME order: citation [1] is citations[0], [2]',
+  'is citations[1], and so on; a target you cite again REUSES its number. Do NOT write a',
+  '"References" list yourself — the app renders it from `citations`. Just the inline [n] in the prose.',
+  '',
+  'FINISH by calling the submitAnswer tool exactly once, with your markdown answer (carrying the',
+  'inline [n] markers) and the ordered `citations` (kind + repo-relative ref) they rest on. Set',
+  'grounded:false and cite nothing if the KB does not support an answer.',
 ].join('\n');
 
 export interface SdkRecallClientOptions {

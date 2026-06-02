@@ -82,7 +82,7 @@ a larger budget than a stage) equipped with:
 | ASK-10  | should   | Recall honors **scope/sensitivity + surfacing** — answers respect the surfacing policy and scope partitions | none-yet | SCOPE-11; SCOPE-1 |
 | ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | test:app/src/kb/recall.test.ts | AUTO-8; LIFE-9 |
 | ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | test:app/src/kb/recallAgent.test.ts | ORCH-21,22; ENG-7 |
-| ASK-13  | should   | Answers use **Wikipedia-style inline numbered citations** (`[1] [2]…`) + a References list; the agent is prompted/skilled to **cite the specific KB source/entity** each claim grounds on, by number | none-yet | ASK-7; VISION-9 |
+| ASK-13  | should   | Answers use **Wikipedia-style inline numbered citations** (`[1] [2]…`) + a References list; the agent is prompted/skilled to **cite the specific KB source/entity** each claim grounds on, by number | test:app/src/kb/recall.test.ts | ASK-7; VISION-9 |
 | ASK-14  | should   | Citations are **dual-rendered** from one canonical target (the source/entity path): in the **Ask panel** each is a clickable link via the **Obsidian URI** (`obsidian://open?path=…`, opened with `shell.openExternal`) that jumps to the page in Obsidian; in a **saved Output** they are rewritten to native **`[[wikilinks]]`** so they work inside the vault | none-yet | ASK-6; VAULT-12,13 |
 | ASK-15  | should   | The Ask panel **renders markdown** (so citations/emphasis/lists display, not raw `**`) via a lightweight pinned renderer | none-yet | SHELL; ENG-2,4 |
 
@@ -178,6 +178,18 @@ behind it substrate-agnostic and unit-testable.
 
 ## 8. Changelog
 
+- 2026-06-02 — **ASK-13 (inline numbered citations) → test:**. The recall agent now emits
+  **Wikipedia-style inline `[n]` markers** in the markdown answer (skill instruction added), and the
+  engine **guarantees the contract** the dual-render (ASK-14) relies on: `finalizeCitations` verifies
+  each citation resolves on disk (ASK-7), **dedups by `ref`** (a target cited twice = one number,
+  reused), and **renumbers the `[n]` markers densely** so they are 1:1 with the final `citations[]`
+  (`[n]` → `citations[n-1]`, no gaps/dangling) — even after unresolvable citations are dropped. The
+  References list is rendered by the UI from `citations[]` (single source of truth), not hand-written
+  into the answer. Contract locked with DEV-4 (ASK-14). Unit-tested (`recall.test.ts`: dense renumber
+  + dedup + drop-and-renumber + end-to-end through `recall()`; `recallAgent.test.ts`: the skill
+  carries the `[n]` instruction). **Reconciled with #113** on rebase: this skill version
+  `RECALL_SKILL_VERSION` → **`recall/v4-sdk`** carries BOTH #113's retrieval-budget stop-criterion and
+  the inline-`[n]` citation instruction (one combined skill version, not two clashing `v3-sdk`s).
 - 2026-06-02 — **retrieval budget scaled to graph size (F3 refinement; dogfood #5).** `recall()` now
   derives the tool-call cap from the entity-graph size — `recallBudget(nodeCount) = clamp(4, 2 +
   ceil(0.5·nodeCount), 16)`, `nodeCount` = `.md` under `entities/` counted at recall start — instead
