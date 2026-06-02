@@ -29,6 +29,7 @@ const state = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   openExternal: vi.fn(async () => undefined), // ASK-14: shell.openExternal for the obsidian:// deep-link
   startPipeline: vi.fn(async () => undefined),
+  pipelineControl: vi.fn(async () => ({ ok: true, message: 'Retrying Ada Lovelace.' })), // OBS-17
   recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
   // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
   listResearchers: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
@@ -51,6 +52,7 @@ vi.mock('./pipeline', () => ({
   activeStagingRoot: (): string | null => state.stagingRoot,
   listActiveReviews: async (): Promise<unknown[]> => [],
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
+  pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
   listResearchersForActive: mocks.listResearchers,
   setActiveResearcherConfig: mocks.setResearcherConfig,
@@ -80,6 +82,7 @@ beforeEach(async () => {
   state.handlers.clear();
   state.stagingRoot = null;
   mocks.startPipeline.mockClear();
+  mocks.pipelineControl.mockClear();
   mocks.recall.mockClear();
   mocks.openExternal.mockClear();
   delete process.env.KB_ASK_E2E_STUB;
@@ -344,5 +347,13 @@ describe('SPEC-0028 Researchers — Control Panel IPC delegates to the pipeline 
     const runs = await invoke<{ eventType: string }[]>('kb:listResearcherRuns', 'web-1');
     expect(mocks.listResearcherRuns).toHaveBeenCalledWith('web-1');
     expect(runs[0].eventType).toBe('researched');
+  });
+});
+
+describe('SPEC-0030 OBS-17 — kb:pipelineControl delegates set-aside recovery', () => {
+  it('forwards the {action, stage, itemId} request + returns the result', async () => {
+    const res = await invoke<{ ok: boolean; message?: string }>('kb:pipelineControl', { action: 'retry', stage: 'claims', itemId: '01ADAID' });
+    expect(mocks.pipelineControl).toHaveBeenCalledWith({ action: 'retry', stage: 'claims', itemId: '01ADAID' });
+    expect(res).toEqual({ ok: true, message: 'Retrying Ada Lovelace.' });
   });
 });

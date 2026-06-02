@@ -1,7 +1,10 @@
-// Pipeline Status view (SPEC-0030 OBS-5/6/7/8/9/11/15) — the live "what's the pipeline doing, and
-// why is it stuck?" observatory. READ-ONLY (OBS-9): no retries/config here (those live in Reviews /
-// Control Panel) — it reports, never mutates. Complements Activity (SPEC-0029): Activity = what
-// happened; Status = what's happening now + where it broke.
+// Pipeline Status view (SPEC-0030 OBS-5/6/7/8/9/11/15/17) — the live "what's the pipeline doing, and
+// why is it stuck?" observatory. Read-only by default (OBS-9): config/general retries live in
+// Reviews / Control Panel — it reports, never mutates. The ONE sanctioned exception is OBS-17's
+// poison-recovery: a set-aside item carries Retry / Dismiss actions so the Principal can clear a
+// stuck poison-loop in place (delegating to the stage-owned `kb:pipelineControl` primitives — the
+// view itself holds no mutation logic). Complements Activity (SPEC-0029): Activity = what happened;
+// Status = what's happening now + where it broke.
 //
 // Shows (OBS-5/6/7/15): overall state (running/idle/stalled), per-stage flow (state + queue depth +
 // current item + set-aside), the canonical-writer lock holder/waiters, recent errors with
@@ -12,7 +15,7 @@
 // render helpers are pure (data → HTML string) so they unit-test without a DOM.
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView } from '../../kb/types';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
 
@@ -22,12 +25,16 @@ let loading = false;
 let errorMsg = '';
 let expanded = new Set<number>(); // recent-error rows drilled-down to their cause (OBS-6)
 let timer: ReturnType<typeof setInterval> | null = null;
+let actionMsg = ''; // transient outcome of the last OBS-17 retry/dismiss (shown atop the panel)
+let acting = false; // a recovery action is in flight — disable the buttons so it can't double-fire
 
 export function mountStatus(container: HTMLElement): void {
   view = null;
   loading = true;
   errorMsg = '';
   expanded = new Set();
+  actionMsg = '';
+  acting = false;
   container.innerHTML = `
     <div class="card status-view">
       <h1>📊 Pipeline Status</h1>
@@ -79,18 +86,50 @@ function wire(container: HTMLElement): void {
   container.addEventListener('click', (e) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el) return;
-    if (el.dataset.act === 'toggle-err') {
+    const act = el.dataset.act;
+    if (act === 'toggle-err') {
       const i = Number(el.dataset.i);
       if (expanded.has(i)) expanded.delete(i);
       else expanded.add(i);
       renderBody(container);
+      return;
+    }
+    // OBS-17: retry / dismiss a set-aside item. Single-flight (ignore clicks while one is in flight);
+    // dismiss is confirmed first (it retires the item from the recoverable list).
+    if (act === 'setaside-retry' || act === 'setaside-dismiss') {
+      if (acting) return;
+      const itemId = el.dataset.id ?? '';
+      if (!itemId) return;
+      const action: PipelineControlRequest['action'] = act === 'setaside-retry' ? 'retry' : 'dismiss';
+      const stage = el.dataset.stage ?? 'claims';
+      const label = el.dataset.label || itemId;
+      if (action === 'dismiss' && !window.confirm(`Dismiss “${label}”? It leaves the recovery list and won’t be re-derived.`)) return;
+      void runControl(container, { action, stage, itemId });
+      return;
     }
   });
 }
 
+/** OBS-17: invoke the pipeline-control IPC for a recovery action, then re-fetch the view (a retried/
+ *  dismissed item drops off the set-aside list). Surfaces the outcome message; never throws to the UI. */
+async function runControl(container: HTMLElement, req: PipelineControlRequest): Promise<void> {
+  acting = true;
+  actionMsg = '';
+  renderBody(container); // reflect the disabled/acting state immediately
+  try {
+    const res = await window.kbApi.pipelineControl(req);
+    actionMsg = res.message ?? (res.ok ? 'Done.' : 'Action failed.');
+  } catch (err) {
+    actionMsg = err instanceof Error ? err.message : String(err);
+  } finally {
+    acting = false;
+    await load(container); // re-render with the fresh list + the outcome banner
+  }
+}
+
 function renderBody(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#statusBody');
-  if (el) el.innerHTML = bodyHtml({ view, loading, errorMsg, expanded });
+  if (el) el.innerHTML = bodyHtml({ view, loading, errorMsg, expanded, actionMsg, acting });
 }
 
 // ── Render (pure helpers return HTML strings) ─────────────────────────────────────────────────
@@ -100,6 +139,8 @@ interface BodyState {
   loading: boolean;
   errorMsg: string;
   expanded: Set<number>;
+  actionMsg?: string; // OBS-17: outcome of the last retry/dismiss
+  acting?: boolean; // OBS-17: a recovery action is in flight (buttons disabled)
 }
 
 export function bodyHtml(s: BodyState): string {
@@ -109,7 +150,7 @@ export function bodyHtml(s: BodyState): string {
   return [
     overallHtml(s.view),
     stagesHtml(s.view.stages),
-    setAsideHtml(s.view.setAsideItems),
+    setAsideHtml(s.view.setAsideItems, { actionMsg: s.actionMsg, acting: s.acting }),
     lockHtml(s.view.lock),
     errorsHtml(s.view.recentErrors, s.expanded),
     latencyHtml(s.view),
@@ -146,23 +187,33 @@ export function stagesHtml(stages: StageStatus[]): string {
   return `<h2 class="status-h2">Stages</h2><ul class="status-stages">${rows}</ul>`;
 }
 
-/** OBS-17: set-aside / poison items — what the pipeline gave up on + why, the recovery list. The
- *  per-item retry/dismiss actions wire to the pipeline-control IPC in the action-half (claims-only
- *  v1; the item carries its stage so the action targets the right primitive). Shows the entity's
- *  name when known (friendlier than the ULID id), falling back to the id. */
-export function setAsideHtml(items: SetAsideView[]): string {
+/** OBS-17: set-aside / poison items — what the pipeline gave up on + why, the recovery list. Each
+ *  item carries **Retry** (re-enqueue to re-derive) + **Dismiss** (retire from the list) actions that
+ *  fire `kb:pipelineControl` — the one sanctioned mutation on this otherwise read-only view (OBS-9).
+ *  Shows the entity's name when known (friendlier than the ULID id), falling back to the id. The item
+ *  carries its `stage` + id on the buttons so the handler targets the right primitive (claims-only v1).
+ *  `acting` disables the buttons while an action is in flight; `actionMsg` reports the last outcome. */
+export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; acting?: boolean } = {}): string {
   if (items.length === 0) return '';
+  const dis = opts.acting ? ' disabled' : '';
+  const banner = opts.actionMsg ? `<p class="status-setaside-msg muted">${esc(opts.actionMsg)}</p>` : '';
   const rows = items
-    .map(
-      (it) => `
+    .map((it) => {
+      const label = it.name ?? it.itemId;
+      const data = `data-stage="${esc(it.stage)}" data-id="${esc(it.itemId)}" data-label="${esc(label)}"`;
+      return `
         <li class="status-setaside-item">
           <span class="status-badge status-setaside">set aside</span>
-          <span class="status-setaside-id">${esc(it.stage)} · ${esc(it.name ?? it.itemId)}</span>
+          <span class="status-setaside-id">${esc(it.stage)} · ${esc(label)}</span>
           ${it.reason ? `<span class="muted">${esc(it.reason)}</span>` : ''}
-        </li>`,
-    )
+          <span class="status-setaside-actions">
+            <button type="button" class="status-setaside-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
+            <button type="button" class="status-setaside-dismiss" data-act="setaside-dismiss" ${data}${dis}>Dismiss</button>
+          </span>
+        </li>`;
+    })
     .join('');
-  return `<h2 class="status-h2">Set aside — needs attention (${items.length})</h2><ul class="status-setaside-items">${rows}</ul>`;
+  return `<h2 class="status-h2">Set aside — needs attention (${items.length})</h2>${banner}<ul class="status-setaside-items">${rows}</ul>`;
 }
 
 /** OBS-7: the canonical-writer lock — held/holder/waiters (so a stall's cause is visible). */

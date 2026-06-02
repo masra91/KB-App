@@ -17,7 +17,7 @@ import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
-import { ClaimsStage, readClaimsQueue, listSetAsideItems } from '../kb/claimsStage';
+import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
 import { ConnectStage, readConnectQueue } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
@@ -26,6 +26,7 @@ import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, toSetAsideViews, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { planSetAsideAction } from '../kb/pipelineControl';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
@@ -57,7 +58,7 @@ import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } 
 import type { Review } from '../kb/reviews';
 import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult } from '../kb/types';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
@@ -295,6 +296,38 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
   return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, ...(lastActivity ? { lastActivity } : {}) });
+}
+
+/**
+ * OBS-17 — act on a set-aside (poison) item from the Status view: **retry** (re-enqueue to re-derive)
+ * or **dismiss** (retire from the recoverable list). Claims-only in v1 (PM ruling); the request is
+ * stage-parameterized so decompose/connect are additive (register their own branch here). Resolves
+ * the surfaced `itemId` (entityId) to its node path via the canonical `listSetAsideItems`, then calls
+ * the stage-owned primitive under the shared canonical-writer lock (the primitives lock internally).
+ * Retry pokes the Claims drain so the item re-processes promptly rather than waiting for the sweep.
+ * Best-effort + honest: a stale/already-recovered item returns `{ok:false}` with a reason, never throws.
+ */
+export async function pipelineControlForActive(req: PipelineControlRequest): Promise<PipelineControlResult> {
+  const a = active;
+  if (!a) return { ok: false, message: 'No knowledge base open.' };
+  if (req.stage !== 'claims') {
+    return { ok: false, message: `Recovery for the "${req.stage}" stage isn’t supported yet (claims-only for now).` };
+  }
+  try {
+    // Plan against the *live* set-aside list (pure): validates stage/action + resolves itemId→path,
+    // or returns why it can't proceed (unsupported stage / already-recovered item).
+    const plan = planSetAsideAction(await listSetAsideItems(a.stagingWt), req);
+    if ('error' in plan) return { ok: false, message: plan.error };
+    if (req.action === 'retry') {
+      await retryClaimsItem(a.stagingWt, plan.entityRel, a.lock);
+      void a.claims.poke(); // re-drain promptly (don't wait for the periodic sweep)
+      return { ok: true, message: `Retrying ${plan.label}.` };
+    }
+    await dismissClaimsItem(a.stagingWt, plan.entityRel, a.lock);
+    return { ok: true, message: `Dismissed ${plan.label}.` };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 /** The open "needs you" queue (SPEC-0018) — read from `staging`, where review state lives. */
