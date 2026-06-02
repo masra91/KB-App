@@ -13,6 +13,7 @@ import { dispatchResearch, type DispatchDeps, type DispatchResult } from './rese
 import { makeCliSelfNominate, type NominateRunner } from './researchNominate';
 import { makeWebResearchFn, type WebResearchOptions } from './researchWebAgent';
 import { makeCodeResearchFn, type CodeResearchOptions } from './researchCodeAgent';
+import { makeM365ResearchFn, type M365ResearchOptions } from './researchM365Agent';
 import { runResearcher, type ResearchFn } from './researchRun';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
@@ -23,6 +24,8 @@ export interface ResearchDepsOptions {
   web?: WebResearchOptions;
   /** Code researcher options (read-only git layer pass-through). */
   code?: CodeResearchOptions;
+  /** M365 researcher options (injectable MCP server + session; OAuth in main, env-gated live). */
+  m365?: M365ResearchOptions;
   /** Override the research cognition for EVERY researcher (tests). Wins over per-template selection. */
   researchFn?: ResearchFn;
   maxFanout?: number;
@@ -45,8 +48,10 @@ export function selectResearchFn(root: string, r: ResearcherConfig, opts: Resear
       return makeWebResearchFn(opts.web);
     case 'code':
       return makeCodeResearchFn(root, opts.code);
+    case 'm365':
+      return makeM365ResearchFn(opts.m365);
     default:
-      return noResearchFn; // m365 (Slice 3) / custom — not yet implemented
+      return noResearchFn; // custom — not yet implemented
   }
 }
 
