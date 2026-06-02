@@ -58,8 +58,9 @@ describe('researcherOutcomeLabel — no dev slugs in the UI (KB product principl
     }
   });
 
-  it('falls back to the raw kind for an unknown eventType (defensive, never crashes)', () => {
-    expect(researcherOutcomeLabel('some-future-kind')).toBe('some-future-kind');
+  it('HUMANIZES an unknown eventType (kebab → spaced) — never leaks a raw dev slug, even for a future kind', () => {
+    expect(researcherOutcomeLabel('some-future-kind')).toBe('some future kind');
+    expect(researcherOutcomeLabel('some-future-kind')).not.toContain('-'); // the no-slug guarantee is total
   });
 });
 

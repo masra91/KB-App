@@ -45,28 +45,34 @@ export const EGRESS_TIER_HINTS: Record<EgressTier, string> = {
  *  higher rank is a risky change (more KB content can leave) → confirm + audit. */
 const EGRESS_EXPOSURE: Record<EgressTier, number> = { 'local-only': 0, 'internal-tenant': 1, 'public-web': 2 };
 
+/** The researcher run-outcome audit kinds (the `eventType`s `runResearcher`/`researchEscalate` emit). */
+export type ResearchOutcomeKind = 'researched' | 'no-finding' | 'research-failed' | 'ceiling-reached' | 'escalated';
+
 /**
- * A Principal-facing label for a researcher run-outcome `eventType` — the audit kinds are dev slugs
- * (`no-finding`, `research-failed`, `ceiling-reached`, `escalated`); a user surface must never show the
- * raw slug (KB product principle). The "Field Desk" redesign (#65) renders these as the typed report;
- * until then this keeps the current last-run line jargon-free. Unknown kinds fall back to the slug
- * (defensive — a new kind reads oddly but never crashes).
+ * Principal-facing labels for every researcher run-outcome kind. The audit kinds are dev slugs; a user
+ * surface must never show the raw slug (KB product principle). This is a TOTAL `Record` over the union,
+ * so adding a new `ResearchOutcomeKind` is a COMPILE error until it's labeled here — the no-slug
+ * guarantee fails at build, never in the UI (KB-QD #180). The "Field Desk" redesign (#65) renders these
+ * as the typed report; until then they keep the last-run line jargon-free.
+ */
+const RESEARCH_OUTCOME_LABELS: Record<ResearchOutcomeKind, string> = {
+  researched: 'found sources',
+  'no-finding': 'no new findings',
+  'research-failed': 'run failed',
+  'ceiling-reached': 'paused — rate limit reached',
+  escalated: 'paused — needs your review',
+};
+
+/**
+ * Map a run-outcome `eventType` to its Principal-facing label. Known kinds get the curated label
+ * (compiler-enforced complete above); an UNKNOWN kind (e.g. a future audit slug not yet mapped) is
+ * humanized — kebab → spaced words — so even then the UI never shows a raw dev slug.
  */
 export function researcherOutcomeLabel(eventType: string): string {
-  switch (eventType) {
-    case 'researched':
-      return 'found sources';
-    case 'no-finding':
-      return 'no new findings';
-    case 'research-failed':
-      return 'run failed';
-    case 'ceiling-reached':
-      return 'paused — rate limit reached';
-    case 'escalated':
-      return 'paused — needs your review';
-    default:
-      return eventType;
+  if (Object.prototype.hasOwnProperty.call(RESEARCH_OUTCOME_LABELS, eventType)) {
+    return RESEARCH_OUTCOME_LABELS[eventType as ResearchOutcomeKind];
   }
+  return eventType.replace(/-/g, ' '); // never leak kebab-case
 }
 
 /** Derive a researcher's last-run summary from its newest `researcher` audit event (or null). */
