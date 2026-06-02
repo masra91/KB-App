@@ -1,0 +1,156 @@
+// SPEC-0009 SETUP-2 / SETUP-6 — main-process IPC tier.
+//
+// SETUP-2: the Principal picks a root folder (kb:pickFolder) and that folder becomes the
+//          vault root (kb:create → persisted activeVaultPath → kb:getState).
+// SETUP-6: a later launch loads the existing KB — kb:getState reports the vault + its
+//          config (the renderer's onboarding gate), and initPipeline hands that vault to
+//          the main process to manage. No re-onboarding.
+//
+// Electron is mocked: ipcMain.handle captures the handlers so we can invoke them directly,
+// dialog.showOpenDialog returns a scripted pick, and app.getPath('userData') points at a
+// temp dir. The pipeline is mocked so no real staging worktree/orchestrator spins up — we
+// only assert the main process is asked to manage the right vault. createKb itself is real
+// (a genuine git repo in a temp dir), so the pick → vault-root chain is exercised end-to-end.
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import path from 'node:path';
+import { makeTempDir, rmTempDir } from '../../test/tempVault';
+import type { AppState, CreateKbResult } from '../kb/types';
+
+type Handler = (event: unknown, ...args: unknown[]) => unknown;
+
+const state = vi.hoisted(() => ({
+  userData: '',
+  dialogResult: { canceled: false, filePaths: [] as string[] },
+  handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
+}));
+
+const mocks = vi.hoisted(() => ({ startPipeline: vi.fn(async () => undefined) }));
+
+vi.mock('electron', () => ({
+  app: { getPath: (): string => state.userData },
+  ipcMain: { handle: (channel: string, fn: Handler) => state.handlers.set(channel, fn) },
+  dialog: { showOpenDialog: vi.fn(async () => state.dialogResult) },
+  BrowserWindow: { fromWebContents: (): null => null },
+}));
+
+vi.mock('./pipeline', () => ({
+  startPipeline: mocks.startPipeline,
+  activePipeline: (): null => null,
+  listActiveReviews: async (): Promise<unknown[]> => [],
+  answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
+  fullReplay: async () => ({ ok: false, message: 'no active kb' }),
+}));
+
+import { registerIpc, initPipeline } from './ipc';
+
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const fn = state.handlers.get(channel);
+  if (!fn) throw new Error(`no handler registered for ${channel}`);
+  return (await fn({ sender: {} }, ...args)) as T;
+}
+
+let vaultDir: string;
+
+beforeEach(async () => {
+  state.userData = await makeTempDir('kb-userdata-');
+  vaultDir = await makeTempDir('kb-vault-');
+  state.dialogResult = { canceled: false, filePaths: [] };
+  state.handlers.clear();
+  mocks.startPipeline.mockClear();
+  registerIpc();
+});
+
+afterEach(async () => {
+  await rmTempDir(state.userData);
+  await rmTempDir(vaultDir);
+});
+
+describe('SETUP-2 — the picked folder becomes the vault root', () => {
+  it('kb:pickFolder returns the folder the Principal chose', async () => {
+    state.dialogResult = { canceled: false, filePaths: [vaultDir] };
+    expect(await invoke<string | null>('kb:pickFolder')).toBe(vaultDir);
+  });
+
+  it('kb:pickFolder returns null when the chooser is canceled', async () => {
+    state.dialogResult = { canceled: true, filePaths: [] };
+    expect(await invoke<string | null>('kb:pickFolder')).toBeNull();
+  });
+
+  it('the picked folder, once created, is the active vault root the app manages', async () => {
+    // 1. Principal picks the folder…
+    state.dialogResult = { canceled: false, filePaths: [vaultDir] };
+    const picked = await invoke<string | null>('kb:pickFolder');
+    expect(picked).toBe(vaultDir);
+
+    // 2. …and creates the KB there.
+    const res = await invoke<CreateKbResult>('kb:create', {
+      path: picked,
+      name: 'My KB',
+      initGitIfNeeded: true,
+    });
+    expect(res.ok).toBe(true);
+
+    // 3. The picked folder is now THE vault root: persisted + reported by getState…
+    const app = await invoke<AppState>('kb:getState');
+    expect(app.activeVaultPath).toBe(path.resolve(vaultDir));
+    expect(app.vaultConfig?.name).toBe('My KB');
+
+    // …and the main process is asked to manage exactly that vault.
+    expect(mocks.startPipeline).toHaveBeenCalledWith(path.resolve(vaultDir));
+  });
+});
+
+describe('SETUP-6 — later launches load the existing KB (no re-onboarding)', () => {
+  it('first run (no configured KB): getState reports no vault → setup is shown', async () => {
+    const app = await invoke<AppState>('kb:getState');
+    expect(app.activeVaultPath).toBeNull();
+    expect(app.vaultConfig).toBeNull();
+  });
+
+  it('first run: initPipeline starts nothing when no KB is configured', async () => {
+    await initPipeline();
+    expect(mocks.startPipeline).not.toHaveBeenCalled();
+  });
+
+  it('a 2nd launch with a configured KB loads it and skips onboarding', async () => {
+    // --- Launch #1: configure a KB at the picked folder. ---
+    state.dialogResult = { canceled: false, filePaths: [vaultDir] };
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'Relaunch KB', initGitIfNeeded: true });
+
+    // --- Launch #2: a fresh process re-registers handlers; only the persisted config
+    //     (in userData) carries over. ---
+    mocks.startPipeline.mockClear();
+    state.handlers.clear();
+    registerIpc();
+
+    // The renderer's onboarding gate is `activeVaultPath && vaultConfig`. Both present →
+    // it mounts the shell instead of the Setup wizard. No re-onboarding.
+    const app = await invoke<AppState>('kb:getState');
+    expect(app.activeVaultPath).toBe(path.resolve(vaultDir));
+    expect(app.vaultConfig).not.toBeNull();
+    expect(app.vaultConfig?.name).toBe('Relaunch KB');
+
+    // And on launch the main process resumes managing the configured vault.
+    await initPipeline();
+    expect(mocks.startPipeline).toHaveBeenCalledWith(path.resolve(vaultDir));
+  });
+
+  it('a 2nd launch whose configured vault has vanished does not falsely report a loaded KB', async () => {
+    // Configure, then delete the vault from disk (moved/deleted between launches).
+    state.dialogResult = { canceled: false, filePaths: [vaultDir] };
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'Gone KB', initGitIfNeeded: true });
+    await rmTempDir(vaultDir);
+
+    const app = await invoke<AppState>('kb:getState');
+    // Path is still remembered, but the config can't load → renderer's gate (needs both)
+    // falls back to setup rather than mounting a broken shell.
+    expect(app.activeVaultPath).toBe(path.resolve(vaultDir));
+    expect(app.vaultConfig).toBeNull();
+
+    // initPipeline likewise refuses to manage a vault whose config is gone
+    // (clear the call kb:create made on launch #1 so we observe only this launch).
+    mocks.startPipeline.mockClear();
+    await initPipeline();
+    expect(mocks.startPipeline).not.toHaveBeenCalled();
+  });
+});
