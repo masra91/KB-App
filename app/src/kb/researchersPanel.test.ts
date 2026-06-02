@@ -129,4 +129,12 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     expect(events[0].payload).toMatchObject({ field: 'repoPath', from: '/old/repo', to: '/new/repo' });
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', repoPath: '/old/repo' })).toEqual([]); // no-op re-assert
   });
+
+  it('audits a tenantId change from prior config (Slice 3 M365 config — never silent)', () => {
+    const prior = web({ template: 'm365', egressTier: 'internal-tenant', config: { tenantId: 'contoso.onmicrosoft.com' } });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', tenantId: 'fabrikam.onmicrosoft.com' });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'tenantId', from: 'contoso.onmicrosoft.com', to: 'fabrikam.onmicrosoft.com' });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', tenantId: 'contoso.onmicrosoft.com' })).toEqual([]); // no-op re-assert
+  });
 });

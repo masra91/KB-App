@@ -75,6 +75,7 @@ export function buildResearcherViews(
     label: r.label ?? r.template,
     prompt: r.prompt,
     repoPath: typeof r.config?.repoPath === 'string' ? r.config.repoPath : '',
+    tenantId: typeof r.config?.tenantId === 'string' ? r.config.tenantId : '',
     egressTier: r.egressTier,
     scope: r.scope,
     enabled: r.enabled,
@@ -129,6 +130,7 @@ export function researcherConfigAuditEvents(
   patch: ResearcherConfigPatch,
 ): AuditEventInput[] {
   const priorRepoPath = typeof prior?.config?.repoPath === 'string' ? prior.config.repoPath : '';
+  const priorTenantId = typeof prior?.config?.tenantId === 'string' ? prior.config.tenantId : '';
   const base = {
     enabled: prior?.enabled ?? false,
     schedule: prior?.schedule ?? 'off',
@@ -137,12 +139,13 @@ export function researcherConfigAuditEvents(
     scope: prior?.scope ?? '',
     prompt: prior?.prompt ?? '',
     repoPath: priorRepoPath,
+    tenantId: priorTenantId,
   };
   const events: AuditEventInput[] = [];
-  // scope + prompt (RESEARCH-17) + repoPath (Slice 2a Code config) are steering config the Principal
-  // edits in the Manage view — audited too (AUDIT-2: a change to what a researcher does / which scope
-  // or repo it serves is never silent).
-  for (const field of ['enabled', 'schedule', 'posture', 'egressTier', 'scope', 'prompt', 'repoPath'] as const) {
+  // scope + prompt (RESEARCH-17) + repoPath (Code) + tenantId (M365) are steering config the Principal
+  // edits in the Manage view — audited too (AUDIT-2: a change to what a researcher does / which scope,
+  // repo, or tenant it serves is never silent).
+  for (const field of ['enabled', 'schedule', 'posture', 'egressTier', 'scope', 'prompt', 'repoPath', 'tenantId'] as const) {
     const to = patch[field];
     if (to === undefined || to === base[field]) continue;
     events.push({

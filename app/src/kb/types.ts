@@ -220,6 +220,9 @@ export interface ResearcherView {
   /** Code-template config: the local repository path the researcher reads (`config.repoPath`); empty
    *  when unset (the Code researcher is inert until set). Shown only for `code` researchers. */
   repoPath: string;
+  /** M365-template config: the tenant id the researcher reads (`config.tenantId`); empty when unset
+   *  (the M365 researcher is inert until set). Shown only for `m365` researchers (SPEC-0028 Slice 3). */
+  tenantId: string;
   egressTier: EgressTier;
   scope: string;
   enabled: boolean;
@@ -238,6 +241,8 @@ export interface ResearcherConfigPatch {
   prompt?: string;
   /** Code-template config: the local repo path to read (merged into `config.repoPath`). */
   repoPath?: string;
+  /** M365-template config: the tenant id to read (merged into `config.tenantId`). */
+  tenantId?: string;
   egressTier?: EgressTier;
   scope?: string;
   enabled?: boolean;
