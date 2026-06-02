@@ -170,6 +170,42 @@ export interface RecallOptions {
 
 export const DEFAULT_MAX_TOOL_CALLS = 12;
 
+/** Retrieval-budget bounds (F3 / dogfood #5). The budget SCALES TO GRAPH SIZE: a tiny KB is fully
+ *  traversable in a few hops, so a fixed-12 budget just let the agent loop (the dogfood saw 12 calls
+ *  + `truncated` on a ~6-node KB). Small KB → small cap; large KB → headroom up to MAX. */
+export const RECALL_BUDGET = { MIN: 4, BASE: 2, PER_NODE: 0.5, MAX: 16 } as const;
+
+/**
+ * Scale the retrieval tool-call budget to the entity-graph size (pure; F3 / dogfood #5).
+ * `clamp(MIN, BASE + ceil(PER_NODE · nodeCount), MAX)` — e.g. 0→4, 6→5, 28+→16. Entities are the
+ * nodes the agent hops (claims/sources are leaves), so `nodeCount` is the entity count.
+ */
+export function recallBudget(nodeCount: number): number {
+  const scaled = RECALL_BUDGET.BASE + Math.ceil(RECALL_BUDGET.PER_NODE * Math.max(0, nodeCount));
+  return Math.min(RECALL_BUDGET.MAX, Math.max(RECALL_BUDGET.MIN, scaled));
+}
+
+/** Count canonical entity nodes — the `.md` files anywhere under `entities/` — as the budget's
+ *  graph-size input. Cheap recursive readdir; missing/empty `entities/` → 0. Ignores dotdirs
+ *  (working state never lives under entities/). */
+export async function countEntityNodes(root: string): Promise<number> {
+  let count = 0;
+  async function walk(dir: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.isDirectory() && !e.name.startsWith('.')) await walk(path.join(dir, e.name));
+      else if (e.isFile() && e.name.endsWith('.md')) count++;
+    }
+  }
+  await walk(path.join(path.resolve(root), 'entities'));
+  return count;
+}
+
 const nowIso = (): string => new Date().toISOString();
 const erasedClock = (): string => nowIso();
 
@@ -196,7 +232,9 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   const history = (typeof q === 'string' ? undefined : q.history) ?? [];
   const tools = opts.tools ?? makeReadOnlyTools(root);
   const client = opts.client ?? makeSdkRecallClient({ model: opts.model, cliPath: opts.cliPath });
-  const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
+  // F3 budget scaled to graph size (dogfood #5): a small KB gets a small cap so the agent can't
+  // loop/over-explore. Explicit `opts.maxToolCalls` (callers/tests) still wins.
+  const maxToolCalls = opts.maxToolCalls ?? recallBudget(await countEntityNodes(root));
   const clock = opts.now ?? erasedClock;
 
   const budget = { used: 0, truncated: false };

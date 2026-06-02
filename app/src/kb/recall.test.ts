@@ -7,7 +7,7 @@ import path from 'node:path';
 import simpleGit from 'simple-git';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir, pathExists, makeTempDir } from '../../test/tempVault';
-import { recall, makeReadOnlyTools, buildRecallToolDefs, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
+import { recall, makeReadOnlyTools, buildRecallToolDefs, recallBudget, countEntityNodes, RECALL_BUDGET, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
 import { createKb } from './vault';
 
 interface ScriptStep {
@@ -230,3 +230,60 @@ async function snapshot(root: string, subdirs: string[]): Promise<Record<string,
   for (const s of subdirs) await rec(path.join(root, s));
   return out;
 }
+
+// ── Retrieval budget scaling (F3 / dogfood #5) ────────────────────────────────────────────────
+describe('recallBudget — scales the tool-call cap to graph size (dogfood #5)', () => {
+  it('clamps to MIN for a tiny/empty KB (no over-budget looping)', () => {
+    expect(recallBudget(0)).toBe(RECALL_BUDGET.MIN);
+    expect(recallBudget(1)).toBe(RECALL_BUDGET.MIN); // 2+ceil(0.5)=3 → clamp up to MIN(4)
+    expect(recallBudget(-5)).toBe(RECALL_BUDGET.MIN); // defensive: negative → MIN
+  });
+
+  it('scales in the middle (a ~6-node KB lands ~5, not 12 — the dogfood symptom)', () => {
+    expect(recallBudget(6)).toBe(5); // 2 + ceil(0.5*6)=5
+    expect(recallBudget(10)).toBe(7); // 2 + 5
+    expect(recallBudget(6)).toBeLessThan(12); // strictly below the old fixed default
+  });
+
+  it('clamps to MAX for a large KB (keeps headroom, never unbounded)', () => {
+    expect(recallBudget(28)).toBe(RECALL_BUDGET.MAX); // 2+14=16
+    expect(recallBudget(1000)).toBe(RECALL_BUDGET.MAX);
+  });
+
+  it('is monotonic non-decreasing in nodeCount', () => {
+    let prev = 0;
+    for (let n = 0; n <= 40; n++) {
+      const b = recallBudget(n);
+      expect(b).toBeGreaterThanOrEqual(prev);
+      prev = b;
+    }
+  });
+});
+
+describe('countEntityNodes — entity-graph size for the budget', () => {
+  let dir: string;
+  afterEach(async () => {
+    if (dir) await rmTempDir(dir);
+  });
+
+  it('counts entities/**/*.md recursively, ignores other trees + dotdirs, 0 when absent', async () => {
+    dir = await makeTempDir();
+    const root = path.join(dir, 'v');
+    await createKb({ path: root, initGitIfNeeded: true });
+    expect(await countEntityNodes(root)).toBe(0); // fresh KB: no entity nodes yet
+
+    await fs.mkdir(path.join(root, 'entities', 'person'), { recursive: true });
+    await fs.mkdir(path.join(root, 'entities', 'org'), { recursive: true });
+    await fs.writeFile(path.join(root, 'entities', 'person', 'ada-lovelace.md'), '# Ada');
+    await fs.writeFile(path.join(root, 'entities', 'person', 'charles-babbage.md'), '# Charles');
+    await fs.writeFile(path.join(root, 'entities', 'org', 'mit.md'), '# MIT');
+    await fs.writeFile(path.join(root, 'entities', 'person', 'notes.txt'), 'not md'); // ignored
+    await fs.mkdir(path.join(root, 'entities', '.cache'), { recursive: true });
+    await fs.writeFile(path.join(root, 'entities', '.cache', 'x.md'), 'dotdir ignored'); // ignored
+    // a claim file must NOT be counted (entities are the graph nodes, claims are leaves)
+    await fs.mkdir(path.join(root, 'claims', 'person'), { recursive: true });
+    await fs.writeFile(path.join(root, 'claims', 'person', 'c.md'), '# claim');
+
+    expect(await countEntityNodes(root)).toBe(3);
+  });
+});
