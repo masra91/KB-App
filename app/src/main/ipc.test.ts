@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   userData: '',
   dialogResult: { canceled: false, filePaths: [] as string[] },
   handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
+  stagingRoot: null as string | null, // SPEC-0029: the active staging worktree the activity handlers read
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -40,6 +41,7 @@ vi.mock('electron', () => ({
 vi.mock('./pipeline', () => ({
   startPipeline: mocks.startPipeline,
   activePipeline: (): null => null,
+  activeStagingRoot: (): string | null => state.stagingRoot,
   listActiveReviews: async (): Promise<unknown[]> => [],
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
@@ -48,6 +50,8 @@ vi.mock('./pipeline', () => ({
 vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 
 import { registerIpc, initPipeline } from './ipc';
+import { createKb } from '../kb/vault';
+import type { ActivityFeedResult, AuditEvent, Lineage } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const fn = state.handlers.get(channel);
@@ -62,6 +66,7 @@ beforeEach(async () => {
   vaultDir = await makeTempDir('kb-vault-');
   state.dialogResult = { canceled: false, filePaths: [] };
   state.handlers.clear();
+  state.stagingRoot = null;
   mocks.startPipeline.mockClear();
   mocks.recall.mockClear();
   delete process.env.KB_ASK_E2E_STUB;
@@ -188,5 +193,66 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     expect(res.grounded).toBe(true);
     expect(res.citations[0].ref).toBe('claims/person/ada-lovelace.md');
     expect(mocks.recall).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC-0029 Audit & Activity — read-only IPC over the active staging worktree', () => {
+  /** Seed a KB with a small spread of real audit lines and point the (mocked) staging root at it. */
+  async function seedActivityVault(): Promise<void> {
+    await createKb({ path: vaultDir, name: 'Activity KB', initGitIfNeeded: true });
+    const write = async (rel: string, lines: Record<string, unknown>[]): Promise<void> => {
+      const abs = path.join(vaultDir, rel);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      await fs.appendFile(abs, lines.map((l) => JSON.stringify(l)).join('\n') + '\n', 'utf8');
+    };
+    await write(path.join('sources', '2026', '01', 'S1', 'audit.jsonl'), [
+      { action: 'archived', id: 'S1', archivedAt: '2026-01-01T00:00:00.000Z', decision: {}, agent: { via: 'deterministic' } },
+      { ts: '2026-01-01T00:01:00.000Z', stage: 'claims', runId: 'C1', entityId: 'E1', sourceId: 'S1', event: 'claimed', claims: 2 },
+    ]);
+    await write(path.join('connect', 'audit.jsonl'), [
+      { ts: '2026-01-01T00:02:00.000Z', stage: 'connect', runId: 'N1', blockKey: 'k', event: 'resolved', node: 'entities/2026/01/E1.md', candidates: 1, merged: 0 },
+    ]);
+    state.stagingRoot = vaultDir;
+  }
+
+  it('returns empty results when no KB is active (no staging root)', async () => {
+    state.stagingRoot = null;
+    expect(await invoke<ActivityFeedResult>('kb:activityFeed')).toEqual({ entries: [], total: 0, truncated: false });
+    expect(await invoke<AuditEvent[]>('kb:activityEvents')).toEqual([]);
+    const lin = await invoke<Lineage>('kb:activityLineage', 'E1');
+    expect(lin).toMatchObject({ subjectId: 'E1', kind: 'unknown', events: [] });
+  });
+
+  it('kb:activityFeed returns curated entries + the window-cap signal', async () => {
+    await seedActivityVault();
+    const res = await invoke<ActivityFeedResult>('kb:activityFeed');
+    expect(res.total).toBe(3);
+    expect(res.truncated).toBe(false);
+    expect(res.entries.length).toBeGreaterThan(0);
+    expect(res.entries[0]).toHaveProperty('summary');
+    expect(res.entries[0]).toHaveProperty('events'); // raw events ride along for drill-down
+  });
+
+  it('kb:activityFeed honors an actor filter', async () => {
+    await seedActivityVault();
+    const res = await invoke<ActivityFeedResult>('kb:activityFeed', { actors: ['connect'] });
+    expect(res.entries.every((e) => e.actor === 'connect')).toBe(true);
+    expect(res.entries.length).toBe(1);
+  });
+
+  it('kb:activityEvents returns raw events filtered across the full audit', async () => {
+    await seedActivityVault();
+    const all = await invoke<AuditEvent[]>('kb:activityEvents');
+    expect(all.map((e) => e.actor)).toEqual(['connect', 'claims', 'archivist']); // newest-first
+    const byEntity = await invoke<AuditEvent[]>('kb:activityEvents', { subjectId: 'E1' });
+    expect(byEntity.map((e) => e.actor).sort()).toEqual(['claims', 'connect']);
+  });
+
+  it('kb:activityLineage traces a subject from the audit', async () => {
+    await seedActivityVault();
+    const lin = await invoke<Lineage>('kb:activityLineage', 'E1');
+    expect(lin.kind).toBe('entity');
+    expect(lin.sources).toContain('S1');
+    expect(lin.events.length).toBeGreaterThanOrEqual(2);
   });
 });

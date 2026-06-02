@@ -9,6 +9,7 @@ import {
   DEFAULT_VIEW_ID,
   VIEW_CAPTURE,
   VIEW_REVIEWS,
+  VIEW_ACTIVITY,
   VIEW_ASK,
   VIEW_PLACEHOLDER,
   VIEW_JOBS,
@@ -20,6 +21,7 @@ import {
 import { esc } from './html';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
+import { mountActivity } from './views/activityView';
 import { mountAsk } from './views/askView';
 import { mountPlaceholder } from './views/placeholderView';
 import { mountJobs } from './views/jobsView';
@@ -52,6 +54,7 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
   const mounts: Record<string, MountFn> = {
     [VIEW_CAPTURE]: (c) => mountCapture(c, vaultPath, name),
     [VIEW_REVIEWS]: mountReviews,
+    [VIEW_ACTIVITY]: mountActivity,
     [VIEW_ASK]: mountAsk,
     [VIEW_PLACEHOLDER]: mountPlaceholder,
     [VIEW_JOBS]: mountJobs,

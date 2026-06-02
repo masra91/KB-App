@@ -131,6 +131,13 @@ export function activePipeline(): Orchestrator | null {
   return active?.orch ?? null;
 }
 
+/** The active vault's `staging` worktree — where the full working-zone audit lives (per-item
+ *  audit.jsonl, connect/, .kb/jobs, .kb/ask, .kb/audit.jsonl), a superset of the evergreen archive
+ *  promoted to `main`. The read root for the Audit & Activity views (SPEC-0029). Null if no active KB. */
+export function activeStagingRoot(): string | null {
+  return active?.stagingWt ?? null;
+}
+
 /** The open "needs you" queue (SPEC-0018) — read from `staging`, where review state lives. */
 export async function listActiveReviews(): Promise<Review[]> {
   return active ? findOpenReviews(active.stagingWt) : [];

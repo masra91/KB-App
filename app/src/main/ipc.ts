@@ -7,6 +7,7 @@ import { readAppConfig, writeAppConfig } from './appConfig';
 import {
   startPipeline,
   activePipeline,
+  activeStagingRoot,
   listActiveReviews,
   answerActiveReview,
   fullReplay,
@@ -15,6 +16,9 @@ import {
   runActiveJobNow,
 } from './pipeline';
 import { recall } from '../kb/recall';
+import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
+import { buildFeed } from '../kb/activityDigest';
+import { traceLineage } from '../kb/lineage';
 import type { CapturePayload } from '../kb/ingest';
 import type {
   AppState,
@@ -32,6 +36,10 @@ import type {
   JobView,
   JobConfigPatch,
   RunJobResult,
+  ActivityFilter,
+  ActivityFeedResult,
+  AuditEvent,
+  Lineage,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -172,6 +180,34 @@ export function registerIpc(): void {
     } catch {
       return { ran: false, reason: 'not-found' };
     }
+  });
+
+  // SPEC-0029 Audit & Activity (read-only). All three read the active `staging` worktree — the full
+  // working-zone audit (AUDIT-10), a superset of the evergreen archive. Empty when no KB is active.
+
+  // AUDIT-5: the curated feed. Uses buildActivityIndex (full rebuild → guaranteed-fresh) rather than
+  // the cached load, so a recent recall whose audit landed without a HEAD move still shows (QA
+  // carry-forward). The optional filter narrows within the recent window; `total`/`truncated` are
+  // surfaced so the UI never silently truncates.
+  ipcMain.handle('kb:activityFeed', async (_e, filter?: ActivityFilter): Promise<ActivityFeedResult> => {
+    const root = activeStagingRoot();
+    if (!root) return { entries: [], total: 0, truncated: false };
+    const index = await buildActivityIndex(root);
+    const events = filter ? filterEvents(index.events, filter) : index.events;
+    return { entries: buildFeed(events), total: index.total, truncated: index.truncated };
+  });
+
+  // AUDIT-5/7: raw events for drill-down + filter/search across the FULL audit (not the capped feed).
+  ipcMain.handle('kb:activityEvents', async (_e, filter?: ActivityFilter): Promise<AuditEvent[]> => {
+    const root = activeStagingRoot();
+    return root ? readEvents(root, filter ?? {}) : [];
+  });
+
+  // AUDIT-6: trace a subject's provenance + transformation timeline + decisions, from the full audit.
+  ipcMain.handle('kb:activityLineage', async (_e, id: string): Promise<Lineage> => {
+    const root = activeStagingRoot();
+    if (!root) return { subjectId: id, kind: 'unknown', sources: [], events: [], decisions: [] };
+    return traceLineage(root, id);
   });
 }
 
