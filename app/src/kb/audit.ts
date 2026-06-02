@@ -357,9 +357,9 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
   },
   {
     actor: 'researcher',
-    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op) — emitted via appendAuditEvent.',
-    emitters: [], // emitted via the canonical writer by SPEC-0028 (no literal emitter file scanned)
-    auditPath: '.kb/researchers/<id>/journal.jsonl',
+    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
+    emitters: ['researchRun'], // researchRun.ts emits via appendAuditEvent on each pass
+    auditPath: CONTROL_AUDIT_REL,
     mutating: true, // reaches outside the KB + produces immutable secondary sources
     carriesWhy: true, // records the request (what + why) + citations behind each finding
     traces: ['AUDIT-1', 'AUDIT-2', 'RESEARCH-6'],
