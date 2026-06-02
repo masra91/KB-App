@@ -2,7 +2,20 @@
 // Runs in the node tier (no DOM), which is itself the proof of SHELL-6.
 import { describe, it, expect, vi } from 'vitest';
 import { createNavModel, type NavView } from './navModel';
-import { NAV_VIEWS, DEFAULT_VIEW_ID, VIEW_CAPTURE, VIEW_REVIEWS, VIEW_ASK, VIEW_PLACEHOLDER, VIEW_SETTINGS } from './views';
+import {
+  NAV_VIEWS,
+  DEFAULT_VIEW_ID,
+  GROUP_MANAGE,
+  VIEW_CAPTURE,
+  VIEW_REVIEWS,
+  VIEW_ASK,
+  VIEW_PLACEHOLDER,
+  VIEW_JOBS,
+  VIEW_AGENTS,
+  VIEW_RESEARCHERS,
+  VIEW_SOURCES,
+  VIEW_SETTINGS,
+} from './views';
 
 const sample: NavView[] = [
   { id: 'a', label: 'A' },
@@ -11,12 +24,32 @@ const sample: NavView[] = [
 ];
 
 describe('NAV_VIEWS registry (SHELL-3)', () => {
-  it('registers Capture, Reviews, Ask, placeholder, and Settings, in rail order (ASK added via SPEC-0026 slice 2)', () => {
-    expect(NAV_VIEWS.map((v) => v.id)).toEqual([VIEW_CAPTURE, VIEW_REVIEWS, VIEW_ASK, VIEW_PLACEHOLDER, VIEW_SETTINGS]);
+  it('registers the top-level views then the Manage section, in rail order (Manage = SPEC-0027 PANEL-1)', () => {
+    expect(NAV_VIEWS.map((v) => v.id)).toEqual([
+      VIEW_CAPTURE,
+      VIEW_REVIEWS,
+      VIEW_ASK,
+      VIEW_PLACEHOLDER,
+      VIEW_JOBS,
+      VIEW_AGENTS,
+      VIEW_RESEARCHERS,
+      VIEW_SOURCES,
+      VIEW_SETTINGS,
+    ]);
   });
 
   it('every view has a non-empty label (SHELL-3)', () => {
     for (const v of NAV_VIEWS) expect(v.label.length).toBeGreaterThan(0);
+  });
+
+  it('the Control Panel views form a contiguous "Manage" group; Settings sits under it (PANEL-1)', () => {
+    const manage = NAV_VIEWS.filter((v) => v.group === GROUP_MANAGE).map((v) => v.id);
+    expect(manage).toEqual([VIEW_JOBS, VIEW_AGENTS, VIEW_RESEARCHERS, VIEW_SOURCES, VIEW_SETTINGS]);
+    // Top-level views (Capture/Reviews/Ask) carry no group.
+    expect(NAV_VIEWS.find((v) => v.id === VIEW_CAPTURE)?.group).toBeUndefined();
+    // The grouped views are contiguous and at the tail of the rail (one heading, no interleaving).
+    const firstManageIdx = NAV_VIEWS.findIndex((v) => v.group === GROUP_MANAGE);
+    expect(NAV_VIEWS.slice(firstManageIdx).every((v) => v.group === GROUP_MANAGE)).toBe(true);
   });
 });
 

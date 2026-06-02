@@ -351,3 +351,34 @@ button:disabled {
 .ask-flags { margin-top: 0.4rem; font-size: 0.85em; }
 .ask-form { display: flex; gap: 0.5rem; }
 .ask-input { flex: 1; }
+
+/* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
+.sidebar .nav-group {
+  margin: 0.75rem 0.7rem 0.2rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.job-list { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.85rem; }
+.job { border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem; }
+.job-head { display: flex; align-items: center; gap: 0.5rem; }
+.job-label { font-weight: 600; }
+.job-toggle { margin-left: auto; font-size: 0.9rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; }
+.job-desc { margin: 0.4rem 0 0.6rem; font-size: 0.9rem; }
+.job-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+.job-controls label { font-size: 0.85rem; color: var(--muted); }
+.job-controls select { font: inherit; margin-left: 0.3rem; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.2rem 0.35rem; }
+.job-lastrun { margin: 0.6rem 0 0; font-size: 0.82rem; }
+.job-status { margin: 0.35rem 0 0; font-size: 0.82rem; min-height: 1em; }
+
+.badge { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; }
+
+/* Shared confirm/button styling (also used by the Settings replay flow). */
+.confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
+.btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
+.btn:hover { background: rgba(255, 255, 255, 0.06); }
+.btn-danger { appearance: none; font: inherit; border: 0; border-radius: 8px; background: var(--error); color: #1a1a1a; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: 600; }
+.btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }

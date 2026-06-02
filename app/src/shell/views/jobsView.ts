@@ -160,14 +160,17 @@ function wire(container: HTMLElement, jobs: JobView[]): void {
           runBtn.disabled = true;
           try {
             const res = await window.kbApi.runJobNow(id);
-            if ('reason' in res) {
-              status.textContent = res.reason === 'skipped' ? 'Already running — skipped.' : `Could not run (${res.reason}).`;
-            } else if (res.outcome === 'noop') {
-              status.textContent = 'Ran — nothing to do this pass.';
-            } else {
-              status.textContent = `Ran — ${res.applied} applied, ${res.deferred} deferred${res.outcome === 'setaside' ? ' (set aside)' : ''}.`;
-            }
-            await render(container); // refresh last-run
+            const msg = !('reason' in res)
+              ? res.outcome === 'noop'
+                ? 'Ran — nothing to do this pass.'
+                : `Ran — ${res.applied} applied, ${res.deferred} deferred${res.outcome === 'setaside' ? ' (set aside)' : ''}.`
+              : res.reason === 'skipped'
+                ? 'Already running — skipped.'
+                : `Could not run (${res.reason}).`;
+            // Re-render to refresh last-run (rebuilds the DOM), then show the outcome on the new row.
+            await render(container);
+            const after = container.querySelector<HTMLElement>(`.job[data-id="${id}"] .job-status`);
+            if (after) after.textContent = msg;
           } catch {
             status.textContent = 'Run failed.';
             runBtn.disabled = false;
