@@ -30,6 +30,7 @@ import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
+import { withOptimisticAdvance, advanceOrCollide, canonicalHead } from './canonicalAdvance';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'claims');
 const WORK_BRANCH = 'kb/claims-work';
@@ -258,136 +259,161 @@ export interface ClaimsOneResult {
 }
 
 /**
- * Derive claims for ONE entity. MUST be called serialized via the shared canonical-writer
- * lock so the canonical branch does not move mid-cycle (the final ff-advance must always apply).
+ * Derive claims for ONE entity under optimistic concurrency (SPEC-0014 ORCH-17/18/19). Cognition +
+ * the claim/entity-block/audit writes happen OFF the lock, synced to a canonical checkpoint; only
+ * the canonical ff-advance runs under `lock`. Because Claims EDITS the entity node's claims block,
+ * it can same-path-collide with a concurrent Connect rewrite of that node — the advance detects it
+ * and retries against the fresh canonical (re-reading the updated entity), bounded → set-aside
+ * (ORCH-19). `lock` defaults to a private mutex so standalone calls (tests) still serialize.
  */
 export async function claimsOne(
   root: string,
   entityRel: string,
   decider: ClaimsDecider,
+  lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
 ): Promise<ClaimsOneResult> {
   root = path.resolve(root);
-  const { wt, branch } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
-  await wtGit.raw('reset', '--hard', branch); // sync to canonical HEAD
-
   const entityId = path.basename(entityRel, '.md');
-  const entityPathWt = path.join(wt, entityRel);
-  const entityMd = await fs.readFile(entityPathWt, 'utf8');
-  const ref = parseEntityNode(entityMd);
-  const sourceDirWt = path.join(wt, ref.derivedFrom);
-  const auditPath = path.join(sourceDirWt, 'audit.jsonl');
-  const runId = ulid();
+  let result: ClaimsOneResult = { entityId, ok: false, claimIds: [], setAside: false };
 
-  try {
-    const source = await readSourceInput(sourceDirWt);
-    const sourceId = source.sourceId;
-    // Feed any already-answered reviews back to the resumed run as authoritative context (REVIEW-6).
-    const priorState = await readClaimsState(sourceDirWt, entityId);
-    const priorReviews: AnsweredReview[] = priorState.answered.map((a) => ({ question: a.question, verdict: a.verdict, note: a.note }));
-    const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source, ...(priorReviews.length > 0 ? { priorReviews } : {}) };
-    const decision = await decider(input);
-    const model = decision.agent?.model ?? 'default';
+  // OFF-lock (ORCH-17): sync to the canonical checkpoint, read the entity off it, run cognition,
+  // write claims / park / record failure, and commit on the work branch. Returns true — every
+  // branch commits something to advance (claims, the park marker, or a failed/setaside marker).
+  const prepare = async (base: string): Promise<boolean> => {
+    const { wt } = await ensureWorktree(root);
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('reset', '--hard', base); // sync to the captured canonical checkpoint
+    const entityPathWt = path.join(wt, entityRel);
+    const entityMd = await fs.readFile(entityPathWt, 'utf8');
+    const ref = parseEntityNode(entityMd);
+    const sourceDirWt = path.join(wt, ref.derivedFrom);
+    const auditPath = path.join(sourceDirWt, 'audit.jsonl');
+    const runId = ulid();
+    try {
+      const source = await readSourceInput(sourceDirWt);
+      const sourceId = source.sourceId;
+      // Feed any already-answered reviews back to the resumed run as authoritative context (REVIEW-6).
+      const priorState = await readClaimsState(sourceDirWt, entityId);
+      const priorReviews: AnsweredReview[] = priorState.answered.map((a) => ({ question: a.question, verdict: a.verdict, note: a.note }));
+      const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source, ...(priorReviews.length > 0 ? { priorReviews } : {}) };
+      const decision = await decider(input);
+      const model = decision.agent?.model ?? 'default';
 
-    // REVIEW-5: if the agent raised any reviews, PARK this item — apply NO claims until answered.
-    if (decision.reviews && decision.reviews.length > 0) {
-      // Cascade cap (REVIEW-8): too many parks on one item → set aside, never loop forever.
-      if (priorState.rounds >= maxReviewRounds) {
+      // REVIEW-5: if the agent raised any reviews, PARK this item — apply NO claims until answered.
+      if (decision.reviews && decision.reviews.length > 0) {
+        // Cascade cap (REVIEW-8): too many parks on one item → set aside, never loop forever.
+        if (priorState.rounds >= maxReviewRounds) {
+          let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
+          audit += auditLine({ runId, entityId, event: 'setaside', reason: 'review-cascade-cap', rounds: priorState.rounds });
+          await fs.appendFile(auditPath, audit, 'utf8');
+          await wtGit.raw('add', '-A');
+          await wtGit.commit(`claims: set aside ${entityId} (review cascade cap)`);
+          result = { entityId, ok: false, claimIds: [], setAside: true };
+          return true;
+        }
+        const createdAtR = new Date().toISOString();
+        const reviewIds: string[] = [];
         let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
-        audit += auditLine({ runId, entityId, event: 'setaside', reason: 'review-cascade-cap', rounds: priorState.rounds });
+        for (const req of decision.reviews) {
+          const id = ulid();
+          const review: Review = {
+            id,
+            status: 'open',
+            question: req.question,
+            detail: req.detail,
+            raisedBy: {
+              stage: STAGE,
+              runId,
+              item: { kind: 'entity', ref: entityRel },
+              auditRel: path.join(ref.derivedFrom, 'audit.jsonl'),
+              markerKey: { entityId },
+            },
+            subject: { ...(req.refs ? { refs: req.refs } : {}), sources: [ref.derivedFrom] },
+            createdAt: createdAtR,
+          };
+          await writeReviewFile(path.join(wt, reviewRel(id)), review);
+          reviewIds.push(id);
+          audit += auditLine({ runId, entityId, sourceId, model, event: 'review-raised', reviewId: id, question: req.question });
+        }
+        // The non-terminal park marker: skips just this item until every raised review is answered.
+        audit += auditLine({ runId, entityId, event: 'awaiting-review', reviewIds, round: priorState.rounds + 1 });
         await fs.appendFile(auditPath, audit, 'utf8');
         await wtGit.raw('add', '-A');
-        await wtGit.commit(`claims: set aside ${entityId} (review cascade cap)`);
-        await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-        return { entityId, ok: false, claimIds: [], setAside: true };
+        await wtGit.commit(`claims: parked ${entityId} for review (${reviewIds.length})`);
+        result = { entityId, ok: true, claimIds: [], setAside: false, parked: true };
+        return true;
       }
-      const createdAtR = new Date().toISOString();
-      const reviewIds: string[] = [];
-      let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
-      for (const req of decision.reviews) {
+
+      // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6).
+      const createdAt = new Date().toISOString();
+      const claimIds: string[] = [];
+      const backlinks: ClaimBacklink[] = [];
+      for (const claim of decision.claims) {
         const id = ulid();
-        const review: Review = {
-          id,
-          status: 'open',
-          question: req.question,
-          detail: req.detail,
-          raisedBy: {
-            stage: STAGE,
-            runId,
-            item: { kind: 'entity', ref: entityRel },
-            auditRel: path.join(ref.derivedFrom, 'audit.jsonl'),
-            markerKey: { entityId },
-          },
-          subject: { ...(req.refs ? { refs: req.refs } : {}), sources: [ref.derivedFrom] },
-          createdAt: createdAtR,
-        };
-        await writeReviewFile(path.join(wt, reviewRel(id)), review);
-        reviewIds.push(id);
-        audit += auditLine({ runId, entityId, sourceId, model, event: 'review-raised', reviewId: id, question: req.question });
+        const rel = path.join('claims', dateShard(id), `${id}.md`);
+        const dest = path.join(wt, rel);
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        await fs.writeFile(
+          dest,
+          renderClaimMd(claim, { id, subject: entityRel, derivedFrom: ref.derivedFrom, createdAt, agent: decision.agent }),
+          'utf8',
+        );
+        claimIds.push(id);
+        backlinks.push({ claimPath: rel, statement: claim.statement, status: claim.status, confidence: claim.confidence });
       }
-      // The non-terminal park marker: skips just this item until every raised review is answered.
-      audit += auditLine({ runId, entityId, event: 'awaiting-review', reviewIds, round: priorState.rounds + 1 });
+
+      // Regenerate the entity node's delimited claims block (CLAIMS-9): canonical data lives in
+      // claims/; this is the regenerable Obsidian-readable back-link. Identity is untouched (CLAIMS-11).
+      await fs.writeFile(entityPathWt, applyClaimsBlock(entityMd, backlinks), 'utf8');
+
+      let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
+      for (const sig of decision.signals ?? []) {
+        audit += auditLine({ runId, entityId, sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
+      }
+      audit += auditLine({ runId, entityId, sourceId, model, event: 'claimed', claims: claimIds.length });
+      await fs.appendFile(auditPath, audit, 'utf8');
+
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`claims: ${claimIds.length} about ${entityId} from ${sourceId}`);
+      result = { entityId, ok: true, claimIds, setAside: false };
+      return true;
+    } catch (err) {
+      // CLAIMS-12 / ORCH-12: never lose the entity. Discard any partial worktree writes, then
+      // record the failed attempt durably; set aside after K so it can't head-of-line-block.
+      await wtGit.raw('reset', '--hard', base);
+      const error = err instanceof Error ? err.message : String(err);
+      const priorFailures = (await readClaimsState(sourceDirWt, entityId)).failures;
+      const attempt = priorFailures + 1;
+      const setAside = attempt >= maxAttempts;
+      let audit = auditLine({ runId, entityId, event: 'failed', attempt, error: oneLine(error) });
+      if (setAside) audit += auditLine({ runId, entityId, event: 'setaside', attempts: attempt });
       await fs.appendFile(auditPath, audit, 'utf8');
       await wtGit.raw('add', '-A');
-      await wtGit.commit(`claims: parked ${entityId} for review (${reviewIds.length})`);
-      await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-      return { entityId, ok: true, claimIds: [], setAside: false, parked: true };
+      await wtGit.commit(`claims: failed ${entityId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
+      result = { entityId, ok: false, claimIds: [], setAside };
+      return true;
     }
+  };
 
-    // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6).
-    const createdAt = new Date().toISOString();
-    const claimIds: string[] = [];
-    const backlinks: ClaimBacklink[] = [];
-    for (const claim of decision.claims) {
-      const id = ulid();
-      const rel = path.join('claims', dateShard(id), `${id}.md`);
-      const dest = path.join(wt, rel);
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(
-        dest,
-        renderClaimMd(claim, { id, subject: entityRel, derivedFrom: ref.derivedFrom, createdAt, agent: decision.agent }),
-        'utf8',
-      );
-      claimIds.push(id);
-      backlinks.push({ claimPath: rel, statement: claim.statement, status: claim.status, confidence: claim.confidence });
-    }
-
-    // Regenerate the entity node's delimited claims block (CLAIMS-9): canonical data lives in
-    // claims/; this is the regenerable Obsidian-readable back-link. Identity is untouched (CLAIMS-11).
-    await fs.writeFile(entityPathWt, applyClaimsBlock(entityMd, backlinks), 'utf8');
-
-    // Append audit (envelope-wrapped): start, every signal (audit-only; CLAIMS-13), terminal
-    // `claimed` marker keyed by entityId. Signals NEVER touch claims/entity/source (CLAIMS-11/13).
-    let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
-    for (const sig of decision.signals ?? []) {
-      audit += auditLine({ runId, entityId, sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
-    }
-    audit += auditLine({ runId, entityId, sourceId, model, event: 'claimed', claims: claimIds.length });
-    await fs.appendFile(auditPath, audit, 'utf8');
-
+  // Same-path collision exhaustion (ORCH-19): set the entity aside so it can't head-of-line-block.
+  const onExhausted = async (): Promise<void> => {
+    const { wt } = await ensureWorktree(root);
+    const wtGit = simpleGit(wt);
+    const base = await canonicalHead(root);
+    await wtGit.raw('reset', '--hard', base);
+    const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
+    const auditPath = path.join(wt, ref.derivedFrom, 'audit.jsonl');
+    await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, event: 'setaside', reason: 'collision-exhausted' }), 'utf8');
     await wtGit.raw('add', '-A');
-    await wtGit.commit(`claims: ${claimIds.length} about ${entityId} from ${sourceId}`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
-    return { entityId, ok: true, claimIds, setAside: false };
-  } catch (err) {
-    // CLAIMS-12 / ORCH-12: never lose the entity. Discard any partial worktree writes, then
-    // record the failed attempt durably; set aside after K so it can't head-of-line-block.
-    await wtGit.raw('reset', '--hard', branch);
-    const error = err instanceof Error ? err.message : String(err);
-    const priorFailures = (await readClaimsState(sourceDirWt, entityId)).failures;
-    const attempt = priorFailures + 1;
-    const setAside = attempt >= maxAttempts;
-    let audit = auditLine({ runId, entityId, event: 'failed', attempt, error: oneLine(error) });
-    if (setAside) audit += auditLine({ runId, entityId, event: 'setaside', attempts: attempt });
-    await fs.appendFile(auditPath, audit, 'utf8');
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`claims: failed ${entityId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-    return { entityId, ok: false, claimIds: [], setAside };
-  }
+    await wtGit.commit(`claims: set aside ${entityId} (collision-exhausted)`);
+    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, base));
+    result = { ...result, ok: false, setAside: true };
+  };
+
+  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
+  return result;
 }
 
 /**
@@ -469,7 +495,8 @@ export class ClaimsStage {
     while (queue.length > 0) {
       const entityRel = queue[0];
       try {
-        await this.lock.run(() => claimsOne(this.root, entityRel, this.decider, this.maxAttempts));
+        // ORCH-17/18: claimsOne prepares OFF the lock and advances UNDER it (shared lock passed in).
+        await claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts);
         worked = true;
       } catch {
         // Unexpected (claimsOne handles its own failures) — stop this pass; a later poke/sweep
