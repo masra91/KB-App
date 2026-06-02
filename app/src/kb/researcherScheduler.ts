@@ -1,0 +1,108 @@
+// The scheduled-researcher tick (SPEC-0028 RESEARCH-2; KB-PM seam ruling Option (a)). Researchers
+// reuse the JOBS scheduler's *machinery shape* — coarse named-preset cadence (PRESET_INTERVAL_MS),
+// restart-safe "due" derived from the last run, single-flight per id — but the EXECUTION BODY is
+// `runResearcher` (a standing research pass → cited secondary source via the ingest path), NOT the
+// JobBehavior→JobFinding→write-sink flow. This keeps JOBS-10's "behaviors take no direct writes"
+// invariant intact (a JobBehavior and a Researcher are distinct behavior shapes that share only
+// scheduling). The scheduler owns no canonical writes; runResearcher's ingest does.
+//
+// "Due" comes from the researcher's last `researcher` audit event (its last pass) — survives
+// restarts with no separate timer state, mirroring isJobDue. A standing researcher does NOT go
+// through the dispatcher's dedup ledger (that coalesces *inline requests*); its cadence is what
+// bounds how often it researches its standing topic ("poll this daily").
+import path from 'node:path';
+import { PRESET_INTERVAL_MS } from './jobs';
+import { readResearcherRegistry } from './researcherRegistry';
+import { readEvents } from './activityIndex';
+import { runResearcher, type ResearchFn } from './researchRun';
+import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
+import { ulid } from './ulid';
+import { Mutex } from './stageLock';
+import { noopDevLog, type DevLog } from './devlog';
+
+/** Is a researcher due for a standing pass? enabled + scheduled + (never-run OR last + interval ≤ now). */
+export async function isResearcherDue(root: string, r: ResearcherConfig, now: number): Promise<boolean> {
+  if (!r.enabled || r.schedule === 'off') return false;
+  const interval = PRESET_INTERVAL_MS[r.schedule];
+  const events = await readEvents(root, { actors: ['researcher'], subjectId: r.id }); // newest-first
+  const last = events[0];
+  if (!last) return true; // never run → due
+  const lastMs = Date.parse(last.ts);
+  return !Number.isFinite(lastMs) || now - lastMs >= interval;
+}
+
+/** The synthetic standing request a scheduled researcher runs against (its topic/label/prompt). */
+export function standingRequest(r: ResearcherConfig, id: string, ts: string): ResearchRequest {
+  const what = r.topics?.[0] ?? r.label ?? r.template;
+  return { id, ts, by: { stage: 'scheduler' }, what, why: 'scheduled standing research', context: '', dedupKey: dedupKeyFor({ what, by: {} }) };
+}
+
+export class ResearcherScheduler {
+  private readonly root: string;
+  private readonly research: ResearchFn;
+  private readonly log: DevLog;
+  private readonly inFlight = new Set<string>(); // single-flight per researcher id (across ticks)
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private ticking = false;
+
+  /** `root` is the staging worktree (where the registry + audit live + researchers write). `research`
+   *  is the cognition (the Web SDK ResearchFn in prod; injected in tests). `lock` reserved for future
+   *  serialization with stages; runResearcher's ingest commits are add-only (unique ULID units). */
+  constructor(root: string, research: ResearchFn, _lock: Mutex = new Mutex(), log: DevLog = noopDevLog) {
+    this.root = path.resolve(root);
+    this.research = research;
+    this.log = log;
+  }
+
+  start(tickMs = 60_000): void {
+    void this.tick();
+    if (this.tickTimer == null) {
+      this.tickTimer = setInterval(() => void this.tick(), tickMs);
+      this.tickTimer.unref?.();
+    }
+  }
+
+  stop(): void {
+    if (this.tickTimer) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = null;
+    }
+  }
+
+  /** One tick: run a standing pass for every enabled+scheduled+due researcher, serially, each
+   *  single-flight. Returns the ids it fired. Ticks never overlap (`ticking` guard). */
+  async tick(now: number = Date.now()): Promise<string[]> {
+    if (this.ticking) return [];
+    this.ticking = true;
+    const fired: string[] = [];
+    try {
+      const researchers = await readResearcherRegistry(this.root);
+      for (const r of researchers) {
+        if (this.inFlight.has(r.id)) continue; // single-flight (JOBS-6 analogue)
+        if (!(await isResearcherDue(this.root, r, now))) continue;
+        fired.push(r.id);
+        await this.runStanding(r, now);
+      }
+    } finally {
+      this.ticking = false;
+    }
+    return fired;
+  }
+
+  /** Run one standing pass (single-flight-guarded). Never throws into the tick loop — a failed pass
+   *  is logged + skipped so one bad researcher can't stall the others. */
+  private async runStanding(r: ResearcherConfig, now: number): Promise<void> {
+    if (this.inFlight.has(r.id)) return;
+    this.inFlight.add(r.id);
+    try {
+      const ts = new Date(now).toISOString();
+      // Stamp the pass (provenance + the audit event the due-check reads) with the tick's logical
+      // time, so cadence is computed against the scheduler clock, not wall-clock.
+      await runResearcher(this.root, r, standingRequest(r, ulid(now), ts), { research: this.research, now: () => ts });
+    } catch (err) {
+      this.log.child({ scope: 'researcher-scheduler' }).error('standing-pass-failed', { itemId: r.id, err });
+    } finally {
+      this.inFlight.delete(r.id);
+    }
+  }
+}
