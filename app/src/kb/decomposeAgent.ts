@@ -62,7 +62,7 @@ const defaultRunner: CopilotRunner = async (prompt) => {
  * per source. The base entity `kind` set and signal `type` set are NUDGES in prose — the
  * agent MAY coin new ones (DECOMP-7,10). They are never enforced in code.
  */
-export const DECOMPOSE_PROMPT_VERSION = 'decompose/v1';
+export const DECOMPOSE_PROMPT_VERSION = 'decompose/v2';
 
 export function buildDecomposePrompt(input: SourceInput): string {
   const body = input.text ?? '(no extractable text — this is an opaque file; infer only from its name/type)';
@@ -70,6 +70,26 @@ export function buildDecomposePrompt(input: SourceInput): string {
     'You are the KB-App Decompose librarian. Read ONE source and DECOMPOSE it into the',
     'distinct ENTITIES it mentions — the nodes of the knowledge graph. Extract only entities',
     'grounded in the text; do NOT invent anything not supported by it.',
+    '',
+    'A NODE has INDEPENDENT IDENTITY — a nameable real-world referent you could collect facts',
+    'about across many sources: a person, organization, place, project, event, work/artifact,',
+    'or a durable named concept/term that exists independently of this source. Extract a node',
+    'ONLY for such things.',
+    '',
+    'Do NOT make a node out of what is really an ATTRIBUTE, ROLE, or CLAIM about another',
+    'entity — those are recorded later by the Claims stage, never as their own nodes:',
+    '  - roles / titles / descriptors predicated of an entity ("first computer programmer",',
+    '    "the CEO", "a British mathematician")',
+    '  - properties / values (dates, quantities, statuses, a location used as an attribute)',
+    '  - relationships or predicates ("worked with", "founded")',
+    '  - generic common nouns used descriptively, not as a specific named referent ("an',
+    '    algorithm", "a meeting") — unless the source treats it as a specific named thing',
+    'Tie-breaker: ask "could a DIFFERENT source add independent facts about this as its own',
+    'thing, and would it deserve its own page?" If it is only meaningful as a description of',
+    'another entity here, it is an attribute/claim, NOT a node.',
+    '',
+    'PREFER FEWER, higher-confidence nodes. When unsure whether something is a node or an',
+    'attribute, treat it as an attribute and do NOT extract it — Claims will capture it.',
     '',
     'For each entity give: kind, name, a confidence in [0,1] that it is a real distinct',
     'entity, and mentions[] (verbatim spans from the source that evidence it).',
