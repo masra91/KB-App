@@ -247,6 +247,12 @@ export interface ResearcherView {
   schedule: SchedulePreset;
   posture: AutonomyPosture;
   topics: string[];
+  /** Per-pass retrieval/chain bounds (RESEARCH-11) — surfaced read-only in the "reach readout" so the
+   *  Principal can see a researcher's spend ceiling without opening anything. Editor deferred (§10). */
+  budget: { maxToolCalls: number; maxDepth: number };
+  /** The researcher's tool/MCP allowlist (RESEARCH-12) — surfaced read-only in the reach readout so a
+   *  researcher's reach is always legible. Empty = the template's default surface. Editor deferred. */
+  allowedTools: string[];
   lastRun: ResearcherLastRun | null; // null = never run
 }
 
