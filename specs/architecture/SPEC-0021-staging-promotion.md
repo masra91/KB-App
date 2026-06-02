@@ -128,7 +128,7 @@ more moving parts). Copy-paths is dumb, deterministic, and easy to test.
 | STAGING-5  | must     | **Decompose emits candidates** into the working `candidates/` path on `staging` and **writes no `entities/`** (CANON-4 / issue #21); `entities/` stays empty until CONNECT | test:candidateDoc.test.ts, decomposeStage.test.ts, stagingPipeline.test.ts | CANON-4,10; DECOMP-1 |
 | STAGING-6  | must     | `main` **never contains working paths** (`inbox/`, `candidates/`, `queue/`, `reviews/`) — by construction (never checked out), so Obsidian/`grep`/Query on `main` see only evergreen state | test:stagingPipeline.test.ts | CANON-1,2,8 |
 | STAGING-7  | must     | App **working-state reads** (the Review queue, candidates) come from **`staging`**; **evergreen reads** (Obsidian/Query) from **`main`** | none-yet | CANON-9; REVIEW-11 |
-| STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | test:staging.test.ts | ORCH-13 |
+| STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | test:stagingCrashRestart.test.ts | ORCH-13 |
 | STAGING-9  | should   | A **periodic sweep** re-runs promotion as a backstop (recovers a missed post-drain promotion), mirroring ORCH-15 | none-yet | ORCH-15 |
 | STAGING-10 | must     | **Promotion mirrors deletions**: each promote makes every evergreen path on `main` an *exact mirror* of `staging` (adds, edits, **and removals**), so Connect's merged-away loser nodes and repointed claims (SPEC-0020 §3) are reflected on `main` — a deduped duplicate never lingers. `sources/` is append-only, so mirroring never removes ground truth | test:staging.test.ts, connectPipeline.test.ts | CANON-1,2; CONNECT-3 |
 | STAGING-11 | must     | The **active evergreen set** is exactly `EVERGREEN_PATHS`, and it **grows with its producers**: `entities/` + `claims/` (+ `outputs/`) join the promoted set once CONNECT/Claims write them — `EVERGREEN_PATHS` is the single source of truth for what reaches `main` | test:staging.test.ts, connectPipeline.test.ts | CANON-3,5; CONNECT-3 |
@@ -204,3 +204,17 @@ The full conformance is large; this spec is built in slices, each green + shippa
   grows with its producers (`entities/`+`claims/`+`outputs/` activate when CONNECT/Claims land).
   This is the spec lever for the **viewable e2e ingestion→enrich** goal (source → deduped
   entities → claims → `[[wikilinks]]`, visible on `main` in Obsidian). Impl rides slice 4.
+- 2026-06-02 — **STAGING-8 dedicated crash/restart test** (`stagingCrashRestart.test.ts`), the
+  explicit coverage KB-Quality-Driver asked for on #26 (the prior `staging.test.ts` proved
+  promote idempotency but not the full restart story). Models three distinct crash points and
+  proves each restarts cleanly from branch state: (1) crash after a stage advanced `staging` but
+  before the post-drain promotion → a restart drain / periodic sweep re-promotes the missed
+  evergreen change, then idempotently no-ops (the STAGING-9 backstop behavior, exercised); (2)
+  crash MID-promote (main's worktree updated from `staging`, commit never landed) → restart
+  converges `main` with **exactly one** commit, no divergent/duplicate history; (3) orchestrator
+  restart after a crashed promotion → a fresh orchestrator re-promotes and does **not** re-archive
+  the already-committed source (commit-to-dequeue, ORCH-13). Graduated STAGING-8 →
+  `test:stagingCrashRestart.test.ts`. STAGING-9's timer-driven *periodic* sweep remains
+  e2e/manual (deterministic timer testing deferred), though its recovery path is exercised here.
+  Also added the shared `app/test/gitEnv.ts` `gitAvailable` probe + a SPEC-0012 note on the
+  git-less-runner signal (skipped git suites are a false green; CI's unit job must have git).
