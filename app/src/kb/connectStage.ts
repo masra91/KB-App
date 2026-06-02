@@ -330,7 +330,11 @@ function parseClaim(md: string, rel: string): ClaimRef | null {
     }
   }
   if (!subject) return null;
-  return { rel, subject, statement: body, status, confidence, relatesTo };
+  // Statement = the body's FIRST line. A claim body may carry a trailing "Source: [[…]]" citation
+  // (VAULT-13) that is provenance, not the assertion — exclude it so merge-regenerated claims
+  // blocks show the statement, not the citation. (Statements are always single-line `oneLine`.)
+  const statement = body.split('\n', 1)[0]?.trim() ?? '';
+  return { rel, subject, statement, status, confidence, relatesTo };
 }
 
 async function readClaims(wtRoot: string): Promise<ClaimRef[]> {
