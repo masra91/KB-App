@@ -41,8 +41,11 @@ heading:
 [ Capture ]   ← default, sacred (SHELL-4)
 [ Reviews ]   ← the "needs you" queue (SPEC-0018), its own view
 ── Manage ──
-[ Jobs ]  [ Agents ]  [ Sources ]  [ Settings ]
+[ Jobs ]  [ Agents ]  [ Researchers ]  [ Sources ]  [ Settings ]
 ```
+
+> **Researchers** (SPEC-0028) is a sibling Manage view: add-from-template (Web/Code/M365/custom),
+> configure prompt/scope/egress/budget/MCP, enable, **run-now**, see findings/citations/escalations.
 
 Exactly one view active at a time (SHELL-2). Reviews stays its own top-level view; the panel
 **links to it** (the "needs you" count).

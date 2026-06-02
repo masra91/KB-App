@@ -40,6 +40,7 @@ and a unique `key` here.
 | SPEC-0025 | META    | Rich Metadata, Tags & Properties            | feature | draft | `features/` |
 | SPEC-0026 | ASK     | Ask & Recall (grounded NL query v1)         | feature | draft | `features/` |
 | SPEC-0027 | PANEL   | Control Panel (manage agents, sources & jobs) | feature | draft | `features/` |
+| SPEC-0028 | RESEARCH | Researchers (Enrich & Research)            | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -54,7 +55,7 @@ assigned at creation time.
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
 | ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
 | ~~CLAIMS~~ | _written → SPEC-0016 (key CLAIMS)_ | feature | Enrich  | Claims (Enrich v2) — internal substance about entities |
-| RESEARCH   | Enrich & Research                | feature | Enrich    | external corroboration/expansion (egress, AUTO-4; thick agent) — was `ENRICH` |
+| ~~RESEARCH~~ | _written → SPEC-0028 (key RESEARCH)_ | feature | Enrich  | Researchers: parallel registry (Web/Code/M365 + custom), invoked inline/scheduled/on-demand |
 | ~~CONNECT~~ | _written → SPEC-0020 (key CONNECT)_ | feature | Enrich  | Connect & Expand (Enrich v3) — sole writer of evergreen `entities/` + promotion gate (SPEC-0019 CANON-5) |
 | ~~ASK~~    | _written → SPEC-0026 (key ASK)_  | feature | Query     | grounded NL query — agentic structure-aware retrieval |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
