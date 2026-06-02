@@ -1,0 +1,104 @@
+// Control Panel · Researchers — pure view-model logic (SPEC-0028 RESEARCH-15). DOM-free +
+// side-effect-free (SHELL-6 / TEST-5): the main process gathers the fs-backed inputs (registry +
+// last-run audit events) and hands them here; the renderer renders the result. Mirrors jobsPanel.
+import { EGRESS_TIERS, RESEARCHER_TEMPLATES, TEMPLATE_DEFAULT_EGRESS, type ResearcherConfig, type EgressTier, type ResearcherTemplate } from './researchers';
+import { schedulePresetLabel, SCHEDULE_OPTIONS } from './jobsPanel';
+import type { AuditEvent } from './audit';
+import type { ResearcherView, ResearcherLastRun, ResearcherConfigPatch } from './types';
+
+export { schedulePresetLabel, SCHEDULE_OPTIONS };
+
+/** An add-from-template option for the Researchers view (RESEARCH-15/16). Slice 1 ships Web; Code +
+ *  M365 are present as options but their behaviors land in Slices 2/3 (the view can still register
+ *  the config). `custom` is the bare generic core. */
+export interface ResearcherTemplateOption {
+  template: ResearcherTemplate;
+  label: string;
+  description: string;
+  defaultEgress: EgressTier;
+}
+
+export const RESEARCHER_TEMPLATE_OPTIONS: ResearcherTemplateOption[] = [
+  { template: 'web', label: 'Web', description: 'Public-web search & fetch — prior art, press releases, definitions.', defaultEgress: 'public-web' },
+  { template: 'code', label: 'Code', description: 'Local repos + GitHub/Azure DevOps reads (read-only). Slices 2.', defaultEgress: 'local-only' },
+  { template: 'm365', label: 'M365 / WorkIQ', description: 'Mail/calendar/SharePoint/Teams via your tenant (OAuth). Slice 3.', defaultEgress: 'internal-tenant' },
+  { template: 'custom', label: 'Custom', description: 'Your own prompt + MCP/tools + declared egress tier.', defaultEgress: 'local-only' },
+];
+
+/** Human labels for the egress tiers (RESEARCH-8), least→most exposed. */
+export const EGRESS_TIER_LABELS: Record<EgressTier, string> = {
+  'local-only': 'Local only (never leaves this machine)',
+  'internal-tenant': 'Internal tenant (your org)',
+  'public-web': 'Public web',
+};
+
+/** Egress exposure rank (higher = data can reach a less-trusted destination). Widening egress to a
+ *  higher rank is a risky change (more KB content can leave) → confirm + audit. */
+const EGRESS_EXPOSURE: Record<EgressTier, number> = { 'local-only': 0, 'internal-tenant': 1, 'public-web': 2 };
+
+/** Derive a researcher's last-run summary from its newest `researcher` audit event (or null). */
+export function lastRunFromEvent(event: AuditEvent | undefined): ResearcherLastRun | null {
+  if (!event) return null;
+  const p = event.payload;
+  const citations = Array.isArray(p.citations) ? p.citations.length : 0;
+  return {
+    ts: event.ts,
+    eventType: event.eventType,
+    what: typeof p.what === 'string' ? p.what : '',
+    ...(event.subjects.sourceId ? { sourceId: event.subjects.sourceId } : {}),
+    citations,
+  };
+}
+
+/**
+ * Map the researcher registry into display rows (RESEARCH-15), overlaying each researcher's last-run
+ * from `lastEventByResearcherId`. Unlike jobs there is no pre-registered catalog of rows — researchers
+ * are all Principal-created from templates (RESEARCHER_TEMPLATE_OPTIONS is the add list, not rows).
+ * Rows in registry order.
+ */
+export function buildResearcherViews(
+  registry: ResearcherConfig[],
+  lastEventByResearcherId: Record<string, AuditEvent | undefined>,
+): ResearcherView[] {
+  return registry.map((r) => ({
+    id: r.id,
+    template: r.template,
+    label: r.label ?? r.template,
+    egressTier: r.egressTier,
+    scope: r.scope,
+    enabled: r.enabled,
+    schedule: r.schedule,
+    posture: r.posture,
+    topics: r.topics ?? [],
+    lastRun: lastRunFromEvent(lastEventByResearcherId[r.id]),
+  }));
+}
+
+/**
+ * Which config changes are risky enough to require an explicit confirm + audit (RESEARCH-15, like
+ * PANEL-7): **enabling** a researcher (starts external egress), flipping to **autonomous** (its
+ * findings auto-apply without Review), or **widening egress** to a more-exposed tier (more KB content
+ * can leave). `prior` undefined = a brand-new researcher; enabling-on-create is risky too.
+ */
+export function isRiskyResearcherChange(prior: ResearcherConfig | undefined, patch: ResearcherConfigPatch): boolean {
+  if (patch.enabled === true && (!prior || !prior.enabled)) return true; // turning it on
+  if (patch.posture === 'autonomous' && (!prior || prior.posture !== 'autonomous')) return true; // to autonomous
+  if (patch.egressTier && prior && EGRESS_EXPOSURE[patch.egressTier] > EGRESS_EXPOSURE[prior.egressTier]) return true; // widening egress
+  if (patch.egressTier && !prior && patch.egressTier !== 'local-only') return true; // new researcher with external egress
+  return false;
+}
+
+/** Validate an egress tier from untrusted IPC input (mirrors isSchedulePreset/isAutonomyPosture). */
+export function isEgressTier(v: unknown): v is EgressTier {
+  return typeof v === 'string' && (EGRESS_TIERS as readonly string[]).includes(v);
+}
+
+/** Validate a researcher template from untrusted IPC input. */
+export function isResearcherTemplate(v: unknown): v is ResearcherTemplate {
+  return typeof v === 'string' && (RESEARCHER_TEMPLATES as readonly string[]).includes(v);
+}
+
+/** Default egress for a template (custom defaults to the safest, local-only). */
+export function defaultEgressFor(template: ResearcherTemplate): EgressTier {
+  return template === 'custom' ? 'local-only' : TEMPLATE_DEFAULT_EGRESS[template];
+}
