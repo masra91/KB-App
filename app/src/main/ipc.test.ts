@@ -12,6 +12,7 @@
 // only assert the main process is asked to manage the right vault. createKb itself is real
 // (a genuine git repo in a temp dir), so the pick → vault-root chain is exercised end-to-end.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import type { AppState, CreateKbResult } from '../kb/types';
@@ -24,7 +25,10 @@ const state = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
 }));
 
-const mocks = vi.hoisted(() => ({ startPipeline: vi.fn(async () => undefined) }));
+const mocks = vi.hoisted(() => ({
+  startPipeline: vi.fn(async () => undefined),
+  recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
+}));
 
 vi.mock('electron', () => ({
   app: { getPath: (): string => state.userData },
@@ -40,6 +44,8 @@ vi.mock('./pipeline', () => ({
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
 }));
+
+vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 
 import { registerIpc, initPipeline } from './ipc';
 
@@ -57,6 +63,8 @@ beforeEach(async () => {
   state.dialogResult = { canceled: false, filePaths: [] };
   state.handlers.clear();
   mocks.startPipeline.mockClear();
+  mocks.recall.mockClear();
+  delete process.env.KB_ASK_E2E_STUB;
   registerIpc();
 });
 
@@ -152,5 +160,33 @@ describe('SETUP-6 — later launches load the existing KB (no re-onboarding)', (
     mocks.startPipeline.mockClear();
     await initPipeline();
     expect(mocks.startPipeline).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
+  async function configureVault(p: string): Promise<void> {
+    await fs.writeFile(path.join(state.userData, 'kb-app.config.json'), JSON.stringify({ activeVaultPath: p }) + '\n');
+  }
+
+  it('runs recall on the active vault root and returns its result', async () => {
+    await configureVault(vaultDir);
+    const res = await invoke<{ answer: string }>('kb:ask', { question: 'Who?', history: [] });
+    expect(mocks.recall).toHaveBeenCalledWith(path.resolve(vaultDir), { question: 'Who?', history: [] });
+    expect(res.answer).toBe('mock recall');
+  });
+
+  it('returns an honest ungrounded result when no KB is configured (recall not run)', async () => {
+    const res = await invoke<{ grounded: boolean; answer: string }>('kb:ask', { question: 'Who?' });
+    expect(res.grounded).toBe(false);
+    expect(res.answer).toContain('No active knowledge base');
+    expect(mocks.recall).not.toHaveBeenCalled();
+  });
+
+  it('KB_ASK_E2E_STUB short-circuits to a deterministic grounded answer (no recall, no vault)', async () => {
+    process.env.KB_ASK_E2E_STUB = '1';
+    const res = await invoke<{ grounded: boolean; citations: { ref: string }[] }>('kb:ask', { question: 'Who?' });
+    expect(res.grounded).toBe(true);
+    expect(res.citations[0].ref).toBe('claims/person/ada-lovelace.md');
+    expect(mocks.recall).not.toHaveBeenCalled();
   });
 });

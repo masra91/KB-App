@@ -70,14 +70,14 @@ a larger budget than a stage) equipped with:
 
 | ID      | Priority | Statement (short)                                                                  | Verify   | Traces |
 | ------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
-| ASK-1   | must     | The Principal can ask an **NL question** and receive a **grounded answer traceable to evidence** (links to the sources/claims/entities it rests on) | test:app/src/kb/recall.test.ts | VISION-9; LIFE-4; PRIN-2 |
-| ASK-2   | must     | Recall is **pull-only** — Principal-initiated; the KB never auto-pushes answers/reports | none-yet | AUTO-5 |
+| ASK-1   | must     | The Principal can ask an **NL question** and receive a **grounded answer traceable to evidence** (links to the sources/claims/entities it rests on) | test:app/e2e/ask.e2e.ts | VISION-9; LIFE-4; PRIN-2 |
+| ASK-2   | must     | Recall is **pull-only** — Principal-initiated; the KB never auto-pushes answers/reports | test:app/src/shell/views/askView.test.ts | AUTO-5 |
 | ASK-3   | must     | Recall is **read-only w.r.t. sources/entities/claims** — it MUST NOT mutate the ontology; its only write is an optional **Output** | test:app/src/kb/recall.test.ts | DATA-1; AUTO-6 |
 | ASK-4   | must     | Answers are produced by a **structure-aware agent** with a recall **skill** (KB layout + metadata/tags/properties + wikilink/provenance) and **tools** (structured KB queries, grep, optional Obsidian CLI), choosing among them per question — **not blind text-search** | test:app/src/kb/recallAgent.test.ts | ORCH-5,7,9; META-1 |
 | ASK-5   | must     | Retrieval is **multi-hop, entity/metadata-aware** — traverses entities → claims → `[[wikilinks]]`, filters by tags/properties, exploiting KB structure | test:app/src/kb/recallTools.test.ts | CONNECT-3; META-1,3 |
 | ASK-6   | must     | The Principal can **save an answer as an Output** — persisted under `outputs/`, **tagged as synthesis** with provenance to its evidence, promoted to `main` | none-yet | DATA-4; STAGING-3 |
 | ASK-7   | must     | Every substantive assertion **cites its evidence**; the agent MUST NOT present ungrounded claims as fact, and **distinguishes KB-grounded from inferred** | test:app/src/kb/recall.test.ts | PRIN-2; VISION-9 |
-| ASK-8   | should   | Recall is **conversational / multi-turn** — follow-ups refine within a session (the Ask/Chat surface) | none-yet | VISION-9; SHELL |
+| ASK-8   | should   | Recall is **conversational / multi-turn** — follow-ups refine within a session (the Ask/Chat surface) | test:app/src/shell/views/askView.test.ts | VISION-9; SHELL |
 | ASK-9   | should   | **Obsidian CLI acceleration** is capability-detected and **never required** — core recall stays **headless** and works with Obsidian absent (optional viewer) | none-yet | STACK; PRIN-5 |
 | ASK-10  | should   | Recall honors **scope/sensitivity + surfacing** — answers respect the surfacing policy and scope partitions | none-yet | SCOPE-11; SCOPE-1 |
 | ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | test:app/src/kb/recall.test.ts | AUTO-8; LIFE-9 |
@@ -191,3 +191,16 @@ behind it substrate-agnostic and unit-testable.
   retained (SDK/CLI unavailable → honest ungrounded result). ASK-12 graduated `none-yet → test:`
   (seam + fallback + skill unit-tested; the **live SDK/CLI round-trip is e2e/manual** — the CLI isn't
   in the unit env, mirroring ORCH-8's CLI convention). 321 tests green; coverage gate passes.
+- 2026-06-02 — **slice 2 (Ask surface) landed.** The Ask view (`VIEW_ASK` 💬, `app/src/shell/views/
+  askView.ts`) + `kb:ask` IPC (resolves the active vault → `recall()`) + the `KbApi.ask` contract +
+  preload bridge. Multi-turn within the session via in-view history (ASK-8); pull-only — recall runs
+  only on the Principal's submit (ASK-2). Answer renders with its citations + ungrounded/truncated
+  flags. **UI is genuinely tested** (PM acceptance): opened SPEC-0012's reserved **component tier
+  (TEST-5)** via **happy-dom** (per-file `@vitest-environment`, node stays default) — `askView.test.ts`
+  (render, multi-turn history, ungrounded/truncated flags, error, empty-question, pull-only); the
+  `kb:ask` handler path in `ipc.test.ts` (active vault → recall, no-vault honesty, stub hook); and an
+  **e2e happy-path** `app/e2e/ask.e2e.ts` (ask → grounded cited answer rendered) gated on
+  `KB_ASK_E2E_STUB=1` (deterministic recall — the live SDK round-trip stays e2e/manual), CI-only.
+  Graduated **ASK-1** (end-to-end surface), **ASK-2**, **ASK-8** `none-yet → test:`. Streaming deferred
+  (request/response; tracked follow-up). 349 tests green; src/kb coverage gate passes. Broadening the
+  unit-coverage gate to the now-open component tier is a follow-up once more views carry tests.

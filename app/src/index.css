@@ -339,3 +339,15 @@ button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* Ask view (SPEC-0026) */
+.ask-view .ask-transcript { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.ask-turn { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 0.75rem; }
+.ask-q { font-weight: 600; margin-bottom: 0.4rem; }
+.ask-answer { white-space: pre-wrap; }
+.ask-answer.error { color: #d66; }
+.ask-citations { margin-top: 0.5rem; font-size: 0.9em; }
+.ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.ask-flags { margin-top: 0.4rem; font-size: 0.85em; }
+.ask-form { display: flex; gap: 0.5rem; }
+.ask-input { flex: 1; }
