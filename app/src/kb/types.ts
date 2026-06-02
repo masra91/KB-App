@@ -223,6 +223,9 @@ export interface ResearcherView {
   /** M365-template config: the tenant id the researcher reads (`config.tenantId`); empty when unset
    *  (the M365 researcher is inert until set). Shown only for `m365` researchers (SPEC-0028 Slice 3). */
   tenantId: string;
+  /** Code-template config: the GitHub PR repo (`config.prRepo`, `owner/name`) the researcher scans;
+   *  empty when unset (PR reads are inert until set). Shown only for `code` researchers (Slice 2b). */
+  prRepo: string;
   egressTier: EgressTier;
   scope: string;
   enabled: boolean;
@@ -243,6 +246,8 @@ export interface ResearcherConfigPatch {
   repoPath?: string;
   /** M365-template config: the tenant id to read (merged into `config.tenantId`). */
   tenantId?: string;
+  /** Code-template config: the GitHub PR repo `owner/name` to scan (merged into `config.prRepo`). */
+  prRepo?: string;
   egressTier?: EgressTier;
   scope?: string;
   enabled?: boolean;

@@ -130,6 +130,14 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', repoPath: '/old/repo' })).toEqual([]); // no-op re-assert
   });
 
+  it('audits a prRepo change from prior config (Slice 2b Code PR config — never silent)', () => {
+    const prior = web({ template: 'code', egressTier: 'local-only', config: { prRepo: 'octocat/old' } });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', prRepo: 'octocat/new' });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'prRepo', from: 'octocat/old', to: 'octocat/new' });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', prRepo: 'octocat/old' })).toEqual([]); // no-op re-assert
+  });
+
   it('audits a tenantId change from prior config (Slice 3 M365 config — never silent)', () => {
     const prior = web({ template: 'm365', egressTier: 'internal-tenant', config: { tenantId: 'contoso.onmicrosoft.com' } });
     const events = researcherConfigAuditEvents(prior, { id: 'web-1', tenantId: 'fabrikam.onmicrosoft.com' });

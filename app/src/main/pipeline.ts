@@ -49,6 +49,7 @@ import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgress
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { makeWebResearchFn } from '../kb/researchWebAgent';
+import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { buildRecallOutput } from '../kb/outputDoc';
@@ -585,6 +586,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   if (typeof patch.scope === 'string' && patch.scope.trim()) clean.scope = patch.scope;
   if (typeof patch.repoPath === 'string' && patch.repoPath.trim()) clean.repoPath = patch.repoPath.trim();
   if (typeof patch.tenantId === 'string' && patch.tenantId.trim()) clean.tenantId = patch.tenantId.trim();
+  // prRepo is owner/name — validated at the boundary (drop a flag-like/garbage value, never store it).
+  if (typeof patch.prRepo === 'string' && isSafeGhRepo(patch.prRepo.trim())) clean.prRepo = patch.prRepo.trim();
   if (Array.isArray(patch.topics)) clean.topics = patch.topics;
 
   let prior: ResearcherConfig | undefined;
@@ -603,12 +606,13 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         ...(clean.topics !== undefined ? { topics: clean.topics } : {}),
         // Template config: merge repoPath (Code) / tenantId (M365) into the existing config,
         // preserving other config keys.
-        ...(clean.repoPath !== undefined || clean.tenantId !== undefined
+        ...(clean.repoPath !== undefined || clean.tenantId !== undefined || clean.prRepo !== undefined
           ? {
               config: {
                 ...(prior.config ?? {}),
                 ...(clean.repoPath !== undefined ? { repoPath: clean.repoPath } : {}),
                 ...(clean.tenantId !== undefined ? { tenantId: clean.tenantId } : {}),
+                ...(clean.prRepo !== undefined ? { prRepo: clean.prRepo } : {}),
               },
             }
           : {}),
@@ -630,8 +634,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         posture: clean.posture ?? DEFAULT_POSTURE,
         enabled: clean.enabled ?? false,
         ...(clean.topics ? { topics: clean.topics } : {}),
-        ...(clean.repoPath || clean.tenantId
-          ? { config: { ...(clean.repoPath ? { repoPath: clean.repoPath } : {}), ...(clean.tenantId ? { tenantId: clean.tenantId } : {}) } }
+        ...(clean.repoPath || clean.tenantId || clean.prRepo
+          ? { config: { ...(clean.repoPath ? { repoPath: clean.repoPath } : {}), ...(clean.tenantId ? { tenantId: clean.tenantId } : {}), ...(clean.prRepo ? { prRepo: clean.prRepo } : {}) } }
           : {}),
       });
     }
