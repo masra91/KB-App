@@ -6,11 +6,51 @@
 // canonical is reconciled by REPLAYING the item commit (cherry-pick) — no merge bubble, linear
 // history (ORCH-3). The rare same-path collision (e.g. two Connect items resolving the same block)
 // is detected and retried against the fresh canonical, bounded → set-aside (ORCH-19).
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import simpleGit from 'simple-git';
 import { Mutex } from './stageLock';
+import { ulid } from './ulid';
+import { ensureGitIdentity } from './vault';
 
 /** Default same-path collision retries before an item is set aside (ORCH-19). */
 export const DEFAULT_MAX_COLLISION_RETRIES = 3;
+
+/** Default per-stage concurrency cap (ORCH-20). cap=1 ⇒ the serial drain (output-identical to the
+ *  pre-concurrency engine); a higher cap lets a stage run that many items' cognition at once,
+ *  their advances still serialized by the shared lock. Raised deliberately by pipeline.ts. */
+export const DEFAULT_STAGE_CAP = 1;
+
+/**
+ * Run `fn` against a FRESH, isolated git worktree for ONE in-flight item (ORCH-17/20): a unique
+ * work branch `kb/<stage>-work-<ulid>` checked out off `checkpoint`, torn down afterward. This is
+ * what lets a stage run cap>1 items concurrently — each prepares in its own worktree+branch instead
+ * of clobbering a single shared one. The teardown is best-effort + prune-guarded so a crash mid-item
+ * can't leak a worktree (a `worktree prune` on the next call reaps any orphan).
+ */
+export async function withEphemeralWorktree<T>(
+  root: string,
+  stage: string,
+  checkpoint: string,
+  fn: (ctx: { wt: string; workBranch: string }) => Promise<T>,
+): Promise<T> {
+  root = path.resolve(root);
+  const id = ulid();
+  const workBranch = `kb/${stage}-work-${id}`;
+  const wt = path.join(root, '.kb', 'cache', 'worktrees', `${stage}-${id}`);
+  const git = simpleGit(root);
+  await ensureGitIdentity(git);
+  await git.raw('worktree', 'prune'); // reap any orphan from a prior crash before adding
+  await fs.mkdir(path.dirname(wt), { recursive: true });
+  await git.raw('worktree', 'add', '--force', '-B', workBranch, wt, checkpoint);
+  try {
+    return await fn({ wt, workBranch });
+  } finally {
+    await git.raw('worktree', 'remove', '--force', wt).catch(() => {});
+    await git.raw('branch', '-D', workBranch).catch(() => {});
+    await git.raw('worktree', 'prune').catch(() => {});
+  }
+}
 
 /** Read the canonical worktree's current HEAD commit — the checkpoint a stage prepares off. */
 export async function canonicalHead(root: string): Promise<string> {

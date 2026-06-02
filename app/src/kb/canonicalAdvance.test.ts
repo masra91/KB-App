@@ -9,7 +9,7 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { gitAvailable } from '../../test/gitEnv';
 import { ensureGitIdentity } from './vault';
-import { canonicalHead, advanceOrCollide, withOptimisticAdvance } from './canonicalAdvance';
+import { canonicalHead, advanceOrCollide, withOptimisticAdvance, withEphemeralWorktree, type AdvanceOutcome } from './canonicalAdvance';
 import { Mutex } from './stageLock';
 
 /** A canonical worktree (`root`) on branch `canon` with one initial commit. */
@@ -44,6 +44,8 @@ async function prepareOnBranch(root: string, branch: string, base: string, files
 
 const headCount = async (root: string): Promise<number> =>
   Number((await simpleGit(root).raw('rev-list', '--count', 'HEAD')).trim());
+const mergeCommitCount = async (root: string): Promise<number> =>
+  Number((await simpleGit(root).raw('rev-list', '--merges', '--count', 'HEAD')).trim());
 const exists = async (root: string, rel: string): Promise<boolean> =>
   fs.access(path.join(root, rel)).then(() => true).catch(() => false);
 
@@ -198,6 +200,88 @@ describe.skipIf(!gitAvailable)('withOptimisticAdvance — prepare/advance/retry/
       expect(attempts).toBe(3); // maxCollisionRetries(2) + 1 initial attempt
       // The item was never half-applied: canonical holds only the racer's content, tree clean.
       expect(await fs.readFile(path.join(root, 'entities/p/steve.md'), 'utf8')).toContain('racer');
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+describe.skipIf(!gitAvailable)('withEphemeralWorktree — per-item isolation for cap>1 (ORCH-17/20)', () => {
+  it('runs fn in a fresh worktree on a unique branch off the checkpoint, then tears it down', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      let seenWt = '';
+      let seenBranch = '';
+      const advanced = await withEphemeralWorktree(root, 'decompose', base, async ({ wt, workBranch }) => {
+        seenWt = wt;
+        seenBranch = workBranch;
+        await fs.mkdir(path.join(wt, 'sources/A'), { recursive: true });
+        await fs.writeFile(path.join(wt, 'sources/A/x'), 'a');
+        const g = simpleGit(wt);
+        await ensureGitIdentity(g);
+        await g.raw('add', '-A');
+        await g.commit('work');
+        return advanceOrCollide(root, workBranch, base); // advance in the canonical worktree
+      });
+      expect(advanced).toBe('advanced');
+      expect(seenBranch).toMatch(/^kb\/decompose-work-/);
+      expect(await exists(root, 'sources/A/x')).toBe(true);
+      // Torn down: the worktree dir is gone and its branch deleted.
+      expect(await exists('', seenWt)).toBe(false);
+      expect((await simpleGit(root).branchLocal()).all).not.toContain(seenBranch);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('concurrent items get ISOLATED worktrees + branches; both land linearly (cap>1 core)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      const lock = new Mutex();
+      const seen: Array<{ wt: string; branch: string }> = [];
+      // Each item: own ephemeral worktree → write+commit → advance UNDER the lock (inside the
+      // ephemeral scope, before teardown). Two run concurrently off the SAME base.
+      const run = (name: string): Promise<AdvanceOutcome> =>
+        withEphemeralWorktree(root, 'decompose', base, async ({ wt, workBranch }) => {
+          seen.push({ wt, branch: workBranch });
+          await fs.mkdir(path.join(wt, `sources/${name}`), { recursive: true });
+          await fs.writeFile(path.join(wt, `sources/${name}/x`), name);
+          const g = simpleGit(wt);
+          await ensureGitIdentity(g);
+          await g.raw('add', '-A');
+          await g.commit(`work ${name}`);
+          return lock.run(() => advanceOrCollide(root, workBranch, base));
+        });
+      const outcomes = await Promise.all([run('A'), run('B')]);
+      expect(outcomes).toEqual(['advanced', 'advanced']); // ff then disjoint cherry-pick
+      expect(seen[0].wt).not.toBe(seen[1].wt); // isolated worktrees
+      expect(seen[0].branch).not.toBe(seen[1].branch); // unique per-item branches
+      expect(await exists(root, 'sources/A/x')).toBe(true);
+      expect(await exists(root, 'sources/B/x')).toBe(true);
+      expect(await mergeCommitCount(root)).toBe(0); // linear (ORCH-3)
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('tears the worktree down even when fn throws', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      let seenWt = '';
+      await expect(
+        withEphemeralWorktree(root, 'claims', base, async ({ wt }) => {
+          seenWt = wt;
+          throw new Error('boom');
+        }),
+      ).rejects.toThrow('boom');
+      expect(await exists('', seenWt)).toBe(false); // cleaned up despite the throw
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);
