@@ -204,11 +204,16 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     expect(archived.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true });
   });
 
-  it('reuses a healthy persistent worktree across items', async () => {
+  it('archives via ephemeral per-item worktrees, leaving none behind (ORCH-20)', async () => {
     await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'a' }]);
     await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'b' }]);
     await new Orchestrator(vault).poke();
-    expect(await readQueue(vault)).toEqual([]);
-    expect(await pathExists(path.join(vault, '.kb', 'cache', 'worktrees', 'archivist'))).toBe(true);
+    expect(await readQueue(vault)).toEqual([]); // both archived
+    // The old persistent `archivist` worktree no longer exists; each item now gets a fresh
+    // ephemeral worktree (`archive-<ulid>`) that is torn down after — no leaked worktrees.
+    expect(await pathExists(path.join(vault, '.kb', 'cache', 'worktrees', 'archivist'))).toBe(false);
+    const wtDir = path.join(vault, '.kb', 'cache', 'worktrees');
+    const leftover = (await fs.readdir(wtDir).catch(() => [] as string[])).filter((d) => d.startsWith('archive-'));
+    expect(leftover).toEqual([]);
   });
 });

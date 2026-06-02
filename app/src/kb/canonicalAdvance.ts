@@ -6,11 +6,51 @@
 // canonical is reconciled by REPLAYING the item commit (cherry-pick) — no merge bubble, linear
 // history (ORCH-3). The rare same-path collision (e.g. two Connect items resolving the same block)
 // is detected and retried against the fresh canonical, bounded → set-aside (ORCH-19).
+import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import simpleGit from 'simple-git';
 import { Mutex } from './stageLock';
+import { ulid } from './ulid';
+import { ensureGitIdentity } from './vault';
 
 /** Default same-path collision retries before an item is set aside (ORCH-19). */
 export const DEFAULT_MAX_COLLISION_RETRIES = 3;
+
+/** Default per-stage concurrency cap (ORCH-20). cap=1 ⇒ the serial drain (output-identical to the
+ *  pre-concurrency engine); a higher cap lets a stage run that many items' cognition at once,
+ *  their advances still serialized by the shared lock. Raised deliberately by pipeline.ts. */
+export const DEFAULT_STAGE_CAP = 1;
+
+/**
+ * Run `fn` against a FRESH, isolated git worktree for ONE in-flight item (ORCH-17/20): a unique
+ * work branch `kb/<stage>-work-<ulid>` checked out off `checkpoint`, torn down afterward. This is
+ * what lets a stage run cap>1 items concurrently — each prepares in its own worktree+branch instead
+ * of clobbering a single shared one. The teardown is best-effort + prune-guarded so a crash mid-item
+ * can't leak a worktree (a `worktree prune` on the next call reaps any orphan).
+ */
+export async function withEphemeralWorktree<T>(
+  root: string,
+  stage: string,
+  checkpoint: string,
+  fn: (ctx: { wt: string; workBranch: string }) => Promise<T>,
+): Promise<T> {
+  root = path.resolve(root);
+  const id = ulid();
+  const workBranch = `kb/${stage}-work-${id}`;
+  const wt = path.join(root, '.kb', 'cache', 'worktrees', `${stage}-${id}`);
+  const git = simpleGit(root);
+  await ensureGitIdentity(git);
+  await git.raw('worktree', 'prune'); // reap any orphan from a prior crash before adding
+  await fs.mkdir(path.dirname(wt), { recursive: true });
+  await git.raw('worktree', 'add', '--force', '-B', workBranch, wt, checkpoint);
+  try {
+    return await fn({ wt, workBranch });
+  } finally {
+    await git.raw('worktree', 'remove', '--force', wt).catch(() => {});
+    await git.raw('branch', '-D', workBranch).catch(() => {});
+    await git.raw('worktree', 'prune').catch(() => {});
+  }
+}
 
 /** Read the canonical worktree's current HEAD commit — the checkpoint a stage prepares off. */
 export async function canonicalHead(root: string): Promise<string> {
@@ -98,6 +138,56 @@ export async function withOptimisticAdvance(
     const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base));
     if (outcome === 'advanced') return 'advanced';
     // 'collision' → re-sync to the moved canonical and retry the whole item.
+  }
+  await onExhausted();
+  return 'setaside';
+}
+
+export interface ConcurrentAdvanceOptions {
+  /** Canonical worktree (on the canonical branch). */
+  root: string;
+  /** The shared per-vault canonical-writer lock (§5). Only the advance runs under it. */
+  lock: Mutex;
+  /** Stage name (e.g. `decompose`) — namespaces the per-item ephemeral work branch + worktree. */
+  stage: string;
+  /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
+  maxCollisionRetries?: number;
+}
+
+/** Context handed to a `prepare` callback under {@link withConcurrentAdvance}: its PRIVATE ephemeral
+ *  worktree (fresh off `base`, on a per-item branch) and the checkpoint it was created off. The
+ *  callback writes its effects in `wt` and commits there; it does NOT manage the worktree or advance. */
+export interface PrepareContext {
+  wt: string;
+  base: string;
+}
+
+/**
+ * Like {@link withOptimisticAdvance}, but for stages that run **cap>1 items concurrently** (ORCH-20):
+ * each attempt gets a FRESH ephemeral per-item worktree off the checkpoint (via
+ * {@link withEphemeralWorktree}), so concurrent prepares within a stage never clobber a shared
+ * worktree. `prepare({ wt, base })` runs OFF the lock (cognition + writes + commit in `wt`); the
+ * advance runs UNDER the lock via the SAME {@link advanceOrCollide} primitive (ff / disjoint replay /
+ * same-path collision → bounded retry → set-aside). cap=1 ⇒ one ephemeral worktree at a time, output-
+ * identical to the serial drain. (`withOptimisticAdvance` — caller-managed fixed worktree/branch —
+ * stays for JOBS's per-job persistent-worktree model; both share `advanceOrCollide`.)
+ */
+export async function withConcurrentAdvance(
+  opts: ConcurrentAdvanceOptions,
+  prepare: (ctx: PrepareContext) => Promise<boolean>,
+  onExhausted: () => Promise<void>,
+): Promise<OptimisticAdvanceResult> {
+  const maxRetries = opts.maxCollisionRetries ?? DEFAULT_MAX_COLLISION_RETRIES;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const base = await canonicalHead(opts.root);
+    const outcome = await withEphemeralWorktree(opts.root, opts.stage, base, async ({ wt, workBranch }) => {
+      const committed = await prepare({ wt, base });
+      if (!committed) return 'noop' as const;
+      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base));
+    });
+    if (outcome === 'noop') return 'noop';
+    if (outcome === 'advanced') return 'advanced';
+    // 'collision' → retry the whole item in a fresh worktree against the moved canonical.
   }
   await onExhausted();
   return 'setaside';

@@ -113,7 +113,7 @@ Three layers; only one has a brain.
 | ORCH-17  | must     | **Stages run concurrently**: a stage's cognition + worktree writes happen **off a synced checkpoint, outside the lock**; multiple items/stages may run their agents at once | test:orchConcurrency.test.ts | DATA-9; PRIN-16 |
 | ORCH-18  | must     | The shared canonical-writer lock guards **only the ff-advance**. On advance: unchanged base → fast-forward; base moved but item paths **disjoint** (unique-ULID keying, ORCH-6) → replay/rebase the item commit and advance; **same-path collision** → re-sync to new canonical and **retry** the item | test:canonicalAdvance.test.ts | ORCH-3,6; DATA-9 |
 | ORCH-19  | must     | **Optimistic-concurrency safety**: collisions retry up to a bounded K; on exhaustion the item is **set aside for review** (ORCH-12), never dropped or half-applied; canonical history stays linear and clean (ORCH-3) | test:canonicalAdvance.test.ts | ORCH-3,12,13 |
-| ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | none-yet | PRIN-16 |
+| ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | test:orchConcurrency.test.ts | PRIN-16 |
 | ORCH-21  | must     | The **agent runtime is pluggable** behind the decider/agent interface: an agent runs via the **CLI single-shot** (`copilot -p`) OR the **Copilot SDK** (Sessions/tools/streaming), chosen **per-agent where it makes sense**; a **deterministic fallback** is always retained (ORCH-7) | none-yet | ORCH-7,8; AUTO-11 |
 | ORCH-22  | should   | Adopt the **Copilot SDK where its capabilities are load-bearing** (multi-turn sessions, agent-invoked tools/MCP, streaming) — Ask/Recall first, Research next, Connect/Reflect opportunistically; **thin single-shot stages stay on the CLI** until the SDK is **GA** and/or **concurrency-overhead evidence** (ORCH-20) justifies the server model. **Pin + age** the SDK per E1 (ENG-2,4,7) | none-yet | ORCH-20; ENG-2,4,7 |
 
@@ -277,3 +277,18 @@ Three layers; only one has a brain.
   same-path collision→retry→converge, ORCH-3 asserted). **Deferred to slice 2:** ORCH-20 — within-stage
   concurrency cap>1 + ephemeral per-item worktrees (default cap stays 1); and narrowing Connect's
   link-promotion (`linkOne`) pass, which stays coarse-locked for now.
+- 2026-06-02 — **ORCH concurrency slice 2 implemented (ORCH-20).** Within-stage concurrency cap.
+  New `withEphemeralWorktree` (a fresh per-item worktree on `kb/<stage>-work-<ulid>` off the
+  checkpoint, torn down after — prune-guarded against crash leaks) + `withConcurrentAdvance` (the
+  ephemeral-worktree wrapper, sharing the same `advanceOrCollide` core as `withOptimisticAdvance`).
+  Migrated archivist/decompose/claims `*One` onto `withConcurrentAdvance` (their old persistent
+  per-stage worktrees removed); each stage's drain now processes up to a **configurable `cap`** items
+  per batch (constructor param, default `DEFAULT_STAGE_CAP=1`), so cap=1 is output-identical to the
+  serial drain and `pipeline.ts` is untouched — the cap-raise is a deliberate future one-liner.
+  **Per design call (KB-PM option 2):** `withOptimisticAdvance` is left intact for JOBS (`jobStage`)
+  — its per-job *persistent* worktree model differs — so the two wrappers share only the advance
+  primitive. **Connect stays cap=1** (serial) this slice (cross-item dedup; its connectOne ephemeral
+  conversion is a follow-up after DEV-1's `mergeNodes` extract — so no `connectStage.ts` seam touch).
+  Tests: `withConcurrentAdvance` (happy/noop/K-exhaust + ephemeral teardown) + a cap=2 drain landing
+  two items linearly (ORCH-3). Graduated ORCH-20 → `test:`. Deferred: raising the cap in pipeline.ts
+  (Principal call); Connect/`linkOne` cap>1.
