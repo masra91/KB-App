@@ -33,9 +33,22 @@ export function boundedGit(dir: string): ReturnType<typeof simpleGit> {
   return simpleGit(dir, { timeout: { block: WORKTREE_GIT_TIMEOUT_MS } });
 }
 
+/** The persistent staging worktree dir name — never reaped. */
+const STAGING_WT_NAME = 'staging';
+/** Per-job worktrees are `job-<id>` (jobStage `worktreeRel`) — persistent, never reaped. A job id
+ *  could itself be 26 chars, so this PREFIX exclusion is the real guard, not the ULID-shape regex. */
+const JOB_WT_PREFIX = 'job-';
 /** Matches an EPHEMERAL per-item worktree dir name — `<stage>-<26-char ULID>` (e.g. `claims-01JZ…`).
- *  Excludes the persistent `staging` and per-job `job-<id>` worktrees, which must never be reaped. */
+ *  NOTE: this shape alone is NOT a safe discriminator (a `job-<26-char-id>` would also match), so
+ *  {@link reapEphemeralWorktrees} additionally excludes `staging` + the `job-` prefix explicitly. */
 const EPHEMERAL_WT_NAME = /-[0-9A-Za-z]{26}$/;
+
+/** True iff `name` is an ephemeral per-item worktree dir safe to reap — explicitly NOT the persistent
+ *  `staging` or any `job-<id>` worktree, AND shaped like `<stage>-<ULID>` (#135 cascade, KB-QD gate). */
+function isReapableEphemeralWorktree(name: string): boolean {
+  if (name === STAGING_WT_NAME || name.startsWith(JOB_WT_PREFIX)) return false;
+  return EPHEMERAL_WT_NAME.test(name);
+}
 
 /**
  * Run `fn` against a FRESH, isolated git worktree for ONE in-flight item (ORCH-17/20): a unique
@@ -113,7 +126,7 @@ export async function reapEphemeralWorktrees(root: string, log: DevLog = noopDev
   const entries = await fs.readdir(wtRoot, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
   let worktrees = 0;
   for (const e of entries) {
-    if (!e.isDirectory() || !EPHEMERAL_WT_NAME.test(e.name)) continue; // skip `staging`, `job-<id>`, files
+    if (!e.isDirectory() || !isReapableEphemeralWorktree(e.name)) continue; // skip `staging`, `job-<id>`, files
     const wt = path.join(wtRoot, e.name);
     await git.raw('worktree', 'remove', '--force', wt).catch(() => {});
     await fs.rm(wt, { recursive: true, force: true }).catch(() => {}); // fallback when remove failed

@@ -406,11 +406,15 @@ describe.skipIf(!gitAvailable)('reapEphemeralWorktrees — #135 cascade recovery
       await git.raw('worktree', 'add', '--force', '-B', `kb/claims-work-${u1}`, path.join(wtRoot, `claims-${u1}`), base);
       await git.raw('worktree', 'add', '--force', '-B', `kb/decompose-work-${u2}`, path.join(wtRoot, `decompose-${u2}`), base);
       // Persistent worktrees that MUST survive a reap: the staging worktree + a per-job worktree.
+      // The job worktree uses a 26-char-ULID id (`job-<ULID>`) so its name ALSO matches the ephemeral
+      // ULID-shape regex — proving the explicit `job-`/`staging` exclusion is what protects it, not an
+      // accident of short job ids (KB-QD's #1 adversarial concern: reaping a live job worktree).
+      const jobId = ulid();
       await git.raw('worktree', 'add', '--force', '-B', 'staging', path.join(wtRoot, 'staging'), base);
-      await git.raw('worktree', 'add', '--force', '-B', 'kb/job-reflect', path.join(wtRoot, 'job-reflect'), base);
+      await git.raw('worktree', 'add', '--force', '-B', `kb/job-${jobId}`, path.join(wtRoot, `job-${jobId}`), base);
 
       const { worktrees, branches } = await reapEphemeralWorktrees(root);
-      expect(worktrees).toBe(2);
+      expect(worktrees).toBe(2); // only the two ephemerals — NOT staging, NOT the job worktree
       expect(branches).toBe(2);
       // Ephemeral worktrees + their work branches are gone.
       expect(await exists(root, path.join('.kb/cache/worktrees', `claims-${u1}`))).toBe(false);
@@ -418,11 +422,11 @@ describe.skipIf(!gitAvailable)('reapEphemeralWorktrees — #135 cascade recovery
       const local = (await git.branchLocal()).all;
       expect(local).not.toContain(`kb/claims-work-${u1}`);
       expect(local).not.toContain(`kb/decompose-work-${u2}`);
-      // Persistent worktrees + their branches survive untouched.
+      // Persistent worktrees + their branches survive untouched — incl. the regex-matching `job-<ULID>`.
       expect(await exists(root, '.kb/cache/worktrees/staging')).toBe(true);
-      expect(await exists(root, '.kb/cache/worktrees/job-reflect')).toBe(true);
+      expect(await exists(root, path.join('.kb/cache/worktrees', `job-${jobId}`))).toBe(true);
       expect(local).toContain('staging');
-      expect(local).toContain('kb/job-reflect');
+      expect(local).toContain(`kb/job-${jobId}`);
     } finally {
       await rmTempDir(dir);
     }
