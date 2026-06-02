@@ -228,4 +228,13 @@ describe('applyClaimDedup — the within-source dedup PASS (CLAIMS-19)', () => {
     expect(report.dropped).toBe(0);
     expect(report.affectedSubjects).toEqual([]);
   });
+
+  it('fails closed when a duplicate set would regenerate a subject that escapes entities/ (containment, #80/#82 family)', async () => {
+    // Two same-source, same-statement claims whose subject path traverses out of the vault → a drop
+    // is detected, then the affected-subject write-sink is guarded: it must throw, not write outside.
+    const evil = '../../../../tmp/evil.md';
+    await writeClaim('ev1', evil, claim('X.', 'fact', 0.9));
+    await writeClaim('ev2', evil, claim('X.', 'interpretation', 0.8));
+    await expect(applyClaimDedup(root)).rejects.toThrow();
+  });
 });
