@@ -27,6 +27,7 @@ import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, toSetAsideViews, deriveStageError, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
+import { readConversionCounts } from '../kb/conversionCounts';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
 import { promote } from '../kb/staging';
@@ -264,7 +265,7 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
 export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
   if (!active) return null;
   const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
-  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside, connectSetAside] = await Promise.all([
+  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside, connectSetAside, conversion] = await Promise.all([
     readQueue(stagingWt),
     readDecomposeQueue(stagingWt),
     readConnectQueue(stagingWt),
@@ -275,6 +276,7 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     listWorktrees(vaultPath),
     listSetAsideItems(stagingWt), // OBS-17: claims poison items (canonical claims-path reader, CLAIMS-20)
     listConnectSetAsideItems(stagingWt), // OBS-17: connect poison blocks (CLAIMS-20 connect twin, #157)
+    readConversionCounts(stagingWt, vaultPath), // SPEC-0032 VIZ-3: funnel counts (staging state + promoted on main)
   ]);
   // Union every stage's set-aside items into the view (claims + connect; future stages append here).
   // Each stage maps its item to the generic {itemId, name, failures, rounds} source shape.
@@ -311,7 +313,7 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
-  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, ...(lastActivity ? { lastActivity } : {}) });
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /**

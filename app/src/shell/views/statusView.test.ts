@@ -43,6 +43,7 @@ const STALLED: PipelineStatusView = {
   worktrees: [{ path: '.kb/cache/worktrees/staging', branch: 'staging' }],
   perf: PERF,
   setAsideItems: [{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }],
+  conversion: { captured: 10, candidates: 14, entities: 7, claims: 22, promoted: 6 },
   builtAt: '2026-06-02T00:03:00.000Z',
 };
 
