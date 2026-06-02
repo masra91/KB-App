@@ -216,6 +216,9 @@ export interface ResearcherView {
   label: string;
   /** The researcher's standing instructions / prompt (RESEARCH-17) — editable in the Manage view. */
   prompt: string;
+  /** Code-template config: the local repository path the researcher reads (`config.repoPath`); empty
+   *  when unset (the Code researcher is inert until set). Shown only for `code` researchers. */
+  repoPath: string;
   egressTier: EgressTier;
   scope: string;
   enabled: boolean;
@@ -232,6 +235,8 @@ export interface ResearcherConfigPatch {
   template?: ResearcherTemplate;
   label?: string;
   prompt?: string;
+  /** Code-template config: the local repo path to read (merged into `config.repoPath`). */
+  repoPath?: string;
   egressTier?: EgressTier;
   scope?: string;
   enabled?: boolean;

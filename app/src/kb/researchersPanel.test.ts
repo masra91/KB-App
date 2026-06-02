@@ -121,4 +121,12 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
   it('does not audit a prompt/scope re-assert (same value)', () => {
     expect(researcherConfigAuditEvents(web({ prompt: 'p', scope: 'global' }), { id: 'web-1', prompt: 'p', scope: 'global' })).toEqual([]);
   });
+
+  it('audits a repoPath change from prior config (Slice 2a Code config — never silent)', () => {
+    const prior = web({ template: 'code', egressTier: 'local-only', config: { repoPath: '/old/repo' } });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', repoPath: '/new/repo' });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'repoPath', from: '/old/repo', to: '/new/repo' });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', repoPath: '/old/repo' })).toEqual([]); // no-op re-assert
+  });
 });

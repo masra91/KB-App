@@ -559,6 +559,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   if (typeof patch.label === 'string') clean.label = patch.label;
   if (typeof patch.prompt === 'string' && patch.prompt.trim()) clean.prompt = patch.prompt;
   if (typeof patch.scope === 'string' && patch.scope.trim()) clean.scope = patch.scope;
+  if (typeof patch.repoPath === 'string' && patch.repoPath.trim()) clean.repoPath = patch.repoPath.trim();
   if (Array.isArray(patch.topics)) clean.topics = patch.topics;
 
   let prior: ResearcherConfig | undefined;
@@ -575,6 +576,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         ...(clean.prompt !== undefined ? { prompt: clean.prompt } : {}),
         ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
         ...(clean.topics !== undefined ? { topics: clean.topics } : {}),
+        // Code-template config: merge repoPath into the existing config (preserve other config keys).
+        ...(clean.repoPath !== undefined ? { config: { ...(prior.config ?? {}), repoPath: clean.repoPath } } : {}),
       });
     } else {
       // New researcher: derive a safe config from the (validated) template + defaults.
@@ -593,6 +596,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         posture: clean.posture ?? DEFAULT_POSTURE,
         enabled: clean.enabled ?? false,
         ...(clean.topics ? { topics: clean.topics } : {}),
+        ...(clean.repoPath ? { config: { repoPath: clean.repoPath } } : {}),
       });
     }
     applied = true;
