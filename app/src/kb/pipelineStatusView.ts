@@ -114,6 +114,26 @@ export interface PipelineStatusView {
 /** No progress for this long with a non-empty queue ⇒ stalled (OBS-11). */
 export const DEFAULT_STALL_MS = 5 * 60_000; // 5 minutes
 
+/** A stage's error badge clears this long after its last error (#163): a stage that errored once and
+ *  recovered should not stay red forever. A genuinely-broken stage re-errors on each attempt, staying
+ *  inside the window → stays red; a recovered one ages out → clears (then `deriveStageState` shows
+ *  running/idle). The dev log only carries warn+error here, so there are no info-level "progress"
+ *  entries to supersede an error with — freshness is the right (and only available) clearing signal. */
+export const DEFAULT_ERROR_FRESH_MS = 2 * 60_000; // 2 minutes
+
+/**
+ * Whether a stage should show as **errored** right now (#163): true iff it has an `error`-level entry
+ * within `freshMs` of `nowMs`. This bounds the old unbounded "any error in the last-N log lines" check
+ * that left recovered stages stuck red. Pure + time-injected so it's testable without a clock.
+ */
+export function deriveStageError(errors: RecentError[], stage: string, nowMs: number, freshMs: number = DEFAULT_ERROR_FRESH_MS): boolean {
+  return errors.some((e) => {
+    if (e.stage !== stage || e.level !== 'error') return false;
+    const ts = Date.parse(e.ts);
+    return Number.isFinite(ts) && nowMs - ts <= freshMs;
+  });
+}
+
 /** The raw per-stage signals the assembler derives a {@link StageState} from. */
 export interface StageInput {
   stage: string;
