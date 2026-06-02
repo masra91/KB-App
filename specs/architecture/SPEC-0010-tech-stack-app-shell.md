@@ -59,11 +59,19 @@ KB git operations use the **`simple-git`** library wrapping **system git**.
 - **Tradeoff:** requires git on PATH (we detect it, like Copilot). `isomorphic-git`
   (pure-JS, no system dep) is the fallback if portability demands it.
 
-### Agent layer — GitHub Copilot SDK (BYOA), detection-only for now
-The BYOA agent layer (AUTO-11) uses the **GitHub Copilot SDK**. For SPEC-0009 we only
-**detect Copilot availability on PATH**; full SDK integration/auth is deferred to the
-agent/enrich stories.
-- **Why:** keeps the first story small; the vault substrate doesn't depend on Copilot.
+### Agent layer — BYOA Copilot: CLI single-shot + SDK where it makes sense
+The BYOA agent layer (AUTO-11) runs on GitHub Copilot. v1 stages use the **Copilot CLI**
+single-shot (`copilot -p` → JSON; ORCH-8). The **Copilot SDK** (Sessions/tools/streaming;
+public preview Apr 2026) is adopted **per-agent, where its capabilities are load-bearing** —
+thick/interactive/tool-using agents (**Ask/Recall is the first pilot**, then Research,
+Connect/Reflect opportunistically) — behind the **same pluggable decider/agent interface**
+(ORCH-21/22), deterministic fallback retained. Thin deterministic stages stay on the CLI until
+the SDK is **GA** and/or concurrency overhead justifies the server model. The SDK still
+requires the CLI binary (it drives a CLI server over JSON-RPC), so PATH detection (SPEC-0009)
+still applies.
+- **Why:** use the richer runtime where it pays (tools, multi-turn, streaming, concurrency)
+  without rewriting thin stages or coupling the **core** pipeline to a preview dep prematurely
+  (E1 / ENG-7: fine to depend on fast-moving, but pin + age — no hot-off-the-presses releases).
 
 ### Environment — resolve the real PATH for GUI launches
 The main process **augments `process.env.PATH` at startup** with the user's login-shell
