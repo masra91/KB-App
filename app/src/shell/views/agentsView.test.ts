@@ -56,4 +56,24 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
     await tick();
     expect(root.textContent).toContain('open a Knowledge Base');
   });
+
+  it('pauses the status poll while its view is hidden, resumes when shown (efficiency — PANEL-9)', async () => {
+    vi.useFakeTimers();
+    try {
+      const listAgents = vi.fn(async () => AGENTS);
+      setApi(listAgents);
+      await mountAgents(root); // initial render → one listAgents call
+      const initial = listAgents.mock.calls.length;
+
+      root.classList.add('hidden'); // the shell toggles `.hidden` when another view is active
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(listAgents.mock.calls.length).toBe(initial); // no IPC while hidden
+
+      root.classList.remove('hidden');
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(listAgents.mock.calls.length).toBeGreaterThan(initial); // resumes when shown
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -11,7 +11,6 @@ import {
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
   VIEW_ASK,
-  VIEW_PLACEHOLDER,
   VIEW_JOBS,
   VIEW_AGENTS,
   VIEW_RESEARCHERS,
@@ -24,7 +23,6 @@ import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
 import { mountActivity } from './views/activityView';
 import { mountAsk } from './views/askView';
-import { mountPlaceholder } from './views/placeholderView';
 import { mountJobs } from './views/jobsView';
 import { mountAgents } from './views/agentsView';
 import { mountResearchers } from './views/researchersView';
@@ -57,7 +55,6 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
     [VIEW_REVIEWS]: mountReviews,
     [VIEW_ACTIVITY]: mountActivity,
     [VIEW_ASK]: mountAsk,
-    [VIEW_PLACEHOLDER]: mountPlaceholder,
     [VIEW_JOBS]: mountJobs,
     [VIEW_AGENTS]: mountAgents,
     [VIEW_RESEARCHERS]: mountResearchers,
@@ -142,6 +139,9 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
         clearInterval(timer);
         return;
       }
+      // The badge lives in the always-visible rail, so it stays live across in-app view switches —
+      // but skip the IPC when the window itself is hidden/backgrounded (no one's looking).
+      if (document.hidden) return;
       void updateReviewBadge();
     }, 5000);
   }

@@ -90,7 +90,7 @@ The "user" is the Principal, in the main window.
 | -------- | -------- | --------------------------------------------------------------------------------- | -------- | ------ |
 | SHELL-1  | must     | When a KB is active, the app shows a persistent left navigation rail + one content region | none-yet | PRIN-17; STACK-2 |
 | SHELL-2  | must     | Selecting a nav item shows that view and marks it active; exactly one view is active at a time | test:app/src/shell/navModel.test.ts | PRIN-17 |
-| SHELL-3  | must     | The shell ships three views — Capture, a neutral placeholder, and Settings        | test:app/src/shell/navModel.test.ts | PRIN-18; SETUP-8 |
+| SHELL-3  | must     | The shell registers multiple views via the registry; the v1 "Coming soon" placeholder scaffold is retired now that the real view set (Capture/Reviews/Activity/Ask + Manage) has landed | test:app/src/shell/navModel.test.ts | PRIN-18; SETUP-8 |
 | SHELL-4  | must     | Capture is the default/active view on launch (capture stays the sacred fast path) | test:app/src/shell/navModel.test.ts | VISION-13; CAPTURE-1 |
 | SHELL-5  | should   | Views come from one extensible registry; adding a view is a single registration with no edits to existing views | test:app/src/shell/navModel.test.ts | PRIN-16; PRIN-18 |
 | SHELL-6  | must     | The view-selection logic is a shell-agnostic module (no Electron/DOM), unit-tested in the node tier; DOM stays a thin render layer | test:app/src/shell/navModel.test.ts | STACK-2; STACK-6; TEST-2; TEST-5 |
@@ -119,14 +119,19 @@ The "user" is the Principal, in the main window.
 - **Traces:** PRIN-17
 - **Verify:** test:app/src/shell/navModel.test.ts (one-active invariant; unknown-id no-op). DOM wiring covered by e2e (CI).
 
-### SHELL-3 — Three views ship in v1
+### SHELL-3 — A multi-view shell (placeholder scaffold retired)
 - **Status:** draft · **Priority:** must
-- **Statement:** The shell **MUST** register three views: **Capture** (the existing
-  panel), a **neutral placeholder** ("Coming soon"), and **Settings**.
-- **Rationale:** Two real views + one stub proves the host carries more than one
-  surface and gives Settings a home (first slice of SETUP-8).
+- **Statement:** The shell **MUST** register multiple views via the registry. v1 shipped
+  **Capture** + a **neutral placeholder** ("Coming soon") + **Settings** to prove the host carries
+  more than one surface and give Settings a home (first slice of SETUP-8). **Amended (2026-06-02):**
+  now that the real view set has landed — Capture, Reviews (SPEC-0018), Activity (SPEC-0029), Ask
+  (SPEC-0026), and the Manage section (SPEC-0027: Jobs/Agents/Researchers/Sources/Settings) — the
+  placeholder scaffold is **retired** (it was dead "Coming soon" clutter in the rail); the real
+  views prove the multi-view shell directly.
+- **Rationale:** The placeholder's only job was to prove >1 surface before real views existed; once
+  they do, keeping it is clutter. The registry/extensibility invariant (SHELL-5) is unchanged.
 - **Traces:** PRIN-18, SETUP-8
-- **Verify:** test:app/src/shell/navModel.test.ts (NAV_VIEWS = capture/placeholder/settings, in order)
+- **Verify:** test:app/src/shell/navModel.test.ts (NAV_VIEWS has the real view set in rail order; no `placeholder`/"Coming soon" entry)
 
 ### SHELL-4 — Capture is the default view
 - **Status:** draft · **Priority:** must
@@ -241,3 +246,8 @@ The "user" is the Principal, in the main window.
 - 2026-05-30 — renumbered SPEC-0016 → **SPEC-0017** (the number SPEC-0016 was taken
   by CLAIMS, merged concurrently); key `SHELL` unchanged, so requirement IDs are
   stable.
+- 2026-06-02 — **SHELL-3 amended: placeholder scaffold retired.** With the real view set landed
+  (Reviews/SPEC-0018, Activity/SPEC-0029, Ask/SPEC-0026, and the SPEC-0027 Manage section), the v1
+  "Coming soon" placeholder was dead clutter in the rail; removed it (`VIEW_PLACEHOLDER` +
+  `placeholderView.ts` + the rail-order test). The multi-view shell is now proven by real views; the
+  registry/extensibility invariant (SHELL-5) is unchanged. (Surfaced by the Control-Panel dogfood.)
