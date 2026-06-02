@@ -3,15 +3,11 @@
 // locked with DEV-3), derive everything the renderer draws — station states, carriage steppers, and
 // the directional funnel deltas — so the maths is node-tested without a DOM or animation.
 //
-// NB the §9 fields (`inFlight`, `conversion`) + the shared `STAGE_ORDER` constant land via DEV-3's
-// backend PR. Until then this module defines the canonical order locally and the renderer mocks the
-// data; on rebase, `STAGE_ORDER`/`StageId` swap to `import … from '../../kb/pipelineStages'` (same
-// values, locked) with no shape change here.
-
-/** The six stations on the Line, left→right (the locked contract order). `capture`/`promote` are the
- *  endpoints (gate in/out); in-flight items sit at archive/decompose/connect/claims. */
-export const STAGE_ORDER = ['capture', 'archive', 'decompose', 'connect', 'claims', 'promote'] as const;
-export type StageId = (typeof STAGE_ORDER)[number];
+// The canonical stage order is the shared `kb/pipelineStages` constant (DEV-3's #168) — one source of
+// truth both the backend view-model and this frontend import, so they can't drift. Re-exported here so
+// the renderer + tests keep importing stage types from the view-model.
+import { STAGE_ORDER, stageIndex, type StageId } from '../../kb/pipelineStages';
+export { STAGE_ORDER, type StageId } from '../../kb/pipelineStages';
 
 /** Cumulative funnel counts (raw, from the backend); the renderer computes the between-point deltas. */
 export interface Conversion {
@@ -39,7 +35,7 @@ export type CellState = 'done' | 'current' | 'pending';
  * the current is `current`, later ones `pending`. An unknown stage (defensive) → all pending.
  */
 export function stepperCells(stage: StageId): CellState[] {
-  const idx = STAGE_ORDER.indexOf(stage);
+  const idx = stageIndex(stage); // shared kb/pipelineStages helper (−1 if unknown)
   return STAGE_ORDER.map((_s, i) => {
     if (idx < 0) return 'pending';
     if (i < idx) return 'done';
