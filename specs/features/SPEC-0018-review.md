@@ -376,3 +376,16 @@ Inherits SPEC-0014 §5 / SPEC-0016 §5:
   store/answer logic behind the IPC (REVIEW-11); the **DOM rendering of the Reviews view and
   the Electron IPC glue are covered by e2e (CI), not unit tests** — matching the SHELL/CAPTURE
   precedent (TEST-9). REVIEW-15 (notifications) stays deferred.
+- 2026-06-02 — **#110 fix: the Reviews list now stays in sync with the rail badge.** The shell
+  mounts each view **once** and shows it by un-hiding (SHELL-8), so the Reviews view rendered its
+  open queue a single time at first mount — while the PANEL-8 rail badge live-polls `listReviews()`
+  every 5s. A review raised *after* the view first mounted (notably a **CONNECT-15 ambiguous-link
+  review**, which has an **empty `subject`** and is raised by `connect`) ticked the badge to "1"
+  while the frozen list still showed "Nothing needs you" — the count and the list disagreed and a
+  real review couldn't be acted on. Fix: `reviewsView` now runs a **visibility-aware refresh poll**
+  at the badge's cadence — it re-fetches only while shown, repaints **only when the open-review id
+  set changes** (no flicker), and **never repaints while a note is being written** (focused/dirty
+  textarea). The list renderer was already generic (question/detail/confirm-reject); the empty
+  `subject` is now optional-chained in the `kb:listReviews` map so it can't throw and blank the
+  list+badge. The Reviews view graduates from e2e-only to a **happy-dom unit test**
+  (`reviewsView.test.ts`) covering link-review rendering + the badge/list reconciliation.

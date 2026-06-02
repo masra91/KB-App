@@ -152,12 +152,15 @@ export function registerIpc(): void {
   // SPEC-0018 REVIEW-10/11: the "needs you" queue + answering, over the typed contract.
   ipcMain.handle('kb:listReviews', async (): Promise<ReviewSummary[]> => {
     const reviews = await listActiveReviews();
+    // `subject` is optional-shaped per review type — a CONNECT-15 link review has an EMPTY subject
+    // (#110: no entity subject, just a node↔target link). Optional-chain it so an empty/missing
+    // subject can't throw here and blank the whole list + the rail badge (both read this handler).
     return reviews.map((r) => ({
       id: r.id,
       question: r.question,
       detail: r.detail,
       stage: r.raisedBy.stage,
-      refs: r.subject.refs ?? [],
+      refs: r.subject?.refs ?? [],
       createdAt: r.createdAt,
     }));
   });
