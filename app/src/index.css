@@ -518,17 +518,23 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-seg-opt:hover:not([aria-checked='true']) { color: var(--viz-ink); }
 
 .rdesk-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.7rem; padding-top: 0.55rem; }
-/* Typed report — state-coded; failed/paused never read as a calm empty (§6, #160/#180). Hue on this line is large enough (≥0.8rem) + carries a state, never small body. */
-.rdesk-report { font-size: 0.82rem; color: var(--viz-ink-muted); }
-.rdesk-report[data-state='found'] { color: var(--viz-patina); }
-.rdesk-report[data-state='failed'] { color: var(--viz-oxide); }
-.rdesk-report[data-state='paused'] { color: var(--viz-brass); }
+/* Typed report — state-coded via a leading GLYPH flag + data-state, NOT by coloring the small body
+   text (§3/§6 + KB-Design-Lead #184): 0.82rem is normal-size text by WCAG, so oxide (3.96:1) can't
+   color it at AA. The text stays --viz-ink (4.5:1+); the state hue rides the glyph flag, which is a
+   graphic (≥3:1). So failed reads distinctly (oxide ✕) AND legibly, never as a calm empty. */
+.rdesk-report { font-size: 0.82rem; color: var(--viz-ink); }
+.rdesk-report-flag { font-family: var(--viz-font-numeric); color: var(--viz-ink-muted); }
+.rdesk-report[data-state='found'] .rdesk-report-flag { color: var(--viz-patina); }
+.rdesk-report[data-state='failed'] .rdesk-report-flag { color: var(--viz-oxide); }
+.rdesk-report[data-state='paused'] .rdesk-report-flag { color: var(--viz-brass); }
 .rdesk-run { margin-left: auto; }
 .rdesk-dispatching .rdesk-run { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
 
 .rdesk-confirm { margin-top: 0.6rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; border-left: 2px solid var(--viz-brass); padding-left: 0.6rem; }
 .rdesk-confirm-msg { flex: 1 1 100%; margin: 0; color: var(--viz-ink); }
-.rdesk-confirm-go { color: var(--viz-oxide); border-color: var(--viz-oxide); }
+/* Danger framed by the oxide BORDER (≥3:1 graphic), text stays --viz-ink at AA (same rule as the report). */
+.rdesk-confirm-go { color: var(--viz-ink); border-color: var(--viz-oxide); }
+.rdesk-confirm-go:hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
 .rdesk-status { margin: 0.4rem 0 0; font-size: 0.8rem; min-height: 1em; color: var(--viz-ink-muted); }
 
 /* Add-dock — named template tiles (glyph + label), not a <select>; the chosen tile lights ember. */

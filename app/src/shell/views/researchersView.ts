@@ -85,9 +85,17 @@ function clearanceLadder(active: EgressTier): string {
   return `<div class="rdesk-clearance"><span class="rdesk-clearance-label viz-signage">clearance</span><span class="rdesk-ladder" role="radiogroup" aria-label="Data clearance">${rungs}</span></div>`;
 }
 
-/** The dispatch report (§6) — typed + state-coded so failed/paused never read as a legit empty result. */
+/** The state glyph carried on the report flag (DESIGN-4: state via glyph + hue + fill, NEVER color
+ *  alone — and the glyph is what carries oxide for `failed`, since oxide can't color the small report
+ *  text at AA; the text stays --viz-ink). */
+const REPORT_FLAG: Record<string, string> = { found: '✓', nothing: '·', paused: '◑', failed: '✕', never: '·' };
+
+/** The dispatch report (§6) — typed + state-coded so failed/paused never read as a legit empty result.
+ *  The state HUE rides the leading glyph + the strip flag (≥3:1 graphic), not the small body text
+ *  (which stays --viz-ink at AA 4.5:1 — KB-Design-Lead's required fix on #184). */
 function reportLine(r: ResearcherView): string {
-  if (!r.lastRun) return `<span class="rdesk-report" data-state="never">never dispatched</span>`;
+  const flag = (state: string): string => `<span class="rdesk-report-flag" aria-hidden="true">${REPORT_FLAG[state]}</span> `;
+  if (!r.lastRun) return `<span class="rdesk-report" data-state="never">${flag('never')}never dispatched</span>`;
   const lr = r.lastRun;
   const when = esc(formatTimestamp(lr.ts));
   const outcome = researcherOutcomeLabel(lr.eventType);
@@ -97,7 +105,7 @@ function reportLine(r: ResearcherView): string {
     lr.eventType === 'researched'
       ? ` — brought back <span class="viz-numeric">${lr.citations}</span> cited source${lr.citations === 1 ? '' : 's'} on “${esc(lr.what)}”`
       : '';
-  return `<span class="rdesk-report" data-state="${state}">last dispatch ${when} · ${esc(outcome)}${detail}</span>`;
+  return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>`;
 }
 
 /** The always-visible reach readout (§2/§6) — budget + tool allowlist, mono/tabular, read-only in v1. */

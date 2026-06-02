@@ -90,6 +90,9 @@ describe('Field Desk — render (RESEARCH-15)', () => {
     expect(report?.getAttribute('data-state')).toBe('failed'); // failed reads distinctly (oxide), not calm
     expect(report?.textContent).toContain('run failed');
     expect(report?.textContent).not.toContain('research-failed'); // no dev slug
+    // AA (KB-Design-Lead #184): the state hue rides the GLYPH flag (a graphic, ≥3:1), not the small
+    // 0.82rem body text (which stays --viz-ink at 4.5:1) — so failed is distinct AND legible.
+    expect(report?.querySelector('.rdesk-report-flag')).not.toBeNull();
   });
 });
 
