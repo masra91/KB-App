@@ -142,6 +142,21 @@ merges to `main`** via required status checks. CI is where the cross-platform ma
 - The CI workflow **MUST document what the matrix does and does not yet cover** (TEST-11),
   so a green check is never mistaken for "fully cross-platform verified" before it is.
 
+**Git-backed suites & the git-less-runner signal (same "no silent caps" rule):**
+Many domain suites exercise **real git** against a throwaway temp vault (TEST-2/18) — vault
+setup, the staging branch, the promotion gate, stage ff-advances, crash/restart. These gate
+on `git` being on PATH and so are written `describe.skipIf(!gitAvailable)`.
+- **The hazard:** on a runner **without git**, those suites **skip silently** — the run is
+  green but the git-backed behavior was **never verified**. A git-less green is a false green,
+  exactly the "silent cap" TEST-11 forbids for the platform matrix.
+- **The rule:** the CI **unit job MUST run on a git-equipped runner** (GitHub's `ubuntu-latest`
+  ships git, so this holds today). Any environment expected to have git MUST treat
+  "git suites skipped" as **red**, not green — surface the skip count, don't swallow it.
+- **One canonical signal:** `gitAvailable` lives in **`app/test/gitEnv.ts`** (a single
+  `git --version` probe) and is the only definition suites should import. (Historically each
+  git suite re-declared its own `gitInstalledSync()`; consolidating the ~10 call sites onto the
+  shared export is a mechanical follow-up — new git suites MUST use `test/gitEnv.ts`.)
+
 ### Coverage policy
 
 - **Domain/core (`app/src/kb/`): target ≥90% lines** (ENG-10), enforced via Vitest
