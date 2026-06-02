@@ -20,11 +20,13 @@ import { deterministicDecider } from './archivist';
 import { Mutex } from './stageLock';
 import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
+import { promises as fs } from 'node:fs';
 import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeStage';
-import { findEntityFiles } from './claimsStage';
+import { ClaimsStage, findEntityFiles } from './claimsStage';
 import { ConnectStage, readCandidates } from './connectStage';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider } from './connectAgent';
+import type { ClaimsDecider } from './claimsAgent';
 
 function gitInstalledSync(): boolean {
   try {
@@ -49,6 +51,33 @@ const connectDecider: ConnectDecider = async (set) => ({
   clusters: [{ canonicalName: 'Steve', memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
   agent: { via: 'copilot', model: 'test' },
 });
+
+// Claims attaches one grounded assertion to the resolved node.
+const claimsDecider: ClaimsDecider = async (input) => ({
+  entityId: input.entityId,
+  claims: [{ statement: 'Steve owns the Q3 budget.', status: 'fact', confidence: 0.9, mentions: ['Q3 budget'] }],
+  agent: { via: 'copilot', model: 'test' },
+});
+
+/** Walk `root/claims` and return repo-relative `.md` claim files. */
+async function findClaimFiles(root: string): Promise<string[]> {
+  const out: string[] = [];
+  async function walk(d: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.name.endsWith('.md')) out.push(path.relative(root, p));
+    }
+  }
+  await walk(path.join(root, 'claims'));
+  return out;
+}
 
 describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to main (SPEC-0020 / STAGING slice 4)', () => {
   it('two sources naming the same person → ONE node, visible on main via Connect’s promote-hook', async () => {
@@ -92,6 +121,49 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
 
       // Working state never reaches main; main stays clean (CANON-1 / STAGING-6).
       expect((await readCandidates(root)).length).toBe(0);
+      expect(await pathExists(path.join(root, 'candidates'))).toBe(false);
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('claims-after-Connect: the deduped node gets a claim, visible on main (provenance fix; CLAIMS-5/9)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const promoteEvergreen = async (): Promise<void> => {
+        await promote(root);
+      };
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, promoteEvergreen);
+
+      // Two sources naming the same person → archive (promote sources) → decompose → connect.
+      await orch.capture('s1', [{ kind: 'text', text: 'call Steve re: Q3 budget' }]);
+      await orch.capture('s2', [{ kind: 'text', text: 'Steve approved the Q3 plan' }]);
+      await orch.poke();
+      for (const srcRel of await readDecomposeQueue(stagingWt)) {
+        await decomposeOne(stagingWt, srcRel, decompDecider);
+      }
+      const connect = new ConnectStage(stagingWt, connectDecider, lock, undefined, promoteEvergreen);
+      await connect.poke();
+      const nodeRel = (await findEntityFiles(stagingWt))[0];
+      expect(nodeRel).toBeTruthy();
+
+      // The resolved node's derivedFrom now holds a source-DIR path (the provenance fix), so Claims
+      // can read the source and attach a claim. Claims' afterDrain promotes it to main.
+      const claims = new ClaimsStage(stagingWt, claimsDecider, lock, undefined, promoteEvergreen);
+      await claims.poke();
+
+      // The claim file + the node's regenerated claims block are VISIBLE ON MAIN — auto-promoted.
+      expect((await findClaimFiles(root)).length).toBeGreaterThanOrEqual(1);
+      const nodeOnMain = await fs.readFile(path.join(root, nodeRel), 'utf8');
+      expect(nodeOnMain).toContain('Steve owns the Q3 budget.'); // claim visible in the node
+      expect(nodeOnMain).toContain('kb:claims:start'); // regenerated claims block (CLAIMS-9)
+
+      // Working state never on main; main clean.
       expect(await pathExists(path.join(root, 'candidates'))).toBe(false);
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {

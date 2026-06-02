@@ -396,21 +396,30 @@ export class ClaimsStage {
   private readonly decider: ClaimsDecider;
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
+  private readonly afterDrain?: () => Promise<void>;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
 
+  /**
+   * @param afterDrain optional hook run (serialized under the shared lock) after a drain that
+   *   wrote claims to ≥1 entity. The pipeline passes the promotion gate here so the entity nodes'
+   *   newly-attached claims blocks (+ `claims/` files) are published `staging`→`main`
+   *   (STAGING-3/11). Mirrors the Orchestrator's + ConnectStage's `afterDrain`.
+   */
   constructor(
     root: string,
     decider: ClaimsDecider = makeClaimsDecider(),
     lock: Mutex = new Mutex(),
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+    afterDrain?: () => Promise<void>,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
+    this.afterDrain = afterDrain;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -453,10 +462,12 @@ export class ClaimsStage {
 
   private async drainOnce(): Promise<void> {
     let queue = await readClaimsQueue(this.root, this.maxAttempts);
+    let worked = false;
     while (queue.length > 0) {
       const entityRel = queue[0];
       try {
         await this.lock.run(() => claimsOne(this.root, entityRel, this.decider, this.maxAttempts));
+        worked = true;
       } catch {
         // Unexpected (claimsOne handles its own failures) — stop this pass; a later poke/sweep
         // retries rather than spinning.
@@ -464,5 +475,8 @@ export class ClaimsStage {
       }
       queue = await readClaimsQueue(this.root, this.maxAttempts);
     }
+    // Publish entity nodes' newly-attached claims staging→main (STAGING-3/11), serialized under
+    // the shared lock. Gated on `worked` so idle sweeps don't churn the gate (it's idempotent).
+    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!());
   }
 }
