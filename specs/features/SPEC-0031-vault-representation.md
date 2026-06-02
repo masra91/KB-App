@@ -103,6 +103,8 @@ The app writes/maintains `<vault>/.obsidian/`:
 | VAULT-9  | should   | Folder layout is **browsable/legible** in the Obsidian file explorer (entities grouped, sources date-sharded, claims/outputs as provenance/synthesis) | none-yet | DATA-9 |
 | VAULT-10 | should   | The representation is **Replay-stable** — a clean/rebuild regenerates the same human view + config | none-yet | REPLAY-14 |
 | VAULT-11 | should   | The entity page is **readable, not a raw list** — claims rendered in prose/grouped + cited; and a **curated entity summary** (synthesis paragraph) tops the page. *(The summary is a new synthesis step — owner TBD: Connect/Claims enhancement vs. a Reflect/Recall job.)* | none-yet | VISION-9; CLAIMS; LIFE-8 |
+| VAULT-12 | should   | Entity↔entity links render with **display names** via the Obsidian alias form `[[path\|Name]]` — resolves by path (collision-safe), shows the **entity name**, not the raw path | none-yet | CONNECT-12,13; [#91](https://github.com/masra91/KB-App/issues/91) |
+| VAULT-13 | should   | A claim's **source is a navigable link** (`[[sources/…\|<date/title>]]`) in the claim + the entity's claims block, so a human can **click through to the source** — not just provenance metadata | none-yet | CLAIMS; ASK-7; [#92](https://github.com/masra91/KB-App/issues/92) |
 
 ## 8. User flows / surface
 
