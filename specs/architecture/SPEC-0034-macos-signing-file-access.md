@@ -80,7 +80,7 @@ From #56's repro + DEV-2's signing analysis (#25 area):
 | MACOS-4  | must     | The app is **explicitly NON-sandboxed** (hardened runtime, not App Sandbox). Chosen-folder access **persists** via the **TCC grant (by signature) + a regular `NSURL` bookmark** to re-resolve the vault path across launches — **not** security-scoped bookmarks, **not** the App-Sandbox `files.user-selected.read-write` entitlement | none-yet → test: relaunch re-resolves the bookmarked vault without re-prompting (signed build) | STACK-10 |
 | MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed (child inherits the parent's TCC grant). Carried by the stable signature + hardened-runtime entitlements (`com.apple.security.cs.allow-jit`, `…allow-unsigned-executable-memory`, `…disable-library-validation`) + the spawn method. **DEV-2 proved the mechanism** (§5): a parent spawning `git` into `~/Documents` succeeds; hardened-runtime library-validation blocks *loading* a bad dylib, not *spawning* a signed binary — so `Operation not permitted` is specifically the ad-hoc/unpersisted-grant case, not an inherent inheritance failure | none-yet → test: packaged smoke — a pipeline run (spawns git+copilot) writes into a granted `~/Documents` vault with **zero `Operation not permitted`** | STACK-10; ORCH-2; #56 |
 | MACOS-6  | should   | The build declares **folder usage-description strings** (`NSDocumentsFolderUsageDescription`, `NSDesktopFolderUsageDescription`, `NSDownloadsFolderUsageDescription`) so the macOS TCC prompt explains *why* the app wants the folder (consent rationale) | none-yet → test: `Info.plist` inspection of the packaged build | STACK-10; PRIN-19 |
-| MACOS-7  | must     | On **first launch against a protected folder**, the app's own **TCC prompt fires** ("Allow access to Documents") — a one-time human "Allow" — and a **denial is handled gracefully** (fall back to the MACOS-1 warn/steer, never a silent stall). This is the one human-in-loop step (can't be automated headlessly) | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn path | STACK-10; SETUP-1; PRIN-19 |
+| MACOS-7  | must     | **First-launch permission-grant UX + denial fallback** (the #56 permission flow — **DEV-4's lane**). On first pipeline use against a protected folder the app's own **TCC prompt fires** once ("Allow access to Documents" — the one human-in-loop step, can't be headless); the surrounding UX makes clear *why* (ties to MACOS-6 rationale) and confirms when granted. **On denial** the app must **degrade visibly, never silently stall**: fall back to the MACOS-1 warn + **guide the user to System Settings → Privacy & Security → Files and Folders** (or to relocate the vault). *The exact denial-fallback posture (warn-and-steer vs deep-link to System Settings vs block-with-explainer) is a **product call routed to KB-Lead** (§8).* | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn/guide path | STACK-10; SETUP-1; PRIN-19; [#56](https://github.com/masra91/KB-App/issues/56) |
 | MACOS-8  | must     | The **distribution** build is **Developer-ID-signed + notarized** (Gatekeeper/quarantine). **Reframed gate (DEV-2 verified):** NOT the cert — both `Apple Development` **and** `Developer ID Application` certs are in the keychain, so dev *and* Developer-ID signing work **now**; the only missing piece is **notarization credentials** (a `notarytool` `AC_PASSWORD`/App-Store-Connect API profile). So #56 is **signing-ungated; only notarized *distribution* is creds-gated** — release-only, not dev/test | none-yet (notarization-creds-gated) | STACK-10 |
 | MACOS-9  | should   | A **documented dev-signing setup** (the `Apple Development` identity + the entitlements plist + the `osxSign`/`osxNotarize` Forge config) so any contributor reproduces the TCC persistence + subprocess-propagation test | none-yet → test: dev-setup doc + a scripted `codesign`/DR check | STACK-10; TEST-* |
 
@@ -121,9 +121,11 @@ regress.
 - **KB-Developer-2** (#25 signing/distribution): `forge.config.ts` `osxSign`, the hardened-runtime
   entitlements plist, the dev-identity + Developer-ID/notarization mechanics (MACOS-3/6/7), and the
   empirical run (§5).
+- **KB-Developer-4** (the #56 permission UX): MACOS-7 — the first-launch grant flow + the
+  denial-fallback surface (warn/steer + System-Settings guidance).
 - **KB-Lead / Principal:** **notarization credentials** (a `notarytool` / App-Store-Connect API
   profile) — unblocks notarized *distribution* (MACOS-8) only. The signing certs are already present
-  (DEV-2 verified), so nothing else waits on the Principal.
+  (DEV-2 verified), so nothing else waits on the Principal. Plus the two product calls in §8.
 
 ## 7. Out of scope (for now)
 
@@ -131,8 +133,23 @@ regress.
 - App Sandbox + Mac App Store distribution (we are deliberately non-sandboxed — MACOS-4).
 - Auto-update signing (later, with the distribution pipeline).
 
-## 8. Changelog
+## 8. Open questions (product calls — routed to KB-Lead)
 
+- [ ] **iCloud Drive scope.** Is iCloud Drive (`~/Library/Mobile Documents/com~apple~CloudDocs`) in
+      **MACOS-2's end-to-end acceptance**, or **detect-warn-only** (MACOS-1)? Its TCC class **and**
+      file-materialization model (on-demand download / evict) differ from Documents/Desktop/Downloads
+      — a git repo on a partially-materialized iCloud tree is its own risk. Recommend **detect-warn
+      only for v1** (steer off iCloud) unless KB-Lead wants the harder end-to-end guarantee.
+- [ ] **Denial-fallback posture (MACOS-7).** When the user denies the TCC grant: warn-and-steer
+      (MACOS-1 message), deep-link to System Settings → Privacy, or block-with-explainer? Product/UX
+      call; DEV-4 implements once decided.
+
+## 9. Changelog
+
+- 2026-06-02 — **PM review additions.** Expanded **MACOS-7** into the full first-launch
+  permission-grant UX + denial-fallback (DEV-4's lane); added **§8 open questions** routed to KB-Lead
+  (iCloud-Drive in/out of MACOS-2 acceptance; the denial-fallback posture). PM scope ✓; awaiting
+  KB-Lead product sign-off before lock.
 - 2026-06-02 — **empirical verification folded in (DEV-2, macOS 26.5).** MACOS-3 + MACOS-5 are now
   evidence-based (§5): stable-identity DR persists across rebuilds (vs the current ad-hoc `cdhash` =
   the root cause); subprocess propagation proven (child git inherits the grant; hardened-runtime
