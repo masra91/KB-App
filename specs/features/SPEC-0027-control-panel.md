@@ -72,13 +72,13 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 
 | ID      | Priority | Statement (short)                                                                  | Verify   | Traces |
 | ------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
-| PANEL-1 | must     | The Control Panel is a **"Manage" section of sibling views** registered in the nav shell — **Jobs, Agents, Sources, Settings** — to observe+configure the machine; one active at a time; Capture stays default | none-yet | VISION-11; SHELL-2,4 |
-| PANEL-2 | must     | The **Jobs** view lists autonomous jobs (SPEC-0023) and lets the Principal **enable/disable**, set **schedule preset**, set **autonomy posture** (Guarded/Autonomous), **run-now**, and see **last-run** state from the job journal | none-yet | JOBS-1,2,11,14,15; AUTO-12 |
+| PANEL-1 | must     | The Control Panel is a **"Manage" section of sibling views** registered in the nav shell — **Jobs, Agents, Sources, Settings** — to observe+configure the machine; one active at a time; Capture stays default | test:app/src/shell/navModel.test.ts | VISION-11; SHELL-2,4 |
+| PANEL-2 | must     | The **Jobs** view lists autonomous jobs (SPEC-0023) and lets the Principal **enable/disable**, set **schedule preset**, set **autonomy posture** (Guarded/Autonomous), **run-now**, and see **last-run** state from the job journal | test:app/src/kb/jobsPanel.test.ts, app/src/shell/views/jobsView.test.ts | JOBS-1,2,11,14,15; AUTO-12 |
 | PANEL-3 | must     | The **Agents** view lists librarian/stage agents with **status + key config** (model, instruction file); v1 is observe + safe knobs (full agent authoring deferred) | none-yet | VISION-11; ORCH-9 |
 | PANEL-4 | should   | The **Sources** view shows the vault + watched folders and **placeholder** slots for future connected sources (Proactive Intake); thin in v1, grows as integrations land | none-yet | VISION-11 |
 | PANEL-5 | must     | The **Settings** view (elevating the display-only stub) holds vault config, **Copilot status**, and editable **autonomy defaults** (per-Instance posture) | none-yet | SETUP-8; AUTO-12 |
 | PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | none-yet | SETUP-6; SCOPE-1 |
-| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | none-yet | AUTO-1,8 |
+| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate), app/src/shell/views/jobsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | none-yet | REVIEW-?; AUTO-10 |
 | PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | none-yet | ORCH-10 |
 
@@ -119,3 +119,20 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   defaults). **Observe + configure**; config persisted per-Instance; risky changes confirm +
   audit. Forks resolved with the Principal: **management-core view set**, **sibling nav items
   (not a tabbed monolith)**, **observe + configure depth**.
+- 2026-06-02 — **slice 1 implemented** in `app/`. Added the **"Manage" section** to the nav shell
+  (SPEC-0017): an optional `group?` on `NavView` renders a rail heading; registered **Jobs,
+  Agents, Researchers, Sources, Settings** (Settings moved under Manage). The **Jobs view is fully
+  manageable** (PANEL-2) over the live SPEC-0023 registry — list / enable-disable / schedule preset
+  / autonomy posture / **run-now** / **last-run** from the job journal — with a known-job **catalog**
+  (Reflect + the `example` reference job) merged with the per-vault registry so a known job is
+  manageable before it's persisted (first edit persists via `upsertJob`). Risky changes (enable,
+  → Autonomous, run-now) **confirm** before applying (PANEL-7); config writes are **git-committed on
+  `staging` under the canonical lock** as the v1 **audit substrate** (interim until SPEC-0029's
+  `kb/audit.ts` envelope lands, then a conforming event is emitted) and take effect **without a
+  restart** (the scheduler re-reads the registry each tick — PANEL-6). Graduated **PANEL-1/2/7**
+  `Verify: none-yet → test:` (node-tier `jobsPanel.test.ts` for the merge + risk logic; happy-dom
+  `jobsView.test.ts` for the view; `navModel.test.ts` for the Manage rail order; `jobs.e2e.ts`
+  packaged-app smoke, CI-only). **Deferred to slice 2:** Agents observe content (PANEL-3),
+  Sources vault+placeholders (PANEL-4), Settings elevation + per-Instance autonomy default via
+  `.kb/instance.json` (PANEL-5), Review-queue link (PANEL-8), live-status polling (PANEL-9) — these
+  ship as thin stubs in slice 1. **Researchers** view is a stub pending SPEC-0028.
