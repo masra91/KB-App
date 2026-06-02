@@ -49,6 +49,22 @@ async function commitOnStaging(root: string, files: Record<string, string>): Pro
   await advanceStaging(root, head);
 }
 
+/** Delete `rels` on `staging` (the way CONNECT deletes a merged-away loser node), via a throwaway
+ *  worktree, and advance staging to the deletion commit. */
+async function deleteOnStaging(root: string, rels: string[]): Promise<void> {
+  const wt = path.join(root, '.kb', 'cache', 'test-staging-wt');
+  const git = simpleGit(root);
+  await git.raw('worktree', 'add', '--force', wt, STAGING_BRANCH);
+  const wtGit = simpleGit(wt);
+  await ensureGitIdentity(wtGit);
+  for (const rel of rels) await fs.rm(path.join(wt, rel), { force: true });
+  await wtGit.raw('add', '-A');
+  await wtGit.commit('staging delete');
+  const head = (await wtGit.revparse(['HEAD'])).trim();
+  await git.raw('worktree', 'remove', '--force', wt);
+  await advanceStaging(root, head);
+}
+
 describe.skipIf(!gitAvailable)('ensureStagingBranch (STAGING-1)', () => {
   it('creates a staging branch off HEAD, leaving the root on its current branch', async () => {
     await withTempVault(async (root) => {
@@ -117,6 +133,48 @@ describe.skipIf(!gitAvailable)('promote — the evergreen gate (STAGING-3/4/6)',
       await commitOnStaging(root, { 'candidates/2026/05/31/C.json': '{}' });
       expect(await promote(root)).toBe(false); // candidates are working-only
       expect(await pathExists(path.join(root, 'candidates'))).toBe(false); // main never sees them
+    });
+  });
+
+  it('publishes resolved entities/ and claims/ to main (CONNECT output joins the evergreen set; STAGING-11)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await ensureStagingBranch(root);
+      // CONNECT resolved a candidate into an entity; Claims attached a claim — both evergreen now.
+      await commitOnStaging(root, {
+        'entities/person/steve-jobs.md': '---\nid: 01E\nname: Steve Jobs\n---\n\n# Steve Jobs\n',
+        'claims/2026/05/31/01C.md': '---\nid: 01C\nsubject: entities/person/steve-jobs.md\n---\n\nFounded Apple.\n',
+        'candidates/2026/05/31/C.json': '{"id":"01X"}', // working state alongside
+      });
+
+      expect(await promote(root)).toBe(true);
+      expect(await pathExists(path.join(root, 'entities/person/steve-jobs.md'))).toBe(true);
+      expect(await pathExists(path.join(root, 'claims/2026/05/31/01C.md'))).toBe(true);
+      expect(await pathExists(path.join(root, 'candidates'))).toBe(false); // working state stays off main
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    });
+  });
+
+  it('mirrors deletions: a node CONNECT merged away on staging is removed from main (STAGING-10)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await ensureStagingBranch(root);
+      // Two same-name nodes resolved+promoted (pre-merge graph state).
+      await commitOnStaging(root, {
+        'entities/person/steve-jobs.md': '---\nid: 01A\nname: Steve Jobs\n---\n\n# Steve Jobs\n',
+        'entities/person/steven-jobs.md': '---\nid: 01B\nname: Steven Jobs\n---\n\n# Steven Jobs\n',
+      });
+      expect(await promote(root)).toBe(true);
+      expect(await pathExists(path.join(root, 'entities/person/steven-jobs.md'))).toBe(true);
+
+      // CONNECT merges 01B into 01A and deletes the loser file on staging (CONNECT-10).
+      await deleteOnStaging(root, ['entities/person/steven-jobs.md']);
+
+      expect(await promote(root)).toBe(true); // the deletion is an evergreen change to publish
+      // main now reflects the merge: the loser is gone, the canonical remains, tree clean.
+      expect(await pathExists(path.join(root, 'entities/person/steven-jobs.md'))).toBe(false);
+      expect(await pathExists(path.join(root, 'entities/person/steve-jobs.md'))).toBe(true);
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
     });
   });
 });

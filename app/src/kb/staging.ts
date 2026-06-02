@@ -11,12 +11,15 @@ import { ensureGitIdentity } from './vault';
 export const STAGING_BRANCH = 'staging';
 
 /**
- * The evergreen path set promoted to `main` (STAGING-3). v1 promotes **sources only** — the one
- * kind that is resolved+valid the moment it exists (immutable ground truth, DATA-2). `entities/`,
- * `claims/`, `outputs/` join the set when their resolving stage (CONNECT, SPEC-0020) lands; until
- * then they live only on `staging` (CANON-10).
+ * The active evergreen path set promoted to `main` — the single source of truth for what reaches
+ * `main` (STAGING-3/11). It **grows with its producers**: `sources/` is evergreen the moment it
+ * exists (immutable ground truth, DATA-2); `entities/` + `claims/` join now that CONNECT
+ * (SPEC-0020) resolves candidates into born-resolved nodes on `staging` and Claims attaches to
+ * them — evergreen once resolved (CANON-10). `outputs/` joins when the Research/Query stage that
+ * writes it lands. Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`) are never listed,
+ * so `main` can never hold them (STAGING-6).
  */
-export const EVERGREEN_PATHS = ['sources'] as const;
+export const EVERGREEN_PATHS = ['sources', 'entities', 'claims'] as const;
 
 /** Ensure a long-lived `staging` branch exists, created off the vault's current branch (HEAD)
  *  if absent (STAGING-1). Created off HEAD — never a hardcoded `main`, so vaults whose default
@@ -39,29 +42,36 @@ export async function advanceStaging(root: string, ref: string): Promise<void> {
 }
 
 /**
- * The promotion gate (STAGING-3/4): advance `main` to hold the evergreen subset of `staging`.
- * Copy-the-evergreen-paths — bring each evergreen path from `staging` into the (main-checked-out)
- * root worktree and commit if anything changed. Working paths are never named, so `main` cannot
- * contain them. Idempotent: a no-op (returns false) when nothing evergreen changed.
+ * The promotion gate (STAGING-3/4), **deletion-aware** (STAGING-10): advance `main` to be an
+ * EXACT MIRROR of `staging`'s evergreen subset — adds, edits, AND removals. For each evergreen
+ * path, **clear `main`'s copy then restore `staging`'s** (index + worktree). Clearing first is
+ * what makes `main` mirror DELETIONS: a node CONNECT merged away on `staging` (a deleted loser +
+ * its repointed claims, SPEC-0020 §3 / CONNECT-10,11) leaves `main` too, so a deduped duplicate
+ * never lingers — plain `checkout staging -- P` only adds/updates, never removes. `sources/` is
+ * append-only, so mirroring never removes ground truth. Working paths are never named, so `main`
+ * cannot contain them (STAGING-6). Idempotent: a no-op (returns false) when nothing evergreen
+ * changed.
  *
  * MUST be called serialized via the shared canonical-writer lock so it never races a stage's
- * ref advance. v1 covers append-only `sources/`; mirroring deletions (needed once `entities/`
- * joins the set and CONNECT merges/deletes) is a later concern (§8).
+ * ref advance.
  */
 export async function promote(root: string, paths: readonly string[] = EVERGREEN_PATHS): Promise<boolean> {
   root = path.resolve(root);
   const git = simpleGit(root);
   await ensureGitIdentity(git);
   for (const p of paths) {
+    // Drop main's current tracked copy of P (worktree + index). `--ignore-unmatch` makes a
+    // never-yet-promoted path a no-op rather than an error — so an absent `entities/`/`claims/`
+    // doesn't crash promotion (and lets the path stay absent if staging has none).
+    await git.raw('rm', '-r', '-f', '--ignore-unmatch', '--quiet', '--', p).catch(() => {});
     try {
-      await git.raw('checkout', STAGING_BRANCH, '--', p); // updates main's index+worktree for p
+      await git.raw('checkout', STAGING_BRANCH, '--', p); // restore staging's P (index + worktree)
     } catch {
-      /* path absent on staging (e.g. nothing archived yet) — nothing to promote for it */
+      /* P absent on staging — nothing to publish; it correctly stays removed from main */
     }
   }
   const status = await git.status();
   if (status.files.length === 0) return false; // idempotent: nothing evergreen changed
-  await git.raw('add', '-A', ...paths);
-  await git.commit('promote: evergreen → main');
+  await git.commit('promote: evergreen → main'); // commits the staged add/update/delete set
   return true;
 }
