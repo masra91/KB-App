@@ -79,7 +79,8 @@ export async function collectResearchRequests(root: string): Promise<ResearchReq
       ts: e.ts,
       by,
       what: p.what,
-      why: typeof p.why === 'string' ? p.why : '',
+      // The signal's `note` is the *why* (D1); accept an explicit `why` too for forward-compat.
+      why: typeof p.why === 'string' ? p.why : typeof p.note === 'string' ? p.note : '',
       context: typeof p.context === 'string' ? p.context : '',
       ...(typeof p.egressHint === 'string' ? { egressHint: p.egressHint as ResearchRequest['egressHint'] } : {}),
       dedupKey: dedupKeyFor({ what: p.what, by }),

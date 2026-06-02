@@ -22,8 +22,12 @@ export interface EntityDecision {
  */
 export interface SignalDecision {
   type: string; // open vocabulary — non-empty only
-  note: string; // freeform payload (required)
+  note: string; // freeform payload (required); for a `research-request` signal this is the *why*
   refs?: string[]; // optional: entity names / mentions this is about
+  // Research-request fields (SPEC-0028 RESEARCH-3 / D1) — present only when `type` is
+  // 'research-request' (the async signal a stage emits to ask researchers to learn more):
+  what?: string; // the term/topic to research
+  context?: string; // surrounding text the request rests on (the only KB material egress may use, D6a)
 }
 
 /** The whole decision returned by one disposable Decompose session. */
@@ -81,6 +85,17 @@ export function validSignal(v: unknown, i: number): SignalDecision {
       throw new Error(`decompose: signals[${i}].refs must be an array of non-empty strings`);
     }
     sig.refs = o.refs as string[];
+  }
+  // Research-request fields (SPEC-0028 RESEARCH-3 / D1) — optional, carried through verbatim. `what`
+  // is the only field a downstream researcher dispatches on; `context` is the bounded KB material
+  // egress may use (D6a). Validated as non-empty strings when present; never allow-listed.
+  if (o.what !== undefined) {
+    if (!isNonEmptyString(o.what)) throw new Error(`decompose: signals[${i}].what must be a non-empty string`);
+    sig.what = o.what;
+  }
+  if (o.context !== undefined) {
+    if (typeof o.context !== 'string') throw new Error(`decompose: signals[${i}].context must be a string`);
+    sig.context = o.context;
   }
   return sig;
 }

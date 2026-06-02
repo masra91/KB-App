@@ -108,6 +108,15 @@ export function buildDecomposePrompt(input: SourceInput): string {
     'Each signal has: type, note (free text), and optional refs[] (entity names it concerns).',
     'Signals are optional and usually unnecessary — only add one when it genuinely helps.',
     '',
+    'One special signal: type "research-request" asks a background researcher to learn more about a',
+    'term the source leans on but does NOT itself explain (an unfamiliar acronym, tool, person, or',
+    'concept worth corroborating). For it, ALSO set:',
+    '  what: the exact term/topic to research (short),',
+    '  note: WHY it is worth researching (what is unclear or worth confirming),',
+    '  context: the verbatim surrounding sentence/phrase from the source it appears in.',
+    'Only emit one when the source genuinely depends on a term it leaves unexplained — never for',
+    'common knowledge, and never more than a couple per source.',
+    '',
     `Do NOT resolve identity across sources or deduplicate — just decompose THIS source.`,
     '',
     `sourceId: ${input.sourceId}`,
@@ -119,7 +128,7 @@ export function buildDecomposePrompt(input: SourceInput): string {
     '--- SOURCE END ---',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"sourceId":"<the id above>","entities":[{"kind":"...","name":"...","confidence":0.0,"mentions":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
+    '{"sourceId":"<the id above>","entities":[{"kind":"...","name":"...","confidence":0.0,"mentions":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]},{"type":"research-request","what":"...","note":"why it matters","context":"verbatim surrounding text"}]}',
   ]
     .filter((l) => l !== '')
     .join('\n');

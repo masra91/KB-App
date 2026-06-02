@@ -106,6 +106,18 @@ describe.skipIf(!gitAvailable)('collectResearchRequests + runInlineResearchSweep
     });
   });
 
+  it('reads the *why* from the signal `note` when no explicit `why` (the decompose emission path, D1)', async () => {
+    await withVault(async (root) => {
+      await fs.mkdir(path.join(root, '.kb'), { recursive: true });
+      // A decompose stage emits the why as `note` (not a separate `why` field) — collect must read it.
+      const line = JSON.stringify({ ts: '2026-06-02T00:00:00.000Z', stage: 'decompose', event: 'signal', type: 'research-request', what: 'Atlas', note: 'acronym left unexplained', context: 'we shipped on Atlas', sourceId: 'S1' }) + '\n';
+      await fs.appendFile(path.join(root, '.kb', 'audit.jsonl'), line, 'utf8');
+      const reqs = await collectResearchRequests(root);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0]).toMatchObject({ what: 'Atlas', why: 'acronym left unexplained', context: 'we shipped on Atlas' });
+    });
+  });
+
   it('sweep collects + dispatches to enabled researchers (inline trigger end-to-end, faked cognition)', async () => {
     await withVault(async (root) => {
       await upsertResearcher(root, web({ id: 'web-1', enabled: true, topics: [] }));

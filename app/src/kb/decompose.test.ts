@@ -63,6 +63,23 @@ describe('open vocabularies — kind & signal type are NOT allow-listed (DECOMP-
       parseDecomposeDecision(JSON.stringify({ sourceId: 's', entities: [], signals: [{ type: '   ', note: 'n' }] })),
     ).toThrow(/type/);
   });
+
+  it('carries research-request fields (what/context) through verbatim (SPEC-0028 RESEARCH-3)', () => {
+    const d = parseDecomposeDecision(
+      JSON.stringify({
+        sourceId: 's',
+        entities: [],
+        signals: [{ type: 'research-request', what: 'Project Atlas', note: 'unexplained term', context: 'we shipped on Atlas' }],
+      }),
+    );
+    expect(d.signals?.[0]).toMatchObject({ type: 'research-request', what: 'Project Atlas', note: 'unexplained term', context: 'we shipped on Atlas' });
+  });
+
+  it('rejects an EMPTY research-request `what` (non-empty string when present)', () => {
+    expect(() =>
+      parseDecomposeDecision(JSON.stringify({ sourceId: 's', entities: [], signals: [{ type: 'research-request', what: '  ', note: 'n' }] })),
+    ).toThrow(/what/);
+  });
 });
 
 describe('field validation (DECOMP-6)', () => {
