@@ -9,10 +9,18 @@ import { AUTONOMY_POSTURES, DEFAULT_POSTURE, type AutonomyPosture } from './jobs
 
 const INSTANCE_REL = path.join('.kb', 'instance.json');
 
+/** Dev-log verbosity the Settings view exposes (SPEC-0030 OBS-10): `info` by default, `debug` to
+ *  troubleshoot (at `debug`, redaction-protected `sensitive` fields are included verbatim — devlog.ts). */
+export const DEV_LOG_LEVELS = ['info', 'debug'] as const;
+export type DevLogLevel = (typeof DEV_LOG_LEVELS)[number];
+export const DEFAULT_DEV_LOG_LEVEL: DevLogLevel = 'info';
+
 /** Instance-wide settings (PANEL-5). v1 holds the autonomy default; grows as Settings does. */
 export interface InstanceConfig {
   /** The Instance-wide default autonomy posture (AUTO-12). Jobs inherit it unless they override. */
   autonomyDefault: AutonomyPosture;
+  /** Dev-log verbosity (OBS-10): `info` (default) or `debug` to troubleshoot. */
+  devLogLevel: DevLogLevel;
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -20,9 +28,9 @@ export function instanceConfigPath(root: string): string {
   return path.join(path.resolve(root), INSTANCE_REL);
 }
 
-/** The safe default Instance config (Guarded — the conservative autonomy posture, AUTO-12). */
+/** The safe default Instance config (Guarded autonomy + `info` dev-log verbosity). */
 export function defaultInstanceConfig(): InstanceConfig {
-  return { autonomyDefault: DEFAULT_POSTURE };
+  return { autonomyDefault: DEFAULT_POSTURE, devLogLevel: DEFAULT_DEV_LOG_LEVEL };
 }
 
 /** Read the Instance config (PANEL-5). Missing/malformed file or unknown posture → safe defaults. */
@@ -43,7 +51,10 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
   const autonomyDefault = (AUTONOMY_POSTURES as readonly string[]).includes(o.autonomyDefault as string)
     ? (o.autonomyDefault as AutonomyPosture)
     : DEFAULT_POSTURE;
-  return { autonomyDefault };
+  const devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(o.devLogLevel as string)
+    ? (o.devLogLevel as DevLogLevel)
+    : DEFAULT_DEV_LOG_LEVEL;
+  return { autonomyDefault, devLogLevel };
 }
 
 /** Write the Instance config (Settings edit, PANEL-5/6) — deterministic, stable key order. */

@@ -39,7 +39,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL } from '../kb/instanceConfig';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
@@ -116,7 +116,11 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // OBS-1/2: per-vault diagnostic dev-log (<vault>/.kb/cache/logs/, gitignored, never promoted).
   // Passed to every stage so failures land here with their cause (OBS-3/4); also captures the
   // worktree-provision failure below — the silent-stall cause that motivated SPEC-0030.
-  const log = createVaultDevLog(vaultPath);
+  // OBS-10: verbosity comes from the Instance config (Settings; default info, debug to troubleshoot).
+  // The config lives on the persistent `staging` worktree; read best-effort (absent first-run → info).
+  // A level change applies on the next pipeline start (vault switch / app restart).
+  const stagingInstance = await readInstanceConfig(path.join(vaultPath, '.kb', 'cache', 'worktrees', 'staging'));
+  const log = createVaultDevLog(vaultPath, { level: stagingInstance.devLogLevel });
   // OBS-12/13: per-vault latency tracer (<vault>/.kb/cache/spans.jsonl, never promoted). Threaded
   // into every stage so each per-item `stage.run` span + its `copilot.invoke` child are recorded;
   // the perf index (perfIndex.ts) aggregates them. Spans also mirror to the dev log at `debug`.
@@ -482,7 +486,7 @@ function summarizeJobChange(patch: JobConfigPatch): string {
 
 /** The per-Instance settings for the active KB (PANEL-5). No active KB → safe defaults. */
 export async function getActiveInstanceSettings(): Promise<InstanceSettings> {
-  if (!active) return { autonomyDefault: 'guarded' };
+  if (!active) return defaultInstanceConfig();
   return readInstanceConfig(active.stagingWt);
 }
 
@@ -493,14 +497,16 @@ export async function getActiveInstanceSettings(): Promise<InstanceSettings> {
  * refused (fail-safe). Takes effect immediately (new jobs inherit it via `resolveJobPosture`).
  */
 export async function setActiveInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings> {
-  if (!active) return { autonomyDefault: 'guarded' };
+  if (!active) return defaultInstanceConfig();
   const root = active.stagingWt;
   if (!isAutonomyPosture(settings.autonomyDefault)) return readInstanceConfig(root); // reject invalid
-  let prior: InstanceSettings = { autonomyDefault: 'guarded' };
+  // OBS-10: dev-log verbosity — drop an unknown level to the safe default (fail-safe).
+  const devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : DEFAULT_DEV_LOG_LEVEL;
+  let prior: InstanceSettings = defaultInstanceConfig();
   await active.lock.run(async () => {
     prior = await readInstanceConfig(root);
-    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault });
-    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault}`);
+    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel });
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel}`);
   });
   if (prior.autonomyDefault !== settings.autonomyDefault) {
     await appendAuditEvent(root, {

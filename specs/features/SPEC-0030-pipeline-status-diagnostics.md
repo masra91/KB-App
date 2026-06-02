@@ -82,7 +82,7 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-7  | must     | The Status view exposes **worktree & lock state** — worktrees, their branches, and who holds/awaits the canonical-writer lock — so a stalled pipeline's cause is visible | test:app/src/shell/views/statusView.test.ts | ORCH-2,18; STAGING-1 |
 | OBS-8  | should   | The view **live-updates** (poll ORCH-10 status + dev-log tail, or push) so progress/stall shows in near-real-time | test:app/src/shell/views/statusView.test.ts | ORCH-10 |
 | OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | test:app/src/shell/views/statusView.test.ts | AUDIT-8 |
-| OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | none-yet | AUTO-12; PRIN-19 |
+| OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | test:app/src/kb/instanceConfig.test.ts, app/src/shell/views/settingsView.test.ts | AUTO-12; PRIN-19 |
 | OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | test:app/src/shell/views/statusView.test.ts | ORCH-10,13 |
 | OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | test:app/src/kb/obsTracing.test.ts | ORCH-16; OBS-1 |
 | OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | test:app/src/kb/obsTracing.test.ts | ORCH-16 |
@@ -126,6 +126,17 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **OBS-10 (configurable dev-log verbosity) → test:. SPEC-0030 now COMPLETE end-to-end.**
+  Added `devLogLevel` (`info` default / `debug`) to the per-Instance config (`.kb/instance.json`,
+  read/write/validate + safe-default), surfaced as a **Diagnostics** verbosity selector in the
+  Settings view (benign info/debug toggle, applied directly, sends the full settings so the autonomy
+  default isn't clobbered). `startPipeline` reads the level from the persistent staging instance
+  config (best-effort; absent first-run → info) and passes it to `createVaultDevLog({level})` — a
+  level change applies on the next pipeline start. The **redaction-aware** half (sensitive fields
+  redacted unless `debug`) already shipped in OBS-1 (devlog.ts). Tested: `instanceConfig.test`
+  (devLogLevel round-trip + unknown→info) + `settingsView.test` (the selector persists the full
+  settings). With OBS-1/2/3/4 (dev log), OBS-12/13/14/16 (tracing), and OBS-5/6/7/8/9/11/15 (Status
+  view) all on `main`, **every OBS requirement is `test:` — SPEC-0030 is done.**
 - 2026-06-02 — **Status view (the UI half)** — **OBS-5/6/7/8/9/11/15 → test:**. A new read-only
   `statusView.ts` sidebar view (`VIEW_STATUS`, registered in views.ts/shell.ts), fed by a
   `kb:pipelineStatusView` IPC over `pipelineStatusForActive()` (pipeline.ts) which gathers per-stage

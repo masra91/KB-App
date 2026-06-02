@@ -12,6 +12,7 @@ import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo } from './pipelineStatusView';
+import type { DevLogLevel } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
 export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo };
@@ -243,6 +244,8 @@ export type RunResearcherResult =
 /** Editable per-Instance settings surfaced in Settings (PANEL-5 / AUTO-12). */
 export interface InstanceSettings {
   autonomyDefault: AutonomyPosture;
+  /** Dev-log verbosity (SPEC-0030 OBS-10): `info` (default) or `debug` to troubleshoot. */
+  devLogLevel: DevLogLevel;
 }
 
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
