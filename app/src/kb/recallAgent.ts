@@ -12,7 +12,7 @@ import type { CopilotClientOptions, SessionConfig, SystemMessageConfig, Tool, To
 import type { RecallClient, RecallSession, RecallSessionConfig, RecallToolDef } from './recall';
 
 /** Version of the recall skill/instruction (for the audit trail; ORCH-16 / SPEC-0014 Q9). */
-export const RECALL_SKILL_VERSION = 'recall/v2-sdk';
+export const RECALL_SKILL_VERSION = 'recall/v3-sdk';
 
 /**
  * The recall SKILL (ASK-4): teaches the agent the KB's structure + how to ground/cite, so it
@@ -36,6 +36,8 @@ export const RECALL_SKILL = [
   '',
   'METHOD (multi-hop, entity-centric): find the relevant entity → read its claims → follow its',
   'links → read the underlying source text for exact quotes. Reason about relevance; do not dump.',
+  'STOP calling tools as soon as you can answer with grounded citations — do NOT exhaustively',
+  'traverse the graph (a small KB is fully coverable in a few hops; extra calls are wasted looping).',
   'Mind the retrieval budget: a tool may tell you it is exhausted — then answer with what you have.',
   '',
   'GROUNDING (strict): cite the entity/claim/source each assertion rests on. Prefer claims and',

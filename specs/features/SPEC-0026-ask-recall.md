@@ -110,9 +110,15 @@ agent, so:
 - **Grounding (ASK-7):** the agent finishes by calling a structured **`submitAnswer`** tool
   (answer + citations); the orchestrator **verifies every citation resolves on disk** before calling
   an answer grounded; no verifiable evidence → `grounded:false` (honest, never fabricated).
-- **F3 — retrieval budget:** a configurable cap on retrieval tool calls per question (default
-  `DEFAULT_MAX_TOOL_CALLS = 12`), enforced in the tool-handler wrappers: past the cap, retrieval
-  returns an "exhausted — answer now" nudge and the result is flagged `truncated`.
+- **F3 — retrieval budget (scaled to graph size; dogfood #5):** the per-question retrieval-tool-call
+  cap **scales to the entity-graph size** via `recallBudget(nodeCount) = clamp(4, 2 + ceil(0.5·nodeCount), 16)`
+  (`nodeCount` = `.md` files under `entities/`, counted at recall start). A small KB is fully
+  traversable in a few hops, so a fixed 12 just let the agent loop (the dogfood saw 12 calls +
+  `truncated` on a ~6-node KB → ~5 now); a large KB keeps headroom up to 16. An explicit
+  `opts.maxToolCalls` (callers/tests) still overrides. Enforced in the tool-handler wrappers: past
+  the cap, retrieval returns an "exhausted — answer now" nudge and the result is flagged `truncated`.
+  Complemented by a skill stop-criterion ("stop as soon as you can answer with grounded citations —
+  don't exhaustively traverse"), which addresses the *cause* (the agent not self-stopping).
 - **F5 — session state:** ephemeral; conversational `history` (ASK-8) is passed in by the caller,
   nothing persisted by the engine.
 - **F2 — Outputs inert in v1 (accepted as working scope; KB-Lead confirming):** a saved Output lives
@@ -158,8 +164,10 @@ behind it substrate-agnostic and unit-testable.
       `[n]` markers already show grounded claims. Finer inline inferred-vs-grounded marking **deferred**
       (bigger convention). Saving an **ungrounded** answer is **allowed**, with a prominent
       "⚠️ Not grounded — inferred" banner (honesty preserved by the label; blocking it would be paternalistic).
-- [x] **Retrieval budget** — resolved (F3, slice 1): a configurable tool-call cap (default 12) +
-      step bound (10); exhaustion → answer-now + `truncated` flag.
+- [x] **Retrieval budget** — resolved (F3, slice 1): a configurable tool-call cap + exhaustion →
+      answer-now + `truncated` flag. **Refined (dogfood #5):** the cap **scales to entity-graph size**
+      (`recallBudget` clamp(4, 2+ceil(0.5·nodeCount), 16)) — a fixed 12 over-budgeted small KBs and let
+      the agent loop; now a ~6-node KB gets ~5. Plus a skill stop-criterion (don't exhaustively traverse).
 - [x] **Does a saved Output get re-enriched? (F2)** — resolved: **inert.** It lives in `outputs/`
       (not `sources/`) and carries `generated:recall`, so the autonomous stages (which queue off
       `sources/`) never re-enrich it. Re-enrichment remains deferred (no consumer needs it).
@@ -170,6 +178,14 @@ behind it substrate-agnostic and unit-testable.
 
 ## 8. Changelog
 
+- 2026-06-02 — **retrieval budget scaled to graph size (F3 refinement; dogfood #5).** `recall()` now
+  derives the tool-call cap from the entity-graph size — `recallBudget(nodeCount) = clamp(4, 2 +
+  ceil(0.5·nodeCount), 16)`, `nodeCount` = `.md` under `entities/` counted at recall start — instead
+  of a fixed 12. The dogfood saw 12 calls + `truncated` on a ~6-node KB (the agent looping on a fully-
+  traversable graph); a 6-node KB now gets ~5. Added a recall-skill stop-criterion ("stop as soon as
+  you can answer with grounded citations — don't exhaustively traverse"); bumped `RECALL_SKILL_VERSION`
+  → `recall/v3-sdk`. Pure `recallBudget` + `countEntityNodes` unit-tested. Co-designed with the recall
+  owner (DEV-3).
 - 2026-06-01 — created (draft). The "out" pillar (VISION-9): NL question → **grounded, cited**
   answer by a **structure-aware thick agent** that wields tools (our structured KB queries,
   grep, **optional** Obsidian CLI) plus a recall **skill** teaching the KB's structure/metadata
