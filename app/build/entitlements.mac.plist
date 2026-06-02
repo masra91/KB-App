@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the macOS signed build (SPEC-0034 MACOS-3; #56).
+  NON-sandboxed (MACOS-4): no App Sandbox / security-scoped-bookmark entitlements — the pipeline
+  spawns git/copilot subprocesses + touches user-chosen folders, which the sandbox can't allow.
+  These three are what an Electron (V8) app needs under the hardened runtime, and they let the
+  spawned git/copilot children run (library validation gates *loading*, not *spawning*) so the
+  TCC folder grant propagates to them (MACOS-5 — verified empirically, #163/#56 §5). Verified to
+  produce a stable identity-based designated requirement that persists TCC grants across rebuilds.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
