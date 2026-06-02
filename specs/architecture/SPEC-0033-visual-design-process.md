@@ -64,8 +64,9 @@ Checked in as a living DESIGN spec (markdown; images/diagrams optional)
 | DESIGN-3 | must     | A design **must be approved by the AI-patterns detector** before it lands — **visually distinct**, not the generic AI-app look | none-yet | VIZ-8; VISION-13 |
 | DESIGN-4 | must     | A design **must be QA-verified** — a QA agent confirms it **clearly implements the functionality for all key user flows** of the surface | none-yet | TEST-2; VISION-13 |
 | DESIGN-5 | must     | Approved designs are **checked in as living specs** (markdown) documenting **structure / colors / themes / typography / motion / visual language**; **images/diagrams optional** (allowed, not required) | none-yet | SPECSYS-7 |
-| DESIGN-6 | should   | The **AI-patterns detector** is a **reusable check** (rubric/tool) that flags when a surface drifts into the generic AI look; runnable per design | none-yet | VIZ-8 |
+| DESIGN-6 | should   | The **AI-patterns detector owns + authors its own rubric** (delegated, not prescribed here) — grounded in its baked knowledge **plus research of current AI-app visual conventions** (online trends), scoped to a **simple Electron desktop app**. A reusable per-design check that flags drift into the generic AI look | none-yet | VIZ-8 |
 | DESIGN-7 | should   | The visual language is **coherent across surfaces** — a shared design system emerges from the per-surface design specs over time | none-yet | PRIN-17,18 |
+| DESIGN-8 | must     | The detector governs the **app's UI surface/chrome ONLY** — **AI-generated KB _content_ is fine** (the knowledge can be AI; the *app* just shouldn't *look* generically AI). The concern is the product's visual identity, not the vault's contents | none-yet | VISION-12,13 |
 
 ## 5. The design spec (what a checked-in design documents)
 
@@ -88,7 +89,9 @@ A design spec (one per surface, e.g. `specs/design/<surface>.md`) documents:
 ## 7. Open questions
 
 - [ ] **Where design specs live** — `specs/design/<surface>.md`? Confirm the folder.
-- [ ] **AI-patterns-detector rubric** — the concrete "generic AI look" signals it flags.
+- [x] **AI-patterns-detector rubric** — RESOLVED: **the detector authors its own** (DESIGN-6),
+      researching current AI-app visual conventions; scope is the **app UI surface, not KB
+      content** (DESIGN-8).
 - [ ] **QA "key user flows" coverage** — how the gate enumerates + verifies flows per surface.
 - [ ] **Gate ordering / blocking** — both gates must pass to land; who arbitrates a tie/conflict
       (Product Lead on intent, Principal on identity).
