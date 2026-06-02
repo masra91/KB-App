@@ -9,7 +9,7 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { gitAvailable } from '../../test/gitEnv';
 import { ensureGitIdentity } from './vault';
-import { canonicalHead, advanceOrCollide, withOptimisticAdvance, withEphemeralWorktree, type AdvanceOutcome } from './canonicalAdvance';
+import { canonicalHead, advanceOrCollide, withOptimisticAdvance, withConcurrentAdvance, withEphemeralWorktree, type AdvanceOutcome } from './canonicalAdvance';
 import { Mutex } from './stageLock';
 
 /** A canonical worktree (`root`) on branch `canon` with one initial commit. */
@@ -40,6 +40,18 @@ async function prepareOnBranch(root: string, branch: string, base: string, files
   await wtGit.raw('add', '-A');
   await wtGit.commit(`work on ${branch}`);
   await git.raw('worktree', 'remove', '--force', wt);
+}
+
+/** Write `files` into a worktree + commit on its current branch — what a stage's `prepare` does. */
+async function commitInWt(wt: string, files: Record<string, string>): Promise<void> {
+  for (const [rel, content] of Object.entries(files)) {
+    await fs.mkdir(path.dirname(path.join(wt, rel)), { recursive: true });
+    await fs.writeFile(path.join(wt, rel), content, 'utf8');
+  }
+  const g = simpleGit(wt);
+  await ensureGitIdentity(g);
+  await g.raw('add', '-A');
+  await g.commit('work');
 }
 
 const headCount = async (root: string): Promise<number> =>
@@ -282,6 +294,77 @@ describe.skipIf(!gitAvailable)('withEphemeralWorktree — per-item isolation for
         }),
       ).rejects.toThrow('boom');
       expect(await exists('', seenWt)).toBe(false); // cleaned up despite the throw
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+describe.skipIf(!gitAvailable)('withConcurrentAdvance — ephemeral-worktree wrapper for cap>1 (ORCH-20)', () => {
+  it('advances on the happy path — prepare writes in the helper-provided ephemeral worktree', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      let setAside = false;
+      const result = await withConcurrentAdvance(
+        { root, lock: new Mutex(), stage: 'decompose' },
+        async ({ wt }) => {
+          await commitInWt(wt, { 'sources/A/x': 'a' });
+          return true;
+        },
+        async () => {
+          setAside = true;
+        },
+      );
+      expect(result).toBe('advanced');
+      expect(setAside).toBe(false);
+      expect(await exists(root, 'sources/A/x')).toBe(true);
+      // The ephemeral worktree was torn down (no leak under .kb/cache/worktrees/decompose-*).
+      const wtDir = path.join(root, '.kb', 'cache', 'worktrees');
+      const leftover = (await fs.readdir(wtDir).catch(() => [] as string[])).filter((d) => d.startsWith('decompose-'));
+      expect(leftover).toEqual([]);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('returns noop when prepare commits nothing', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const result = await withConcurrentAdvance({ root, lock: new Mutex(), stage: 'decompose' }, async () => false, async () => {});
+      expect(result).toBe('noop');
+      expect(await headCount(root)).toBe(1);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('sets aside after K same-path collisions — never dropped, canonical clean (ORCH-19)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      let setAside = false;
+      let attempts = 0;
+      const result = await withConcurrentAdvance(
+        { root, lock: new Mutex(), stage: 'connect', maxCollisionRetries: 2 },
+        async ({ wt, base }) => {
+          attempts++;
+          await commitInWt(wt, { 'entities/p/steve.md': `mine ${attempts}` });
+          // A racing item lands a conflicting SAME-PATH change every attempt → always collides.
+          await prepareOnBranch(root, 'kb/racer', base, { 'entities/p/steve.md': `racer ${attempts}` });
+          await advanceOrCollide(root, 'kb/racer', base);
+          return true;
+        },
+        async () => {
+          setAside = true;
+        },
+      );
+      expect(result).toBe('setaside');
+      expect(setAside).toBe(true);
+      expect(attempts).toBe(3); // maxCollisionRetries(2) + 1
+      expect(await fs.readFile(path.join(root, 'entities/p/steve.md'), 'utf8')).toContain('racer');
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);

@@ -28,7 +28,7 @@ import type { Candidate } from './connect';
 import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from './decomposeAgent';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, type PrepareContext } from './canonicalAdvance';
+import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 
 const STAGE = 'decompose';
 /** Default attempts before a poison source is set aside (DECOMP-6). */
@@ -240,6 +240,7 @@ export class DecomposeStage {
   private readonly decider: DecomposeDecider;
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
+  private readonly cap: number;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -250,11 +251,13 @@ export class DecomposeStage {
     decider: DecomposeDecider = makeDecomposeDecider(),
     lock: Mutex = new Mutex(),
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+    cap: number = DEFAULT_STAGE_CAP,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
+    this.cap = cap;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -298,14 +301,14 @@ export class DecomposeStage {
   private async drainOnce(): Promise<void> {
     let queue = await readDecomposeQueue(this.root, this.maxAttempts);
     while (queue.length > 0) {
-      const sourceRel = queue[0];
+      // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
+      // own ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial; cross-stage cognition
+      // overlaps regardless). decomposeOne handles its own failures, so a settled batch never rejects;
+      // an unexpected throw stops this pass for a later poke/sweep to retry.
+      const batch = queue.slice(0, this.cap);
       try {
-        // ORCH-17/18: decomposeOne prepares OFF the lock and advances UNDER it (passing the shared
-        // lock). The drain stays serial within Decompose (cap=1); cross-stage cognition overlaps.
-        await decomposeOne(this.root, sourceRel, this.decider, this.lock, this.maxAttempts);
+        await Promise.all(batch.map((rel) => decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts)));
       } catch {
-        // Unexpected (decomposeOne handles its own failures) — stop this pass; a later
-        // poke/sweep retries rather than spinning.
         return;
       }
       queue = await readDecomposeQueue(this.root, this.maxAttempts);

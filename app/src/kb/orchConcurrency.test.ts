@@ -19,7 +19,7 @@ import { Mutex } from './stageLock';
 import { captureToInbox } from './ingest';
 import { archiveOne } from './orchestrator';
 import { deterministicDecider } from './archivist';
-import { decomposeOne, readDecomposeQueue, findSourceDirs } from './decomposeStage';
+import { decomposeOne, readDecomposeQueue, findSourceDirs, DecomposeStage } from './decomposeStage';
 import { connectOne, readCandidates, readConnectQueue } from './connectStage';
 import { claimsOne, readClaimsQueue, findEntityFiles } from './claimsStage';
 import type { DecomposeDecider } from './decomposeAgent';
@@ -151,6 +151,36 @@ describe.skipIf(!gitAvailable)('cross-stage optimistic concurrency (SPEC-0014 OR
       expect(entities.length).toBe(1);
       const nodeMd = await fs.readFile(path.join(stagingWt, entities[0]), 'utf8');
       expect(nodeMd).toContain('Q3 budget'); // the claim survived the collision/retry
+      expect(await mergeCommitCount(stagingWt)).toBe(mergesBefore); // ORCH-3: linear, no merge bubble
+      expect(await isClean(stagingWt)).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('a stage drain at cap=2 processes two items concurrently, landing them linearly (ORCH-20)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      // Archive two sources so Decompose has two queue items.
+      for (const text of ['source one about Steve', 'source two about Steve']) {
+        const cap = await lock.run(() => captureToInbox(stagingWt, 'test', [{ kind: 'text', text }]));
+        await archiveOne(stagingWt, cap.ids[0], deterministicDecider, lock);
+      }
+      expect((await readDecomposeQueue(stagingWt)).length).toBe(2);
+      const mergesBefore = await mergeCommitCount(stagingWt);
+
+      // Decompose drain at cap=2: both sources prepare concurrently (each in its own ephemeral
+      // worktree), advances serialized by the shared lock — disjoint paths replay cleanly.
+      const stage = new DecomposeStage(stagingWt, decompSteve, lock, undefined, 2);
+      await stage.poke();
+      stage.stop();
+
+      expect((await readDecomposeQueue(stagingWt)).length).toBe(0); // both decomposed
+      expect((await readCandidates(stagingWt)).length).toBe(2); // one candidate from each source
       expect(await mergeCommitCount(stagingWt)).toBe(mergesBefore); // ORCH-3: linear, no merge bubble
       expect(await isClean(stagingWt)).toBe(true);
     } finally {

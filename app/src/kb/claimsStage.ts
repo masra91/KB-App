@@ -29,7 +29,7 @@ import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, type PrepareContext } from './canonicalAdvance';
+import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 
 const STAGE = 'claims';
 /** Default attempts before a poison entity is set aside (CLAIMS-12). */
@@ -390,6 +390,7 @@ export class ClaimsStage {
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
   private readonly afterDrain?: () => Promise<void>;
+  private readonly cap: number;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -407,12 +408,14 @@ export class ClaimsStage {
     lock: Mutex = new Mutex(),
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     afterDrain?: () => Promise<void>,
+    cap: number = DEFAULT_STAGE_CAP,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
     this.afterDrain = afterDrain;
+    this.cap = cap;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -457,14 +460,14 @@ export class ClaimsStage {
     let queue = await readClaimsQueue(this.root, this.maxAttempts);
     let worked = false;
     while (queue.length > 0) {
-      const entityRel = queue[0];
+      // ORCH-17/18/20: process up to `cap` entities concurrently (each in its own ephemeral worktree;
+      // cap=1 ⇒ serial). claimsOne handles its own failures + same-source-audit collisions (re-sync +
+      // retry), so a settled batch never rejects; an unexpected throw stops this pass for a later sweep.
+      const batch = queue.slice(0, this.cap);
       try {
-        // ORCH-17/18: claimsOne prepares OFF the lock and advances UNDER it (shared lock passed in).
-        await claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts);
+        await Promise.all(batch.map((entityRel) => claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts)));
         worked = true;
       } catch {
-        // Unexpected (claimsOne handles its own failures) — stop this pass; a later poke/sweep
-        // retries rather than spinning.
         return;
       }
       queue = await readClaimsQueue(this.root, this.maxAttempts);

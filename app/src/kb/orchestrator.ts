@@ -17,7 +17,7 @@ import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
-import { withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
+import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 
 const STATUS_REL = path.join('.kb', 'cache', 'status.json');
 
@@ -136,6 +136,7 @@ export class Orchestrator {
   private readonly decider: ArchivistDecider;
   private readonly lock: Mutex;
   private readonly afterDrain?: () => Promise<void>;
+  private readonly cap: number;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -154,11 +155,13 @@ export class Orchestrator {
     decider: ArchivistDecider = deterministicDecider,
     lock: Mutex = new Mutex(),
     afterDrain?: () => Promise<void>,
+    cap: number = DEFAULT_STAGE_CAP,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.afterDrain = afterDrain;
+    this.cap = cap;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -220,15 +223,15 @@ export class Orchestrator {
     let queue = await readQueue(this.root);
     await this.updateStatus(queue.length, null);
     while (queue.length > 0) {
-      const id = queue[0];
-      await this.updateStatus(queue.length, id);
+      // ORCH-17/18/20: archive up to `cap` items concurrently — each prepares OFF the lock in its own
+      // ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial). A failing item throws and
+      // stays in the inbox (ORCH-12); the batch's other items still land, and a later sweep retries.
+      const batch = queue.slice(0, this.cap);
+      await this.updateStatus(queue.length, batch[0]);
       try {
-        // ORCH-17/18: archiveOne prepares OFF the lock and advances UNDER it (shared lock passed in).
-        await archiveOne(this.root, id, this.decider, this.lock);
-        this.lastArchived = id;
+        await Promise.all(batch.map((id) => archiveOne(this.root, id, this.decider, this.lock)));
+        this.lastArchived = batch[batch.length - 1];
       } catch {
-        // ORCH-12: never lose the item — it stays in the inbox; stop this pass and let a
-        // later poke/sweep retry rather than spin on a bad unit.
         await this.updateStatus(queue.length, null);
         return;
       }
