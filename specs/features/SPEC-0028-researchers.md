@@ -124,23 +124,65 @@ Review like any source.
 - **App-managed secret store** — BYOA only (RESEARCH-9).
 - **A central routing *agent*** — routing is deterministic + self-nomination (RESEARCH-4).
 
-## 8. Open questions
+## 7a. Delivery slices (v1)
 
-- [ ] **`research-request` schema** — fields (target entity/source, what-to-learn, why,
-      egress-tier hint, dedup key so the same request doesn't fan out repeatedly).
-- [ ] **Dedup / rate of inline requests** — Decompose on a busy KB could emit many; how the
-      dispatcher debounces / coalesces.
-- [ ] **Self-nomination cost** — the cheap relevance check still costs a call per eligible
-      researcher; cap eligible-set size? cache decisions per (researcher, topic)?
-- [ ] **Findings-note vs raw artifact** — when does a researcher store the raw fetched artifact
-      vs a grounded note vs both (size/licensing/PII)?
-- [ ] **Scheduled-researcher overlap with Jobs (SPEC-0023)** — does a scheduled researcher run
-      *as* a job, or does Reflect invoke researchers? (Parallel-but-related — pin the seam.)
-- [ ] **Egress-tier ↔ sensitivity mapping** — the concrete mapping from SPEC-0005 sensitivity
-      levels to the three tiers.
+Security-dominant, so v1 lands in three reviewable slices, lowest-egress-risk first:
+
+- **Slice 1 — framework spine + Web + Researchers view.** The generic-core registry, the
+  `research-request` signal + the deterministic **dispatcher** (eligibility filter → fan-out →
+  self-nomination → max-fan-out cap), the **Web** researcher (`public-web`), **secondary-source
+  re-entry**, **bounds** (budget + depth-limit→Review + global ceiling), the **untrusted-content
+  posture**, the `researcher` audit actor, and the **Researchers** Control-Panel view. Invocation:
+  **inline + on-demand + scheduled** (scheduled = a `researcher` job type, see decision D5).
+- **Slice 2 — Code researcher** (`local-only`, strictly read-only, isolated gitignored worktree;
+  RESEARCH-10) — its own PR + security review.
+- **Slice 3 — M365/WorkIQ** (`internal-tenant`, OAuth MCP) + **custom** researcher polish.
+
+## 8. Resolved decisions (Slice 1 locked) + escalations
+
+Forks resolved with KB-PM (D1–D3, D5, D6a are KB-PM/owner calls; D4-policy and the broader D6
+mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1):
+
+- **D1 — `research-request` schema:** `{ id, ts, by: { stage, sourceId?, entityId? }, what, why,
+  context, egressHint?, dedupKey }`, carried on the existing `signals[]` as `type:
+  'research-request'` (the payload in the signal). A producer is **any** stage **or Reflect** —
+  not a special emitter (D5).
+- **D2 — dedup / rate:** `dedupKey = hash(normalized what + subject)`; the dispatcher keeps a
+  per-epoch **seen-set** + a debounce window in `.kb/research/`, coalescing duplicates so a busy
+  Decompose can't fan the same request out repeatedly.
+- **D3 — self-nomination cost:** a **deterministic pre-filter** (scope + egress tier + template
+  topic match) narrows the eligible set **before** any paid relevance check; decisions are
+  **cached per (researcher, topic)** with a TTL; a **max-fan-out** caps eligible researchers.
+- **D4 — findings-note vs raw artifact (v1 posture):** default is a single **grounded, cited
+  findings-note** as the secondary source; the raw fetched artifact is stored **only when small +
+  license-safe**; **never** large/PII raw by default. *(Principal to ratify the licensing/PII
+  policy; the conservative default errs safe and is not a Slice-1 blocker.)*
+- **D5 — scheduled-researcher ↔ Jobs seam:** a scheduled researcher runs **as a `researcher` job
+  type** on the SPEC-0023 `JobScheduler` (reusing single-flight, posture, budget, journal,
+  ephemeral worktree, write-sink guard). `research-request` is a **signal any producer emits**
+  (pipeline stages AND Reflect); **Reflect emits a request, it does not invoke researchers** — the
+  **dispatcher is the single router**, keeping behaviors composable.
+- **D6a — egress ↔ content (Slice 1):** the **Web** researcher builds outbound queries **only
+  from the `research-request`'s explicit `what`/`context`** — **never** arbitrary KB content.
+  Least-privilege egress that ships safely **without depending on SPEC-0005** (sensitivity is
+  hardcoded `internal` today) and is the floor any future egress model preserves.
+- **D6 (escalated) — egress-tier ↔ sensitivity mapping** (proposed `public-web → shareable`,
+  `internal-tenant → up to internal/confidential`, `local-only → any`) **and whether to prioritize
+  SPEC-0005 classification** so public-web researchers can later be fed KB content: **Principal
+  call.** Governs relaxation in Slices 2/3, not Slice 1.
 
 ## 9. Changelog
 
+- 2026-06-02 — **Slice 1 design locked** (KB-PM-greenlit; KB-Developer-5). Resolved the open
+  questions into decisions D1–D6a (§8): `research-request` schema on `signals[]`; dispatcher
+  dedup ledger; deterministic self-nomination pre-filter + cache; conservative cited-findings-note
+  default; scheduled researchers as a `researcher` **job type** on the SPEC-0023 scheduler with the
+  **dispatcher as sole router** (Reflect emits requests, doesn't invoke); and **least-privilege
+  egress** for Slice-1 Web (queries built only from the explicit request, no SPEC-0005 dependency).
+  Added the 3-slice delivery plan (§7a). Two items **escalated to the Principal** (licensing/PII
+  raw-artifact policy; the egress-tier↔sensitivity mapping + SPEC-0005 prioritization) — they
+  govern Slices 2/3, not Slice 1. `Verify` stays `none-yet`; targets graduate to `test:` per slice
+  as requirement-traced tests land (honest verification — SPECSYS / TEST-2).
 - 2026-06-02 — created (draft). **Enrich & Research** (SPEC-0004 Stage 2) modeled as a
   **parallel registry of researchers** (generic core + Web/Code/M365 templates + custom),
   invoked **inline (async `research-request` signal) / scheduled / on-demand**, routed by a
