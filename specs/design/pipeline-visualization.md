@@ -82,6 +82,15 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
     22 claims) reads `+N` or the `×ratio`, never a confusing negative where volume grows. The
     gauge-rail bar scales to the stage's own volume so a fan-out reads as the stream *widening*,
     not overflowing. (Resolves the GATE-2 fan-out-caption note.)
+  - **Funnel unit logic** (resolves the #169 `promoted`-semantics question). The funnel is a
+    **source-throughput spine with intermediate transformation yields**: `captured` and `promoted`
+    are the **same unit (sources)** — sources in → sources fully landed on `main`; their ratio is
+    the **completion rate**, the primary "is it working" signal. `candidates` / `entities` /
+    `claims` are the **intermediate transformation volumes** (extract → dedup → claim), which fan
+    out / narrow via the directional deltas above. So **`promoted` = sources-on-main**, not
+    entities-on-main (which would break the in/out unit spine). Because the last segment crosses
+    units (claims-volume → sources-promoted), the **PROMOTE caption is a completion ratio**
+    (`5/10 · 50%`), **not** a delta from claims; only the mid-funnel segments are directional deltas.
 - **In-flight (middle)** — each live source is a **carriage**: a compact stepper across the six
   stations, current step lit + animated, completed filled, with its current Copilot dwell time.
   This is the "pizza tracker" (VIZ-2). Click a carriage → expand to its full per-hop trace
@@ -183,8 +192,9 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
   fill. The one *running* station embers + breathes.
 - **Gauge-rail** — vertical fill bar (volume) with a **directional** conversion-delta caption to
   the next station (`−N (deduped)` at reductions, `+N (×ratio)` at fan-outs like Connect→Claims);
-  the slowest station's rail tints toward oxide and shows its `p95` Copilot latency (VIZ-4, the
-  spatial "where time goes").
+  the **terminal PROMOTE rail shows a completion ratio** (`promoted/captured`, e.g. `5/10 · 50%`),
+  not a delta — see §2 funnel unit logic. The slowest station's rail tints toward oxide and shows
+  its `p95` Copilot latency (VIZ-4, the spatial "where time goes").
 - **Carriage** — `▸ name` + a six-cell stepper `[██████▣·····]` + current dwell ("12s on Copilot").
   Filled = done (patina), `▣` lit = current (ember), `·` = pending. Expandable to the per-hop
   trace.
@@ -283,6 +293,11 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   chrome" implementation guardrails (§6); concrete measured contrast ratios + the rule that state
   hues never color small text — which caught that **oxide** (3.96:1), not ember, was the actual
   sub-AA case (§3). Awaiting GATE 2 (KB-QD, flow coverage).
+- 2026-06-02 — **Funnel unit semantics clarified** (§2/§6) resolving DEV-3's #169 question:
+  `captured`/`promoted` are the same unit (sources) = the throughput spine + completion rate;
+  candidates/entities/claims are intermediate transformation yields; **`promoted` = sources-on-main**
+  (not entities-on-main); the PROMOTE caption is a completion ratio (`promoted/captured`), not a
+  delta. Recorded in `decisions`.
 - 2026-06-02 — **GATE 2 (KB-Quality-Driver, flow-coverage) PASS** — all four key flows + per-item
   drill-down covered; OBS-17 Retry/Dismiss confirmed first-class (siding is a persistent region, not
   hidden under pivot). Folded in KB-QD's non-blocking note: the conversion-delta caption is now
