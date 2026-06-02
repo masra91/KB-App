@@ -200,6 +200,19 @@ Three layers; only one has a brain.
 
 ## 6. Changelog
 
+- 2026-06-02 — **#163: canonical-writer lock made self-surfacing (no silent wedge).** The §5 `Mutex`
+  is the pipeline's most dangerous wedge point — a critical section that never settles (a re-entrant
+  `lock.run` self-deadlock, or any hung await) blocks every future canonical write while the pipeline
+  reports "Running". Hardening (`stageLock.ts`, additive — serialization semantics unchanged): every
+  `lock.run(fn, label)` now carries a **label** (every call site labelled: `<stage>:advance`,
+  `*:afterDrain`, `capture`, `promote`, `connect:dedup`, `review:answer`, …) so the holder names
+  itself in OBS-7; and a **watchdog** turns a section held past a threshold (default 30s) into a loud
+  `lock.stuck` dev-log warning (scope `lock`) + a `stuck`/`heldMs` flag in the lock-state snapshot —
+  a silent deadlock becomes a named, surfaced error (AUDIT-2). Wired with the vault dev-log in
+  `pipeline.ts`. Tests incl. a re-entrant deadlock that the watchdog surfaces (named). NOTE: this
+  makes the deadlock *loud + self-diagnosing*; the targeted re-entrant-path fix (and the
+  re-entrancy-throw) follow once a live run names the holder. Secondary stale stage-error badge
+  (`hasErrorFor` time-bound) tracked separately.
 - 2026-06-02 — **ORCH-24: ephemeral-worktree lifecycle made leak-proof + self-healing (#135 cascade).**
   The #135 poison-loop's fallout: ephemeral `claims-<ULID>` worktrees + their `kb/*-work-*` branches
   leaked (a crash/kill mid-item leaves the dir, which `worktree prune` can't reap because the dir

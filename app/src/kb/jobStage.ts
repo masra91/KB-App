@@ -251,7 +251,7 @@ export async function runJobOnce(
       await fs.appendFile(journalPath, JSON.stringify(entry) + '\n', 'utf8');
       await wtGit.raw('add', '-A');
       await wtGit.commit(`job ${job.id}: set aside run ${runId} (collision-exhausted)`);
-      if ((await lock.run(() => advanceOrCollide(root, branch, base))) === 'advanced') break;
+      if ((await lock.run(() => advanceOrCollide(root, branch, base), `job:${job.id}:setaside-advance`)) === 'advanced') break;
       // The set-aside advance itself collided — re-sync to the moved canonical and retry (bounded).
     }
     log.warn('job.setaside', { runId, itemId: job.id, reason: 'collision-exhausted' });

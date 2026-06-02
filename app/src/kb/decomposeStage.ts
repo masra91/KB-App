@@ -235,7 +235,7 @@ export async function decomposeOne(
       const wtGit = simpleGit(wt);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
-      await lock.run(() => advanceOrCollide(root, workBranch, base));
+      await lock.run(() => advanceOrCollide(root, workBranch, base), 'decompose:setaside-advance');
     });
     log.error('decompose.setaside', { itemId: result.sourceId, reason: 'collision-exhausted' });
     result = { ...result, ok: false, setAside: true };

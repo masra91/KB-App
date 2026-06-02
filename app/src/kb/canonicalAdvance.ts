@@ -203,6 +203,8 @@ export interface OptimisticAdvanceOptions {
   workBranch: string;
   /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
   maxCollisionRetries?: number;
+  /** OBS-7 / #163 watchdog label naming the holder of the canonical-writer lock during the advance. */
+  label?: string;
 }
 
 export type OptimisticAdvanceResult = 'advanced' | 'noop' | 'setaside';
@@ -231,7 +233,7 @@ export async function withOptimisticAdvance(
     const base = await canonicalHead(opts.root);
     const committed = await prepare(base);
     if (!committed) return 'noop';
-    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base));
+    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base), opts.label ?? 'advance');
     if (outcome === 'advanced') return 'advanced';
     // 'collision' → re-sync to the moved canonical and retry the whole item.
   }
@@ -248,6 +250,8 @@ export interface ConcurrentAdvanceOptions {
   stage: string;
   /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
   maxCollisionRetries?: number;
+  /** OBS-7 / #163 watchdog label naming the lock holder during the advance. Defaults to `<stage>:advance`. */
+  label?: string;
 }
 
 /** Context handed to a `prepare` callback under {@link withConcurrentAdvance}: its PRIVATE ephemeral
@@ -279,7 +283,7 @@ export async function withConcurrentAdvance(
     const outcome = await withEphemeralWorktree(opts.root, opts.stage, base, async ({ wt, workBranch }) => {
       const committed = await prepare({ wt, base });
       if (!committed) return 'noop' as const;
-      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base));
+      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base), opts.label ?? `${opts.stage}:advance`);
     });
     if (outcome === 'noop') return 'noop';
     if (outcome === 'advanced') return 'advanced';

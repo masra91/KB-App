@@ -135,5 +135,5 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
     await git.raw('add', '-A');
     await git.commit(`review answered: ${id} (${verdict})`);
     return { ok: true, message: 'answered', stage: review.raisedBy.stage, review };
-  });
+  }, 'review:answer');
 }
