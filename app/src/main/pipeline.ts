@@ -36,6 +36,7 @@ import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
 import { reviewResumeStage } from '../kb/reviewResume';
+import { resumeApprovedResearchEscalation } from '../kb/researchResume';
 import { runFullReplay } from '../kb/replay';
 import { JobScheduler } from '../kb/jobScheduler';
 import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
@@ -412,6 +413,14 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
   if (result.ok) {
     const consolidation = await executeApprovedConsolidation(active.stagingWt, id, active.lock);
     if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath), 'consolidation:promote');
+  }
+  // SPEC-0028 RESEARCH-11 (D7 fast-follow): if this Review was a CONFIRMED research depth-limit
+  // escalation, continue the chain one level deeper now — so the "Continue researching X?" control
+  // actually continues (no dead affordance). Self-gating (no-op for any other review), so it's safe to
+  // call unconditionally. Uses the same cliPath+dev-log wiring as the scheduler/Run-now (#160).
+  if (result.ok) {
+    const resumed = await resumeApprovedResearchEscalation(active.stagingWt, id, researchDepsOptions(active.log));
+    if (resumed.resumed) active.log.child({ scope: 'research' }).info('research.resumed-after-confirm', { reviewId: id, sources: resumed.sourceIds?.length ?? 0 });
   }
   return result;
 }

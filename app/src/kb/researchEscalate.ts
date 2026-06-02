@@ -60,12 +60,21 @@ export async function raiseResearchEscalation(
       // its stable id so a resume consumer / the UI can identify the chain.
       item: { kind: 'research-request', ref: req.id },
       auditRel: CONTROL_AUDIT_REL, // where answerReview appends the `review-answered` resume marker
+      // markerKey carries everything resume-on-confirm needs to reconstruct + re-dispatch the request
+      // one level deeper WITHOUT re-reading the audit (what/why/context/dedupKey + the subject ids).
+      // markerKey values are strings (Review contract).
       markerKey: {
         kind: RESEARCH_DEPTH_REVIEW_KIND,
         requestId: req.id,
         researcherId: r.id,
         depth: String(depth),
         maxDepth: String(r.budget.maxDepth),
+        what: req.what,
+        why: req.why,
+        context: req.context,
+        dedupKey: req.dedupKey,
+        ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}),
+        ...(req.by.entityId ? { entityId: req.by.entityId } : {}),
       },
     },
     subject: { refs: [req.what] },
