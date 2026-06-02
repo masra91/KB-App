@@ -49,6 +49,11 @@ function renderDetails(): void {
       <li>${mark(ins.copilot.available, true)} Copilot &mdash; <span class="muted">${esc(ins.copilot.detail)}</span></li>
       ${ins.alreadyKb ? '<li>⚠️ This folder already contains a KB-App config (will be reused).</li>' : ''}
     </ul>
+    ${
+      ins.tccProtectedDir
+        ? `<p class="warning">⚠️ This folder is inside your <strong>${esc(ins.tccProtectedDir)}</strong>, a macOS-protected location. KB-App's background tasks (git, Copilot) can be silently blocked there — captures may never finish processing. <strong>Pick a folder outside ${esc(ins.tccProtectedDir)}</strong> (e.g. one directly in your home directory) to be safe.</p>`
+        : ''
+    }
     <label class="field">Name<input id="name" value="${esc(baseName(ins.path))}" /></label>
     <label class="checkbox"><input type="checkbox" id="initGit" checked /> Initialize git repo if needed</label>
     ${ins.gitInstalled ? '' : '<p class="error">git is required. Install git, then choose the folder again.</p>'}
