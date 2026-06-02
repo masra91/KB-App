@@ -89,6 +89,7 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | test:app/src/shell/views/statusView.test.ts | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
+| OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app | none-yet | ORCH-12; [#137](https://github.com/masra91/KB-App/issues/137) |
 
 ## 6. User flows / surface
 
@@ -100,8 +101,8 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 7. Out of scope (for now)
 
-- **Interactive recovery** (retry/skip/unstick from the view) — read-only v1; retries live in the
-  pipeline / Reviews. (A natural follow-up.)
+- ~~Interactive recovery~~ — **now in scope as OBS-17** (Principal requested after hitting poison-loops):
+  retry / set-aside / dismiss a stuck item from the view. (Earlier deferred; promoted to a follow-up slice.)
 - **Remote/centralized log shipping** — local on-disk only.
 - **Long-horizon trend dashboards / historical analytics** — v1 covers **current + recent**
   latency/throughput (OBS-14/15); cross-week trends, charts, and SLA tracking are later.
