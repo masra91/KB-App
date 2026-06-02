@@ -1,6 +1,17 @@
 // Shell-agnostic KB types: the data shapes + the IPC contract between main & renderer.
 // No electron/obsidian imports here — this module must stay reusable (STACK-6).
+//
+// The Audit & Activity DTOs (SPEC-0029) live in their domain modules; we re-export them via
+// TYPE-ONLY imports so the renderer/preload get one import surface (`../../kb/types`) without
+// pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
+// type` is erased at build time.
 import type { SchedulePreset, AutonomyPosture } from './jobs';
+import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
+import type { ActivityFilter } from './activityIndex';
+import type { ActivityFeedEntry } from './activityDigest';
+import type { Lineage } from './lineage';
+
+export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -186,4 +197,19 @@ export interface KbApi {
   listJobs(): Promise<JobView[]>;
   setJobConfig(patch: JobConfigPatch): Promise<JobView[]>;
   runJobNow(id: string): Promise<RunJobResult>;
+  // SPEC-0029 Audit & Activity (read-only): the curated feed, raw events (drill-down/search), lineage.
+  activityFeed(filter?: ActivityFilter): Promise<ActivityFeedResult>;
+  activityEvents(filter?: ActivityFilter): Promise<AuditEvent[]>;
+  activityLineage(id: string): Promise<Lineage>;
+}
+
+/** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT
+ *  `entries.length` (the feed is capped to the recent window — SPEC-0029 AUDIT-4/5, QA carry-forward). */
+export interface ActivityFeedResult {
+  /** Curated, human-friendly entries (one per run), newest-first, within the recent window. */
+  entries: ActivityFeedEntry[];
+  /** Total conforming events seen across the audit before the window cap. */
+  total: number;
+  /** True when older events were dropped from this window (never silently — surface in the UI). */
+  truncated: boolean;
 }
