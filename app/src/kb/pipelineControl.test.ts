@@ -1,52 +1,58 @@
-// SPEC-0030 OBS-17 — the pure recovery-action planner behind `kb:pipelineControl`.
+// SPEC-0030 OBS-17 — the pure, stage-agnostic recovery-action planner behind `kb:pipelineControl`.
 import { describe, it, expect } from 'vitest';
-import { planSetAsideAction } from './pipelineControl';
-import type { SetAsideItem } from './claimsStage';
+import { planSetAsideAction, type SetAsideTarget } from './pipelineControl';
 import type { PipelineControlRequest } from './types';
 
-const ITEMS: SetAsideItem[] = [
-  { entityRel: 'entities/people/01ADAID.md', entityId: '01ADAID', kind: 'person', name: 'Ada Lovelace', derivedFrom: 'sources/s1', failures: 3, rounds: 0 },
-  { entityRel: 'entities/people/01NONAME.md', entityId: '01NONAME', kind: 'person', name: '', derivedFrom: 'sources/s2', failures: 0, rounds: 2 },
+// Targets are pre-resolved by the caller (pipeline.ts) per stage: claims → {id:entityId, handle:entityRel},
+// connect → {id:blockKey, handle:blockKey}. The planner is stage-agnostic — it only sees id/handle/label.
+const CLAIMS: SetAsideTarget[] = [
+  { id: '01ADAID', handle: 'entities/people/01ADAID.md', label: 'Ada Lovelace' },
+  { id: '01NONAME', handle: 'entities/people/01NONAME.md', label: '01NONAME' },
+];
+const CONNECT: SetAsideTarget[] = [
+  { id: 'block:engine', handle: 'block:engine', label: 'Analytical Engine' },
 ];
 const req = (over: Partial<PipelineControlRequest>): PipelineControlRequest => ({ action: 'retry', stage: 'claims', itemId: '01ADAID', ...over });
 
-describe('planSetAsideAction (OBS-17)', () => {
-  it('resolves a retry to the entity node path + friendly label', () => {
-    expect(planSetAsideAction(ITEMS, req({ action: 'retry', itemId: '01ADAID' }))).toEqual({
-      entityRel: 'entities/people/01ADAID.md',
+describe('planSetAsideAction (OBS-17, stage-agnostic)', () => {
+  it('resolves a retry to the server-derived handle + label (claims)', () => {
+    expect(planSetAsideAction(CLAIMS, req({ action: 'retry', itemId: '01ADAID' }))).toEqual({
+      handle: 'entities/people/01ADAID.md',
       label: 'Ada Lovelace',
     });
   });
 
-  it('resolves a dismiss the same way (handle = entityRel)', () => {
-    expect(planSetAsideAction(ITEMS, req({ action: 'dismiss', itemId: '01ADAID' }))).toEqual({
-      entityRel: 'entities/people/01ADAID.md',
+  it('resolves a dismiss the same way', () => {
+    expect(planSetAsideAction(CLAIMS, req({ action: 'dismiss', itemId: '01ADAID' }))).toEqual({
+      handle: 'entities/people/01ADAID.md',
       label: 'Ada Lovelace',
     });
   });
 
-  it('falls back to the id as the label when the entity has no name', () => {
-    const plan = planSetAsideAction(ITEMS, req({ itemId: '01NONAME' }));
-    expect(plan).toEqual({ entityRel: 'entities/people/01NONAME.md', label: '01NONAME' });
-  });
-
-  it('rejects a non-claims stage (claims-only v1) without resolving', () => {
-    const plan = planSetAsideAction(ITEMS, req({ stage: 'decompose' }));
-    expect(plan).toHaveProperty('error');
-    expect('error' in plan && plan.error).toContain('decompose');
+  it('works identically for a connect target (blockKey handle) — stage-agnostic', () => {
+    expect(planSetAsideAction(CONNECT, req({ stage: 'connect', action: 'retry', itemId: 'block:engine' }))).toEqual({
+      handle: 'block:engine',
+      label: 'Analytical Engine',
+    });
   });
 
   it('rejects an unknown action', () => {
-    const plan = planSetAsideAction(ITEMS, req({ action: 'nuke' as PipelineControlRequest['action'] }));
+    const plan = planSetAsideAction(CLAIMS, req({ action: 'nuke' as PipelineControlRequest['action'] }));
     expect('error' in plan && plan.error).toContain('Unknown action');
   });
 
-  it('reports a no-op when the item is no longer set aside (already recovered/dismissed)', () => {
-    const plan = planSetAsideAction(ITEMS, req({ itemId: '01GONE' }));
+  it('reports a no-op when the item is no longer in the live list (already recovered/dismissed/stale)', () => {
+    const plan = planSetAsideAction(CLAIMS, req({ itemId: '01GONE' }));
     expect('error' in plan && plan.error).toContain('no longer set aside');
   });
 
   it('reports a no-op against an empty list', () => {
     expect('error' in planSetAsideAction([], req({}))).toBe(true);
+  });
+
+  it('never trusts a renderer-supplied id absent from the server-built list (trust boundary)', () => {
+    // A hostile/stale itemId that is not a real handle → no-op error, never returned as a handle.
+    const plan = planSetAsideAction(CONNECT, req({ stage: 'connect', itemId: '../../etc/passwd' }));
+    expect('error' in plan).toBe(true);
   });
 });

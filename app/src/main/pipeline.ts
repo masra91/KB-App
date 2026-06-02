@@ -19,14 +19,14 @@ import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
-import { ConnectStage, readConnectQueue } from '../kb/connectStage';
+import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, toSetAsideViews, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
-import { planSetAsideAction } from '../kb/pipelineControl';
+import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
 import { promote } from '../kb/staging';
@@ -264,7 +264,7 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
 export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
   if (!active) return null;
   const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
-  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside] = await Promise.all([
+  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside, connectSetAside] = await Promise.all([
     readQueue(stagingWt),
     readDecomposeQueue(stagingWt),
     readConnectQueue(stagingWt),
@@ -273,9 +273,15 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     readRecentDevLogEntries(vaultPath, { limit: 25 }),
     loadPerfIndex(stagingWt),
     listWorktrees(vaultPath),
-    listSetAsideItems(stagingWt), // OBS-17: claims poison items, the canonical claims-path reader (CLAIMS-20)
+    listSetAsideItems(stagingWt), // OBS-17: claims poison items (canonical claims-path reader, CLAIMS-20)
+    listConnectSetAsideItems(stagingWt), // OBS-17: connect poison blocks (CLAIMS-20 connect twin, #157)
   ]);
-  const setAsideItems = toSetAsideViews(claimsSetAside); // → Status-view shape (stage·name + reason)
+  // Union every stage's set-aside items into the view (claims + connect; future stages append here).
+  // Each stage maps its item to the generic {itemId, name, failures, rounds} source shape.
+  const setAsideItems = [
+    ...toSetAsideViews(claimsSetAside.map((i) => ({ itemId: i.entityId, name: i.name, failures: i.failures, rounds: i.rounds })), 'claims'),
+    ...toSetAsideViews(connectSetAside.map((i) => ({ itemId: i.blockKey, name: i.name, failures: i.failures, rounds: i.rounds })), 'connect'),
+  ];
 
   const recentErrors: RecentError[] = recentRaw.map((e) => ({
     ts: e.ts,
@@ -308,30 +314,43 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
 
 /**
  * OBS-17 — act on a set-aside (poison) item from the Status view: **retry** (re-enqueue to re-derive)
- * or **dismiss** (retire from the recoverable list). Claims-only in v1 (PM ruling); the request is
- * stage-parameterized so decompose/connect are additive (register their own branch here). Resolves
- * the surfaced `itemId` (entityId) to its node path via the canonical `listSetAsideItems`, then calls
- * the stage-owned primitive under the shared canonical-writer lock (the primitives lock internally).
- * Retry pokes the Claims drain so the item re-processes promptly rather than waiting for the sweep.
+ * or **dismiss** (retire from the recoverable list). Stage-dispatched (claims + connect today); a new
+ * stage is one more branch here — the planner + view stay stage-agnostic. Each branch builds the
+ * stage's *live* `{id, handle, label}` list (the `handle` is **server-derived**, never the renderer's
+ * `itemId` — the #153/#157 trust boundary) and binds the stage-owned primitives, which write under
+ * the shared canonical-writer lock. Retry pokes the stage drain so the item re-processes promptly.
  * Best-effort + honest: a stale/already-recovered item returns `{ok:false}` with a reason, never throws.
  */
 export async function pipelineControlForActive(req: PipelineControlRequest): Promise<PipelineControlResult> {
   const a = active;
   if (!a) return { ok: false, message: 'No knowledge base open.' };
-  if (req.stage !== 'claims') {
-    return { ok: false, message: `Recovery for the "${req.stage}" stage isn’t supported yet (claims-only for now).` };
-  }
   try {
-    // Plan against the *live* set-aside list (pure): validates stage/action + resolves itemId→path,
-    // or returns why it can't proceed (unsupported stage / already-recovered item).
-    const plan = planSetAsideAction(await listSetAsideItems(a.stagingWt), req);
+    let targets: SetAsideTarget[];
+    let doRetry: (handle: string) => Promise<void>;
+    let doDismiss: (handle: string) => Promise<void>;
+    let pokeAfterRetry: () => void;
+    if (req.stage === 'claims') {
+      targets = (await listSetAsideItems(a.stagingWt)).map((i) => ({ id: i.entityId, handle: i.entityRel, label: i.name || i.entityId }));
+      doRetry = (h) => retryClaimsItem(a.stagingWt, h, a.lock);
+      doDismiss = (h) => dismissClaimsItem(a.stagingWt, h, a.lock);
+      pokeAfterRetry = () => void a.claims.poke();
+    } else if (req.stage === 'connect') {
+      targets = (await listConnectSetAsideItems(a.stagingWt)).map((i) => ({ id: i.blockKey, handle: i.blockKey, label: i.name || i.blockKey }));
+      doRetry = (h) => retryConnectItem(a.stagingWt, h, a.lock);
+      doDismiss = (h) => dismissConnectItem(a.stagingWt, h, a.lock);
+      pokeAfterRetry = () => void a.connect.poke();
+    } else {
+      return { ok: false, message: `Recovery for the “${req.stage}” stage isn’t supported yet.` };
+    }
+    // Plan against the live list (pure): validate the action + resolve itemId→handle, or a no-op reason.
+    const plan = planSetAsideAction(targets, req);
     if ('error' in plan) return { ok: false, message: plan.error };
     if (req.action === 'retry') {
-      await retryClaimsItem(a.stagingWt, plan.entityRel, a.lock);
-      void a.claims.poke(); // re-drain promptly (don't wait for the periodic sweep)
+      await doRetry(plan.handle);
+      pokeAfterRetry(); // re-drain promptly (don't wait for the periodic sweep)
       return { ok: true, message: `Retrying ${plan.label}.` };
     }
-    await dismissClaimsItem(a.stagingWt, plan.entityRel, a.lock);
+    await doDismiss(plan.handle);
     return { ok: true, message: `Dismissed ${plan.label}.` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };

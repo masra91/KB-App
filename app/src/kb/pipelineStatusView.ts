@@ -21,11 +21,11 @@ export interface SetAsideView {
   reason?: string;
 }
 
-/** The fields {@link toSetAsideViews} needs from a claims-path set-aside item (structural — the
- *  domain `claimsStage.SetAsideItem` is assignable). Kept local so this view-model stays free of a
- *  stage dependency. */
+/** The fields {@link toSetAsideViews} needs from any stage's set-aside item. `itemId` is the
+ *  renderer-facing id the stage surfaces (entityId for claims, blockKey for connect). Kept local +
+ *  generic so this view-model stays free of any stage dependency. */
 export interface SetAsideSource {
-  entityId: string;
+  itemId: string;
   name: string;
   failures: number;
   rounds: number;
@@ -40,12 +40,13 @@ export function setAsideReason(failures: number, rounds: number): string {
   return 'set aside after repeated failures';
 }
 
-/** Map claims-path set-aside items (`claimsStage.listSetAsideItems`) to the Status-view presentation
- *  shape (OBS-17, claims-only v1). Tags `stage:'claims'`; derives the reason. */
-export function toSetAsideViews(items: SetAsideSource[]): SetAsideView[] {
+/** Map a stage's set-aside items to the Status-view presentation shape (OBS-17), tagging the `stage`
+ *  and deriving the reason. Stage-agnostic — claims + connect (+ future stages) each map their list
+ *  through this; the assembler unions the results. */
+export function toSetAsideViews(items: SetAsideSource[], stage: string): SetAsideView[] {
   return items.map((it) => ({
-    stage: 'claims',
-    itemId: it.entityId,
+    stage,
+    itemId: it.itemId,
     name: it.name,
     reason: setAsideReason(it.failures, it.rounds),
   }));
