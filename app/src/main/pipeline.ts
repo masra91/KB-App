@@ -30,6 +30,7 @@ import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
+import { reviewResumeStage } from '../kb/reviewResume';
 import { runFullReplay } from '../kb/replay';
 import { JobScheduler } from '../kb/jobScheduler';
 import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
@@ -301,7 +302,12 @@ export async function listActiveReviews(): Promise<Review[]> {
 export async function answerActiveReview(id: string, answerInput: unknown): Promise<AnswerReviewResult> {
   if (!active) return { ok: false, message: 'No active knowledge base.' };
   const result = await answerReviewInVault(active.stagingWt, active.lock, id, answerInput);
-  if (result.ok && result.stage === 'claims') void active.claims.poke(); // resume the unparked item
+  // Resume the parked item PROMPTLY (REVIEW-6) by poking the stage that raised the review (#46).
+  if (result.ok) {
+    const resume = reviewResumeStage(result.stage);
+    if (resume === 'claims') void active.claims.poke();
+    else if (resume === 'connect') void active.connect.poke();
+  }
   // SPEC-0024 REFLECT-5/7: if this Review was a Reflect-proposed consolidation that the Principal
   // just APPROVED, execute the merge now — the ONLY point a Reflect destructive merge ever runs
   // (never autonomously). `executeApprovedConsolidation` self-gates (a safe no-op for any non-
