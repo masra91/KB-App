@@ -160,10 +160,17 @@ cert-gated (`darwin && KB_SIGNED_E2E=1`) + release-gated (MACOS-8) so it can't s
       only for v1** (steer off iCloud) unless KB-Lead wants the harder end-to-end guarantee.
 - [ ] **Denial-fallback posture (MACOS-7).** When the user denies the TCC grant: warn-and-steer
       (MACOS-1 message), deep-link to System Settings → Privacy, or block-with-explainer? Product/UX
-      call; DEV-4 implements once decided.
+      call; DEV-4 implements once decided. Recommend **warn-and-steer + textual guidance to System
+      Settings → Privacy & Security → Files and Folders for v1** (reuses the MACOS-1 fallback, never a
+      silent stall, ships without new native code), with the **System-Settings deep-link as a
+      fast-follow** (`x-apple.systempreferences:` URL — small, additive) unless KB-Lead wants it in v1.
 
 ## 9. Changelog
 
+- 2026-06-02 — **§8 denial-fallback question made decision-ready** (recommended v1 default added,
+  mirroring the iCloud call): warn-and-steer + textual System-Settings guidance for v1 (reuses MACOS-1,
+  no silent stall, no new native code), deep-link as a fast-follow. Both §8 product calls now carry a
+  recommended default so KB-Lead can confirm-or-override in one pass; rebased onto current main.
 - 2026-06-02 — **MACOS-5 PROVEN — the protected-folder e2e (#183) ran GREEN on DEV-2's signed build.**
   `KB_OSX_SIGN=1 npm run package` + `KB_SIGNED_E2E=1 … playwright test signedProtectedFolder` → the
   signed app's `ensureStagingWorktree` git-write into a `~/Documents` vault succeeded with **zero
