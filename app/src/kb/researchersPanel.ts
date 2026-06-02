@@ -45,6 +45,30 @@ export const EGRESS_TIER_HINTS: Record<EgressTier, string> = {
  *  higher rank is a risky change (more KB content can leave) → confirm + audit. */
 const EGRESS_EXPOSURE: Record<EgressTier, number> = { 'local-only': 0, 'internal-tenant': 1, 'public-web': 2 };
 
+/**
+ * A Principal-facing label for a researcher run-outcome `eventType` — the audit kinds are dev slugs
+ * (`no-finding`, `research-failed`, `ceiling-reached`, `escalated`); a user surface must never show the
+ * raw slug (KB product principle). The "Field Desk" redesign (#65) renders these as the typed report;
+ * until then this keeps the current last-run line jargon-free. Unknown kinds fall back to the slug
+ * (defensive — a new kind reads oddly but never crashes).
+ */
+export function researcherOutcomeLabel(eventType: string): string {
+  switch (eventType) {
+    case 'researched':
+      return 'found sources';
+    case 'no-finding':
+      return 'no new findings';
+    case 'research-failed':
+      return 'run failed';
+    case 'ceiling-reached':
+      return 'paused — rate limit reached';
+    case 'escalated':
+      return 'paused — needs your review';
+    default:
+      return eventType;
+  }
+}
+
 /** Derive a researcher's last-run summary from its newest `researcher` audit event (or null). */
 export function lastRunFromEvent(event: AuditEvent | undefined): ResearcherLastRun | null {
   if (!event) return null;

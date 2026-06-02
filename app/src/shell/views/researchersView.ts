@@ -18,6 +18,7 @@ import {
   EGRESS_TIER_LABELS,
   EGRESS_TIER_HINTS,
   defaultEgressFor,
+  researcherOutcomeLabel,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS } from '../../kb/researchers';
 import type { ResearcherView, ResearcherConfigPatch } from '../../kb/types';
@@ -73,7 +74,7 @@ function researcherItem(r: ResearcherView): string {
   const postureOpts = (['guarded', 'autonomous'] as const).map((p) => `<option value="${p}"${p === r.posture ? ' selected' : ''}>${POSTURE_LABEL[p]}</option>`).join('');
   const egressOpts = EGRESS_TIERS.map((t) => `<option value="${esc(t)}" title="${esc(EGRESS_TIER_HINTS[t])}"${t === r.egressTier ? ' selected' : ''}>${esc(EGRESS_TIER_LABELS[t])}</option>`).join('');
   const last = r.lastRun
-    ? `Last run ${esc(formatTimestamp(r.lastRun.ts))} — ${esc(r.lastRun.eventType)}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
+    ? `Last run ${esc(formatTimestamp(r.lastRun.ts))} — ${esc(researcherOutcomeLabel(r.lastRun.eventType))}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
     : 'Never run';
   return `
     <li class="researcher" data-id="${esc(r.id)}">
@@ -217,6 +218,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
             let msg: string;
             if ('reason' in res) msg = `Could not run (${res.reason}).`;
             else if (res.failed) msg = `Run failed${res.error ? ` — ${res.error}` : ''}.`; // failed ≠ empty (#160)
+            else if (res.ceilingReached) msg = 'Paused — research rate limit reached for now; try again later.'; // ceiling ≠ empty (RESEARCH-11)
             else msg = res.sourceIds.length ? `Ran — added ${res.sourceIds.length} cited source(s).` : 'Ran — no new finding this pass.';
             await render(container);
             const after = container.querySelector<HTMLElement>(`.researcher[data-id="${id}"] .researcher-status`);

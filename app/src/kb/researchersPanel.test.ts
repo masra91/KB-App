@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildResearcherViews,
   lastRunFromEvent,
+  researcherOutcomeLabel,
   isRiskyResearcherChange,
   isEgressTier,
   isResearcherTemplate,
@@ -41,6 +42,24 @@ describe('lastRunFromEvent', () => {
     expect(noFind).toMatchObject({ eventType: 'no-finding', citations: 0 });
     expect(noFind?.sourceId).toBeUndefined();
     expect(lastRunFromEvent(undefined)).toBeNull();
+  });
+});
+
+describe('researcherOutcomeLabel — no dev slugs in the UI (KB product principle)', () => {
+  it('maps every researcher run-outcome eventType to a Principal-facing label', () => {
+    expect(researcherOutcomeLabel('researched')).toBe('found sources');
+    expect(researcherOutcomeLabel('no-finding')).toBe('no new findings');
+    expect(researcherOutcomeLabel('research-failed')).toBe('run failed');
+    expect(researcherOutcomeLabel('ceiling-reached')).toBe('paused — rate limit reached');
+    expect(researcherOutcomeLabel('escalated')).toBe('paused — needs your review');
+    // none of the mapped labels leak the raw kebab-case slug
+    for (const slug of ['no-finding', 'research-failed', 'ceiling-reached', 'escalated']) {
+      expect(researcherOutcomeLabel(slug)).not.toContain('-');
+    }
+  });
+
+  it('falls back to the raw kind for an unknown eventType (defensive, never crashes)', () => {
+    expect(researcherOutcomeLabel('some-future-kind')).toBe('some-future-kind');
   });
 });
 

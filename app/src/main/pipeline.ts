@@ -781,9 +781,15 @@ export async function runActiveResearcherNow(id: string): Promise<RunResearcherR
     actor: 'panel',
     eventType: 'researcher-run-now',
     subjects: { researcherId: id },
-    payload: { outcome: res.failed ? 'failed' : res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
+    payload: { outcome: res.failed ? 'failed' : res.ceilingReached ? 'ceiling-reached' : res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
   });
-  return { ran: true, sourceIds: res.sourceIds, note: res.note, ...(res.failed ? { failed: true, ...(res.error ? { error: res.error } : {}) } : {}) };
+  return {
+    ran: true,
+    sourceIds: res.sourceIds,
+    note: res.note,
+    ...(res.failed ? { failed: true, ...(res.error ? { error: res.error } : {}) } : {}),
+    ...(res.ceilingReached ? { ceilingReached: true } : {}),
+  };
 }
 
 /** Recent runs for a researcher (RESEARCH-15) — its `researcher` audit events, newest-first. */

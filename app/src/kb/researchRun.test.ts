@@ -109,7 +109,9 @@ describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
       const r2 = await runResearcher(root, web, { ...request, id: 'req-2' }, { research, instanceCeiling: 1, now: () => '2026-06-02T01:05:00.000Z' });
       expect(calls).toBe(1); // the 2nd pass never reached egress — the hard backstop, not advisory
       expect(r1.sourceIds).toHaveLength(1);
+      expect(r1.ceilingReached).toBeUndefined(); // an admitted pass is NOT flagged ceiling
       expect(r2.sourceIds).toEqual([]);
+      expect(r2.ceilingReached).toBe(true); // distinguishable from a legit no-finding (ceiling ≠ empty)
       expect(r2.note).toMatch(/ceiling reached/i);
       const audit = await readAudit(root);
       const ceiling = audit.find((a) => a.eventType === 'ceiling-reached');

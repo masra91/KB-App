@@ -48,6 +48,15 @@ describe('Researchers view (RESEARCH-15)', () => {
     expect(c.querySelector('.researcher-lastrun')?.textContent).toContain('Never run');
   });
 
+  it('renders the last-run outcome as a Principal-facing label, never the raw audit slug', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, lastRun: { ts: '2026-06-02T01:00:00.000Z', eventType: 'research-failed', what: 'Atlas', citations: 0 } }]);
+    setApi();
+    const c = await mount();
+    const lastrun = c.querySelector('.researcher-lastrun')?.textContent ?? '';
+    expect(lastrun).toContain('run failed'); // friendly
+    expect(lastrun).not.toContain('research-failed'); // never the dev slug
+  });
+
   it('shows an empty state + the add form when there are no researchers', async () => {
     listResearchers = vi.fn(async () => []);
     setApi();
@@ -99,6 +108,19 @@ describe('run-now + add-from-template', () => {
     await flush();
     expect(runResearcherNow).toHaveBeenCalledWith('web-1');
     expect(c.querySelector('.researcher-status')?.textContent).toContain('added 1 cited source');
+  });
+
+  it('run-now blocked by the per-Instance ceiling reads as PAUSED, not "no new finding" (ceiling ≠ empty, RESEARCH-11)', async () => {
+    runResearcherNow = vi.fn(async () => ({ ran: true, sourceIds: [], note: 'ceiling', ceilingReached: true }));
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
+    await flush();
+    const status = c.querySelector('.researcher-status')?.textContent ?? '';
+    expect(status).toMatch(/paused/i);
+    expect(status).toMatch(/rate limit/i);
+    expect(status).not.toMatch(/no new finding/i); // must NOT masquerade as an empty result
   });
 
   it('add-from-template creates a disabled researcher with the chosen id', async () => {

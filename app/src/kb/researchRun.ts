@@ -62,6 +62,10 @@ export interface RunResearcherResult {
   failed?: boolean;
   /** The failure cause, when `failed`. */
   error?: string;
+  /** The pass was refused by the global per-Instance ceiling (RESEARCH-11) — a rate-limit pause, NOT a
+   *  legit empty result. Kept distinct so the UI/audit don't report a runaway-backstop block as
+   *  "no new finding" (the failed≠empty principle, applied to the ceiling). */
+  ceilingReached?: boolean;
 }
 
 /**
@@ -89,7 +93,7 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
       subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
       payload: { what: req.what, why: req.why, countInWindow: admission.countInWindow, ceiling: admission.ceiling, windowHours: windowMs / 3_600_000, egressTier: r.egressTier },
     });
-    return { sourceIds: [], note: `per-Instance research ceiling reached (${admission.countInWindow}/${admission.ceiling} passes in ${windowMs / 3_600_000}h)` };
+    return { sourceIds: [], note: `per-Instance research ceiling reached (${admission.countInWindow}/${admission.ceiling} passes in ${windowMs / 3_600_000}h)`, ceilingReached: true };
   }
 
   const findings = await deps.research(r, req);
