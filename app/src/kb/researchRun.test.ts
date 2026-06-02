@@ -7,7 +7,7 @@ import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { readCapturedMeta } from './ingest';
-import { runResearcher, buildOutboundQuery, type ResearchFn } from './researchRun';
+import { runResearcher, buildOutboundQuery, MAX_OUTBOUND_CONTEXT_CHARS, type ResearchFn } from './researchRun';
 import { CONTROL_AUDIT_REL } from './audit';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
@@ -44,6 +44,19 @@ describe('buildOutboundQuery — request-only egress (RESEARCH-8 / D6a)', () => 
   it('builds the query from the request what/context ONLY (no KB content)', () => {
     expect(buildOutboundQuery(request)).toBe('Project Atlas — launch codename');
     expect(buildOutboundQuery({ ...request, context: '' })).toBe('Project Atlas');
+  });
+
+  it('HARD-CAPS context to MAX_OUTBOUND_CONTEXT_CHARS so unbounded source text cannot leak (KB-QD #96)', () => {
+    const huge = 'x'.repeat(MAX_OUTBOUND_CONTEXT_CHARS + 5000);
+    const q = buildOutboundQuery({ ...request, context: huge });
+    const ctxPart = q.slice('Project Atlas — '.length);
+    expect(ctxPart.length).toBe(MAX_OUTBOUND_CONTEXT_CHARS + 1); // capped slice + the single ellipsis
+    expect(ctxPart.endsWith('…')).toBe(true);
+    expect(q.length).toBeLessThan(huge.length); // the blob never rides outbound in full
+  });
+
+  it('leaves a within-bound context untouched (no spurious truncation)', () => {
+    expect(buildOutboundQuery({ ...request, context: 'launch codename' })).toBe('Project Atlas — launch codename');
   });
 });
 
