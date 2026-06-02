@@ -5,6 +5,7 @@
 // NO fabricating fallback — a bad/absent session throws and the job run is treated as a failed pass.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 
 const exec = promisify(execFile);
@@ -58,10 +59,13 @@ function launchFlags(): string[] {
   const model = requestedModel();
   return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
 }
-const defaultRunner: CopilotRunner = async (prompt) => {
-  const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
-  return stdout;
-};
+const defaultRunner: CopilotRunner = async (prompt) =>
+  // Acquire one global copilot slot so concurrent (cap>1) job/stage drains can't fan out past the
+  // process-wide ceiling (dogfood #4 / copilotConcurrency).
+  withCopilotSlot(async () => {
+    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+    return stdout;
+  });
 
 export const REFLECT_PROMPT_VERSION = 'reflect/v1';
 

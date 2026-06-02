@@ -134,7 +134,14 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // resolved graph. They drain independently; the lock keeps their staging ff-advances from
   // racing. Connect + Claims each carry the promotion gate as their afterDrain so resolved
   // entities and their claims become visible on `main` (the archivist already promotes sources/).
-  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, undefined, log);
+  // Per-stage concurrency cap (ORCH-20 / dogfood #4): >1 lets a stage run that many items' cognition
+  // concurrently, cutting wall-time on a backlog (claims/decompose dominate it). The process-wide
+  // `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across all stages
+  // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
+  // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
+  // stays cap=1 until its ephemeral-worktree migration (Phase 2).
+  const STAGE_CAP = 3;
+  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
@@ -148,7 +155,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
       await promoteEvergreen();
       void connect.poke();
     },
-    undefined,
+    STAGE_CAP,
     log,
   );
   // The autonomous-job scheduler (SPEC-0023): wakes registered jobs on their named-preset cadence,
