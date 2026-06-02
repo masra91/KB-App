@@ -15,7 +15,7 @@ function setApi(autonomyDefault: 'guarded' | 'autonomous', setSpy?: KbApi['setIn
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
     inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
-    getInstanceSettings: vi.fn(async () => ({ autonomyDefault })),
+    getInstanceSettings: vi.fn(async () => ({ autonomyDefault, devLogLevel: 'info' as const })),
     setInstanceSettings: set as KbApi['setInstanceSettings'],
   };
   return { set };
@@ -53,7 +53,7 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
 
     (root.querySelector('#autonomy-go') as HTMLButtonElement).click();
     await tick();
-    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous' });
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'info' });
     expect(root.querySelector('#autonomy-status')?.textContent).toContain('Autonomous');
   });
 
@@ -75,6 +75,30 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
     changeTo(root, 'guarded');
     await tick();
     expect((root.querySelector('#autonomy-confirm') as HTMLElement).hidden).toBe(true);
-    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'guarded' });
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'guarded', devLogLevel: 'info' });
+  });
+});
+
+describe('Settings · Dev-log verbosity (SPEC-0030 OBS-10)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('renders the current level and persists a change as the FULL settings (autonomy preserved)', async () => {
+    const { set } = setApi('autonomous'); // devLogLevel defaults to info
+    await mountSettings(root);
+    await tick();
+    const sel = root.querySelector('#devlog-level') as HTMLSelectElement;
+    expect(sel.value).toBe('info');
+
+    sel.value = 'debug';
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    await tick();
+    // The whole settings object is sent — autonomyDefault not clobbered (no confirm; benign toggle).
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'debug' });
+    expect(root.querySelector('#verbosity-status')?.textContent).toContain('Debug');
   });
 });

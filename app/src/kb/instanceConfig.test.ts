@@ -20,14 +20,14 @@ afterEach(async () => {
 });
 
 describe('instance config store (PANEL-5)', () => {
-  it('defaults to Guarded when no file exists', async () => {
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded' });
-    expect(defaultInstanceConfig()).toEqual({ autonomyDefault: 'guarded' });
+  it('defaults to Guarded + info verbosity when no file exists', async () => {
+    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
+    expect(defaultInstanceConfig()).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
   });
 
   it('round-trips a written config', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'autonomous' });
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous' });
+    await writeInstanceConfig(root, { autonomyDefault: 'autonomous', devLogLevel: 'debug' });
+    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous', devLogLevel: 'debug' });
     // Stored under .kb/instance.json (per-vault, never the app config).
     expect(instanceConfigPath(root).endsWith(path.join('.kb', 'instance.json'))).toBe(true);
   });
@@ -35,9 +35,16 @@ describe('instance config store (PANEL-5)', () => {
   it('falls back to the safe default on malformed JSON or an unknown posture', async () => {
     await fs.mkdir(path.join(root, '.kb'), { recursive: true });
     await fs.writeFile(instanceConfigPath(root), '{ not json', 'utf8');
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded' });
-    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never });
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded' });
+    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
+    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never, devLogLevel: 'info' });
+    expect((await readInstanceConfig(root)).autonomyDefault).toBe('guarded');
+  });
+
+  it('OBS-10: devLogLevel round-trips and an unknown level falls back to info', async () => {
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'debug' });
+    expect((await readInstanceConfig(root)).devLogLevel).toBe('debug');
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'screaming' as never });
+    expect((await readInstanceConfig(root)).devLogLevel).toBe('info'); // unknown → safe default
   });
 });
 

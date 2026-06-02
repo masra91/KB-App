@@ -3,6 +3,7 @@
 // Principal-initiated "clean & rebuild" of the KB. Editing config (e.g. switching the KB) is
 // deferred (SHELL-8/10).
 import { esc } from '../html';
+import type { InstanceSettings } from '../../kb/types';
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
 const REPLAY_CONFIRM =
@@ -31,15 +32,19 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       }
     }
 
-    // PANEL-5: the editable per-Instance autonomy default. Never errors the shell — falls back to Guarded.
-    let autonomyDefault: 'guarded' | 'autonomous' = 'guarded';
+    // PANEL-5 / OBS-10: the editable per-Instance settings (autonomy default + dev-log verbosity).
+    // Never errors the shell — falls back to safe defaults. Shared mutable object so each control
+    // sends the full settings (the IPC contract takes the whole object) without clobbering the other.
+    const settings: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info' };
     try {
-      autonomyDefault = (await window.kbApi.getInstanceSettings()).autonomyDefault;
+      Object.assign(settings, await window.kbApi.getInstanceSettings());
     } catch {
-      // Leave the safe default.
+      // Leave the safe defaults.
     }
     const opt = (v: 'guarded' | 'autonomous', label: string): string =>
-      `<option value="${v}"${v === autonomyDefault ? ' selected' : ''}>${label}</option>`;
+      `<option value="${v}"${v === settings.autonomyDefault ? ' selected' : ''}>${label}</option>`;
+    const levelOpt = (v: 'info' | 'debug', label: string): string =>
+      `<option value="${v}"${v === settings.devLogLevel ? ' selected' : ''}>${label}</option>`;
 
     container.innerHTML = `
       <div class="card">
@@ -68,6 +73,14 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="autonomy-status" class="muted" role="status" aria-live="polite"></p>
       </div>
       <div class="card">
+        <h2>Diagnostics</h2>
+        <p class="muted">Dev-log verbosity for this Knowledge Base (SPEC-0030). <strong>Info</strong> is the default; <strong>Debug</strong> adds verbose detail — and includes redaction-protected captured text / egress payloads — to troubleshoot a stuck pipeline. Applies on the next pipeline start.</p>
+        <label class="verbosity-row">Dev-log level
+          <select id="devlog-level">${levelOpt('info', 'Info')}${levelOpt('debug', 'Debug')}</select>
+        </label>
+        <p id="verbosity-status" class="muted" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="muted">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
         <button id="replay-btn" class="btn-danger"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild KB…</button>
@@ -79,7 +92,8 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="replay-status" class="muted" role="status" aria-live="polite"></p>
       </div>`;
 
-    wireAutonomy(container, autonomyDefault);
+    wireAutonomy(container, settings);
+    wireVerbosity(container, settings);
     wireReplay(container);
   } catch {
     container.innerHTML = `
@@ -92,7 +106,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
 
 /** Wire the per-Instance autonomy default (PANEL-5/7): changing the default to Autonomous is risky and
  *  reveals a confirm before it applies + is audited; relaxing to Guarded applies directly. */
-function wireAutonomy(container: HTMLElement, initial: 'guarded' | 'autonomous'): void {
+function wireAutonomy(container: HTMLElement, settings: InstanceSettings): void {
   const select = container.querySelector<HTMLSelectElement>('#autonomy-default');
   const confirm = container.querySelector<HTMLElement>('#autonomy-confirm');
   const cancel = container.querySelector<HTMLButtonElement>('#autonomy-cancel');
@@ -100,24 +114,23 @@ function wireAutonomy(container: HTMLElement, initial: 'guarded' | 'autonomous')
   const status = container.querySelector<HTMLElement>('#autonomy-status');
   if (!select || !confirm || !cancel || !go || !status) return;
 
-  let current = initial;
-
   const apply = async (value: 'guarded' | 'autonomous'): Promise<void> => {
     status.textContent = 'Saving…';
     try {
-      const saved = await window.kbApi.setInstanceSettings({ autonomyDefault: value });
-      current = saved.autonomyDefault;
-      select.value = current;
-      status.textContent = `Default posture: ${current === 'autonomous' ? 'Autonomous' : 'Guarded'}.`;
+      // Send the FULL settings (the IPC takes the whole object) so we never clobber devLogLevel.
+      const saved = await window.kbApi.setInstanceSettings({ ...settings, autonomyDefault: value });
+      Object.assign(settings, saved);
+      select.value = settings.autonomyDefault;
+      status.textContent = `Default posture: ${settings.autonomyDefault === 'autonomous' ? 'Autonomous' : 'Guarded'}.`;
     } catch {
-      select.value = current; // revert on failure
+      select.value = settings.autonomyDefault; // revert on failure
       status.textContent = 'Could not save the change.';
     }
   };
 
   select.addEventListener('change', () => {
     const value = select.value === 'autonomous' ? 'autonomous' : 'guarded';
-    if (value === 'autonomous' && current !== 'autonomous') {
+    if (value === 'autonomous' && settings.autonomyDefault !== 'autonomous') {
       status.textContent = '';
       confirm.hidden = false; // risky → confirm before applying (PANEL-7)
     } else {
@@ -126,11 +139,34 @@ function wireAutonomy(container: HTMLElement, initial: 'guarded' | 'autonomous')
   });
   cancel.addEventListener('click', () => {
     confirm.hidden = true;
-    select.value = current; // revert the pending selection
+    select.value = settings.autonomyDefault; // revert the pending selection
   });
   go.addEventListener('click', () => {
     confirm.hidden = true;
     void apply('autonomous');
+  });
+}
+
+/** Wire the dev-log verbosity selector (SPEC-0030 OBS-10): a benign info/debug toggle, applied
+ *  directly (no confirm) — it only changes diagnostic detail. Sends the FULL settings so the
+ *  autonomy default is preserved; the level takes effect on the next pipeline start. */
+function wireVerbosity(container: HTMLElement, settings: InstanceSettings): void {
+  const select = container.querySelector<HTMLSelectElement>('#devlog-level');
+  const status = container.querySelector<HTMLElement>('#verbosity-status');
+  if (!select || !status) return;
+
+  select.addEventListener('change', async () => {
+    const value = select.value === 'debug' ? 'debug' : 'info';
+    status.textContent = 'Saving…';
+    try {
+      const saved = await window.kbApi.setInstanceSettings({ ...settings, devLogLevel: value });
+      Object.assign(settings, saved);
+      select.value = settings.devLogLevel;
+      status.textContent = `Dev-log level: ${settings.devLogLevel === 'debug' ? 'Debug' : 'Info'} (applies on the next pipeline start).`;
+    } catch {
+      select.value = settings.devLogLevel; // revert on failure
+      status.textContent = 'Could not save the change.';
+    }
   });
 }
 
