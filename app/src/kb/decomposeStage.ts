@@ -22,32 +22,20 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
 import { ulid } from './ulid';
-import { ensureGitIdentity } from './vault';
 import { readCapturedMeta } from './ingest';
 import { renderCandidate, candidateFileRel } from './candidateDoc';
 import type { Candidate } from './connect';
 import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from './decomposeAgent';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { withOptimisticAdvance, advanceOrCollide, canonicalHead } from './canonicalAdvance';
+import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, type PrepareContext } from './canonicalAdvance';
 
-const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'decompose');
-const WORK_BRANCH = 'kb/decompose-work';
 const STAGE = 'decompose';
 /** Default attempts before a poison source is set aside (DECOMP-6). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
 
 /** A terminal marker means the source has left the derived queue (success or set-aside). */
 const TERMINAL_EVENTS = new Set(['decomposed', 'setaside']);
-
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** One parsed line of a source's audit.jsonl that this stage cares about. */
 interface AuditLine {
@@ -122,31 +110,6 @@ export async function readDecomposeQueue(root: string, maxAttempts = DEFAULT_MAX
   return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
 }
 
-/** Ensure a healthy persistent decompose worktree on WORK_BRANCH; recreate if broken. */
-async function ensureWorktree(root: string): Promise<{ wt: string; branch: string }> {
-  const git = simpleGit(root);
-  await ensureGitIdentity(git);
-  const branch = (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
-  const wt = path.join(root, WORKTREE_REL);
-  try {
-    await git.raw('worktree', 'prune');
-  } catch {
-    /* none registered yet */
-  }
-  const healthy =
-    (await pathExists(wt)) &&
-    (await simpleGit(wt)
-      .revparse(['--is-inside-work-tree'])
-      .then(() => true)
-      .catch(() => false));
-  if (!healthy) {
-    if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(wt), { recursive: true });
-    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, branch);
-  }
-  return { wt, branch };
-}
-
 /** The rigid audit envelope (SPEC-0015 §3.4) — orchestrator-owned fields wrap freeform payloads. */
 function auditLine(fields: Record<string, unknown>): string {
   return JSON.stringify({ ts: new Date().toISOString(), stage: STAGE, ...fields }) + '\n';
@@ -187,10 +150,8 @@ export async function decomposeOne(
   // OFF-lock (ORCH-17): sync the worktree to the canonical checkpoint, run cognition, write the
   // candidates + audit, and commit on the work branch. Returns true — there is always work to
   // advance (the candidates+marker on success, or the failed/setaside marker on error).
-  const prepare = async (base: string): Promise<boolean> => {
-    const { wt } = await ensureWorktree(root);
-    const wtGit = simpleGit(wt);
-    await wtGit.raw('reset', '--hard', base); // sync to the captured canonical checkpoint
+  const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
+    const wtGit = simpleGit(wt); // the ephemeral per-item worktree, fresh off the checkpoint
     const sourceDirWt = path.join(wt, sourceRel);
     const input = await readSourceInput(sourceDirWt);
     result.sourceId = input.sourceId;
@@ -251,19 +212,22 @@ export async function decomposeOne(
   // Same-path collision exhaustion (ORCH-19) — set the source aside so it can't head-of-line-block.
   // Rare for Decompose (disjoint candidate paths + per-source audit); never drop the item.
   const onExhausted = async (): Promise<void> => {
-    const { wt } = await ensureWorktree(root);
-    const wtGit = simpleGit(wt);
     const base = await canonicalHead(root);
-    await wtGit.raw('reset', '--hard', base);
-    const auditPath = path.join(wt, sourceRel, 'audit.jsonl');
-    await fs.appendFile(auditPath, auditLine({ runId: ulid(), sourceId: result.sourceId, event: 'setaside', reason: 'collision-exhausted' }), 'utf8');
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
-    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, base));
+    await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
+      await fs.appendFile(
+        path.join(wt, sourceRel, 'audit.jsonl'),
+        auditLine({ runId: ulid(), sourceId: result.sourceId, event: 'setaside', reason: 'collision-exhausted' }),
+        'utf8',
+      );
+      const wtGit = simpleGit(wt);
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
+      await lock.run(() => advanceOrCollide(root, workBranch, base));
+    });
     result = { ...result, ok: false, setAside: true };
   };
 
-  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
+  await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
   return result;
 }
 

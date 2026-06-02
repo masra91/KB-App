@@ -142,3 +142,53 @@ export async function withOptimisticAdvance(
   await onExhausted();
   return 'setaside';
 }
+
+export interface ConcurrentAdvanceOptions {
+  /** Canonical worktree (on the canonical branch). */
+  root: string;
+  /** The shared per-vault canonical-writer lock (§5). Only the advance runs under it. */
+  lock: Mutex;
+  /** Stage name (e.g. `decompose`) — namespaces the per-item ephemeral work branch + worktree. */
+  stage: string;
+  /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
+  maxCollisionRetries?: number;
+}
+
+/** Context handed to a `prepare` callback under {@link withConcurrentAdvance}: its PRIVATE ephemeral
+ *  worktree (fresh off `base`, on a per-item branch) and the checkpoint it was created off. The
+ *  callback writes its effects in `wt` and commits there; it does NOT manage the worktree or advance. */
+export interface PrepareContext {
+  wt: string;
+  base: string;
+}
+
+/**
+ * Like {@link withOptimisticAdvance}, but for stages that run **cap>1 items concurrently** (ORCH-20):
+ * each attempt gets a FRESH ephemeral per-item worktree off the checkpoint (via
+ * {@link withEphemeralWorktree}), so concurrent prepares within a stage never clobber a shared
+ * worktree. `prepare({ wt, base })` runs OFF the lock (cognition + writes + commit in `wt`); the
+ * advance runs UNDER the lock via the SAME {@link advanceOrCollide} primitive (ff / disjoint replay /
+ * same-path collision → bounded retry → set-aside). cap=1 ⇒ one ephemeral worktree at a time, output-
+ * identical to the serial drain. (`withOptimisticAdvance` — caller-managed fixed worktree/branch —
+ * stays for JOBS's per-job persistent-worktree model; both share `advanceOrCollide`.)
+ */
+export async function withConcurrentAdvance(
+  opts: ConcurrentAdvanceOptions,
+  prepare: (ctx: PrepareContext) => Promise<boolean>,
+  onExhausted: () => Promise<void>,
+): Promise<OptimisticAdvanceResult> {
+  const maxRetries = opts.maxCollisionRetries ?? DEFAULT_MAX_COLLISION_RETRIES;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const base = await canonicalHead(opts.root);
+    const outcome = await withEphemeralWorktree(opts.root, opts.stage, base, async ({ wt, workBranch }) => {
+      const committed = await prepare({ wt, base });
+      if (!committed) return 'noop' as const;
+      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base));
+    });
+    if (outcome === 'noop') return 'noop';
+    if (outcome === 'advanced') return 'advanced';
+    // 'collision' → retry the whole item in a fresh worktree against the moved canonical.
+  }
+  await onExhausted();
+  return 'setaside';
+}

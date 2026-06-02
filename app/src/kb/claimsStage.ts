@@ -21,7 +21,6 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
 import { ulid, dateShard } from './ulid';
-import { ensureGitIdentity } from './vault';
 import { readCapturedMeta } from './ingest';
 import { renderClaimMd, applyClaimsBlock, oneLine, type ClaimBacklink } from './claimDoc';
 import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
@@ -30,10 +29,8 @@ import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { withOptimisticAdvance, advanceOrCollide, canonicalHead } from './canonicalAdvance';
+import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, type PrepareContext } from './canonicalAdvance';
 
-const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'claims');
-const WORK_BRANCH = 'kb/claims-work';
 const STAGE = 'claims';
 /** Default attempts before a poison entity is set aside (CLAIMS-12). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
@@ -42,15 +39,6 @@ export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
 /** A terminal marker means the entity has left the derived queue (success or set-aside). */
 const TERMINAL_EVENTS = new Set(['claimed', 'setaside']);
-
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** One parsed line of a source's audit.jsonl that this stage cares about (keyed by entityId). */
 interface AuditLine {
@@ -212,31 +200,6 @@ export async function readClaimsQueue(root: string, maxAttempts = DEFAULT_MAX_AT
   return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
 }
 
-/** Ensure a healthy persistent claims worktree on WORK_BRANCH; recreate if broken. */
-async function ensureWorktree(root: string): Promise<{ wt: string; branch: string }> {
-  const git = simpleGit(root);
-  await ensureGitIdentity(git);
-  const branch = (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
-  const wt = path.join(root, WORKTREE_REL);
-  try {
-    await git.raw('worktree', 'prune');
-  } catch {
-    /* none registered yet */
-  }
-  const healthy =
-    (await pathExists(wt)) &&
-    (await simpleGit(wt)
-      .revparse(['--is-inside-work-tree'])
-      .then(() => true)
-      .catch(() => false));
-  if (!healthy) {
-    if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(wt), { recursive: true });
-    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, branch);
-  }
-  return { wt, branch };
-}
-
 /** The rigid audit envelope (SPEC-0016 §3.4) — orchestrator-owned fields wrap freeform payloads. */
 function auditLine(fields: Record<string, unknown>): string {
   return JSON.stringify({ ts: new Date().toISOString(), stage: STAGE, ...fields }) + '\n';
@@ -281,10 +244,8 @@ export async function claimsOne(
   // OFF-lock (ORCH-17): sync to the canonical checkpoint, read the entity off it, run cognition,
   // write claims / park / record failure, and commit on the work branch. Returns true — every
   // branch commits something to advance (claims, the park marker, or a failed/setaside marker).
-  const prepare = async (base: string): Promise<boolean> => {
-    const { wt } = await ensureWorktree(root);
-    const wtGit = simpleGit(wt);
-    await wtGit.raw('reset', '--hard', base); // sync to the captured canonical checkpoint
+  const prepare = async ({ wt, base }: PrepareContext): Promise<boolean> => {
+    const wtGit = simpleGit(wt); // the ephemeral per-item worktree, fresh off the checkpoint
     const entityPathWt = path.join(wt, entityRel);
     const entityMd = await fs.readFile(entityPathWt, 'utf8');
     const ref = parseEntityNode(entityMd);
@@ -399,20 +360,23 @@ export async function claimsOne(
 
   // Same-path collision exhaustion (ORCH-19): set the entity aside so it can't head-of-line-block.
   const onExhausted = async (): Promise<void> => {
-    const { wt } = await ensureWorktree(root);
-    const wtGit = simpleGit(wt);
     const base = await canonicalHead(root);
-    await wtGit.raw('reset', '--hard', base);
-    const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
-    const auditPath = path.join(wt, ref.derivedFrom, 'audit.jsonl');
-    await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, event: 'setaside', reason: 'collision-exhausted' }), 'utf8');
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`claims: set aside ${entityId} (collision-exhausted)`);
-    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, base));
+    await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
+      const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
+      await fs.appendFile(
+        path.join(wt, ref.derivedFrom, 'audit.jsonl'),
+        auditLine({ runId: ulid(), entityId, event: 'setaside', reason: 'collision-exhausted' }),
+        'utf8',
+      );
+      const wtGit = simpleGit(wt);
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`claims: set aside ${entityId} (collision-exhausted)`);
+      await lock.run(() => advanceOrCollide(root, workBranch, base));
+    });
     result = { ...result, ok: false, setAside: true };
   };
 
-  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
+  await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
   return result;
 }
 

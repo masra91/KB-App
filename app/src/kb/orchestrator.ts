@@ -13,15 +13,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
 import { dateShard } from './ulid';
-import { ensureGitIdentity } from './vault';
 import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
-import { withOptimisticAdvance } from './canonicalAdvance';
+import { withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
 
-const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'archivist');
-const WORK_BRANCH = 'kb/archive-work';
 const STATUS_REL = path.join('.kb', 'cache', 'status.json');
 
 export interface PipelineStatusData {
@@ -29,15 +26,6 @@ export interface PipelineStatusData {
   processing: string | null;
   lastArchived: string | null;
   updatedAt: string | null;
-}
-
-async function pathExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** The inbox queue: sorted ULID directories (ULIDs sort by capture time). ORCH-4. */
@@ -60,32 +48,6 @@ export async function readQueue(root: string): Promise<string[]> {
   return dirs.sort();
 }
 
-/** Ensure a healthy persistent worktree on `WORK_BRANCH`; recreate if missing/broken. */
-async function ensureWorktree(root: string): Promise<{ wt: string; branch: string }> {
-  const git = simpleGit(root);
-  await ensureGitIdentity(git);
-  const branch = (await git.raw('rev-parse', '--abbrev-ref', 'HEAD')).trim();
-  const wt = path.join(root, WORKTREE_REL);
-  try {
-    await git.raw('worktree', 'prune');
-  } catch {
-    /* no worktrees registered yet */
-  }
-  // simple-git's constructor throws on a missing dir, so only probe an existing one.
-  const healthy =
-    (await pathExists(wt)) &&
-    (await simpleGit(wt)
-      .revparse(['--is-inside-work-tree'])
-      .then(() => true)
-      .catch(() => false));
-  if (!healthy) {
-    if (await pathExists(wt)) await fs.rm(wt, { recursive: true, force: true });
-    await fs.mkdir(path.dirname(wt), { recursive: true });
-    await git.raw('worktree', 'add', '-B', WORK_BRANCH, wt, branch);
-  }
-  return { wt, branch };
-}
-
 /**
  * Archive one inbox unit, returning its new `sources/` path, under optimistic concurrency
  * (SPEC-0014 ORCH-17/18). The move + source.md + audit write happen OFF the lock, synced to a
@@ -104,10 +66,8 @@ export async function archiveOne(
   root = path.resolve(root);
   const destRel = path.join('sources', dateShard(id), id);
 
-  const prepare = async (base: string): Promise<boolean> => {
-    const { wt } = await ensureWorktree(root);
-    const wtGit = simpleGit(wt);
-    await wtGit.raw('reset', '--hard', base); // sync to the canonical checkpoint (OFF the lock)
+  const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
+    const wtGit = simpleGit(wt); // the ephemeral per-item worktree, fresh off the checkpoint
 
     const unitDir = path.join(wt, 'inbox', id);
     const meta = await readCapturedMeta(unitDir);
@@ -139,7 +99,7 @@ export async function archiveOne(
     throw new Error(`archive: ${id} exhausted optimistic-advance retries (unexpected same-path collision)`);
   };
 
-  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
+  await withConcurrentAdvance({ root, lock, stage: 'archive' }, prepare, onExhausted);
   return destRel;
 }
 
