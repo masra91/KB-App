@@ -81,7 +81,7 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-6  | must     | The Status view surfaces **recent errors** and **set-aside/poison items** prominently — each with reason + drill-down to the dev-log detail | test:app/src/shell/views/statusView.test.ts | ORCH-12; OBS-1 |
 | OBS-7  | must     | The Status view exposes **worktree & lock state** — worktrees, their branches, and who holds/awaits the canonical-writer lock — so a stalled pipeline's cause is visible | test:app/src/shell/views/statusView.test.ts | ORCH-2,18; STAGING-1 |
 | OBS-8  | should   | The view **live-updates** (poll ORCH-10 status + dev-log tail, or push) so progress/stall shows in near-real-time | test:app/src/shell/views/statusView.test.ts | ORCH-10 |
-| OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | test:app/src/shell/views/statusView.test.ts | AUDIT-8 |
+| OBS-9  | must     | The Status view is **read-only observation** — no general mutating actions (config/retries live in Reviews / Control Panel). **Sole sanctioned exception: the OBS-17 set-aside recovery actions** (retry/dismiss on a poison item), which mutate via the stage-owned primitives, not the view | test:app/src/shell/views/statusView.test.ts | AUDIT-8; OBS-17 |
 | OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | test:app/src/kb/instanceConfig.test.ts, app/src/shell/views/settingsView.test.ts | AUTO-12; PRIN-19 |
 | OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | test:app/src/shell/views/statusView.test.ts | ORCH-10,13 |
 | OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | test:app/src/kb/obsTracing.test.ts | ORCH-16; OBS-1 |
@@ -89,7 +89,7 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | test:app/src/shell/views/statusView.test.ts | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
-| OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app. The view calls the stage-owned recovery primitives (claims: CLAIMS-20 `retryClaimsItem`/`dismissClaimsItem`/`listSetAsideItems`) — no parallel reader/epoch logic in the view | none-yet (read-side surface landed: app/src/kb/pipelineStatusView.test.ts, app/src/shell/views/statusView.test.ts — reads `listSetAsideItems`; retry/dismiss actions pending the pipeline-control IPC binding `retryClaimsItem`/`dismissClaimsItem` #146) | ORCH-12; CLAIMS-20; [#137](https://github.com/masra91/KB-App/issues/137) |
+| OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app. The view calls the stage-owned recovery primitives (claims: CLAIMS-20 `retryClaimsItem`/`dismissClaimsItem`/`listSetAsideItems`) — no parallel reader/epoch logic in the view | test:app/src/kb/pipelineControl.test.ts, app/src/shell/views/statusView.test.ts, app/src/main/ipc.test.ts | ORCH-12; CLAIMS-20; [#137](https://github.com/masra91/KB-App/issues/137) |
 
 ## 6. User flows / surface
 
@@ -127,6 +127,25 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **OBS-17 action-half → test:. Interactive unblock complete.** The Status view's
+  set-aside panel now carries **Retry** + **Dismiss** per item, wired to a new **`kb:pipelineControl`**
+  IPC (`{action, stage, itemId}`, stage-parameterized) → `pipelineControlForActive` (main/pipeline.ts).
+  The mutation logic is the **stage-owned primitive** (claims: DEV-2's `retryClaimsItem` /
+  `dismissClaimsItem`, CLAIMS-20 #146) run under the shared canonical-writer lock; **retry pokes the
+  Claims drain** so the item re-derives promptly. The branchy decision (validate stage+action, resolve
+  the surfaced `itemId` → entity node path against the live `listSetAsideItems`, or report a no-op for
+  an already-recovered/unsupported item) is a **pure `planSetAsideAction`** (`app/src/kb/pipelineControl.ts`)
+  so it's unit-testable without electron; pipeline.ts is thin glue. Renderer: single-flight buttons
+  (disabled while acting), **dismiss is confirmed first** (it retires the item), an outcome banner, and
+  a re-fetch after each action. **OBS-9 reconciled** — the view is read-only *except* this sanctioned
+  OBS-17 recovery affordance (carve-out added to OBS-9). **Scope:** claims-only v1; the `stage` on the
+  request/buttons + the stage guard in the planner are the seam where decompose/connect become additive.
+  Tested: `pipelineControl.test` (planner: resolve retry/dismiss, name/id label, non-claims + unknown
+  action + already-recovered no-ops, empty list), `statusView.test` (Retry fires `{retry}` + re-fetches
+  + banner; Dismiss confirms then fires `{dismiss}`, cancel = no-op; buttons carry stage/id; disabled +
+  banner while acting; the read-only set now = drilldown + the two sanctioned actions), `ipc.test`
+  (`kb:pipelineControl` forwards the request + returns the result). With this, **every OBS requirement
+  including OBS-17 is `test:` — SPEC-0030 is fully closed end-to-end.**
 - 2026-06-02 — **OBS-17 read-side (set-aside recovery surface).** The first, independent half of
   the interactive-unblock requirement: surface the **claims poison items** (entities whose current
   claims state is terminal via `setaside` — not `claimed`/`dismissed`) so the Principal can see WHAT

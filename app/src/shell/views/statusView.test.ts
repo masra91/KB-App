@@ -46,8 +46,11 @@ const STALLED: PipelineStatusView = {
   builtAt: '2026-06-02T00:03:00.000Z',
 };
 
-function setApi(fn: KbApi['pipelineStatusView']): void {
-  (window as unknown as { kbApi: Pick<KbApi, 'pipelineStatusView'> }).kbApi = { pipelineStatusView: fn };
+function setApi(fn: KbApi['pipelineStatusView'], control?: KbApi['pipelineControl']): void {
+  (window as unknown as { kbApi: Pick<KbApi, 'pipelineStatusView' | 'pipelineControl'> }).kbApi = {
+    pipelineStatusView: fn,
+    pipelineControl: control ?? (vi.fn().mockResolvedValue({ ok: true }) as unknown as KbApi['pipelineControl']),
+  };
 }
 
 describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
@@ -94,14 +97,27 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   it('setAsideHtml lists poison items with stage · name + reason, name preferred over id (OBS-17)', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }]);
     expect(h).toContain('Set aside — needs attention (1)');
-    expect(h).toContain('claims · Ada Lovelace');
-    expect(h).not.toContain('01ADAID'); // the friendly name replaces the ULID
+    expect(h).toContain('claims · Ada Lovelace'); // the friendly name is the visible label
     expect(h).toContain('set aside after 3 failed attempts');
   });
 
   it('setAsideHtml falls back to the item id when no name is known', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01NONAME' }]);
     expect(h).toContain('claims · 01NONAME');
+  });
+
+  it('setAsideHtml renders retry/dismiss buttons carrying the stage + id (OBS-17 actions)', () => {
+    const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' }]);
+    expect(h).toContain('data-act="setaside-retry"');
+    expect(h).toContain('data-act="setaside-dismiss"');
+    expect(h).toContain('data-stage="claims"');
+    expect(h).toContain('data-id="01ADAID"');
+  });
+
+  it('setAsideHtml disables the buttons + shows the outcome banner while/after acting', () => {
+    const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' }], { acting: true, actionMsg: 'Retrying Ada Lovelace.' });
+    expect(h).toContain('disabled');
+    expect(h).toContain('Retrying Ada Lovelace.');
   });
 
   it('setAsideHtml is empty when nothing is set aside (clean → no panel)', () => {
@@ -161,10 +177,47 @@ describe('mountStatus (OBS-8/9 — live + read-only)', () => {
     head!.click();
     expect(root.textContent).toContain('copilot exploded'); // expanded the cause
 
-    // Read-only (OBS-9): the only interactive controls are the error-drilldown toggles —
-    // no retry/config/mutation buttons.
+    // Read-only by default (OBS-9), with OBS-17 as the one sanctioned exception: besides the
+    // error-drilldown toggles, the only mutating controls are the per-item set-aside retry/dismiss.
     const acts = [...root.querySelectorAll<HTMLElement>('[data-act]')].map((e) => e.dataset.act);
-    expect(new Set(acts)).toEqual(new Set(['toggle-err']));
+    expect(new Set(acts)).toEqual(new Set(['toggle-err', 'setaside-retry', 'setaside-dismiss']));
+  });
+
+  it('Retry on a set-aside item calls pipelineControl{retry} then re-fetches (OBS-17)', async () => {
+    const statusFn = vi.fn().mockResolvedValue(STALLED);
+    const control = vi.fn().mockResolvedValue({ ok: true, message: 'Retrying Ada Lovelace.' });
+    setApi(statusFn, control as unknown as KbApi['pipelineControl']);
+    mountStatus(root);
+    await Promise.resolve(); await Promise.resolve();
+
+    const retry = root.querySelector<HTMLButtonElement>('.status-setaside-retry');
+    expect(retry).not.toBeNull();
+    retry!.click();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+
+    expect(control).toHaveBeenCalledWith({ action: 'retry', stage: 'claims', itemId: '01ADAID' });
+    expect(statusFn.mock.calls.length).toBeGreaterThanOrEqual(2); // re-fetched after the action
+    expect(root.textContent).toContain('Retrying Ada Lovelace.'); // outcome banner
+  });
+
+  it('Dismiss confirms first, then calls pipelineControl{dismiss}; cancelling does nothing (OBS-17)', async () => {
+    const control = vi.fn().mockResolvedValue({ ok: true, message: 'Dismissed Ada Lovelace.' });
+    setApi(vi.fn().mockResolvedValue(STALLED), control as unknown as KbApi['pipelineControl']);
+    mountStatus(root);
+    await Promise.resolve(); await Promise.resolve();
+    const dismiss = (): HTMLButtonElement => root.querySelector<HTMLButtonElement>('.status-setaside-dismiss')!;
+
+    // Cancel → no IPC call.
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    dismiss().click();
+    await Promise.resolve();
+    expect(control).not.toHaveBeenCalled();
+
+    // Confirm → fires dismiss.
+    confirmSpy.mockReturnValue(true);
+    dismiss().click();
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(control).toHaveBeenCalledWith({ action: 'dismiss', stage: 'claims', itemId: '01ADAID' });
   });
 
   it('renders the no-KB state when the pipeline is inactive', async () => {

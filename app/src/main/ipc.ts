@@ -9,6 +9,7 @@ import {
   activePipeline,
   activeStagingRoot,
   pipelineStatusForActive,
+  pipelineControlForActive,
   listActiveReviews,
   answerActiveReview,
   saveRecallOutput,
@@ -43,6 +44,8 @@ import type {
   ReviewSummary,
   AnswerReviewRequest,
   AnswerReviewResult,
+  PipelineControlRequest,
+  PipelineControlResult,
   FullReplayResult,
   AskRequest,
   AskResult,
@@ -171,6 +174,13 @@ export function registerIpc(): void {
   ipcMain.handle('kb:answerReview', async (_e, req: AnswerReviewRequest): Promise<AnswerReviewResult> => {
     const { ok, message } = await answerActiveReview(req.id, { verdict: req.verdict, note: req.note });
     return { ok, message };
+  });
+
+  // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).
+  // The one mutating action the Status surface offers; it delegates to the stage-owned recovery
+  // primitives under the canonical-writer lock (no mutation logic here).
+  ipcMain.handle('kb:pipelineControl', async (_e, req: PipelineControlRequest): Promise<PipelineControlResult> => {
+    return pipelineControlForActive(req);
   });
 
   // SPEC-0022 REPLAY-1/2: Principal-initiated "clean & rebuild". The renderer gates this behind a

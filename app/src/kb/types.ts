@@ -121,6 +121,21 @@ export interface AnswerReviewResult {
   message: string;
 }
 
+// --- Pipeline recovery control (SPEC-0030 OBS-17) ---
+
+/** A Principal-initiated recovery action on a set-aside/poison item (OBS-17). Stage-parameterized
+ *  so decompose/connect are additive (claims-only handlers in v1); `itemId` is the entity id the
+ *  Status view surfaced, resolved to its node path by the handler. */
+export interface PipelineControlRequest {
+  action: 'retry' | 'dismiss';
+  stage: string;
+  itemId: string;
+}
+export interface PipelineControlResult {
+  ok: boolean;
+  message?: string; // a human reason on failure / no-op (e.g. already recovered, unsupported stage)
+}
+
 // --- Replay & Reprocessing (SPEC-0022 REPLAY) ---
 
 /** Result of a Principal-initiated full replay (clean & rebuild). */
@@ -292,6 +307,8 @@ export interface KbApi {
   pipelineStatusView(): Promise<PipelineStatusView | null>;
   listReviews(): Promise<ReviewSummary[]>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
+  // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).
+  pipelineControl(req: PipelineControlRequest): Promise<PipelineControlResult>;
   fullReplay(): Promise<FullReplayResult>;
   ask(req: AskRequest): Promise<AskResult>;
   // SPEC-0026 ASK-6: save a grounded recall answer as a KB Output.
