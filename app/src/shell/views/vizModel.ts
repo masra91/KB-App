@@ -9,24 +9,14 @@
 import { STAGE_ORDER, stageIndex, type StageId } from '../../kb/pipelineStages';
 export { STAGE_ORDER, type StageId } from '../../kb/pipelineStages';
 
-/** Cumulative funnel counts (raw, from the backend); the renderer computes the between-point deltas. */
-export interface Conversion {
-  captured: number;
-  candidates: number;
-  entities: number;
-  claims: number;
-  promoted: number;
-}
+// The §9 data shapes are the backend's source of truth (DEV-3's #169/#175) — import + re-export them
+// so the renderer + tests bind to the exact `PipelineStatusView` fields, no parallel mirror to drift.
+import type { ConversionCounts, InFlightItem } from '../../kb/pipelineStatusView';
+export type { InFlightItem } from '../../kb/pipelineStatusView';
 
-/** One live source on the Line (a "carriage"). `active` = its stage is *currently draining* it (vs
- *  queued behind) — only the active carriage ember-breathes (VIZ-6). */
-export interface InFlightItem {
-  itemId: string;
-  name: string;
-  stage: StageId;
-  sinceTs: string;
-  active?: boolean;
-}
+/** Cumulative funnel counts (raw cumulative tallies from the backend); the renderer computes the
+ *  between-point deltas + the terminal completion ratio. Alias of the backend `ConversionCounts`. */
+export type Conversion = ConversionCounts;
 
 export type CellState = 'done' | 'current' | 'pending';
 
