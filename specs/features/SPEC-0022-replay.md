@@ -144,18 +144,18 @@ half-purged `main` (CANON-1/3).
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------------ | -------- | ------ |
 | REPLAY-1   | must     | Full Replay is a Principal-initiated action surfaced in **Settings**; it is **never** automated/agent-triggered | none-yet | LIFE-12; AUTO-1; SHELL |
 | REPLAY-2   | must     | Full Replay **MUST require explicit confirmation** via a dialog that names the consequence before any destructive step | none-yet | AUTO-1,10 |
-| REPLAY-3   | must     | Full Replay **MUST preserve all Sources** — `source.md`, raw bytes, and the archival lineage in `audit.jsonl` are never deleted or edited | none-yet | DATA-1,2; LIFE-2,10,11; PRIN-1 |
-| REPLAY-4   | must     | Full Replay **MUST purge all derived knowledge across both zones** — `candidates/`, `entities/`, `claims/`, `outputs/`, open `reviews/`, and rebuildable caches/indexes | none-yet | DATA-1,4; LIFE-12; CANON-9 |
-| REPLAY-5   | must     | Full Replay **MUST reset all pipeline status** so every Source is reprocessed from the first stage, **including set-aside and awaiting-review items** | none-yet | LIFE-10,12 |
-| REPLAY-6   | must     | The status reset **MUST be append-only**: a **replay-epoch marker** is appended per Source; stage queue-readers **MUST honor only stage markers after the latest epoch** — no audit rewriting | none-yet | DATA-10; ORCH-4,13; CANON-11 |
-| REPLAY-7   | must     | The **inbox is preserved** — un-archived captures are untouched and flow through the rebuilt pipeline | none-yet | INGEST-8; LIFE-2 |
-| REPLAY-8   | must     | Purge + reset is performed **on `staging` as committed work**, then **published by the promotion gate**; **`main` is never left half-purged or dirty** for the user or Obsidian | none-yet | CANON-1,3,8; STAGING-2,3,4; ORCH-3 |
-| REPLAY-9   | must     | After reset, the pipeline **MUST automatically resume** and reprocess all Sources from the start of the pipeline (Decompose → candidates → resolution → claims → …) | none-yet | LIFE-10; CANON-4,5 |
-| REPLAY-10  | must     | The purged derived generation **remains recoverable in git history** (the purge is a commit); replay does not rewrite history | none-yet | DATA-9,11; LIFE-10 |
-| REPLAY-11  | should   | Full Replay **emits an audit event** recording the action: a `replayId`, timestamp, and counts of what was purged/reset | none-yet | DATA-10; LIFE-9 |
+| REPLAY-3   | must     | Full Replay **MUST preserve all Sources** — `source.md`, raw bytes, and the archival lineage in `audit.jsonl` are never deleted or edited | test:replay | DATA-1,2; LIFE-2,10,11; PRIN-1 |
+| REPLAY-4   | must     | Full Replay **MUST purge all derived knowledge across both zones** — `candidates/`, `entities/`, `claims/`, `outputs/`, open `reviews/`, and rebuildable caches/indexes | test:replay | DATA-1,4; LIFE-12; CANON-9 |
+| REPLAY-5   | must     | Full Replay **MUST reset all pipeline status** so every Source is reprocessed from the first stage, **including set-aside and awaiting-review items** | test:replayReaders | LIFE-10,12 |
+| REPLAY-6   | must     | The status reset **MUST be append-only**: a **replay-epoch marker** is appended per Source; stage queue-readers **MUST honor only stage markers after the latest epoch** — no audit rewriting | test:replayEpoch | DATA-10; ORCH-4,13; CANON-11 |
+| REPLAY-7   | must     | The **inbox is preserved** — un-archived captures are untouched and flow through the rebuilt pipeline | test:replay | INGEST-8; LIFE-2 |
+| REPLAY-8   | must     | Purge + reset is performed **on `staging` as committed work**, then **published by the promotion gate**; **`main` is never left half-purged or dirty** for the user or Obsidian | test:replay | CANON-1,3,8; STAGING-2,3,4; ORCH-3 |
+| REPLAY-9   | must     | After reset, the pipeline **MUST automatically resume** and reprocess all Sources from the start of the pipeline (Decompose → candidates → resolution → claims → …) | test:replay | LIFE-10; CANON-4,5 |
+| REPLAY-10  | must     | The purged derived generation **remains recoverable in git history** (the purge is a commit); replay does not rewrite history | test:replay | DATA-9,11; LIFE-10 |
+| REPLAY-11  | should   | Full Replay **emits an audit event** recording the action: a `replayId`, timestamp, and counts of what was purged/reset | test:replay | DATA-10; LIFE-9 |
 | REPLAY-12  | should   | While a replay's purge step is in progress, the UI reflects it and a **second concurrent replay is prevented** | none-yet | ORCH-10; SHELL |
-| REPLAY-13  | must     | Full Replay is **idempotent/restartable**: an interrupted replay leaves the KB either pre-purge or fully reset — never half-purged | none-yet | ORCH-13; STAGING-8 |
-| REPLAY-14  | must     | The rebuild runs through the **same, unmodified production pipeline** and reprocesses Sources in **chronological capture order** (ULID = capture time, per the normal queue ORCH-4) — **no replay-only code path** — so the deduped/connected graph rebuilds deterministically (canonical nodes anchor to the earliest mention) and is exactly what live ingestion produces | none-yet | ORCH-3,4; CONNECT-3; LIFE-10 |
+| REPLAY-13  | must     | Full Replay is **idempotent/restartable**: an interrupted replay leaves the KB either pre-purge or fully reset — never half-purged | test:replay | ORCH-13; STAGING-8 |
+| REPLAY-14  | must     | The rebuild runs through the **same, unmodified production pipeline** and reprocesses Sources in **chronological capture order** (ULID = capture time, per the normal queue ORCH-4) — **no replay-only code path** — so the deduped/connected graph rebuilds deterministically (canonical nodes anchor to the earliest mention) and is exactly what live ingestion produces | test:replay | ORCH-3,4; CONNECT-3; LIFE-10 |
 
 ### REPLAY-3 — Sources are sacred across replay
 - **Status:** draft · **Priority:** must
@@ -167,7 +167,7 @@ half-purged `main` (CANON-1/3).
   only ever destroys *reproducible* derived knowledge; the moment it can touch a Source it
   stops being safe and stops being "replay."
 - **Traces:** DATA-1, DATA-2, LIFE-2, LIFE-10, LIFE-11, PRIN-1
-- **Verify:** none-yet
+- **Verify:** test:replay (`replay.test.ts` — source.md identical + audit only grows across replay)
 
 ### REPLAY-4 — Purge everything below the Source line, in both zones
 - **Status:** draft · **Priority:** must
@@ -183,7 +183,7 @@ half-purged `main` (CANON-1/3).
   are working-zone decision points tied to a derived generation; they are purged. (Principal
   answer-notes that were promoted to **Sources** under LIFE-7 are Sources and survive.)
 - **Traces:** DATA-1, DATA-4, LIFE-12, CANON-9
-- **Verify:** none-yet
+- **Verify:** test:replay (`replay.test.ts` — candidates purged on staging; entities cleared from main)
 
 ### REPLAY-6 — Reset status append-only, via a replay epoch
 - **Status:** draft · **Priority:** must
@@ -205,7 +205,7 @@ half-purged `main` (CANON-1/3).
   and any future stage) to filter markers by the latest epoch. That is an ORCH-stage change
   driven by this spec; see Open Questions and the SPEC-0014 changelog when implemented.
 - **Traces:** DATA-10, ORCH-4, ORCH-13, CANON-11
-- **Verify:** none-yet
+- **Verify:** test:replayEpoch (`replayEpoch.test.ts` + `replayReaders.test.ts` — readers honor only post-epoch markers; history preserved)
 
 ### REPLAY-8 — Atomic via staging + the promotion gate
 - **Status:** draft · **Priority:** must
@@ -220,18 +220,19 @@ half-purged `main` (CANON-1/3).
   promotion discipline gives atomicity, crash-safety, and "the messy middle never appears in
   `main`" for free, and keeps replay consistent with how every other stage mutates the vault.
 - **Traces:** CANON-1, CANON-3, CANON-8, STAGING-2, STAGING-3, STAGING-4, ORCH-3
-- **Verify:** none-yet
+- **Verify:** test:replay (`replay.test.ts` — staging committed cleanly; main clean + entities cleared via the gate)
 
 ## 5. Open questions
 
-- [ ] **Epoch-filter placement** — does the `replay-reset` epoch filter live in a shared
-      audit-reading helper used by all stages, or is it duplicated per stage state-reader?
-      A shared helper is cleaner and the obvious choice when implemented; pin in SPEC-0014.
-- [ ] **In-flight item at pause** — when the user confirms mid-stage, do we *wait* for the
-      current item's commit, or *abort* it? Resolved direction: **let the in-flight commit
-      land** (it's a sub-second ff under the writer lock) but **do not wait on an in-flight
-      agent call** whose derived output is about to be purged; the epoch reset un-marks the
-      item so it reprocesses fresh. Pin mechanics during build.
+- [x] **Epoch-filter placement** — RESOLVED (impl): the filter lives in **one shared helper**,
+      `kb/replayEpoch.ts` `epochScopedLines(raw)`, used by all stage state-readers
+      (`readDecomposeState`, `readClaimsState`, `readConnectState`) via a one-line change each —
+      no per-stage duplication. Recorded as the ORCH coupling in the SPEC-0014 changelog.
+- [x] **In-flight item at pause** — RESOLVED (impl): `pipeline.fullReplay()` calls `stop()` on
+      every stage (orch/decompose/connect/claims) before the purge, then `runFullReplay` takes
+      the shared canonical-writer lock — so any in-flight commit drains (sub-second ff) before
+      the purge runs, and no new sweep starts. The epoch reset un-marks the item so it
+      reprocesses fresh; stages are restarted afterward (auto-resume, REPLAY-9).
 - [ ] **Replay audit destination** — REPLAY-11 wants a vault-level record of the replay, but
       the global audit index is deferred (SPEC-0014 open q). v1 likely colocates per-Source
       `replay-reset` markers (already required) plus a single top-level `replay` event in the
@@ -268,3 +269,17 @@ half-purged `main` (CANON-1/3).
   `main`, not deferred) and adds **REPLAY-14**: the rebuild runs the **unmodified production
   pipeline in capture (ULID) order**, no replay-only path — making Replay a deterministic
   rebuild *and* the Principal's on-demand **pipeline test/validation tool** (§1).
+- 2026-06-02 — **implemented (full rebuild v1)** by KB-Developer-2. `kb/replayEpoch.ts` (shared
+  `epochScopedLines` helper — the one ORCH coupling, recorded in SPEC-0014) + epoch-filter
+  wired into all three stage state-readers (decompose/claims/connect). `kb/replay.ts`
+  `runFullReplay()`: purge derived trees on `staging` as one atomic commit, preserve
+  sources/inbox/config, append-only epoch reset per Source + the connect audit, `promote()` to
+  republish `main` (entities/claims cleared via #29/#30 deletion-aware promotion), and a
+  working-zone `replay/audit.jsonl` record (REPLAY-11). Surfaced as `pipeline.fullReplay()`
+  (pause→purge→promote→resume + concurrency guard), `kb:fullReplay` IPC/preload, and a Settings
+  "Clean & Rebuild" button + confirm dialog (REPLAY-1/2). REPLAY-14 verified: the rebuild runs
+  the unmodified pipeline in ULID/capture order and re-derives the deduped graph; the epoch
+  filter is permanent production-reader code (REPLAY-6) that *enables* the unmodified-pipeline
+  rebuild — the queue derives "done" from preserved Source audits replay must not delete
+  (REPLAY-3), so the append-only epoch reset is the only spec-legal re-trigger. Verify columns
+  REPLAY-3..11,13,14 → `test:`; REPLAY-1/2/12 (UI + main-process guard) remain e2e/manual.

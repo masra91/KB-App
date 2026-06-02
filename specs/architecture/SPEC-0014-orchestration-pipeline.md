@@ -222,3 +222,14 @@ Three layers; only one has a brain.
   `source.md`'s `archivedBy` (e.g. `copilot (default)` vs `deterministic (copilot failed:
   …)`). No tokens/cost. Resolved-model limitation noted (unpinned → recorded as `default`).
   `Verify:` → `test:`.
+- 2026-06-02 — **Replay-epoch coupling (SPEC-0022 REPLAY-6) resolved.** The stage queue-readers
+  derive "is this unit done?" by scanning each unit's append-only `audit.jsonl` for terminal
+  stage markers (ORCH-4/13). Full Replay (SPEC-0022) resets that status **append-only** by
+  appending a `replay-reset` epoch marker, so the readers MUST honor only markers after the
+  latest epoch. Per the SPEC-0022 open question, this is implemented as **one shared helper**,
+  `kb/replayEpoch.ts` `epochScopedLines(raw)`, integrated into `readDecomposeState`,
+  `readClaimsState`, and `readConnectState` with a one-line change each — **not** duplicated per
+  stage. The filter is a permanent, always-on capability of the production readers (a no-op when
+  no epoch marker exists), so the post-replay rebuild runs the unmodified pipeline (SPEC-0022
+  REPLAY-14) — it is *not* a replay-only code path. Any future stage's state-reader MUST route
+  its audit scan through `epochScopedLines` to stay replay-correct.
