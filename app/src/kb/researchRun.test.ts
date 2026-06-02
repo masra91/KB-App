@@ -1,0 +1,86 @@
+// Researcher run pass (SPEC-0028 RESEARCH-5/6/8/12). Real FS+git temp vault (TEST-18); the cognition
+// (external research) is injected deterministically — no network/SDK.
+import { describe, it, expect } from 'vitest';
+import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { makeTempDir, rmTempDir } from '../../test/tempVault';
+import { createKb } from './vault';
+import { readCapturedMeta } from './ingest';
+import { runResearcher, buildOutboundQuery, type ResearchFn } from './researchRun';
+import { CONTROL_AUDIT_REL } from './audit';
+import type { ResearcherConfig, ResearchRequest } from './researchers';
+
+function gitInstalledSync(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const gitAvailable = gitInstalledSync();
+
+async function withVault(fn: (root: string) => Promise<void>): Promise<void> {
+  const dir = await makeTempDir();
+  try {
+    const root = path.join(dir, 'vault');
+    await createKb({ path: root, initGitIfNeeded: true });
+    await fn(root);
+  } finally {
+    await rmTempDir(dir);
+  }
+}
+
+const web: ResearcherConfig = { id: 'web-1', template: 'web', prompt: 'p', egressTier: 'public-web', scope: 'global', budget: { maxToolCalls: 8, maxDepth: 2 }, schedule: 'off', posture: 'guarded', enabled: true };
+const request: ResearchRequest = { id: 'req-1', ts: '2026-06-02T00:00:00.000Z', by: { stage: 'decompose', sourceId: 'S1', entityId: 'E1' }, what: 'Project Atlas', why: 'unknown term', context: 'launch codename', dedupKey: 'project atlas::E1' };
+
+async function readAudit(root: string): Promise<Record<string, unknown>[]> {
+  const raw = await fs.readFile(path.join(root, CONTROL_AUDIT_REL), 'utf8');
+  return raw.split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
+}
+
+describe('buildOutboundQuery — request-only egress (RESEARCH-8 / D6a)', () => {
+  it('builds the query from the request what/context ONLY (no KB content)', () => {
+    expect(buildOutboundQuery(request)).toBe('Project Atlas — launch codename');
+    expect(buildOutboundQuery({ ...request, context: '' })).toBe('Project Atlas');
+  });
+});
+
+describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
+  it('on a finding: writes a cited secondary source + emits a researched audit event', async () => {
+    await withVault(async (root) => {
+      const research: ResearchFn = async () => ({ found: true, note: 'Atlas is a launch codename per the press release. [1]', citations: ['https://example.com/atlas'], query: 'Project Atlas' });
+      const res = await runResearcher(root, web, request, { research, now: () => '2026-06-02T01:00:00.000Z' });
+
+      expect(res.sourceIds).toHaveLength(1);
+      // the secondary source is on disk with origin + citation-rich provenance (RESEARCH-6).
+      const meta = await readCapturedMeta(path.join(root, 'inbox', res.sourceIds[0]));
+      expect(meta.origin).toBe('secondary');
+      expect(meta.research).toMatchObject({ researcherId: 'web-1', requestId: 'req-1', citations: ['https://example.com/atlas'] });
+
+      const audit = await readAudit(root);
+      const ev = audit.find((a) => a.eventType === 'researched')!;
+      expect(ev).toMatchObject({ actor: 'researcher' });
+      expect((ev.subjects as Record<string, unknown>).researcherId).toBe('web-1');
+      expect((ev.payload as Record<string, unknown>).externallySourced).toBe(true);
+    });
+  });
+
+  it('on no finding: writes no source but audits the no-op (RESEARCH-4, no silent action)', async () => {
+    await withVault(async (root) => {
+      const research: ResearchFn = async () => ({ found: false, note: '', citations: [], query: 'Project Atlas' });
+      const res = await runResearcher(root, web, request, { research });
+      expect(res.sourceIds).toEqual([]);
+      const audit = await readAudit(root);
+      expect(audit.some((a) => a.eventType === 'no-finding' && a.actor === 'researcher')).toBe(true);
+    });
+  });
+
+  it('refuses an unsafe researcher id before touching any path (defense-in-depth)', async () => {
+    await withVault(async (root) => {
+      const research: ResearchFn = async () => ({ found: true, note: 'x', citations: [], query: 'q' });
+      await expect(runResearcher(root, { ...web, id: '../evil' }, request, { research })).rejects.toThrow(/unsafe researcher id/);
+    });
+  });
+});

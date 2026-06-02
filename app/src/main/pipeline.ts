@@ -37,9 +37,18 @@ import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvent
 import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture } from '../kb/instanceConfig';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
-import { type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
+import { readEvents } from '../kb/activityIndex';
+import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
+import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor } from '../kb/researchersPanel';
+import { runResearcher } from '../kb/researchRun';
+import { stubResearchFn } from '../kb/researchStub';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { ulid } from '../kb/ulid';
+import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView } from '../kb/types';
+import type { AuditEvent } from '../kb/audit';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult } from '../kb/types';
+import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
  *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
@@ -336,6 +345,122 @@ export async function listAgentsForActive(): Promise<AgentView[]> {
     requestedModel: process.env.KB_COPILOT_MODEL || undefined,
     pipelineActive: active !== null,
   });
+}
+
+// --- Control Panel · Researchers (SPEC-0028 RESEARCH-15; over the researcher registry) ---
+
+/** List the active KB's researchers with each one's last-run (from its newest `researcher` audit
+ *  event). Reads `staging` (registry + audit live there). No active KB → empty (PANEL-9 degrade). */
+export async function listResearchersForActive(): Promise<ResearcherView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  const registry = await readResearcherRegistry(root);
+  const events = await readEvents(root, { actors: ['researcher'] }); // newest-first
+  const lastByResearcher: Record<string, AuditEvent | undefined> = {};
+  for (const r of registry) lastByResearcher[r.id] = events.find((e) => e.subjects.researcherId === r.id);
+  return buildResearcherViews(registry, lastByResearcher);
+}
+
+/**
+ * Apply a Researchers-view config change (RESEARCH-15) + return the refreshed list. Untrusted IPC
+ * input is validated at this boundary (template/egress/schedule/posture dropped unless known enums;
+ * an unsafe `id` is rejected by the registry guard). The write + git commit run under the shared
+ * lock (durability); then a conforming `panel` audit event records the change (PANEL-7-style).
+ */
+export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  if (typeof patch.id !== 'string' || patch.id.length === 0) return listResearchersForActive();
+
+  let prior: ResearcherConfig | undefined;
+  let applied = false;
+  await active.lock.run(async () => {
+    const registry = await readResearcherRegistry(root);
+    prior = registry.find((r) => r.id === patch.id);
+    if (prior) {
+      await patchResearcher(root, patch.id, {
+        ...(typeof patch.enabled === 'boolean' ? { enabled: patch.enabled } : {}),
+        ...(isSchedulePreset(patch.schedule) ? { schedule: patch.schedule } : {}),
+        ...(isAutonomyPosture(patch.posture) ? { posture: patch.posture } : {}),
+        ...(isEgressTier(patch.egressTier) ? { egressTier: patch.egressTier } : {}),
+        ...(typeof patch.prompt === 'string' && patch.prompt.trim() ? { prompt: patch.prompt } : {}),
+        ...(typeof patch.scope === 'string' && patch.scope.trim() ? { scope: patch.scope } : {}),
+        ...(Array.isArray(patch.topics) ? { topics: patch.topics } : {}),
+      });
+    } else {
+      // New researcher: derive a safe config from the (validated) template + defaults.
+      const template = isResearcherTemplate(patch.template) ? patch.template : 'custom';
+      await upsertResearcher(root, {
+        id: patch.id,
+        template,
+        label: typeof patch.label === 'string' ? patch.label : undefined,
+        prompt: typeof patch.prompt === 'string' && patch.prompt.trim() ? patch.prompt : `Research ${template} sources relevant to the request.`,
+        egressTier: isEgressTier(patch.egressTier) ? patch.egressTier : defaultEgressFor(template),
+        scope: typeof patch.scope === 'string' && patch.scope.trim() ? patch.scope : 'global',
+        budget: DEFAULT_RESEARCHER_BUDGET,
+        schedule: isSchedulePreset(patch.schedule) ? patch.schedule : 'off',
+        posture: isAutonomyPosture(patch.posture) ? patch.posture : DEFAULT_POSTURE,
+        enabled: patch.enabled ?? false,
+        ...(Array.isArray(patch.topics) ? { topics: patch.topics } : {}),
+      });
+    }
+    applied = true;
+    await commitControlFile(root, researcherRegistryPath(root), `researcher ${patch.id} config change`);
+  });
+  if (applied) {
+    await appendAuditEvent(root, {
+      actor: 'panel',
+      eventType: 'researcher-config-change',
+      subjects: { researcherId: patch.id },
+      payload: {
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+        ...(patch.schedule !== undefined ? { schedule: patch.schedule } : {}),
+        ...(patch.posture !== undefined ? { posture: patch.posture } : {}),
+        ...(patch.egressTier !== undefined ? { egressTier: patch.egressTier } : {}),
+        why: 'Principal change via Control Panel',
+      },
+    });
+  }
+  return listResearchersForActive();
+}
+
+/**
+ * Manual "Run now" for a researcher (RESEARCH-15, "run-now to test") — a single on-demand pass via
+ * the run-pass against a synthetic request derived from the researcher's config. Slice 1a uses the
+ * deterministic `stubResearchFn` (no external egress); Slice 1b swaps the real Web adapter behind
+ * the same seam. The Principal's trigger is audited as a `panel` event; the run's own work is audited
+ * by the run-pass (actor `researcher`).
+ */
+export async function runActiveResearcherNow(id: string): Promise<RunResearcherResult> {
+  if (!active) return { ran: false, reason: 'no-kb' };
+  const root = active.stagingWt;
+  const r = (await readResearcherRegistry(root)).find((x) => x.id === id);
+  if (!r) return { ran: false, reason: 'not-found' };
+  const what = r.topics?.[0] ?? r.label ?? r.template;
+  const req: ResearchRequest = {
+    id: ulid(),
+    ts: new Date().toISOString(),
+    by: { stage: 'panel' },
+    what,
+    why: 'on-demand test run via Control Panel',
+    context: '',
+    dedupKey: dedupKeyFor({ what, by: {} }),
+  };
+  const res = await runResearcher(root, r, req, { research: stubResearchFn });
+  await appendAuditEvent(root, {
+    actor: 'panel',
+    eventType: 'researcher-run-now',
+    subjects: { researcherId: id },
+    payload: { outcome: res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
+  });
+  return { ran: true, sourceIds: res.sourceIds, note: res.note };
+}
+
+/** Recent runs for a researcher (RESEARCH-15) — its `researcher` audit events, newest-first. */
+export async function listResearcherRunsForActive(id: string): Promise<ResearcherLastRun[]> {
+  if (!active) return [];
+  const events = await readEvents(active.stagingWt, { actors: ['researcher'], subjectId: id });
+  return events.map((e) => lastRunFromEvent(e)).filter((x): x is ResearcherLastRun => x !== null);
 }
 
 /** Commit a job-registry change on `staging` — the durability record (audit is a separate `panel` event). */

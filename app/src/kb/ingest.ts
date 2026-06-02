@@ -9,6 +9,7 @@ import simpleGit from 'simple-git';
 import { ulid, isUlid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { mimeForName, rawNameFor } from './media';
+import type { ResearchProvenance } from './researchers';
 
 export interface TextPayload {
   kind: 'text';
@@ -31,10 +32,18 @@ export interface CapturedMeta {
   capturedAt: string; // ISO 8601
   surface: string;
   captureBatch: string; // links payloads from one capture gesture (CAPTURE-14)
-  origin?: 'principal' | 'external'; // who produced it; defaults to principal (DATA-2/5)
+  origin?: 'principal' | 'external' | 'secondary'; // who produced it; defaults to principal (DATA-2/5). `secondary` = a researcher finding (SPEC-0028 RESEARCH-5)
   originalName?: string;
   mimeType?: string;
   bytes?: number;
+  /** Citation-rich research provenance, present on a `secondary` source (RESEARCH-6). */
+  research?: ResearchProvenance;
+}
+
+/** Optional capture attributes — who produced it + (for secondary sources) research provenance. */
+export interface CaptureOpts {
+  origin?: CapturedMeta['origin'];
+  research?: ResearchProvenance;
 }
 
 export interface CaptureOutcome {
@@ -57,6 +66,7 @@ export async function captureToInbox(
   surface: string,
   payloads: CapturePayload[],
   now: number = Date.now(),
+  opts: CaptureOpts = {},
 ): Promise<CaptureOutcome> {
   if (payloads.length === 0) throw new Error('captureToInbox: nothing to capture');
   root = path.resolve(root);
@@ -83,6 +93,8 @@ export async function captureToInbox(
         surface,
         captureBatch,
         mimeType: 'text/markdown',
+        ...(opts.origin ? { origin: opts.origin } : {}),
+        ...(opts.research ? { research: opts.research } : {}),
       };
     } else {
       const raw = rawNameFor(p.name);
@@ -98,6 +110,8 @@ export async function captureToInbox(
         originalName: p.name,
         mimeType: mimeForName(p.name),
         bytes: p.data.byteLength,
+        ...(opts.origin ? { origin: opts.origin } : {}),
+        ...(opts.research ? { research: opts.research } : {}),
       };
     }
     await fs.writeFile(path.join(dir, 'audit.jsonl'), JSON.stringify({ action: 'captured', ...meta }) + '\n', 'utf8');

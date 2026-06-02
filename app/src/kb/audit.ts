@@ -30,6 +30,7 @@ export const AUDIT_ACTORS = [
   'recall',
   'replay',
   'panel',
+  'researcher',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
 
@@ -40,6 +41,9 @@ export interface AuditSubjects {
   claimId?: string;
   reviewId?: string;
   jobId?: string;
+  /** Researcher id + the research-request it answered (SPEC-0028). */
+  researcherId?: string;
+  requestId?: string;
   /** Connect keys its work by canonical block key, not a single entity id. */
   blockKey?: string;
 }
@@ -350,6 +354,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true,
     carriesWhy: true, // payload must record field/from/to + the why (Principal change)
     traces: ['AUDIT-1', 'AUDIT-2', 'PANEL-7'],
+  },
+  {
+    actor: 'researcher',
+    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
+    emitters: ['researchRun'], // researchRun.ts emits via appendAuditEvent on each pass
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true, // reaches outside the KB + produces immutable secondary sources
+    carriesWhy: true, // records the request (what + why) + citations behind each finding
+    traces: ['AUDIT-1', 'AUDIT-2', 'RESEARCH-6'],
   },
 ] as const;
 

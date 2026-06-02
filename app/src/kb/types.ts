@@ -6,6 +6,7 @@
 // pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
 // type` is erased at build time.
 import type { SchedulePreset, AutonomyPosture } from './jobs';
+import type { EgressTier, ResearcherTemplate } from './researchers';
 import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
@@ -181,6 +182,51 @@ export type RunJobResult =
   | { ran: true; outcome: 'advanced' | 'noop' | 'setaside'; applied: number; deferred: number }
   | { ran: false; reason: 'skipped' | 'not-found' | 'unknown-type' | 'no-kb' };
 
+// --- Control Panel · Researchers (SPEC-0028 RESEARCH-15; over the researcher registry) ---
+
+/** Last-run summary for a researcher, derived from its newest `researcher` audit event, for display. */
+export interface ResearcherLastRun {
+  ts: string; // ISO timestamp of the last pass
+  eventType: string; // 'researched' | 'no-finding'
+  what: string; // the request term it answered
+  sourceId?: string; // the secondary source produced (when it found something)
+  citations: number; // external citations on the finding
+}
+
+/** One manageable researcher as the Researchers view needs it (RESEARCH-15): config + last run. */
+export interface ResearcherView {
+  id: string;
+  template: ResearcherTemplate;
+  label: string;
+  egressTier: EgressTier;
+  scope: string;
+  enabled: boolean;
+  schedule: SchedulePreset;
+  posture: AutonomyPosture;
+  topics: string[];
+  lastRun: ResearcherLastRun | null; // null = never run
+}
+
+/** A config change from the Researchers view (RESEARCH-15). Omitted fields are left unchanged. New
+ *  researcher = include template + prompt + egressTier. `id` must be a bare slug (registry-guarded). */
+export interface ResearcherConfigPatch {
+  id: string;
+  template?: ResearcherTemplate;
+  label?: string;
+  prompt?: string;
+  egressTier?: EgressTier;
+  scope?: string;
+  enabled?: boolean;
+  schedule?: SchedulePreset;
+  posture?: AutonomyPosture;
+  topics?: string[];
+}
+
+/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run. */
+export type RunResearcherResult =
+  | { ran: true; sourceIds: string[]; note: string }
+  | { ran: false; reason: 'not-found' | 'no-kb' };
+
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
 
 /** Editable per-Instance settings surfaced in Settings (PANEL-5 / AUTO-12). */
@@ -222,6 +268,11 @@ export interface KbApi {
   getInstanceSettings(): Promise<InstanceSettings>;
   setInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings>;
   listAgents(): Promise<AgentView[]>;
+  // SPEC-0028 Researchers (Control Panel · Manage): manage the registry + on-demand run.
+  listResearchers(): Promise<ResearcherView[]>;
+  setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
+  runResearcherNow(id: string): Promise<RunResearcherResult>;
+  listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT
