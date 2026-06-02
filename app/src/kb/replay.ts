@@ -10,7 +10,7 @@
 // stage sweeps before and resumes them after, which auto-rebuilds the KB (REPLAY-9).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import simpleGit from 'simple-git';
+import { boundedGit } from './canonicalAdvance';
 import { ensureGitIdentity } from './vault';
 import { findSourceDirs } from './decomposeStage';
 import { promote } from './staging';
@@ -88,7 +88,7 @@ async function purgeResetPromote(vaultRoot: string, stagingWt: string, opts: Rep
   stagingWt = path.resolve(stagingWt);
   const replayId = opts.replayId ?? newReplayId();
   const ts = opts.ts ?? new Date().toISOString();
-  const git = simpleGit(stagingWt);
+  const git = boundedGit(stagingWt); // #163: bounded — runs under the canonical-writer lock
   await ensureGitIdentity(git);
 
   // Restartability (REPLAY-13): begin from the last committed state so an interrupted prior purge

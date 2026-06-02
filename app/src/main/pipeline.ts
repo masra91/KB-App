@@ -12,7 +12,6 @@
 // ref-advance serialize through it.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import simpleGit from 'simple-git';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
@@ -446,7 +445,7 @@ export async function saveRecallOutput(result: AskResult): Promise<SaveRecallOut
     const abs = path.join(root, built.rel);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, built.markdown, 'utf8');
-    const git = simpleGit(root);
+    const git = boundedGit(root); // #163: bounded — runs under the canonical-writer lock
     await git.add(built.rel);
     await git.commit(`recall: save output ${id}`);
     await promote(a.vaultPath); // mirror the new outputs/ note to main (evergreen, deletion-aware gate)
@@ -806,8 +805,10 @@ async function commitRegistryChange(root: string, message: string): Promise<void
  * canonical branch directly; under the lock it is just another linear advance that stages cherry-pick
  * their disjoint work onto). A no-op write (identical bytes) commits nothing.
  */
-async function commitControlFile(root: string, absPath: string, message: string): Promise<void> {
-  const git = simpleGit(root);
+// Exported for the #163 regression gate (boundedGit under the lock); `timeoutMs` defaults to the
+// standard bound and is overridable so the test can drive the timeout fast.
+export async function commitControlFile(root: string, absPath: string, message: string, timeoutMs?: number): Promise<void> {
+  const git = boundedGit(root, timeoutMs); // #163: bounded — runs under the canonical-writer lock
   const rel = path.relative(root, absPath);
   await git.add(rel);
   const staged = (await git.diff(['--cached', '--name-only'])).trim();
