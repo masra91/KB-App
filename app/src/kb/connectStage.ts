@@ -45,7 +45,7 @@ import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
+import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -781,8 +781,8 @@ export async function readLinkQueue(root: string): Promise<string[]> {
 export async function linkOne(root: string, nodeRel: string): Promise<LinkOneResult> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
+  const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
+  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
   await wtGit.raw('clean', '-fd', 'entities', 'claims'); // drop stray files from a prior aborted run
 
@@ -917,8 +917,8 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
 export async function dedupClaimsOnce(root: string): Promise<DedupReport & { committed: boolean }> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
+  const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
+  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base);
   await wtGit.raw('clean', '-fd', 'entities', 'claims');
 

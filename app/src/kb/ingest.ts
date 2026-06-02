@@ -5,8 +5,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import simpleGit from 'simple-git';
 import { ulid, isUlid } from './ulid';
+import { boundedGit } from './canonicalAdvance';
 import { ensureGitIdentity } from './vault';
 import { mimeForName, rawNameFor } from './media';
 import type { ResearchProvenance } from './researchers';
@@ -44,6 +44,8 @@ export interface CapturedMeta {
 export interface CaptureOpts {
   origin?: CapturedMeta['origin'];
   research?: ResearchProvenance;
+  /** Override the git block-timeout (#163); defaults to boundedGit's standard bound. Tests drive it fast. */
+  timeoutMs?: number;
 }
 
 export interface CaptureOutcome {
@@ -120,7 +122,7 @@ export async function captureToInbox(
 
   // CAPTURE-3: commit the raw units before anything processes them. Add-only — staging
   // just `inbox` keeps capture from sweeping up unrelated working state.
-  const git = simpleGit(root);
+  const git = boundedGit(root, opts.timeoutMs); // #163: bounded — runs under the canonical-writer lock
   await ensureGitIdentity(git);
   await git.raw('add', 'inbox');
   await git.commit(`capture: ${payloads.length} item(s) [${surface}]`);
@@ -189,7 +191,7 @@ export async function normalizeInbox(root: string, now: number = Date.now()): Pr
   }
 
   if (minted.length > 0) {
-    const git = simpleGit(root);
+    const git = boundedGit(root); // #163: bounded — runs under the canonical-writer lock
     await ensureGitIdentity(git);
     await git.raw('add', 'inbox');
     await git.commit(`normalize: ${minted.length} foreign drop(s)`);
