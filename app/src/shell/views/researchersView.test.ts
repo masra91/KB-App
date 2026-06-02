@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', tenantId: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
-const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', tenantId: '', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
-const m365Row: ResearcherView = { id: 'm365-1', template: 'm365', label: 'WorkIQ', prompt: 'summarize project mail', repoPath: '', tenantId: 'contoso.onmicrosoft.com', egressTier: 'internal-tenant', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
+const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
+const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', tenantId: '', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
+const m365Row: ResearcherView = { id: 'm365-1', template: 'm365', label: 'WorkIQ', prompt: 'summarize project mail', repoPath: '', prRepo: '', tenantId: 'contoso.onmicrosoft.com', egressTier: 'internal-tenant', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -218,7 +218,8 @@ describe('Code researcher repoPath config (Slice 2a)', () => {
     c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
     await flush();
     expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true); // steering, not risky
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/other' });
+    // a code save carries both code-template fields (repoPath + prRepo), prefilled from config
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/other', prRepo: 'octocat/hello-world' });
   });
 
   it('escapes a hostile repoPath value', async () => {
@@ -227,6 +228,39 @@ describe('Code researcher repoPath config (Slice 2a)', () => {
     const c = await mount();
     expect(c.querySelector('img')).toBeNull();
     expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toContain('<img');
+  });
+});
+
+describe('Code researcher prRepo (GitHub PR repo) config (Slice 2b)', () => {
+  it('shows a prRepo input ONLY for code researchers, prefilled from config', async () => {
+    listResearchers = vi.fn(async () => [codeRow]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value).toBe('octocat/hello-world');
+  });
+
+  it('a web researcher has no prRepo field (template-specific)', async () => {
+    const c = await mount(); // default webRow
+    expect(c.querySelector('.researcher-prrepo')).toBeNull();
+  });
+
+  it('saves prRepo alongside the other code fields (no confirm)', async () => {
+    listResearchers = vi.fn(async () => [codeRow]);
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value = 'octocat/other-repo';
+    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
+    await flush();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true);
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/app', prRepo: 'octocat/other-repo' });
+  });
+
+  it('escapes a hostile prRepo value', async () => {
+    listResearchers = vi.fn(async () => [{ ...codeRow, prRepo: '"><img src=x onerror=alert(1)>' }]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('img')).toBeNull();
+    expect(c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value).toContain('<img');
   });
 });
 
