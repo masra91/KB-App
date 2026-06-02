@@ -10,7 +10,7 @@ updated: 2026-06-02
 related: [SPEC-0028, SPEC-0033, SPEC-0027, SPEC-0017]
 design-system: pipeline-visualization.md   # reuses "The Line" tokens/type/motion (DESIGN-7 coherence)
 gates:
-  ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
+  ai-patterns: approved     # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02, no rejections
   qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
 stage: Cross-cutting
 ---
@@ -171,6 +171,21 @@ A manage surface is mostly at rest, so motion is sparser than The Line — two o
   confirm worded as the consequence ("It will reach Public web on its Daily schedule"), not a generic
   "Are you sure". Single-flight.
 
+### Implementation guardrails — config surfaces drift hardest (GATE-1 watch-items)
+
+A config screen is exactly where a dev reaches for a UI-kit's form components and silently
+re-introduces the generic look. On top of The Line's inherited guardrails (flat ink, no
+radius/shadow on structure, ember focus rings, no UI-kit Card/Paper surfaces), this surface adds:
+- **The clearance ladder is a real spatial component, NOT a restyled `<select>`/dropdown.** The
+  whole distinctiveness rests on it being a 3-rung exposure scale read at a glance; collapsing it to
+  a styled native picker defeats the design.
+- **`schedule` / `autonomy` selectors and the add-tiles are custom instrument components, not bare
+  native `<select>` or a UI-kit `Select`.** The anti-tell table rejects dropdowns for source+egress;
+  carry that intent down to these lower-stakes controls so native chrome doesn't leak back in.
+- **No UI-kit `Card` / `Paper` / `Switch` / rounded / shadow on the strips.** Form-heavy surfaces are
+  where component libraries pull hardest; the armed toggle and strips are flat-ink instrument parts,
+  not a Switch in a Card.
+
 ## 7. Key user flows covered (GATE 2 — KB-Quality-Driver)
 
 | # | Flow (SPEC-0028 §6 / RESEARCH-15/17) | How the design serves it |
@@ -244,3 +259,8 @@ egressTier, enabled, schedule, posture, topics, `lastRun {ts, eventType, what, c
   (found/nothing/**failed-oxide**/escalation) that makes failure distinct from empty (UI half of
   #160). Reuses "The Line" tokens/type/motion (DESIGN-7). Flags 2 impl notes (the #160 backend half;
   escalation-state exposure). Pending GATE 1 (KB-AI-Detector) + GATE 2 (KB-QD).
+- 2026-06-02 — **GATE 1 (KB-AI-Detector) APPROVED**, no rejections. Folded in the 3 config-surface
+  implementation watch-items as explicit §6 guardrails: the clearance ladder must be a real spatial
+  component (not a restyled `<select>`); schedule/autonomy/add-tiles must be custom instrument
+  components (not native/UI-kit selects); no UI-kit Card/Paper/Switch/rounded/shadow on strips.
+  Awaiting GATE 2 (KB-QD, flow coverage).
