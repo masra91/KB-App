@@ -15,7 +15,8 @@
 //   #77 class). The researcher id that reaches `.kb/researchers/<id>` is slug-validated upstream.
 import { captureToInbox } from './ingest';
 import { appendAuditEvent } from './audit';
-import { isSafeResearcherId, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
+import { admitResearchPass } from './researchCeiling';
+import { isSafeResearcherId, RESEARCH_INSTANCE_CEILING, RESEARCH_INSTANCE_WINDOW_MS, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
 
 /** What the injected cognition returns. `found:false` = nothing worth recording (audited no-op). */
 export interface ResearchFindings {
@@ -46,6 +47,10 @@ export interface RunResearcherDeps {
   research: ResearchFn;
   /** Injectable ISO clock (deterministic tests). */
   now?: () => string;
+  /** Override the global per-Instance egress ceiling (RESEARCH-11). Default RESEARCH_INSTANCE_CEILING. */
+  instanceCeiling?: number;
+  /** Override the per-Instance ceiling's rolling window in ms. Default RESEARCH_INSTANCE_WINDOW_MS. */
+  instanceWindowMs?: number;
 }
 
 export interface RunResearcherResult {
@@ -68,6 +73,24 @@ export interface RunResearcherResult {
 export async function runResearcher(root: string, r: ResearcherConfig, req: ResearchRequest, deps: RunResearcherDeps): Promise<RunResearcherResult> {
   if (!isSafeResearcherId(r.id)) throw new Error(`runResearcher: refusing unsafe researcher id ${JSON.stringify(r.id)}`);
   const now = deps.now ?? (() => new Date().toISOString());
+
+  // Global per-Instance egress ceiling (RESEARCH-11) — the cross-researcher HARD backstop, checked at
+  // this single chokepoint so it bounds BOTH inline dispatch runs AND scheduled standing passes. Once the
+  // rolling-window count is spent, REFUSE before any egress (no `deps.research`) + audit the no-op so the
+  // backstop is never silent (AUDIT-2). Self-healing: capacity returns as passes age out of the window.
+  const ceiling = deps.instanceCeiling ?? RESEARCH_INSTANCE_CEILING;
+  const windowMs = deps.instanceWindowMs ?? RESEARCH_INSTANCE_WINDOW_MS;
+  const admission = await admitResearchPass(root, Date.parse(now()) || Date.now(), ceiling, windowMs);
+  if (!admission.allowed) {
+    await appendAuditEvent(root, {
+      actor: 'researcher',
+      eventType: 'ceiling-reached',
+      ts: now(),
+      subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
+      payload: { what: req.what, why: req.why, countInWindow: admission.countInWindow, ceiling: admission.ceiling, windowHours: windowMs / 3_600_000, egressTier: r.egressTier },
+    });
+    return { sourceIds: [], note: `per-Instance research ceiling reached (${admission.countInWindow}/${admission.ceiling} passes in ${windowMs / 3_600_000}h)` };
+  }
 
   const findings = await deps.research(r, req);
 

@@ -8,7 +8,7 @@ import { createKb } from './vault';
 import { upsertResearcher } from './researcherRegistry';
 import { readCapturedMeta } from './ingest';
 import { promises as fs } from 'node:fs';
-import { runInlineResearch, makeResearchDeps, collectResearchRequests, runInlineResearchSweep, selectResearchFn } from './researchInline';
+import { runInlineResearch, makeResearchDeps, collectResearchRequests, runInlineResearchSweep, selectResearchFn, chainDepthOfSource } from './researchInline';
 import type { ResearchFn } from './researchRun';
 import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
@@ -113,7 +113,39 @@ async function emitRequestSignal(root: string, what: string, by: { stage: string
   await fs.appendFile(path.join(root, '.kb', 'audit.jsonl'), line, 'utf8');
 }
 
+describe('chainDepthOfSource — research-chain depth walk (RESEARCH-11)', () => {
+  it('a primary (non-research) source has 0 research ancestors → its request is depth 1', () => {
+    expect(chainDepthOfSource('S1', new Map(), new Map())).toBe(0);
+    expect(chainDepthOfSource(undefined, new Map(), new Map())).toBe(0);
+  });
+
+  it('counts each research→finding→request hop beneath the source', () => {
+    // chain: primary S0 → req A → finding S1 → req B → finding S2
+    const producedBy = new Map([['S1', 'A'], ['S2', 'B']]); // research source → producing request
+    const requestSource = new Map<string, string | undefined>([['A', 'S0'], ['B', 'S1']]); // request → source it rested on
+    expect(chainDepthOfSource('S0', producedBy, requestSource)).toBe(0); // primary → request off it is depth 1
+    expect(chainDepthOfSource('S1', producedBy, requestSource)).toBe(1); // request off S1 is depth 2
+    expect(chainDepthOfSource('S2', producedBy, requestSource)).toBe(2); // request off S2 is depth 3 (over default maxDepth)
+  });
+
+  it('guards against a malformed cyclic lineage (no infinite recursion)', () => {
+    const producedBy = new Map([['S1', 'A'], ['S2', 'B']]);
+    const requestSource = new Map<string, string | undefined>([['A', 'S2'], ['B', 'S1']]); // S1↔S2 cycle
+    expect(chainDepthOfSource('S1', producedBy, requestSource)).toBeLessThanOrEqual(2); // terminates
+  });
+});
+
 describe.skipIf(!gitAvailable)('collectResearchRequests + runInlineResearchSweep (RESEARCH-3, D1)', () => {
+  it('stamps depth 1 on a request born off a primary source (no research ancestors)', async () => {
+    await withVault(async (root) => {
+      await fs.mkdir(path.join(root, '.kb'), { recursive: true });
+      await emitRequestSignal(root, 'Project Atlas', { stage: 'decompose', sourceId: 'S1' });
+      const reqs = await collectResearchRequests(root);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0].depth).toBe(1);
+    });
+  });
+
   it('reads research-request signals from the audit into requests (ignoring other signals)', async () => {
     await withVault(async (root) => {
       await fs.mkdir(path.join(root, '.kb'), { recursive: true });

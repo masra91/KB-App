@@ -2,7 +2,8 @@
 // of `research-request`s (emitted on `signals[]` by any producer — pipeline stages or Reflect, D1)
 // and the enabled researchers, it: dedups against a persistent ledger (D2), eligibility-filters
 // (deterministic pre-filter, D3), caps fan-out, asks each eligible researcher to self-nominate (a
-// cheap relevance check), and runs the nominated ones — bounded by a global ceiling (RESEARCH-11).
+// cheap relevance check), and runs the nominated ones — bounded by the chain DEPTH limit (over-depth
+// → escalate to Review, no egress) and a global ceiling, both RESEARCH-11.
 //
 // It is NOT an agent (out-of-scope §7): routing is deterministic + self-nomination. The cognition
 // (self-nominate + run) is INJECTED behind a seam so this module stays substrate-agnostic and
@@ -34,6 +35,10 @@ export interface ResearchOutcome {
   ran: boolean;
   /** Secondary-source ids produced (when it ran + found something). */
   sourceIds?: string[];
+  /** True when the request hit the chain depth limit and was escalated to Review instead of run. */
+  escalated?: boolean;
+  /** The depth-limit Review id raised (when `escalated`). */
+  reviewId?: string;
   /** Why it didn't run / a one-liner outcome (for the caller's audit). */
   note?: string;
 }
@@ -55,6 +60,9 @@ export interface DispatchDeps {
   selfNominate: (r: ResearcherConfig, req: ResearchRequest) => Promise<boolean>;
   /** Run one nominated research pass → secondary source(s). Owns its own audit + ingest writes. */
   run: (r: ResearcherConfig, req: ResearchRequest) => Promise<{ sourceIds: string[]; note?: string }>;
+  /** Raise the depth-limit Review when a chain exceeds `budget.maxDepth` (RESEARCH-11). When omitted,
+   *  the over-depth request is still refused (no run) but no Review is written — tests inject a fake. */
+  escalate?: (r: ResearcherConfig, req: ResearchRequest, depth: number) => Promise<{ reviewId: string; created: boolean }>;
   /** Max eligible researchers a single request fans out to (RESEARCH-4). Default DEFAULT_MAX_FANOUT. */
   maxFanout?: number;
   /** Hard backstop on total RUNS across this whole dispatch (RESEARCH-11). Default RESEARCH_GLOBAL_CEILING. */
@@ -115,6 +123,16 @@ export async function dispatchResearch(
       const didNominate = await nominated;
       if (!didNominate) {
         outcomes.push({ requestId: req.id, researcherId: r.id, nominated: false, ran: false, note: 'not relevant (self-nomination declined)' });
+        continue;
+      }
+      // Depth limit (RESEARCH-11): a research→finding→request chain past the researcher's maxDepth is
+      // refused (no egress) and escalated to Review — checked BEFORE the ceiling so an over-depth chain
+      // surfaces to the Principal as "continue?" rather than being silently swallowed by the backstop.
+      const depth = req.depth ?? 1;
+      if (depth > r.budget.maxDepth) {
+        let reviewId: string | undefined;
+        if (deps.escalate) reviewId = (await deps.escalate(r, req, depth)).reviewId;
+        outcomes.push({ requestId: req.id, researcherId: r.id, nominated: true, ran: false, escalated: true, ...(reviewId ? { reviewId } : {}), note: `depth ${depth} > maxDepth ${r.budget.maxDepth} → escalated to Review` });
         continue;
       }
       if (runs >= ceiling) {

@@ -15,6 +15,7 @@ import { makeWebResearchFn, type WebResearchOptions } from './researchWebAgent';
 import { makeCodeResearchFn, type CodeResearchOptions } from './researchCodeAgent';
 import { makeM365ResearchFn, type M365ResearchOptions } from './researchM365Agent';
 import { runResearcher, type ResearchFn } from './researchRun';
+import { raiseResearchEscalation } from './researchEscalate';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
 export interface ResearchDepsOptions {
@@ -65,6 +66,7 @@ export function makeResearchDeps(root: string, opts: ResearchDepsOptions = {}): 
   return {
     selfNominate: makeCliSelfNominate(opts.nominateRunner),
     run: (r, req) => runResearcher(root, r, req, { research: selectResearchFn(root, r, opts) }),
+    escalate: (r, req, depth) => raiseResearchEscalation(root, r, req, depth),
     ...(opts.maxFanout !== undefined ? { maxFanout: opts.maxFanout } : {}),
     ...(opts.globalCeiling !== undefined ? { globalCeiling: opts.globalCeiling } : {}),
   };
@@ -82,17 +84,52 @@ export async function runInlineResearch(root: string, requests: readonly Researc
 }
 
 /**
+ * Walk the research-chain lineage to count how many research passes already sit *beneath* a source
+ * (RESEARCH-11 depth). A PRIMARY source (not produced by a researcher) is 0; a research-produced
+ * finding is one deeper than the source its triggering request rested on. Pure over two lineage maps
+ * derived from the audit: `producedBy` (a research-produced sourceId → the requestId that produced
+ * it) and `requestSource` (a requestId → the sourceId it was *about*, i.e. its `by.sourceId`). A
+ * visited-set guards against a malformed cyclic lineage. Exported for direct unit testing — the chain
+ * DEPTH of a request that rests on source `s` is `1 + chainDepthOfSource(s, …)`.
+ */
+export function chainDepthOfSource(
+  sourceId: string | undefined,
+  producedBy: Map<string, string>,
+  requestSource: Map<string, string | undefined>,
+  visited: Set<string> = new Set(),
+): number {
+  if (!sourceId || visited.has(sourceId)) return 0;
+  visited.add(sourceId);
+  const parentRequestId = producedBy.get(sourceId);
+  if (!parentRequestId) return 0; // a primary (non-research) source — the chain root
+  return 1 + chainDepthOfSource(requestSource.get(parentRequestId), producedBy, requestSource, visited);
+}
+
+/**
  * Collect the `research-request` signals a producer emitted (RESEARCH-3, D1) from the audit into
  * `ResearchRequest`s ready for dispatch. A producer (a pipeline stage that hit an unknown term, or
  * Reflect) emits `signals: [{ type: 'research-request', what, why, context?, refs? }]`, which lands
  * as a `signal` audit event whose payload carries those fields. We read them back here; the
  * dispatcher's persistent dedup ledger then ensures the same request isn't fanned out twice across
  * sweeps, so re-collecting old signals is safe + idempotent.
+ *
+ * Each request is stamped with its CHAIN DEPTH (RESEARCH-11): depth 1 for a request off a primary
+ * source, +1 for each research→finding→request hop beneath it, derived from the `researched` audit
+ * lineage. The dispatcher enforces it against `budget.maxDepth` so a runaway research→finding→
+ * research chain escalates to Review instead of fetching unboundedly.
  */
 export async function collectResearchRequests(root: string): Promise<ResearchRequest[]> {
   const events = await readEvents(root, {}); // newest-first
+  // Lineage maps for the depth walk: which request produced a given research source, and which
+  // source a given request rested on. Built from the same audit read (no extra I/O).
+  const producedBy = new Map<string, string>(); // research-produced sourceId → producing requestId
+  const requestSource = new Map<string, string | undefined>(); // requestId → its by.sourceId
   const out: ResearchRequest[] = [];
   for (const e of events) {
+    if (e.actor === 'researcher' && e.eventType === 'researched' && e.subjects.sourceId && e.subjects.requestId) {
+      producedBy.set(e.subjects.sourceId, e.subjects.requestId);
+      continue;
+    }
     if (e.eventType !== 'signal') continue;
     const p = e.payload;
     if (p.type !== RESEARCH_REQUEST_SIGNAL || typeof p.what !== 'string' || p.what.length === 0) continue;
@@ -101,9 +138,11 @@ export async function collectResearchRequests(root: string): Promise<ResearchReq
       ...(e.subjects.sourceId ? { sourceId: e.subjects.sourceId } : {}),
       ...(e.subjects.entityId ? { entityId: e.subjects.entityId } : {}),
     };
+    // Stable id from provenance so re-collecting the same signal yields the same request.
+    const id = `${e.provenance.file}:${e.provenance.line}`;
+    requestSource.set(id, by.sourceId);
     out.push({
-      // Stable id from provenance so re-collecting the same signal yields the same request.
-      id: `${e.provenance.file}:${e.provenance.line}`,
+      id,
       ts: e.ts,
       by,
       what: p.what,
@@ -113,6 +152,10 @@ export async function collectResearchRequests(root: string): Promise<ResearchReq
       ...(typeof p.egressHint === 'string' ? { egressHint: p.egressHint as ResearchRequest['egressHint'] } : {}),
       dedupKey: dedupKeyFor({ what: p.what, by }),
     });
+  }
+  // Second pass: stamp chain depth now that both lineage maps are complete.
+  for (const req of out) {
+    req.depth = 1 + chainDepthOfSource(req.by.sourceId, producedBy, requestSource, new Set());
   }
   return out;
 }

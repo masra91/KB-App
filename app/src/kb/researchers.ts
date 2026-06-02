@@ -48,9 +48,24 @@ export interface ResearcherBudget {
 
 export const DEFAULT_RESEARCHER_BUDGET: ResearcherBudget = { maxToolCalls: 8, maxDepth: 2 };
 
-/** Hard global backstop: total researcher passes the dispatcher will run per drain/tick, across all
- *  researchers, regardless of per-researcher budgets (RESEARCH-11). The runaway ceiling. */
+/** Per-DISPATCH burst cap: total researcher passes one `dispatchResearch` fan-out will run, across all
+ *  researchers, regardless of per-researcher budgets (RESEARCH-11). Bounds a single inline sweep's burst;
+ *  the cross-dispatch/standing backstop is {@link RESEARCH_INSTANCE_CEILING}. */
 export const RESEARCH_GLOBAL_CEILING = 24;
+
+/**
+ * The **global per-Instance egress ceiling** (RESEARCH-11) — the cross-researcher HARD backstop on the
+ * total number of research passes (external egress) this Instance performs in a rolling window, layered
+ * ON TOP of per-researcher budgets + the per-dispatch burst cap. It catches a runaway the per-dispatch
+ * cap can't: passes accumulating across ticks/standing schedules over time. Enforced at the single pass
+ * chokepoint (`runResearcher`), so it bounds inline dispatch AND scheduled standing passes alike. It is
+ * a **safety backstop, not a normal-use limit**, and **self-healing** — passes age out of the window, so
+ * capacity returns automatically. The default is **tunable** (KB-PM ratified). NB: purely a runaway/
+ * volume backstop — the egress-tier ↔ content-sensitivity policy is a separate Principal item (D6), not
+ * conflated here. */
+export const RESEARCH_INSTANCE_CEILING = 100;
+/** The rolling window the per-Instance ceiling counts passes over (24h). Tunable with the ceiling. */
+export const RESEARCH_INSTANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /** Max researchers a single `research-request` may fan out to (RESEARCH-4 max-fan-out). */
 export const DEFAULT_MAX_FANOUT = 4;
@@ -133,6 +148,15 @@ export interface ResearchRequest {
   egressHint?: EgressTier;
   /** Coalescing key so the same request doesn't fan out repeatedly (D2). */
   dedupKey: string;
+  /**
+   * Chain depth of this request (RESEARCH-11 depth limit). A request born from a PRIMARY source is
+   * depth 1; one born from a research-produced (`origin:'secondary'`) finding is one deeper than that
+   * finding's own chain, and so on (research→finding→`research-request`→research…). Stamped at
+   * creation — by `collectResearchRequests` (from audit lineage) for inline requests, `1` for a
+   * scheduler standing pass — and ENFORCED by the dispatcher against the running researcher's
+   * `budget.maxDepth` (over-depth → escalate-to-Review, no egress). Absent ⇒ treated as `1`.
+   */
+  depth?: number;
 }
 
 /** Normalize a string for dedup/topic matching: lowercase, collapse whitespace, trim. */

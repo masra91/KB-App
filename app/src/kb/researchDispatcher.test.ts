@@ -128,3 +128,78 @@ describe('dispatchResearch — dedup ledger (D2) + ceiling (RESEARCH-11)', () =>
     });
   });
 });
+
+describe('dispatchResearch — chain depth limit (RESEARCH-11)', () => {
+  /** deps() plus a recording escalate seam. */
+  function depthDeps(over: Partial<DispatchDeps> = {}): DispatchDeps & { runs: () => number; escalations: () => Array<{ id: string; depth: number }> } {
+    let runs = 0;
+    const escalations: Array<{ id: string; depth: number }> = [];
+    return {
+      selfNominate: async () => true,
+      run: async (r) => {
+        runs++;
+        return { sourceIds: [`src-${r.id}-${runs}`] };
+      },
+      escalate: async (_r, request, depth) => {
+        escalations.push({ id: request.id, depth });
+        return { reviewId: `rev-${request.id}`, created: true };
+      },
+      ...over,
+      runs: () => runs,
+      escalations: () => escalations,
+    } as DispatchDeps & { runs: () => number; escalations: () => Array<{ id: string; depth: number }> };
+  }
+
+  it('runs a request at or under maxDepth', async () => {
+    await withTemp(async (root) => {
+      const d = depthDeps();
+      const res = await dispatchResearch(root, [req('atlas', { depth: 2 })], [web({ budget: { maxToolCalls: 8, maxDepth: 2 } })], d);
+      expect(res.outcomes[0].ran).toBe(true);
+      expect(d.runs()).toBe(1);
+      expect(d.escalations()).toHaveLength(0);
+    });
+  });
+
+  it('refuses an OVER-depth request (no egress) and escalates it to Review instead', async () => {
+    await withTemp(async (root) => {
+      const d = depthDeps();
+      const res = await dispatchResearch(root, [req('atlas', { depth: 3 })], [web({ budget: { maxToolCalls: 8, maxDepth: 2 } })], d);
+      const o = res.outcomes[0];
+      expect(o.ran).toBe(false); // NO run — the deterministic hard stop, not advisory
+      expect(o.escalated).toBe(true);
+      expect(o.reviewId).toBe('rev-req-atlas');
+      expect(o.note).toMatch(/depth 3 > maxDepth 2/);
+      expect(d.runs()).toBe(0); // zero egress
+      expect(d.escalations()).toEqual([{ id: 'req-atlas', depth: 3 }]);
+    });
+  });
+
+  it('checks depth BEFORE the ceiling (an over-depth chain surfaces as a Review, not a silent ceiling skip)', async () => {
+    await withTemp(async (root) => {
+      const d = depthDeps();
+      const res = await dispatchResearch(root, [req('atlas', { depth: 5 })], [web()], { ...d, globalCeiling: 0 });
+      expect(res.outcomes[0].escalated).toBe(true);
+      expect(res.ceilingHit).toBe(false); // never reached the ceiling branch
+      expect(d.escalations()).toHaveLength(1);
+    });
+  });
+
+  it('an absent depth is treated as 1 (a root request always runs under any sane maxDepth)', async () => {
+    await withTemp(async (root) => {
+      const d = depthDeps();
+      const res = await dispatchResearch(root, [req('atlas')], [web()], d); // no depth set
+      expect(res.outcomes[0].ran).toBe(true);
+      expect(d.escalations()).toHaveLength(0);
+    });
+  });
+
+  it('refuses the over-depth run even when no escalate seam is wired (defense-in-depth)', async () => {
+    await withTemp(async (root) => {
+      const d = depthDeps({ escalate: undefined });
+      const res = await dispatchResearch(root, [req('atlas', { depth: 9 })], [web()], d);
+      expect(res.outcomes[0]).toMatchObject({ ran: false, escalated: true });
+      expect(res.outcomes[0].reviewId).toBeUndefined();
+      expect(d.runs()).toBe(0);
+    });
+  });
+});
