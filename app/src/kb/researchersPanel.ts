@@ -2,8 +2,9 @@
 // side-effect-free (SHELL-6 / TEST-5): the main process gathers the fs-backed inputs (registry +
 // last-run audit events) and hands them here; the renderer renders the result. Mirrors jobsPanel.
 import { EGRESS_TIERS, RESEARCHER_TEMPLATES, TEMPLATE_DEFAULT_EGRESS, type ResearcherConfig, type EgressTier, type ResearcherTemplate } from './researchers';
+import { DEFAULT_POSTURE } from './jobs';
 import { schedulePresetLabel, SCHEDULE_OPTIONS } from './jobsPanel';
-import type { AuditEvent } from './audit';
+import type { AuditEvent, AuditEventInput } from './audit';
 import type { ResearcherView, ResearcherLastRun, ResearcherConfigPatch } from './types';
 
 export { schedulePresetLabel, SCHEDULE_OPTIONS };
@@ -101,4 +102,38 @@ export function isResearcherTemplate(v: unknown): v is ResearcherTemplate {
 /** Default egress for a template (custom defaults to the safest, local-only). */
 export function defaultEgressFor(template: ResearcherTemplate): EgressTier {
   return template === 'custom' ? 'local-only' : TEMPLATE_DEFAULT_EGRESS[template];
+}
+
+const RESEARCHER_AUDIT_WHY = 'Principal change via Control Panel';
+
+/**
+ * Conforming `panel` audit events for a researcher config change (RESEARCH-15 / AUDIT-2), mirroring
+ * jobConfigAuditEvents: one event per **behavior-relevant field that actually changed** (enabled /
+ * schedule / posture / egressTier), carrying from→to. `patch` MUST be the **validated/applied**
+ * values (not raw IPC input) so a dropped-invalid field is never recorded as applied, and a no-op
+ * re-assert audits nothing. For a new researcher, `prior` is undefined → base is the safe defaults
+ * (egress `local-only`), so e.g. creating a public-web researcher records local-only→public-web.
+ */
+export function researcherConfigAuditEvents(
+  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier'> | undefined,
+  patch: ResearcherConfigPatch,
+): AuditEventInput[] {
+  const base = {
+    enabled: prior?.enabled ?? false,
+    schedule: prior?.schedule ?? 'off',
+    posture: prior?.posture ?? DEFAULT_POSTURE,
+    egressTier: prior?.egressTier ?? ('local-only' as EgressTier),
+  };
+  const events: AuditEventInput[] = [];
+  for (const field of ['enabled', 'schedule', 'posture', 'egressTier'] as const) {
+    const to = patch[field];
+    if (to === undefined || to === base[field]) continue;
+    events.push({
+      actor: 'panel',
+      eventType: 'researcher-config-change',
+      subjects: { researcherId: patch.id },
+      payload: { field, from: base[field], to, why: RESEARCHER_AUDIT_WHY },
+    });
+  }
+  return events;
 }

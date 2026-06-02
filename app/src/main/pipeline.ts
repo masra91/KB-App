@@ -40,7 +40,7 @@ import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
-import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor } from '../kb/researchersPanel';
+import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { stubResearchFn } from '../kb/researchStub';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
@@ -391,54 +391,61 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   const root = active.stagingWt;
   if (typeof patch.id !== 'string' || patch.id.length === 0) return listResearchersForActive();
 
+  // Validate untrusted IPC input into a `clean` patch (drop unknown enums; the rest is fail-safe).
+  // apply + audit both use `clean`, so a dropped-invalid field is never recorded as applied
+  // (QA-2 #81 follow-up — audit accuracy matters for the egress-relevant fields).
+  const clean: ResearcherConfigPatch = { id: patch.id };
+  if (typeof patch.enabled === 'boolean') clean.enabled = patch.enabled;
+  if (isSchedulePreset(patch.schedule)) clean.schedule = patch.schedule;
+  if (isAutonomyPosture(patch.posture)) clean.posture = patch.posture;
+  if (isEgressTier(patch.egressTier)) clean.egressTier = patch.egressTier;
+  if (isResearcherTemplate(patch.template)) clean.template = patch.template;
+  if (typeof patch.label === 'string') clean.label = patch.label;
+  if (typeof patch.prompt === 'string' && patch.prompt.trim()) clean.prompt = patch.prompt;
+  if (typeof patch.scope === 'string' && patch.scope.trim()) clean.scope = patch.scope;
+  if (Array.isArray(patch.topics)) clean.topics = patch.topics;
+
   let prior: ResearcherConfig | undefined;
   let applied = false;
   await active.lock.run(async () => {
     const registry = await readResearcherRegistry(root);
-    prior = registry.find((r) => r.id === patch.id);
+    prior = registry.find((r) => r.id === clean.id);
     if (prior) {
-      await patchResearcher(root, patch.id, {
-        ...(typeof patch.enabled === 'boolean' ? { enabled: patch.enabled } : {}),
-        ...(isSchedulePreset(patch.schedule) ? { schedule: patch.schedule } : {}),
-        ...(isAutonomyPosture(patch.posture) ? { posture: patch.posture } : {}),
-        ...(isEgressTier(patch.egressTier) ? { egressTier: patch.egressTier } : {}),
-        ...(typeof patch.prompt === 'string' && patch.prompt.trim() ? { prompt: patch.prompt } : {}),
-        ...(typeof patch.scope === 'string' && patch.scope.trim() ? { scope: patch.scope } : {}),
-        ...(Array.isArray(patch.topics) ? { topics: patch.topics } : {}),
+      await patchResearcher(root, clean.id, {
+        ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}),
+        ...(clean.schedule !== undefined ? { schedule: clean.schedule } : {}),
+        ...(clean.posture !== undefined ? { posture: clean.posture } : {}),
+        ...(clean.egressTier !== undefined ? { egressTier: clean.egressTier } : {}),
+        ...(clean.prompt !== undefined ? { prompt: clean.prompt } : {}),
+        ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
+        ...(clean.topics !== undefined ? { topics: clean.topics } : {}),
       });
     } else {
       // New researcher: derive a safe config from the (validated) template + defaults.
-      const template = isResearcherTemplate(patch.template) ? patch.template : 'custom';
+      const template = clean.template ?? 'custom';
+      const egressTier = clean.egressTier ?? defaultEgressFor(template);
+      clean.egressTier = egressTier; // record the actual created egress in the audit (from local-only)
       await upsertResearcher(root, {
-        id: patch.id,
+        id: clean.id,
         template,
-        label: typeof patch.label === 'string' ? patch.label : undefined,
-        prompt: typeof patch.prompt === 'string' && patch.prompt.trim() ? patch.prompt : `Research ${template} sources relevant to the request.`,
-        egressTier: isEgressTier(patch.egressTier) ? patch.egressTier : defaultEgressFor(template),
-        scope: typeof patch.scope === 'string' && patch.scope.trim() ? patch.scope : 'global',
+        label: clean.label,
+        prompt: clean.prompt ?? `Research ${template} sources relevant to the request.`,
+        egressTier,
+        scope: clean.scope ?? 'global',
         budget: DEFAULT_RESEARCHER_BUDGET,
-        schedule: isSchedulePreset(patch.schedule) ? patch.schedule : 'off',
-        posture: isAutonomyPosture(patch.posture) ? patch.posture : DEFAULT_POSTURE,
-        enabled: patch.enabled ?? false,
-        ...(Array.isArray(patch.topics) ? { topics: patch.topics } : {}),
+        schedule: clean.schedule ?? 'off',
+        posture: clean.posture ?? DEFAULT_POSTURE,
+        enabled: clean.enabled ?? false,
+        ...(clean.topics ? { topics: clean.topics } : {}),
       });
     }
     applied = true;
-    await commitControlFile(root, researcherRegistryPath(root), `researcher ${patch.id} config change`);
+    await commitControlFile(root, researcherRegistryPath(root), `researcher ${clean.id} config change`);
   });
   if (applied) {
-    await appendAuditEvent(root, {
-      actor: 'panel',
-      eventType: 'researcher-config-change',
-      subjects: { researcherId: patch.id },
-      payload: {
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(patch.schedule !== undefined ? { schedule: patch.schedule } : {}),
-        ...(patch.posture !== undefined ? { posture: patch.posture } : {}),
-        ...(patch.egressTier !== undefined ? { egressTier: patch.egressTier } : {}),
-        why: 'Principal change via Control Panel',
-      },
-    });
+    // Conforming `panel` audit: one event per changed behavior-relevant field (from→to), validated
+    // values only — never a dropped-invalid field, never a no-op re-assert (QA-2 #81 follow-up).
+    for (const event of researcherConfigAuditEvents(prior, clean)) await appendAuditEvent(root, event);
   }
   return listResearchersForActive();
 }

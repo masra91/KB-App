@@ -7,6 +7,7 @@ import {
   isEgressTier,
   isResearcherTemplate,
   defaultEgressFor,
+  researcherConfigAuditEvents,
   RESEARCHER_TEMPLATE_OPTIONS,
 } from './researchersPanel';
 import type { ResearcherConfig } from './researchers';
@@ -79,5 +80,31 @@ describe('untrusted-input validators + template defaults', () => {
 
   it('exposes the four template add-options', () => {
     expect(RESEARCHER_TEMPLATE_OPTIONS.map((o) => o.template)).toEqual(['web', 'code', 'm365', 'custom']);
+  });
+});
+
+describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to audit)', () => {
+  it('emits one event per CHANGED behavior-relevant field, with from/to', () => {
+    const prior = web({ enabled: false, schedule: 'off', posture: 'guarded', egressTier: 'local-only' });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', enabled: true, egressTier: 'public-web' });
+    expect(events.map((e) => (e.payload as { field: string }).field).sort()).toEqual(['egressTier', 'enabled']);
+    const enabledEv = events.find((e) => (e.payload as { field: string }).field === 'enabled')!;
+    expect(enabledEv).toMatchObject({ actor: 'panel', eventType: 'researcher-config-change', subjects: { researcherId: 'web-1' } });
+    expect(enabledEv.payload).toMatchObject({ from: false, to: true });
+  });
+
+  it('audits nothing for a no-op re-assert (same value)', () => {
+    const prior = web({ enabled: true, schedule: 'daily' });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', enabled: true, schedule: 'daily' })).toEqual([]);
+  });
+
+  it('for a new researcher (no prior): from = safe defaults (egress local-only)', () => {
+    const events = researcherConfigAuditEvents(undefined, { id: 'web-1', egressTier: 'public-web' });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'egressTier', from: 'local-only', to: 'public-web' });
+  });
+
+  it('ignores undefined (dropped-invalid) fields — only applied values are audited', () => {
+    expect(researcherConfigAuditEvents(web(), { id: 'web-1' })).toEqual([]); // nothing changed
   });
 });
