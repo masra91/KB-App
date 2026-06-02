@@ -23,6 +23,7 @@ import { ConnectStage } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog } from '../kb/devlog';
+import { createVaultTracer } from '../kb/tracing';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
@@ -114,6 +115,10 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // Passed to every stage so failures land here with their cause (OBS-3/4); also captures the
   // worktree-provision failure below — the silent-stall cause that motivated SPEC-0030.
   const log = createVaultDevLog(vaultPath);
+  // OBS-12/13: per-vault latency tracer (<vault>/.kb/cache/spans.jsonl, never promoted). Threaded
+  // into every stage so each per-item `stage.run` span + its `copilot.invoke` child are recorded;
+  // the perf index (perfIndex.ts) aggregates them. Spans also mirror to the dev log at `debug`.
+  const tracer = createVaultTracer(vaultPath, { log });
   let stagingWt: string;
   try {
     stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
@@ -128,7 +133,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const promoteEvergreen = async (): Promise<void> => {
     await promote(vaultPath);
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, undefined, log);
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, undefined, log, tracer);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen
@@ -143,8 +148,8 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
   // stays cap=1 until its ephemeral-worktree migration (Phase 2).
   const STAGE_CAP = 3;
-  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log);
-  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log);
+  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
+  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
   // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.)
@@ -159,6 +164,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     },
     STAGE_CAP,
     log,
+    tracer,
   );
   // The autonomous-job scheduler (SPEC-0023): wakes registered jobs on their named-preset cadence,
   // each a bounded, single-flight pass in its own worktree sharing the canonical-writer lock (a

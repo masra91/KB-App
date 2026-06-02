@@ -19,6 +19,7 @@ import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, 
 import { Mutex } from './stageLock';
 import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
+import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
 const STATUS_REL = path.join('.kb', 'cache', 'status.json');
 
@@ -63,6 +64,7 @@ export async function archiveOne(
   id: string,
   decider: ArchivistDecider = deterministicDecider,
   lock: Mutex = new Mutex(),
+  span: ActiveSpan = noopActiveSpan,
 ): Promise<string> {
   root = path.resolve(root);
   const destRel = path.join('sources', dateShard(id), id);
@@ -72,7 +74,7 @@ export async function archiveOne(
 
     const unitDir = path.join(wt, 'inbox', id);
     const meta = await readCapturedMeta(unitDir);
-    const decision = await decider(meta);
+    const decision = await decider(meta, { span });
 
     const dest = path.join(wt, destRel);
     await fs.mkdir(path.dirname(dest), { recursive: true });
@@ -139,6 +141,7 @@ export class Orchestrator {
   private readonly afterDrain?: () => Promise<void>;
   private readonly cap: number;
   private readonly log: DevLog;
+  private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -159,6 +162,7 @@ export class Orchestrator {
     afterDrain?: () => Promise<void>,
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
+    tracer: Tracer = noopTracer,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -166,6 +170,7 @@ export class Orchestrator {
     this.afterDrain = afterDrain;
     this.cap = cap;
     this.log = log.child({ scope: 'archive' });
+    this.tracer = tracer;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -233,7 +238,23 @@ export class Orchestrator {
       const batch = queue.slice(0, this.cap);
       await this.updateStatus(queue.length, batch[0]);
       try {
-        await Promise.all(batch.map((id) => archiveOne(this.root, id, this.decider, this.lock)));
+        // OBS-12: each item gets a `stage.run` span (wraps the archivist's copilot child once Phase B
+        // lands; v1's deterministic decider emits no child, so this just times the archive op).
+        await Promise.all(
+          batch.map((id) => {
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
+            return archiveOne(this.root, id, this.decider, this.lock, span).then(
+              (r) => {
+                span.end('ok');
+                return r;
+              },
+              (err) => {
+                span.end('error');
+                throw err;
+              },
+            );
+          }),
+        );
         this.lastArchived = batch[batch.length - 1];
       } catch (err) {
         // OBS-4: archive failed — the item stays in the inbox (ORCH-12). Surface the cause so this

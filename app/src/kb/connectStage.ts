@@ -46,6 +46,7 @@ import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
+import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
 /**
  * The branch Connect's worktree is based on and fast-forwards into.
@@ -390,6 +391,7 @@ export async function connectOne(
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
   collisionAttempt = 0,
   log: DevLog = noopDevLog,
+  span: ActiveSpan = noopActiveSpan,
 ): Promise<ConnectOneResult> {
   root = path.resolve(root);
   const checkpoint = await canonicalHead(root); // the canonical commit this block prepares off
@@ -407,7 +409,7 @@ export async function connectOne(
     const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint));
     if (outcome === 'advanced') return onSuccess;
     if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
-      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1, log);
+      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1, log, span);
     }
     // Persist the set-aside, retrying its OWN advance against a fresh checkpoint — the marker is a
     // disjoint connect-audit append, so this converges. Never silently drop the set-aside (QA #45):
@@ -445,7 +447,7 @@ export async function connectOne(
       candidates: setCandidates,
       existingNodes: sameKeyNodes.map((n): ExistingNodeRef => ({ id: n.id, name: n.name })),
     };
-    const decision = await decider(set);
+    const decision = await decider(set, { span });
     const model = decision.agent?.model ?? 'default';
     const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
     const candidateById = new Map(setCandidates.map((c) => [c.id, c] as const));
@@ -796,6 +798,7 @@ export class ConnectStage {
   private readonly maxAttempts: number;
   private readonly afterDrain?: () => Promise<void>;
   private readonly log: DevLog;
+  private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -814,6 +817,7 @@ export class ConnectStage {
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     afterDrain?: () => Promise<void>,
     log: DevLog = noopDevLog,
+    tracer: Tracer = noopTracer,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -821,6 +825,7 @@ export class ConnectStage {
     this.maxAttempts = maxAttempts;
     this.afterDrain = afterDrain;
     this.log = log.child({ scope: 'connect' });
+    this.tracer = tracer;
   }
 
   start(sweepMs = 30_000): void {
@@ -864,12 +869,16 @@ export class ConnectStage {
     let worked = false;
     while (queue.length > 0) {
       const key = queue[0].blockKey;
+      const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: key });
       try {
         // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
         // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
-        await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log);
+        // OBS-12: the `stage.run` span wraps the decider's `copilot.invoke` child (incl. collision re-runs).
+        const r = await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log, span);
+        span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error');
         worked = true;
       } catch (err) {
+        span.end('error');
         this.log.error('connect.drain-error', { itemId: key, err });
         return; // unexpected — stop this pass; a later poke/sweep retries rather than spinning
       }

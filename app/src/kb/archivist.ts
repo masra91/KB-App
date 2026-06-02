@@ -4,6 +4,7 @@
 // a single-shot Copilot session implementing the same `ArchivistDecider` interface — the
 // orchestrator code does not change.
 import type { CapturedMeta } from './ingest';
+import type { SpanCtx } from './tracing';
 
 export interface ArchiveDecision {
   kind: 'text' | 'file';
@@ -30,7 +31,7 @@ export interface AgentTrace {
 }
 
 /** A decider maps a captured unit's metadata to an archival decision. */
-export type ArchivistDecider = (meta: CapturedMeta) => ArchiveDecision | Promise<ArchiveDecision>;
+export type ArchivistDecider = (meta: CapturedMeta, ctx?: SpanCtx) => ArchiveDecision | Promise<ArchiveDecision>;
 
 /**
  * v1 deterministic decision. Conservative defaults only (CAPTURE-10): everything captured

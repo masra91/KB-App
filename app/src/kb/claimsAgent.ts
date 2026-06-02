@@ -14,6 +14,7 @@ import { detectCopilot } from './copilot';
 import { parseClaimsDecision, type ClaimsDecision, CLAIM_STATUSES } from './claims';
 import type { SourceInput } from './decomposeAgent';
 import type { AgentTrace } from './archivist';
+import { COPILOT_OP, type SpanCtx } from './tracing';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000; // reading a whole source for substance takes time
@@ -37,7 +38,7 @@ export interface EntityInput {
 }
 
 /** A decider maps an entity (+ its source) to a validated claims decision. May throw (CLAIMS-12). */
-export type ClaimsDecider = (input: EntityInput) => Promise<ClaimsDecision>;
+export type ClaimsDecider = (input: EntityInput, ctx?: SpanCtx) => Promise<ClaimsDecision>;
 
 /** Injectable runner: given the composed prompt, return the session's stdout. */
 export type CopilotRunner = (prompt: string) => Promise<string>;
@@ -149,7 +150,7 @@ export interface ClaimsDeciderOptions {
 export function makeClaimsDecider(opts: ClaimsDeciderOptions = {}): ClaimsDecider {
   const run = opts.run ?? defaultRunner;
   let available: boolean | null = opts.available ?? null;
-  return async (input) => {
+  return async (input, ctx) => {
     if (available === null) {
       try {
         available = (await detectCopilot()).available;
@@ -163,8 +164,16 @@ export function makeClaimsDecider(opts: ClaimsDeciderOptions = {}): ClaimsDecide
     const params = launchFlags();
     const at = new Date().toISOString();
     const t0 = Date.now();
-    const decision = parseClaimsDecision(await run(buildClaimsPrompt(input)), input.entityId);
-    const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
-    return { ...decision, agent };
+    // OBS-13: time the Copilot call as a child of the stage's run span (failures included).
+    const cs = ctx?.span?.child(COPILOT_OP);
+    try {
+      const decision = parseClaimsDecision(await run(buildClaimsPrompt(input)), input.entityId);
+      cs?.end('ok');
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
+      return { ...decision, agent };
+    } catch (e) {
+      cs?.end('error');
+      throw e;
+    }
   };
 }

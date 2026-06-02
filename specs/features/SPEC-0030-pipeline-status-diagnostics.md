@@ -84,8 +84,8 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | none-yet | AUDIT-8 |
 | OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | none-yet | AUTO-12; PRIN-19 |
 | OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | none-yet | ORCH-10,13 |
-| OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | none-yet | ORCH-16; OBS-1 |
-| OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | none-yet | ORCH-16 |
+| OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | test:app/src/kb/obsTracing.test.ts | ORCH-16; OBS-1 |
+| OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | test:app/src/kb/obsTracing.test.ts | ORCH-16 |
 | OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | none-yet | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
@@ -184,3 +184,16 @@ A sidebar view (SPEC-0017), read-only:
   **Deferred to slice 2b (wiring):** OBS-12/13 — threading the `Tracer` into the 5 stages + pipeline.ts
   so real operations emit a `stage.run` span wrapping a synthesized `copilot.invoke` child (the
   proven DevLog threading). The Status **view** (OBS-5–9/11) + latency surfacing (OBS-15) follow.
+- 2026-06-02 — **stage span emission (wiring)** — **OBS-12 + OBS-13 → test:**. The `Tracer` is now
+  threaded into the 4 pipeline stages (`Orchestrator`/`Decompose`/`Connect`/`Claims`) + `pipeline.ts`
+  (`createVaultTracer(vaultPath)`), the same optional-ctor-param pattern as the dev-log. Each stage
+  drain opens a per-item `stage.run` span and passes it to the agent via a new `SpanCtx`
+  (`decider(input, { span })`); the agent times its Copilot call as a **true nested `copilot.invoke`
+  child** (`ctx.span.child(COPILOT_OP)`), capturing **failures too** (the span ends `error` before the
+  decider re-throws / the archivist falls back). Children inherit `stage`+`itemId` for per-item tracing
+  (OBS-16). The thin agents gained only an optional `ctx` param — no `Tracer` dependency. Verified
+  end-to-end (`obsTracing.test.ts`): a real `makeDecomposeDecider` call under a stage span emits a
+  nested copilot child (`parentSpanId` link, inherited stage/itemId, `ok`), a failed call ends `error`
+  + re-throws, and the emitted spans feed the perf index. Existing stage tests unchanged (the new
+  params default to `noopTracer`/`noopActiveSpan`). **The Status view (OBS-5–9/11) + latency surfacing
+  (OBS-15) are the remaining slice** — the latency half's data + emission are now complete.

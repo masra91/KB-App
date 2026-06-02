@@ -13,6 +13,7 @@ import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { parseDecomposeDecision, type DecomposeDecision } from './decompose';
 import type { AgentTrace } from './archivist';
+import { COPILOT_OP, type SpanCtx } from './tracing';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000; // decomposition reads more than a classification
@@ -28,7 +29,7 @@ export interface SourceInput {
 }
 
 /** A decider maps a source to a validated decompose decision. May throw (DECOMP-6). */
-export type DecomposeDecider = (input: SourceInput) => Promise<DecomposeDecision>;
+export type DecomposeDecider = (input: SourceInput, ctx?: SpanCtx) => Promise<DecomposeDecision>;
 
 /** Injectable runner: given the composed prompt, return the session's stdout. */
 export type CopilotRunner = (prompt: string) => Promise<string>;
@@ -149,7 +150,7 @@ export interface DecomposeDeciderOptions {
 export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): DecomposeDecider {
   const run = opts.run ?? defaultRunner;
   let available: boolean | null = opts.available ?? null;
-  return async (input) => {
+  return async (input, ctx) => {
     if (available === null) {
       try {
         available = (await detectCopilot()).available;
@@ -163,8 +164,17 @@ export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): Decomp
     const params = launchFlags();
     const at = new Date().toISOString();
     const t0 = Date.now();
-    const decision = parseDecomposeDecision(await run(buildDecomposePrompt(input)), input.sourceId);
-    const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
-    return { ...decision, agent };
+    // OBS-13: time this Copilot invocation as a child of the stage's run span (OBS-12 nesting),
+    // capturing failures too — a thrown parse/call ends the span `error` before re-throwing.
+    const cs = ctx?.span?.child(COPILOT_OP);
+    try {
+      const decision = parseDecomposeDecision(await run(buildDecomposePrompt(input)), input.sourceId);
+      cs?.end('ok');
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
+      return { ...decision, agent };
+    } catch (e) {
+      cs?.end('error');
+      throw e;
+    }
   };
 }
