@@ -38,6 +38,7 @@ import {
   type ParsedNode,
 } from './connectDoc';
 import { mergeNodes } from './mergeNodes';
+import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
 import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
@@ -792,6 +793,46 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
 }
 
 /**
+ * Connect's post-Claims **within-source claim-dedup** pass (SPEC-0016 CLAIMS-19). Collapses
+ * near-duplicate claims that share a source's provenance (the "same assertion restated per-entity"
+ * over-extraction dogfooding surfaced) — deterministic, idempotent, grouped strictly by source so
+ * cross-source claims are never merged (CLAIMS-17); the symmetric-relationship residual is left for
+ * typed links (CONNECT-20) and only counted. Mirrors `linkOne`'s worktree discipline: reset to base,
+ * run the pure pass on the worktree, then (only if it changed anything) commit + ff-merge the
+ * canonical advance. A no-dupe vault is a byte-stable no-op. MUST be called serialized via the shared
+ * canonical-writer lock. Returns the report (for the drain's audit/log) + whether it committed.
+ */
+export async function dedupClaimsOnce(root: string): Promise<DedupReport & { committed: boolean }> {
+  root = path.resolve(root);
+  const { wt, base } = await ensureWorktree(root);
+  const wtGit = simpleGit(wt);
+  const rootGit = simpleGit(root);
+  await wtGit.raw('reset', '--hard', base);
+  await wtGit.raw('clean', '-fd', 'entities', 'claims');
+
+  const report = await applyClaimDedup(wt); // delete dropped claim files + regenerate affected blocks
+  if (report.dropped === 0) return { ...report, committed: false }; // nothing collapsed → byte-stable no-op
+
+  const runId = ulid();
+  await appendAudit(
+    wt,
+    auditLine({
+      runId,
+      event: 'claim-dedup',
+      dropped: report.dropped,
+      kept: report.kept,
+      affected: report.affectedSubjects.length,
+      // The deferred symmetric-relationship residual → CONNECT-20 (logged, not acted on; PM ruling).
+      relationalResidual: report.suspectedRelationalResidual,
+    }),
+  );
+  await wtGit.raw('add', '-A');
+  await wtGit.commit(`connect: dedup ${report.dropped} within-source duplicate claim(s)`);
+  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  return { ...report, committed: true };
+}
+
+/**
  * Owns a vault's Connect stage: a poke/sweep drain loop sharing the canonical-writer lock with
  * the other stages (SPEC-0014 §5). Restartable: re-reads the derived queue and resumes.
  */
@@ -899,6 +940,24 @@ export class ConnectStage {
       } catch (err) {
         this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
       }
+    }
+    // Within-source claim dedup (CLAIMS-19): collapse the "same assertion restated per-entity"
+    // over-extraction once Claims has settled. Coarse-locked like link-promotion (it sweeps all
+    // claims), deterministic (no copilot slot), idempotent. A drop must promote (deletions mirror to
+    // `main` via the deletion-aware gate), so set `worked` when it committed. Best-effort: a failure
+    // is logged and a later poke/sweep retries — it never aborts the rest of the drain.
+    try {
+      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root));
+      if (dedup.committed) {
+        worked = true;
+        this.log.info('connect.claim-dedup', {
+          dropped: dedup.dropped,
+          affected: dedup.affectedSubjects.length,
+          relationalResidual: dedup.suspectedRelationalResidual,
+        });
+      }
+    } catch (err) {
+      this.log.warn('connect.claim-dedup-error', { err }); // best-effort; a later poke/sweep retries
     }
     // Publish the now-resolved evergreen entities (+ repointed claims + links) staging→main
     // (STAGING-3/11), serialized under the shared lock so promotion never races a stage ref

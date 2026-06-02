@@ -333,7 +333,7 @@ inside the entity node so its substance reads in place:
 | CLAIMS-16  | must     | Claims is **idempotent / restartable**: an item leaves the **derived work-list** only once its result is committed (terminal marker); crash/re-poke resumes without duplicating committed claims, and the node block regenerates whole | test:claimsStage.test.ts | ORCH-4,13 |
 | CLAIMS-17  | should   | **No cross-_source_ dedup**: the same assertion from two **different sources** yields two claims (independent provenance); cross-source merge/retraction stays a Connect/Reflect concern, fed by `possible-duplicate` signals. (Within-_source_ near-dupes are now collapsed — CLAIMS-19.) | test:claimsStage.test.ts, claimDedup.test.ts | DATA-3; LIFE-8 |
 | CLAIMS-18  | should   | The Claims work-list is discovered by a **derived sweep of `entities/`** in v1 (terminal `claims` marker in the source audit, keyed by `entityId`); the eventual seam is a **`queue/claims/` folder + per-entity poke** (DECOMP-16) — later stages attach with no change to Claims | test:claimsStage.test.ts | ORCH-9,15; DECOMP-16 |
-| CLAIMS-19  | should   | **Within-source near-duplicate claim collapse**: claims that share the **same source provenance** AND normalize to the **same statement** collapse to one canonical (fact>interpretation>hypothesis, then confidence, then earliest id); the rest are deleted and the affected nodes' claims blocks regenerated. Deterministic + idempotent; runs as **Connect's post-Claims pass** (SPEC-0016 §6). Symmetric-relationship rewordings ("A↔B") are NOT collapsed — deferred to typed links (SPEC-0020 CONNECT-20); the residual is logged | test:claimDedup.test.ts | DATA-3; LIFE-8; SPEC-0020 |
+| CLAIMS-19  | should   | **Within-source near-duplicate claim collapse**: claims that share the **same source provenance** AND normalize to the **same statement** collapse to one canonical (fact>interpretation>hypothesis, then confidence, then earliest id); the rest are deleted and the affected nodes' claims blocks regenerated. Deterministic + idempotent; runs as **Connect's post-Claims pass** (SPEC-0016 §6). Symmetric-relationship rewordings ("A↔B") are NOT collapsed — deferred to typed links (SPEC-0020 CONNECT-20); the residual is logged | test:claimDedup.test.ts, connectStage.test.ts | DATA-3; LIFE-8; SPEC-0020 |
 
 ### CLAIMS-5 — The work unit is an entity + its whole source
 - **Status:** draft · **Priority:** must
@@ -415,7 +415,10 @@ inside the entity node so its substance reads in place:
   merge claims from **different** sources (CLAIMS-17) nor collapse **symmetric rewordings**
   ("A worked with B" vs "B worked with A"). Statement normalization is therefore
   **order-sensitive**. It runs as **Connect's post-Claims pass** (§6), under the canonical-writer
-  lock, and **logs** what it collapsed plus a heuristic count of suspected symmetric residuals.
+  lock, and **logs** what it collapsed plus a heuristic count of suspected symmetric residuals. Its
+  destructive sinks (the claim-file delete + the entity-node block rewrite) are routed through the
+  shared symlink-safe containment guard (`assertContainedRel`, fail-closed) before the fs op, parity
+  with the Connect/Reflect merge sink (#80/#82).
 - **Rationale:** Dogfooding surfaced a tiny input producing ~11 near-duplicate claims — the same
   assertion restated once per entity. Collapsing exact/trivially-reworded restatements within a
   single source's testimony is a safe, deterministic felt-quality win that does **not** disturb
@@ -425,7 +428,7 @@ inside the entity node so its substance reads in place:
   (**CONNECT-20**); collapsing them textually would lose the relationship from one node's page,
   so they are deferred and merely counted, making the typed-links consumer-need visible.
 - **Traces:** DATA-3, LIFE-8, SPEC-0020 (Connect / CONNECT-20)
-- **Verify:** test:claimDedup.test.ts
+- **Verify:** test:claimDedup.test.ts, connectStage.test.ts
 
 ## 5. Concurrency & failure model (v1 posture)
 
@@ -521,6 +524,16 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
   links, dedup), claim retraction/supersession. Concurrency posture inherited
   (serial-in-stage, pipelined-across-stages, serialized canonical writer); cross-stage node
   writes are disjoint-region + downstream + regenerate-whole, hence conflict-free.
+- 2026-06-02 — **CLAIMS-19 WIRED into Connect (discharged).** The dedup pass now runs as Connect's
+  post-Claims pass: `ConnectStage.drainOnce` calls `dedupClaimsOnce` (after link-promotion, under the
+  shared canonical-writer lock) — reset-to-base → `applyClaimDedup` on the worktree → commit + ff-merge,
+  mirroring `linkOne`; a drop sets `worked` so the deletions promote `staging`→`main` via the
+  deletion-aware gate. The destructive sinks are hardened with the shared `assertContainedRel`
+  containment guard (claim delete under `claims/`, node rewrite under `entities/`; #80/#82 parity).
+  Added an **integration test** (`connectStage.test.ts`) proving a real drain collapses within-source
+  dupes + advances canonical (and leaves symmetric rewordings for CONNECT-20) — so CLAIMS-19 is now
+  behaviorally verified, not just unit-tested. (Closes #34 part-2 wiring; the eval/golden-set is the
+  remaining cross-cutting behavioral check for DECOMP-17 + CLAIMS-19.)
 - 2026-06-02 — **CLAIMS-19 (within-source dedup).** Dogfooding surfaced ~11 near-duplicate
   claims for a tiny input (the same assertion restated per-entity). Graduated the deferred dedup
   boundary: **within-source** near-duplicate statement collapse is now in scope (CLAIMS-19),

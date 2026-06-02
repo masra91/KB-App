@@ -9,7 +9,8 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue } from './connectStage';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce } from './connectStage';
+import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
 import type { Candidate, ConnectDecision } from './connect';
@@ -528,6 +529,92 @@ describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on
       await connectOne(root, 'organization|apple', oneClusterDecider('Apple')); // no tags in verdict
       const md = await fs.readFile(path.join(root, 'entities/organization/apple.md'), 'utf8');
       expect(md).toContain('tags: ["type/organization"]');
+    });
+  });
+});
+
+// ── Within-source claim dedup as Connect's post-Claims pass (SPEC-0016 CLAIMS-19) ────────────
+describe.skipIf(!gitAvailable)('Connect within-source claim dedup (CLAIMS-19)', () => {
+  const SRC = 'sources/2026/06/02/01SRCA';
+  /** Seed a claim WITH provenance.derivedFrom (the within-source dedup group key). */
+  async function seedClaimProv(
+    root: string,
+    subjectRel: string,
+    statement: string,
+    status: 'fact' | 'interpretation' | 'hypothesis',
+    confidence: number,
+    derivedFrom = SRC,
+  ): Promise<string> {
+    const id = ulid();
+    const rel = path.join('claims', dateShard(id), `${id}.md`);
+    const dest = path.join(root, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(
+      dest,
+      renderClaimMd({ statement, status, confidence, mentions: ['evidence'] }, { id, subject: subjectRel, derivedFrom, createdAt: '2026-06-02T00:00:00Z' }),
+      'utf8',
+    );
+    return rel;
+  }
+  const exists = (root: string, rel: string) => fs.access(path.join(root, rel)).then(() => true).catch(() => false);
+
+  it('a ConnectStage drain collapses within-source duplicate claims and advances canonical', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const ada = await seedNode(root, 'person', 'Ada Lovelace', [SRC]);
+      const bab = await seedNode(root, 'person', 'Charles Babbage', [SRC]);
+      const REL = 'Ada Lovelace worked with Charles Babbage.';
+      const a1 = await seedClaimProv(root, ada.rel, REL, 'fact', 0.9); // canonical (fact)
+      const a2 = await seedClaimProv(root, ada.rel, 'ada lovelace   WORKED with charles babbage', 'hypothesis', 0.5); // dup of a1 (same subject)
+      const b1 = await seedClaimProv(root, bab.rel, REL, 'interpretation', 0.8); // dup of a1 (cross-subject, same source)
+      const sym = await seedClaimProv(root, ada.rel, 'Charles Babbage worked with Ada Lovelace.', 'fact', 0.9); // symmetric reword — must SURVIVE (CONNECT-20)
+      await commitAll(root, 'seed entities + duplicate claims');
+
+      // A bare drain (no candidates/links queued) still runs the post-Claims dedup sweep.
+      const stage = new ConnectStage(root, oneClusterDecider('unused'), new Mutex(), undefined, undefined, undefined);
+      await stage.poke();
+      stage.stop();
+
+      // Canonical (root working tree, after the ff-merge inside the pass) reflects the collapse.
+      expect(await exists(root, a1)).toBe(true); // fact canonical kept
+      expect(await exists(root, a2)).toBe(false); // same-subject dup dropped
+      expect(await exists(root, b1)).toBe(false); // cross-subject dup dropped
+      expect(await exists(root, sym)).toBe(true); // symmetric reword survives (deferred → CONNECT-20)
+
+      // Ada's regenerated block lists the survivors (a1, sym), not the dropped a2.
+      const adaMd = await fs.readFile(path.join(root, ada.rel), 'utf8');
+      expect(adaMd).toContain(`[[${a1}]]`);
+      expect(adaMd).toContain(`[[${sym}]]`);
+      expect(adaMd).not.toContain(`[[${a2}]]`);
+      expect(adaMd).toContain('id:'); // identity untouched (CLAIMS-11)
+      // Babbage lost its only claim → placeholder block, no dangling link.
+      const babMd = await fs.readFile(path.join(root, bab.rel), 'utf8');
+      expect(babMd).not.toContain(`[[${b1}]]`);
+    });
+  });
+
+  it('dedupClaimsOnce commits + advances when it collapses, and is a clean no-op otherwise', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const ada = await seedNode(root, 'person', 'Ada Lovelace', [SRC]);
+      const REL = 'Pioneered the first published algorithm.';
+      await seedClaimProv(root, ada.rel, REL, 'fact', 0.9);
+      const dup = await seedClaimProv(root, ada.rel, REL, 'hypothesis', 0.4);
+      await commitAll(root, 'seed');
+      const headBefore = (await simpleGit(root).revparse(['HEAD'])).trim();
+
+      const first = await dedupClaimsOnce(root);
+      expect(first.committed).toBe(true);
+      expect(first.dropped).toBe(1);
+      expect(await exists(root, dup)).toBe(false);
+      const headAfter = (await simpleGit(root).revparse(['HEAD'])).trim();
+      expect(headAfter).not.toBe(headBefore); // canonical advanced
+
+      // Idempotent: a second pass finds no dupes → no commit, no advance.
+      const second = await dedupClaimsOnce(root);
+      expect(second.committed).toBe(false);
+      expect(second.dropped).toBe(0);
+      expect((await simpleGit(root).revparse(['HEAD'])).trim()).toBe(headAfter);
     });
   });
 });
