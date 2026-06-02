@@ -8,8 +8,8 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
-import { renderEntityNode } from './connectDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS } from './connectStage';
+import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue } from './connectStage';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
 import type { Candidate, ConnectDecision } from './connect';
 import { Mutex } from './stageLock';
@@ -82,6 +82,28 @@ async function seedClaim(root: string, subjectRel: string, statement: string): P
   const dest = path.join(root, rel);
   await fs.mkdir(path.dirname(dest), { recursive: true });
   const fm = ['---', `id: ${id}`, `subject: ${subjectRel}`, 'status: fact', 'confidence: 0.9', '---', '', statement, ''].join('\n');
+  await fs.writeFile(dest, fm, 'utf8');
+  return rel;
+}
+
+/** A claim carrying `relatesTo` hints (what Claims leaves for Connect to promote into links). */
+async function seedClaimRelatesTo(root: string, subjectRel: string, statement: string, relatesTo: string[]): Promise<string> {
+  const id = ulid();
+  const rel = path.join('claims', dateShard(id), `${id}.md`);
+  const dest = path.join(root, rel);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const fm = [
+    '---',
+    `id: ${id}`,
+    `subject: ${subjectRel}`,
+    'status: fact',
+    'confidence: 0.9',
+    `relatesTo: ${JSON.stringify(relatesTo)}`,
+    '---',
+    '',
+    statement,
+    '',
+  ].join('\n');
   await fs.writeFile(dest, fm, 'utf8');
   return rel;
 }
@@ -322,6 +344,82 @@ describe.skipIf(!gitAvailable)('connectOne — signals route to the audit log on
       expect(sig).toMatchObject({ stage: 'connect', type: 'note', note: 'one plausible match only' });
       const node = await fs.readFile(path.join(root, 'entities/person/steve-jobs.md'), 'utf8');
       expect(node).not.toContain('one plausible match only');
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikilinks]] (CONNECT-12/13)', () => {
+  it('resolves a relatesTo hint by name to a canonical node and renders a real [[wikilink]] block', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const apple = await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedClaimRelatesTo(root, steve.rel, 'Co-founded Apple.', ['Apple']);
+      await commitAll(root, 'seed node + relatesTo claim');
+
+      expect(await readLinkQueue(root)).toEqual([steve.rel]); // Steve's claim has a hint
+      const res = await linkOne(root, steve.rel);
+      expect(res.changed).toBe(true);
+      expect(res.links).toBe(1);
+
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(LINKS_BLOCK_START);
+      expect(md).toContain(`[[${apple.rel}]]`); // real Obsidian wikilink to the canonical node
+      expect((await simpleGit(root).status()).isClean()).toBe(true); // ORCH-3
+    });
+  });
+
+  it('is idempotent: a second linkOne on an unchanged node is a no-op (regenerate-whole)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedClaimRelatesTo(root, steve.rel, 'Co-founded Apple.', ['Apple']);
+      await commitAll(root, 'seed');
+
+      expect((await linkOne(root, steve.rel)).changed).toBe(true);
+      const res2 = await linkOne(root, steve.rel);
+      expect(res2.changed).toBe(false); // no churn — block regenerated identically
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    });
+  });
+
+  it('an unknown target is NOT a dangling guess — it becomes a note signal (CONNECT-13)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      await seedClaimRelatesTo(root, steve.rel, 'Knows someone at Nowhere Inc.', ['Nowhere Inc']);
+      await commitAll(root, 'seed');
+
+      const res = await linkOne(root, steve.rel);
+      expect(res.links).toBe(0);
+      expect(res.unresolved).toContain('Nowhere Inc');
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).not.toContain('[['); // no dangling wikilink rendered
+      const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
+      const note = audit
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l))
+        .find((o) => o.event === 'signal' && o.type === 'note');
+      expect(note.note).toContain('Nowhere Inc'); // recorded for follow-up, not guessed
+    });
+  });
+
+  it('an ambiguous target (two nodes share the name) is NOT linked — note, never guess (CONNECT-13)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']); // entities/organization/apple.md
+      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']); // entities/fruit/apple.md — same name
+      await seedClaimRelatesTo(root, steve.rel, 'Likes Apple.', ['Apple']);
+      await commitAll(root, 'seed two same-name nodes');
+
+      const res = await linkOne(root, steve.rel);
+      expect(res.links).toBe(0); // ambiguous → not linked
+      expect(res.unresolved).toContain('Apple');
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).not.toContain('[['); // no guessed link to either Apple
     });
   });
 });

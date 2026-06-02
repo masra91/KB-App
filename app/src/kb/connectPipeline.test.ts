@@ -24,6 +24,7 @@ import { promises as fs } from 'node:fs';
 import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeStage';
 import { ClaimsStage, findEntityFiles } from './claimsStage';
 import { ConnectStage, readCandidates } from './connectStage';
+import { LINKS_BLOCK_START } from './connectDoc';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider } from './connectAgent';
 import type { ClaimsDecider } from './claimsAgent';
@@ -56,6 +57,33 @@ const connectDecider: ConnectDecider = async (set) => ({
 const claimsDecider: ClaimsDecider = async (input) => ({
   entityId: input.entityId,
   claims: [{ statement: 'Steve owns the Q3 budget.', status: 'fact', confidence: 0.9, mentions: ['Q3 budget'] }],
+  agent: { via: 'copilot', model: 'test' },
+});
+
+// For the wikilink e2e: one source naming two entities; Steve's claim relates to Apple.
+const decompDeciderTwo: DecomposeDecider = async (i) => ({
+  sourceId: i.sourceId,
+  entities: [
+    { kind: 'person', name: 'Steve', confidence: 0.8, mentions: ['Steve'] },
+    { kind: 'organization', name: 'Apple', confidence: 0.8, mentions: ['Apple'] },
+  ],
+  agent: { via: 'copilot', model: 'test' },
+});
+
+// Each block resolves to one node named after its candidates (Steve → person, Apple → org).
+const connectDeciderEach: ConnectDecider = async (set) => ({
+  blockKey: set.blockKey,
+  clusters: [{ canonicalName: set.candidates[0].name, memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
+  agent: { via: 'copilot', model: 'test' },
+});
+
+// Claims leaves a relatesTo hint to Apple on Steve's claim (CLAIMS-10); Apple gets none.
+const claimsDeciderLink: ClaimsDecider = async (input) => ({
+  entityId: input.entityId,
+  claims:
+    input.name === 'Steve'
+      ? [{ statement: 'Steve co-founded Apple.', status: 'fact', confidence: 0.95, mentions: ['Apple'], relatesTo: ['Apple'] }]
+      : [],
   agent: { via: 'copilot', model: 'test' },
 });
 
@@ -165,6 +193,52 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
 
       // Working state never on main; main clean.
       expect(await pathExists(path.join(root, 'candidates'))).toBe(false);
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('link-promotion: a claim relatesTo hint becomes a real [[wikilink]] between nodes, visible on main (CONNECT-12)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const promoteEvergreen = async (): Promise<void> => {
+        await promote(root);
+      };
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, promoteEvergreen);
+
+      // One source naming two entities → archive → decompose (2 candidates: Steve + Apple).
+      await orch.capture('s1', [{ kind: 'text', text: 'Steve co-founded Apple in 1976.' }]);
+      await orch.poke();
+      for (const srcRel of await readDecomposeQueue(stagingWt)) {
+        await decomposeOne(stagingWt, srcRel, decompDeciderTwo);
+      }
+
+      // Connect resolves both blocks → two canonical nodes (Steve, Apple), promoted to main.
+      const connect = new ConnectStage(stagingWt, connectDeciderEach, lock, undefined, promoteEvergreen);
+      await connect.poke();
+      expect((await findEntityFiles(root)).length).toBe(2);
+
+      // Claims attaches a claim on Steve carrying relatesTo: ['Apple'] (promoted to main).
+      const claims = new ClaimsStage(stagingWt, claimsDeciderLink, lock, undefined, promoteEvergreen);
+      await claims.poke();
+
+      // Re-poke Connect: the link-promotion pass turns the relatesTo hint into a real [[wikilink]]
+      // to the Apple node, and its afterDrain promotes the linked node — visible on main.
+      await connect.poke();
+
+      const ents = await findEntityFiles(root);
+      const steveRel = ents.find((r) => r.includes(`${path.sep}person${path.sep}`));
+      const appleRel = ents.find((r) => r.includes(`${path.sep}organization${path.sep}`));
+      expect(steveRel).toBeTruthy();
+      expect(appleRel).toBeTruthy();
+      const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
+      expect(steveMd).toContain(LINKS_BLOCK_START);
+      expect(steveMd).toContain(`[[${appleRel}]]`); // native Obsidian wikilink between canonical nodes
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);

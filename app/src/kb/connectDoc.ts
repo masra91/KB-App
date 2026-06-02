@@ -8,6 +8,7 @@
 // through renames and merges. Connect is the SOLE writer of `entities/` (CONNECT-3).
 import path from 'node:path';
 import type { AgentTrace } from './archivist';
+import { CLAIMS_BLOCK_START } from './claimDoc';
 
 /** Quote a scalar only when it contains YAML-significant characters. */
 function scalar(s: string): string {
@@ -172,4 +173,59 @@ export function unionOrdered(a: readonly string[], b: readonly string[]): string
     }
   }
   return out;
+}
+
+// ── The entity node's generated links block (CONNECT-12) ────────────────────────────────────
+//
+// Connect promotes Claims' soft `relatesTo` hints into real Obsidian `[[wikilinks]]` between
+// canonical nodes, so the graph view connects (CONNECT-12). Like the claims block (CLAIMS-9) it
+// is a delimited, regenerated-WHOLE block — re-pokes/replays converge and human edits inside the
+// markers are expected to be overwritten. Connect owns this block; Claims owns the claims block.
+
+export const LINKS_BLOCK_START = '<!-- kb:links:start (generated — edit via Connect, not here) -->';
+export const LINKS_BLOCK_END = '<!-- kb:links:end -->';
+
+/** One reconciled relation rendered into the node's links block: a wikilink to a canonical node. */
+export interface NodeLink {
+  targetRel: string; // repo-relative path of the resolved canonical node (the [[wikilink]] target)
+  predicate?: string; // optional link text prefix (relatesTo hints are bare names in v1 → usually absent)
+}
+
+/** The generated links block (CONNECT-12), regenerated WHOLE. A node with hints but no resolved
+ *  target still gets a (placeholder) block so re-runs are idempotent (mirrors the claims block). */
+export function renderLinksBlock(links: readonly NodeLink[]): string {
+  const rows =
+    links.length === 0
+      ? ['_No resolved links yet._']
+      : links.map((l) => (l.predicate ? `- ${l.predicate} [[${l.targetRel}]]` : `- [[${l.targetRel}]]`));
+  return [LINKS_BLOCK_START, ...rows, LINKS_BLOCK_END].join('\n');
+}
+
+/** Remove any existing generated links block (and surrounding blank lines) from a node. */
+export function stripLinksBlock(nodeMd: string): string {
+  const start = nodeMd.indexOf(LINKS_BLOCK_START);
+  if (start === -1) return nodeMd;
+  const endMarker = nodeMd.indexOf(LINKS_BLOCK_END, start);
+  const end = endMarker === -1 ? nodeMd.length : endMarker + LINKS_BLOCK_END.length;
+  return (nodeMd.slice(0, start) + nodeMd.slice(end)).replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+}
+
+/**
+ * Idempotently (re)write the generated links block in an entity node (CONNECT-12). Strips any
+ * prior links block, then inserts the freshly-regenerated one in a STABLE position — immediately
+ * BEFORE the claims block when present (matching SPEC-0020 §3.4 node layout), else at the end.
+ * Stable placement is what keeps the node byte-identical across re-pokes when nothing changed and
+ * prevents order-thrash with the claims block (which `applyClaimsBlock` always appends last).
+ * Identity frontmatter + `# Name` heading are never altered.
+ */
+export function applyLinksBlock(nodeMd: string, links: readonly NodeLink[]): string {
+  const stripped = stripLinksBlock(nodeMd);
+  const block = renderLinksBlock(links);
+  const claimsAt = stripped.indexOf(CLAIMS_BLOCK_START);
+  if (claimsAt === -1) {
+    return `${stripped.replace(/\s+$/, '')}\n\n${block}\n`;
+  }
+  const before = stripped.slice(0, claimsAt).replace(/\s+$/, '');
+  const after = stripped.slice(claimsAt).replace(/^\s+/, '');
+  return `${before}\n\n${block}\n\n${after}`;
 }
