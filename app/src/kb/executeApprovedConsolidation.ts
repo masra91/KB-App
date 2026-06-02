@@ -17,6 +17,12 @@ import { mergeNodes } from './mergeNodes';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'consolidation');
 const WORK_BRANCH = 'kb/consolidation-work';
+// Sink-inventory note (SPEC-0030 #30): `jobId` here is a path SEGMENT, not a rel — this is the
+// **Class B** id-injection axis, guarded by `isSafeJobId` (charset, no separators/traversal) at the
+// registry READ/WRITE/SINK boundaries (#73/#29), NOT by the Class-A `assertContainedRel` rel-
+// containment helper (they don't substitute for each other). The `jobId` flows from a Review's
+// `markerKey` (an internal record raised by the reflect job, whose id is registry-validated upstream),
+// so it's a validated segment by the time it reaches here.
 /** Per-job consolidation audit (tracked on staging, never promoted — like the job journal). */
 function consolidationAuditRel(jobId: string): string {
   return path.join('.kb', 'jobs', jobId, 'consolidations.jsonl');

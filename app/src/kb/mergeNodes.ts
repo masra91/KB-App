@@ -7,6 +7,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { applyClaimsBlock, type ClaimBacklink } from './claimDoc';
+import { checkContainedRel } from './pathContainment';
 
 /** Minimal claim view for repointing + regenerating the canonical node's claims block. */
 interface ClaimRef {
@@ -90,38 +91,22 @@ async function pathExists(p: string): Promise<boolean> {
 /** The only directory entity nodes live in — merge inputs must resolve under it. */
 const NODE_ROOT = 'entities';
 
-/** Realpath the deepest EXISTING ancestor of `target` and re-append the non-existent tail, so a
- *  symlink anywhere in the existing portion is resolved (the target may not exist — an already-gone
- *  loser). Lexical `path.resolve` alone would let a committed symlink appear contained while the op
- *  follows it out. Mirrors the JOBS-10 write-sink guard (#61). */
-async function resolveSymlinkSafe(target: string): Promise<string> {
-  let existing = target;
-  const tail: string[] = [];
-  while (!(await pathExists(existing))) {
-    tail.unshift(path.basename(existing));
-    const parent = path.dirname(existing);
-    if (parent === existing) return target; // hit the fs root without an existing ancestor
-    existing = parent;
-  }
-  const realBase = await fs.realpath(existing);
-  return tail.length > 0 ? path.join(realBase, ...tail) : realBase;
-}
-
 /**
- * Reject a node rel that escapes the worktree or isn't under `entities/` — checked on the
- * symlink-RESOLVED path. `canonicalRel`/`loserRels` are LLM-emitted (the Reflect agent's
- * consolidation plan, REFLECT-5/7) and drive `fs.writeFile` + `fs.rm` below — a DESTRUCTIVE sink and
- * a prompt-injection surface (same class as JOBS-10 #52/#61, worse consequence). The Review approval
- * covers the *prose* ("Merge X into Y?"), NOT the paths, so contain them HERE before any fs op.
- * Connect's own callers pass located-node rels (always under `entities/`), so they pass trivially.
- * Returns a reason for the first offender, or null if every rel is safe.
+ * Reject a node rel that escapes the worktree or isn't under `entities/` (Class-A containment).
+ * `canonicalRel`/`loserRels` are LLM-emitted (the Reflect agent's consolidation plan, REFLECT-5/7)
+ * and drive `fs.writeFile` + `fs.rm` below — a DESTRUCTIVE sink and a prompt-injection surface (same
+ * class as JOBS-10 #52/#61, worse consequence). The Review approval covers the *prose* ("Merge X into
+ * Y?"), NOT the paths, so contain them HERE before any fs op — via the shared **symlink-safe** helper
+ * (SPEC-0030 #30: one containment impl across the path-injection family). Connect's own callers pass
+ * located-node rels (always under `entities/`), so they pass trivially. The reason strings are kept
+ * exact so the caller's throw message is unchanged. Returns a reason for the first offender, or null.
  */
 async function uncontainedNodeRel(wt: string, rels: readonly string[]): Promise<string | null> {
-  const wtReal = await fs.realpath(wt);
   for (const rel of rels) {
-    const resolved = await resolveSymlinkSafe(path.resolve(wt, rel));
-    if (resolved === wtReal || !resolved.startsWith(wtReal + path.sep)) return `node path escapes the worktree: ${rel}`;
-    if (path.relative(wtReal, resolved).split(path.sep)[0] !== NODE_ROOT) return `node path outside ${NODE_ROOT}/: ${rel}`;
+    const r = await checkContainedRel(wt, rel, [NODE_ROOT]);
+    if ('kind' in r) {
+      return r.kind === 'escape' ? `node path escapes the worktree: ${rel}` : `node path outside ${NODE_ROOT}/: ${rel}`;
+    }
   }
   return null;
 }
