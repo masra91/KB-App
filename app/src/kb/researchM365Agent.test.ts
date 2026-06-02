@@ -52,9 +52,22 @@ describe('isM365Citation / filterCitations — tenant/service gate (RESEARCH-8 d
       expect(isM365Citation(u), u).toBe(false);
     }
   });
-  it('keeps non-URL opaque item refs (token-scoped to the tenant)', () => {
-    expect(isM365Citation('message:AAMkAGI2…')).toBe(true);
+  it('is bypass-safe — host-suffix tricks + userinfo cannot pass (KB-QD)', () => {
+    for (const u of [
+      'https://sharepoint.com.evil.com/x', // suffix trick → host is *.evil.com
+      'https://evilsharepoint.com/x', // no dot boundary
+      'https://sharepoint.com@evil.com/x', // userinfo trick → hostname is evil.com
+      'https://graph.microsoft.com.evil.com/x',
+    ]) {
+      expect(isM365Citation(u), u).toBe(false);
+    }
+  });
+  it('keeps non-URL bare item refs (opaque, token-scoped, inert) but REJECTS dangerous schemes', () => {
+    expect(isM365Citation('AAMkAGI2NTk4LWE…')).toBe(true); // bare Graph id → kept
     expect(isM365Citation('')).toBe(false);
+    for (const u of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'message:AAA']) {
+      expect(isM365Citation(u), u).toBe(false); // non-http scheme → rejected (XSS/exfil-safe)
+    }
   });
   it('filterCitations drops external + dedups, preserves order', () => {
     expect(

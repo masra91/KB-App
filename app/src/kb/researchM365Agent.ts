@@ -96,11 +96,16 @@ export function isM365Citation(citation: string): boolean {
   try {
     url = new URL(citation);
   } catch {
-    return citation.trim().length > 0; // not a URL → an opaque in-tenant item ref (token-scoped)
+    // Not a URL → an opaque bare item ref (e.g. a Graph message/item id); token-scoped + inert
+    // (never fetched; only recorded as provenance). Kept.
+    return citation.trim().length > 0;
   }
-  // Only http(s) URLs are an external-egress risk → gate them to M365 service hosts. A non-http
-  // scheme (e.g. `message:`, an opaque Graph ref) is a tenant item the OAuth token already scopes.
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return citation.trim().length > 0;
+  // A parsed URL: keep ONLY http(s) on an M365 service host. REJECT every other scheme
+  // (`javascript:`/`data:`/`file:`/`message:`/…) — a non-http citation is never a real Graph ref
+  // (those are bare ids or https URLs) and could be an XSS/exfil vector if a citation is ever
+  // rendered as a link. `URL.hostname` strips userinfo, and the dot-boundary suffix blocks
+  // `sharepoint.com.evil.com`-style tricks (KB-QD bypass-safety).
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
   const host = url.hostname.toLowerCase();
   return M365_SERVICE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
 }
