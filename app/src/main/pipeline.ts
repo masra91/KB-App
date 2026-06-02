@@ -25,7 +25,7 @@ import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
-import { assemblePipelineStatus, toSetAsideViews, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { assemblePipelineStatus, toSetAsideViews, deriveStageError, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
@@ -294,8 +294,10 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   }));
   const setAsideFor = (stage: string): number =>
     recentErrors.filter((e) => e.stage === stage && e.event.includes('setaside')).length;
-  const hasErrorFor = (stage: string): boolean =>
-    recentErrors.some((e) => e.stage === stage && e.level === 'error');
+  // #163: a stage is errored only if it has a FRESH error — a recovered stage's error ages out
+  // (was unbounded: any error in the last-N log lines kept the badge red forever).
+  const nowMs = Date.now();
+  const hasErrorFor = (stage: string): boolean => deriveStageError(recentErrors, stage, nowMs);
 
   const stages: StageInput[] = [
     { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveStatus.processing ? { currentItem: archiveStatus.processing } : {}) },

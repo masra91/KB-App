@@ -127,6 +127,14 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **#163 fix: stage error badges are now time-bounded (OBS-5/6).** `hasErrorFor` flagged
+  a stage errored if *any* of the last-N warn/error log lines was an error — no time bound and (since
+  the dev log only surfaces warn+error here) no info-level "progress" to supersede it — so a recovered
+  stage stayed **red forever**. New pure `deriveStageError(errors, stage, nowMs, freshMs)`
+  (`DEFAULT_ERROR_FRESH_MS` = 2 min) marks a stage errored only on a **fresh** error: a one-off error
+  ages out (then `deriveStageState` shows running/idle), while a genuinely-broken stage re-errors each
+  attempt and stays red. Regression test (fails-before/passes-after): a stale error → not-errored
+  (the old unbounded check returned errored). `pipeline.ts` calls it with `Date.now()`.
 - 2026-06-02 — **OBS-17 extended to Connect (the stage-agnostic seam, additive — no rewrite).** The
   recovery surface now covers **connect** set-aside (poison) blocks alongside claims, exactly as the
   seam was designed. Refactored the pure layer to be stage-agnostic: `planSetAsideAction(targets, req)`

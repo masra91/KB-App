@@ -2,12 +2,15 @@
 import { describe, it, expect } from 'vitest';
 import {
   deriveStageState,
+  deriveStageError,
   assemblePipelineStatus,
   setAsideReason,
   toSetAsideViews,
   DEFAULT_STALL_MS,
+  DEFAULT_ERROR_FRESH_MS,
   type AssembleParts,
   type StageInput,
+  type RecentError,
 } from './pipelineStatusView';
 import type { PerfIndex } from './perfIndex';
 import type { LockState } from './stageLock';
@@ -38,6 +41,45 @@ describe('deriveStageState (OBS-5)', () => {
   });
   it('queued but not draining → blocked', () => {
     expect(deriveStageState({ queueDepth: 5, busy: false, hasError: false })).toBe('blocked');
+  });
+});
+
+describe('deriveStageError (#163 — stale error badge fix)', () => {
+  const NOW = Date.parse('2026-06-02T20:00:00.000Z');
+  const err = (stage: string, ts: string, level = 'error'): RecentError => ({ ts, level, event: `${stage}.failed`, stage });
+
+  it('a FRESH error marks the stage errored', () => {
+    const errs = [err('claims', '2026-06-02T19:59:30.000Z')]; // 30s ago
+    expect(deriveStageError(errs, 'claims', NOW)).toBe(true);
+  });
+
+  it('a STALE error does NOT — a recovered stage clears (the #163 bug: was unbounded → stuck red)', () => {
+    const errs = [err('claims', '2026-06-02T19:50:00.000Z')]; // 10min ago > 2min window
+    expect(deriveStageError(errs, 'claims', NOW)).toBe(false);
+    // the OLD unbounded check (`some(level error && stage)`) would have returned true here.
+  });
+
+  it('respects the freshness window boundary', () => {
+    const at = (msAgo: number): string => new Date(NOW - msAgo).toISOString();
+    expect(deriveStageError([err('claims', at(DEFAULT_ERROR_FRESH_MS - 1))], 'claims', NOW)).toBe(true);
+    expect(deriveStageError([err('claims', at(DEFAULT_ERROR_FRESH_MS + 1))], 'claims', NOW)).toBe(false);
+  });
+
+  it('ignores a fresh error for a DIFFERENT stage', () => {
+    expect(deriveStageError([err('decompose', '2026-06-02T19:59:30.000Z')], 'claims', NOW)).toBe(false);
+  });
+
+  it('ignores a fresh WARN (only error-level marks the badge)', () => {
+    expect(deriveStageError([err('claims', '2026-06-02T19:59:30.000Z', 'warn')], 'claims', NOW)).toBe(false);
+  });
+
+  it('a re-failing stage stays red (its latest error is fresh) even with an older one too', () => {
+    const errs = [err('claims', '2026-06-02T19:40:00.000Z'), err('claims', '2026-06-02T19:59:50.000Z')];
+    expect(deriveStageError(errs, 'claims', NOW)).toBe(true);
+  });
+
+  it('tolerates an unparseable timestamp (skips it, never throws)', () => {
+    expect(deriveStageError([err('claims', 'not-a-date')], 'claims', NOW)).toBe(false);
   });
 });
 
