@@ -577,38 +577,11 @@ option { background: var(--card); color: var(--fg); }
 .activity-event code { color: var(--fg); }
 .activity-event-src { font-size: 0.75rem; }
 
-/* === SPEC-0032 Pipeline Visualization — "The Line" design tokens (DESIGN-VIZ §3/§4/§6) =========== */
-/* Semantic, role-named tokens (DESIGN-7). Dark is the default; light ("draughting paper") overrides
-   under prefers-color-scheme so both palettes are first-class. State hues color fills/glyphs/borders/
-   large text only — small body text stays --viz-ink (oxide is sub-AA at body size; never on small text). */
-:root {
-  --viz-field: #15171a;        /* warm graphite — the line's ground */
-  --viz-rule: #2b2f35;         /* spine, ticks, registration marks */
-  --viz-idle: #6b7178;         /* at-rest stations */
-  --viz-ember: #e8743b;        /* THE signature heat — running stage / lit step */
-  --viz-patina: #5fa38c;       /* settled / promoted */
-  --viz-brass: #c7a24a;        /* blocked / waiting on lock */
-  --viz-oxide: #d2452f;        /* error / set-aside (badge/glyph/border only — not small text) */
-  --viz-ink: #e6e3dc;          /* labels, body (14:1 on field) */
-  --viz-ink-muted: #9298a0;    /* secondary, units */
-  /* Typography (§4) — bundled OFL faces w/ shape-matched fallbacks; if these fall back to system-ui the
-     identity is lost (GATE-1) — the .woff2 faces ship via @fontsource in the wiring increment. */
-  --viz-font-signage: 'Saira Condensed', 'Arial Narrow', sans-serif;  /* UPPERCASE station signage */
-  --viz-font-numeric: 'IBM Plex Mono', ui-monospace, monospace;        /* tabular figures */
-  --viz-font-body: 'IBM Plex Sans', system-ui, sans-serif;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --viz-field: #f4f1ea; --viz-rule: #cfc9bc; --viz-idle: #8a8473; --viz-ember: #c2541f;
-    --viz-patina: #3e7d67; --viz-brass: #9a7b2e; --viz-oxide: #b02a18; --viz-ink: #1c1b18; --viz-ink-muted: #6a6557;
-  }
-}
-/* Flat ink, no card chrome (§6 guardrail): the Line is ruled lines + ticks, never floating cards —
-   no border-radius on structural surfaces, no shadow/elevation/glass. Numerics are tabular so odometer
-   rolls + live updates never reflow. Focus rings are ember, never the framework default. */
-.viz-view { background: var(--viz-field); color: var(--viz-ink); font-family: var(--viz-font-body); }
-.viz-view :focus-visible { outline: 2px solid var(--viz-ember); outline-offset: 1px; }
-.viz-stepper, .viz-funnel, .viz-delta-from, .viz-delta-to { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; }
+/* === SPEC-0032 "The Line" — surface-specific (builds ON the shared design-system.css) =========== */
+/* Tokens, type-role utilities, flat-ink primitives, motion tokens + the `viz-breathe` keyframes + the
+   reduced-motion reset all live in `shell/design-system.css` (the shared foundation Field Desk also
+   imports — DESIGN-7). Only Line *composition* lives here, consuming those shared tokens. */
+.viz-stepper, .viz-funnel, .viz-delta-from, .viz-delta-to, .viz-num { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; }
 .viz-carriages, .viz-funnel { list-style: none; margin: 0; padding: 0; }
 .viz-carriage { display: flex; align-items: center; gap: 0.6rem; padding: 0.25rem 0; }
 .viz-carriage-name { color: var(--viz-ink); }
@@ -619,12 +592,7 @@ option { background: var(--card); color: var(--fg); }
 .viz-delta-expand .viz-delta-caption { color: var(--viz-patina); }
 .viz-delta-flat .viz-delta-caption { color: var(--viz-ink-muted); }
 .viz-delta-complete .viz-delta-caption { color: var(--viz-patina); } /* terminal completion ratio (#171) */
-/* Stuck-lock alarm (§6 / #172) — the primary "silent stall made loud" signal. Oxide on display-size
-   text (≥3:1, §3 contrast rule — oxide never on small text), flat (left rule, no card/shadow). */
+/* Stuck-lock alarm (§6 / #172) — oxide on display-size text (≥3:1, §3 rule — never small text), flat left-rule. */
 .viz-stuck-alarm { color: var(--viz-oxide); font-size: 1.125rem; font-weight: 600; border-left: 3px solid var(--viz-oxide); padding: 0.4rem 0.7rem; margin: 0.5rem 0; }
-.viz-num { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; }
-/* Ember breathe — the single active carriage/step pulses (VIZ-6). Animate opacity only (VIZ-9). */
-.viz-breathe .viz-cell-current { animation: viz-breathe 1.8s ease-in-out infinite; }
-@keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
-/* Reduced-motion: full parity — no breathe; state still reads via glyph + hue + fill (§5). */
-@media (prefers-reduced-motion: reduce) { .viz-breathe .viz-cell-current { animation: none; opacity: 1; } }
+/* The single active step breathes (VIZ-6); keyframes + the reduced-motion reset are in design-system.css. */
+.viz-breathe .viz-cell-current { animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite; }
