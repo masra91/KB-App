@@ -3,14 +3,14 @@ design: DESIGN-VIZ
 implements: SPEC-0032
 title: Pipeline Visualization — Visual Design ("The Line")
 type: design
-status: draft
+status: active   # both SPEC-0033 gates cleared 2026-06-02 → checked in as a living design spec
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-02
 updated: 2026-06-02
 related: [SPEC-0032, SPEC-0033, SPEC-0030, SPEC-0017, SPEC-0031]
 gates:
   ai-patterns: approved     # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02, no rejections
-  qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
+  qa-flow-coverage: approved # GATE 2 — KB-Quality-Driver (all key flows) — 2026-06-02
 stage: Cross-cutting
 ---
 
@@ -57,9 +57,9 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
 │                                                                              │
 │   CAPTURE ─────● ARCHIVE ─────● DECOMPOSE ════▣ CONNECT ─────○ CLAIMS ───○ PROMOTE
 │      │            │              │ (ember pulse)   │            │           │
-│   ▓▓▓▓▓        ▓▓▓▓           ▓▓▓░░          ▓▓░░░       ▓░░░░      ░░░░    ← gauge-rail
-│    10           10             8              7            7         5      ← tabular counts
-│                              ↓ −2 deduped                                    (conversion delta)
+│   ▓▓▓▓▓        ▓▓▓▓           ▓▓▓░░          ▓▓░░░       ▓▓▓▓▓▓     ▓▓░    ← gauge-rail
+│    10           10             8              7            22        5      ← tabular counts
+│                              −2 deduped                +15 (×3.1)            ← directional delta
 │                                                                              │
 │   IN FLIGHT ──────────────────────────────────────────────────────────────│
 │   ▸ ada-lovelace.md      [██████▣·····]  Decompose ⟳   12s on Copilot       │
@@ -75,8 +75,13 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
 
 - **The Line (top)** — six stations on a single horizontal spine. Each station node shows its
   state (idle/running/blocked/error) and, beneath, a **gauge-rail**: a short vertical bar of
-  current volume plus the **conversion delta** to the next station (the −2 "deduped" callout).
-  This *is* the funnel, integrated into the line rather than a separate chart (VIZ-3, VIZ-4).
+  current volume plus the **conversion delta** to the next station. This *is* the funnel,
+  integrated into the line rather than a separate chart (VIZ-3, VIZ-4).
+  - **The delta is directional** — the line is not monotonic. A *reduction* (e.g. Decompose
+    dedup) reads `−N (deduped)`; a *fan-out* (e.g. Connect→**Claims**, where 7 entities expand to
+    22 claims) reads `+N` or the `×ratio`, never a confusing negative where volume grows. The
+    gauge-rail bar scales to the stage's own volume so a fan-out reads as the stream *widening*,
+    not overflowing. (Resolves the GATE-2 fan-out-caption note.)
 - **In-flight (middle)** — each live source is a **carriage**: a compact stepper across the six
   stations, current step lit + animated, completed filled, with its current Copilot dwell time.
   This is the "pizza tracker" (VIZ-2). Click a carriage → expand to its full per-hop trace
@@ -176,7 +181,8 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
 
 - **Station node** — `◐/▣/○/✓/✕` glyph + UPPERCASE signage + gauge-rail. State = glyph + color +
   fill. The one *running* station embers + breathes.
-- **Gauge-rail** — vertical fill bar (volume) with a conversion-delta caption to the next station;
+- **Gauge-rail** — vertical fill bar (volume) with a **directional** conversion-delta caption to
+  the next station (`−N (deduped)` at reductions, `+N (×ratio)` at fan-outs like Connect→Claims);
   the slowest station's rail tints toward oxide and shows its `p95` Copilot latency (VIZ-4, the
   spatial "where time goes").
 - **Carriage** — `▸ name` + a six-cell stepper `[██████▣·····]` + current dwell ("12s on Copilot").
@@ -277,3 +283,10 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   chrome" implementation guardrails (§6); concrete measured contrast ratios + the rule that state
   hues never color small text — which caught that **oxide** (3.96:1), not ember, was the actual
   sub-AA case (§3). Awaiting GATE 2 (KB-QD, flow coverage).
+- 2026-06-02 — **GATE 2 (KB-Quality-Driver, flow-coverage) PASS** — all four key flows + per-item
+  drill-down covered; OBS-17 Retry/Dismiss confirmed first-class (siding is a persistent region, not
+  hidden under pivot). Folded in KB-QD's non-blocking note: the conversion-delta caption is now
+  **directional** — `−N (deduped)` at reductions, `+N (×ratio)` at fan-outs (Connect→Claims), so the
+  funnel stays legible where volume grows (§2/§6, mock updated). **Both gates GREEN → status `active`,
+  checked in as the living design spec.** Implementation mission carries the §9 data deps + the
+  watch-items.
