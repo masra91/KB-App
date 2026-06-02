@@ -3,8 +3,9 @@
 // SPEC-0029 AUDIT-5/6/7/8 — the Activity view, component tier (happy-dom, per-file env; node tier
 // stays default). The IPC is mocked (`window.kbApi.activityFeed/activityLineage`); we assert the
 // rendered DOM, the drill-down, the filter→re-query, lineage, and read-only/escaping behavior.
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountActivity } from './activityView';
+import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { ActivityFeedResult, Lineage, KbApi } from '../../kb/types';
 
 function feed(entries: ActivityFeedResult['entries'], total = entries.length, truncated = false): ActivityFeedResult {
@@ -168,5 +169,37 @@ describe('Read-only + XSS-safety (AUDIT-8)', () => {
     expect(c.textContent).toContain('<script>alert(1)</script>'); // shown as text
     // read-only: no buttons that mutate (only toggle/lineage/clear — all read affordances)
     expect(c.querySelector('button.primary')).toBeNull();
+  });
+});
+
+describe('Activity view · #145 load resilience (no infinite spinner on a hung IPC)', () => {
+  let c: HTMLElement;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    c = document.createElement('div');
+    document.body.appendChild(c);
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    c.remove();
+  });
+
+  it('times out a hung activityFeed → retryable error, and Retry re-loads successfully', async () => {
+    const activityFeed = vi.fn<KbApi['activityFeed']>().mockReturnValueOnce(new Promise<ActivityFeedResult>(() => {})); // hangs
+    (window as unknown as { kbApi: Pick<KbApi, 'activityFeed'> }).kbApi = { activityFeed: activityFeed as unknown as KbApi['activityFeed'] };
+    mountActivity(c);
+    expect(c.textContent).toContain('Loading…'); // spinner initially
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
+    expect(c.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(c.querySelector('.activity-error')).toBeTruthy();
+    expect(c.querySelector('.load-retry')).toBeTruthy();
+
+    // Retry succeeds → the feed renders.
+    activityFeed.mockResolvedValueOnce(feed(ENTRIES, 3));
+    c.querySelector<HTMLButtonElement>('.load-retry')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.querySelectorAll('.activity-entry')).toHaveLength(2);
   });
 });

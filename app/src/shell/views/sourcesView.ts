@@ -2,6 +2,7 @@
 // future connected sources (Proactive Intake: email/calendar/news). Thin in v1, grows as integrations
 // land. Read-only over existing IPC (`getState`); no new persistence. Degrades gracefully (PANEL-9).
 import { esc } from '../html';
+import { withTimeout } from '../loadGuard';
 
 export async function mountSources(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="card"><h1>🔌 Sources</h1><p class="muted">Loading…</p></div>`;
@@ -9,7 +10,10 @@ export async function mountSources(container: HTMLElement): Promise<void> {
   let name = '—';
   let vaultPath = '—';
   try {
-    const state = await window.kbApi.getState();
+    // #145: bound the wait so a hung `getState` can't leave an infinite spinner. The view's content
+    // is mostly static (connected-source placeholders), so on any failure we still render the full
+    // view with em-dash vault info — better than hiding it behind a retry.
+    const state = await withTimeout(window.kbApi.getState());
     name = state.vaultConfig?.name ?? '—';
     vaultPath = state.activeVaultPath ?? '—';
   } catch {

@@ -11,6 +11,7 @@
 // audit domain modules' node:fs/simple-git runtime deps (STACK-6). The actor filter options are
 // derived from the loaded data, not imported from AUDIT_ACTORS (a runtime value).
 import { esc } from '../html';
+import { withTimeout } from '../loadGuard';
 import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
@@ -54,7 +55,8 @@ async function load(container: HTMLElement): Promise<void> {
   errorMsg = '';
   renderBody(container);
   try {
-    const res = await window.kbApi.activityFeed(filter);
+    // #145: bound the wait so a hung `activityFeed` can't leave an infinite spinner.
+    const res = await withTimeout(window.kbApi.activityFeed(filter));
     entries = res.entries;
     total = res.total;
     truncated = res.truncated;
@@ -108,13 +110,15 @@ function wire(container: HTMLElement): void {
     } else if (act === 'clear-lineage') {
       lineage = null;
       renderLineage(container);
+    } else if (act === 'retry-load') {
+      void load(container); // #145: re-run the feed load after a failure/timeout
     }
   });
 }
 
 async function traceLineage(container: HTMLElement, id: string): Promise<void> {
   try {
-    lineage = await window.kbApi.activityLineage(id);
+    lineage = await withTimeout(window.kbApi.activityLineage(id));
   } catch (err) {
     lineage = { subjectId: id, kind: 'unknown', sources: [], events: [], decisions: [] };
     errorMsg = err instanceof Error ? err.message : String(err);
@@ -157,7 +161,9 @@ interface BodyState {
 
 export function bodyHtml(s: BodyState): string {
   if (s.loading) return `<p class="muted">Loading…</p>`;
-  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)}</p>`;
+  // #145: a failed/timed-out load is retryable, never an infinite spinner. The view's header +
+  // controls stay mounted around this body, so a button here (not a full renderLoadError) suffices.
+  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="btn load-retry" data-act="retry-load">Retry</button></p>`;
   if (s.entries.length === 0) return `<p class="muted activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
   const note = s.truncated
     ? `<p class="muted activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
