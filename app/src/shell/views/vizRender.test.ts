@@ -2,9 +2,10 @@
 // SPEC-0032 VIZ render helpers — pure HTML from the view-model. We assert the structural output
 // (stepper fill, active-breathe, virtualization, directional funnel captions) + XSS-safety.
 import { describe, it, expect } from 'vitest';
-import { carriagesHtml, funnelHtml, stuckLockAlarmHtml, formatHeldMs } from './vizRender';
+import { carriagesHtml, funnelHtml, stuckLockAlarmHtml, formatHeldMs, stationsHtml } from './vizRender';
 import type { InFlightItem, Conversion } from './vizModel';
 import type { LockState } from '../../kb/stageLock';
+import type { StageStatus } from '../../kb/pipelineStatusView';
 
 const mk = (over: Partial<InFlightItem> & Pick<InFlightItem, 'itemId' | 'stage'>): InFlightItem => ({
   name: over.itemId,
@@ -88,5 +89,37 @@ describe('stuckLockAlarmHtml + formatHeldMs (§6 — silent stall made loud)', (
     expect(frag(stuckLockAlarmHtml({ held: true, waiters: 0, stuck: true })).textContent).toContain('a stage');
     const evil = frag(stuckLockAlarmHtml({ held: true, waiters: 0, holder: '<img src=x onerror=alert(1)>', stuck: true }));
     expect(evil.querySelector('img')).toBeNull();
+  });
+});
+
+describe('stationsHtml (§2 — the Line spine)', () => {
+  const stages: StageStatus[] = [
+    { stage: 'archive', state: 'idle', queueDepth: 0, setAside: 0 },
+    { stage: 'decompose', state: 'running', queueDepth: 3, setAside: 0 },
+    { stage: 'connect', state: 'blocked', queueDepth: 1, setAside: 2 },
+    { stage: 'claims', state: 'error', queueDepth: 0, setAside: 1 },
+  ];
+
+  it('renders all six stations in canonical order (capture…promote), endpoints idle', () => {
+    const root = frag(stationsHtml(stages));
+    const st = root.querySelectorAll('.viz-station');
+    expect(st).toHaveLength(6);
+    expect([...st].map((s) => s.getAttribute('data-stage'))).toEqual(['capture', 'archive', 'decompose', 'connect', 'claims', 'promote']);
+    expect(root.querySelector('[data-stage="capture"]')!.classList.contains('viz-state-idle')).toBe(true); // endpoint, no drain state
+  });
+
+  it('only the running station breathes; each station carries its state hue', () => {
+    const root = frag(stationsHtml(stages));
+    expect(root.querySelectorAll('.viz-breathe')).toHaveLength(1);
+    expect(root.querySelector('[data-stage="decompose"]')!.classList.contains('viz-breathe')).toBe(true);
+    expect(root.querySelector('[data-stage="connect"]')!.classList.contains('viz-state-blocked')).toBe(true);
+    expect(root.querySelector('[data-stage="claims"]')!.classList.contains('viz-state-error')).toBe(true);
+  });
+
+  it('shows queue depth + set-aside count (state never by color alone — glyph present)', () => {
+    const root = frag(stationsHtml(stages));
+    expect(root.querySelector('[data-stage="decompose"] .viz-station-queue')!.textContent).toBe('3');
+    expect(root.querySelector('[data-stage="connect"] .viz-station-aside')!.textContent).toContain('2');
+    expect(root.querySelector('[data-stage="decompose"] .viz-station-glyph')!.textContent).toBe('◐'); // running glyph
   });
 });

@@ -17,12 +17,40 @@ import {
   type CellState,
 } from './vizModel';
 import type { LockState } from '../../kb/stageLock';
+import type { StageStatus } from '../../kb/pipelineStatusView';
 
 /** Glyph per station state (§6) — also the color-blind-safe channel alongside the hue. */
 const STATE_GLYPH: Record<string, string> = { running: '◐', blocked: '▣', idle: '○', settled: '✓', error: '✕' };
 
+/** Stage state → its design-system hue utility class (§3). */
+const STATE_CLASS: Record<string, string> = { idle: 'viz-state-idle', running: 'viz-state-running', blocked: 'viz-state-blocked', error: 'viz-state-error' };
+
 /** One carriage cell glyph by stepper state (§6: filled=done, ▣ lit=current, · pending). */
 const CELL_GLYPH: Record<CellState, string> = { done: '█', current: '▣', pending: '·' };
+
+/**
+ * The station spine (§2, the Line itself): the six stations in order, each a glyph + UPPERCASE signage
+ * + its live state hue, with queue depth + set-aside count. The one *running* station ember-breathes
+ * (VIZ-6). State = glyph + hue + (breathe) — never color alone (§3 a11y). `capture`/`promote` are the
+ * endpoints (not in the drains' `stages[]`) → render calm/idle. Per-station VOLUME comes from `stages[]`;
+ * the conversion deltas are the separate `funnelHtml` overlay (DEV-3's split).
+ */
+export function stationsHtml(stages: StageStatus[]): string {
+  const byStage = new Map(stages.map((s) => [s.stage, s]));
+  const nodes = STAGE_ORDER.map((id) => {
+    const st = byStage.get(id);
+    const state = st?.state ?? 'idle';
+    const breathe = state === 'running' ? ' viz-breathe' : '';
+    const queue = st && st.queueDepth > 0 ? ` <span class="viz-station-queue viz-numeric">${st.queueDepth}</span>` : '';
+    const aside = st && st.setAside > 0 ? ` <span class="viz-station-aside viz-state-error" title="set aside">${st.setAside}✕</span>` : '';
+    return (
+      `<li class="viz-station ${STATE_CLASS[state] ?? 'viz-state-idle'}${breathe}" data-stage="${esc(id)}">` +
+      `<span class="viz-station-glyph" aria-hidden="true">${STATE_GLYPH[state] ?? STATE_GLYPH.idle}</span>` +
+      `<span class="viz-station-name viz-signage">${esc(id)}</span>${queue}${aside}</li>`
+    );
+  }).join('');
+  return `<ul class="viz-line viz-spine">${nodes}</ul>`;
+}
 
 /**
  * The in-flight carriages (VIZ-2 "pizza tracker"): each live source is a six-cell stepper across the

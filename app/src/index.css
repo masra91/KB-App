@@ -594,5 +594,12 @@ option { background: var(--card); color: var(--fg); }
 .viz-delta-complete .viz-delta-caption { color: var(--viz-patina); } /* terminal completion ratio (#171) */
 /* Stuck-lock alarm (§6 / #172) — oxide on display-size text (≥3:1, §3 rule — never small text), flat left-rule. */
 .viz-stuck-alarm { color: var(--viz-oxide); font-size: 1.125rem; font-weight: 600; border-left: 3px solid var(--viz-oxide); padding: 0.4rem 0.7rem; margin: 0.5rem 0; }
-/* The single active step breathes (VIZ-6); keyframes + the reduced-motion reset are in design-system.css. */
-.viz-breathe .viz-cell-current { animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite; }
+/* The station spine (§2) — the six stations on one horizontal rule; wraps to vertical on narrow. */
+.viz-line { list-style: none; margin: 0.5rem 0; padding: 0.25rem 0 0.25rem 0.6rem; display: flex; gap: 1.1rem; flex-wrap: wrap; }
+.viz-station { display: flex; align-items: center; gap: 0.3rem; color: inherit; }
+.viz-station-glyph { font-size: 1.1rem; }
+.viz-station-name { font-size: 0.8rem; }
+.viz-station-queue, .viz-station-aside { font-size: 0.72rem; }
+/* The single active step/station breathes (VIZ-6); keyframes + the reduced-motion reset are in design-system.css. */
+.viz-breathe .viz-cell-current,
+.viz-station.viz-breathe .viz-station-glyph { animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite; }
