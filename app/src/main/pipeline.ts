@@ -84,9 +84,15 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // entities and their claims become visible on `main` (the archivist already promotes sources/).
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen);
-  const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, promoteEvergreen);
+  // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
+  // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
+  // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.)
+  const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, async () => {
+    await promoteEvergreen();
+    void connect.poke();
+  });
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, lock };
-  startActiveStages(active);
+  startActiveStages(active); // single source of truth for which stages run (shared with fullReplay)
   return orch;
 }
 

@@ -341,16 +341,16 @@ source" assumption (the open question SPEC-0016 §7 deferred "to Connect"). v1 r
 
 ### 3.7 Link promotion — Expand (the graph lights up)
 
-> **v1 status: DEFERRED to a follow-up slice (CONNECT-12/13/20 not yet built).** Link
-> promotion consumes Claims' `relatesTo` hints (SPEC-0016 §3.2) — but the Enrich reorder runs
-> Connect *before* Claims, so on the first resolution pass those hints **do not exist yet**.
-> Link promotion is therefore a **Connect re-pass that runs after Claims** (re-poke an entity
-> once its claims gain `relatesTo` hints), a clean separate slice. The **resolver core**
-> (block / match / merge / dedup / born-resolved nodes — §3.2–3.6) ships first and is
-> independent of links. The design below is the target for that follow-up slice; the v1 code
-> writes **no** links block. (Exact re-poke trigger semantics to be pinned with that slice;
-> KB-Architect confirmed the promotion gate is order-agnostic + idempotent, so a re-pass just
-> re-promotes the delta.)
+> **Status: BUILT (CONNECT-12/13).** Link promotion consumes Claims' `relatesTo` hints
+> (SPEC-0016 §3.2) — but the Enrich reorder runs Connect *before* Claims, so on the first
+> resolution pass those hints don't exist yet. So link promotion is a **Connect re-pass after
+> Claims**: `ConnectStage`'s drain runs a link pass (`readLinkQueue`/`linkOne`) after the
+> candidate pass, triggered by Claims' `afterDrain` poke (plus the periodic sweep backstop).
+> Resolution is **deterministic** (CONNECT-20 typed-link-as-object stays deferred): each
+> `relatesTo` name resolves by normalized name to a canonical node — exactly-one match → a
+> `[[wikilink]]`; zero/ambiguous → a `note` signal, never a dangling guess (CONNECT-13). The
+> block is regenerated WHOLE (idempotent — re-poke/replay re-promote the delta only). The
+> resolver core (§3.2–3.6) shipped first (slices 1–2); this is slice 3.
 
 The Principal's directive: **links are real Obsidian `[[wikilinks]]`**, kept updated and
 preserved; **not** link-as-file objects unless we genuinely need rich per-link metadata
@@ -419,8 +419,8 @@ appends JSONL. Structure in the envelope, freedom in the payload.
 | CONNECT-9   | must     | When candidates resolve to an **existing** node, Connect **folds them in** (extends provenance/aliases); it does not create a duplicate | test:connectStage.test.ts | DATA-3; LIFE-3 |
 | CONNECT-10  | must     | When two existing nodes are the same thing, Connect picks a **canonical** node, repoints references, and **deletes** the loser (recoverable via git; **no tombstone files**) | test:connectStage.test.ts | DATA-9,11 |
 | CONNECT-11  | must     | On merge, affected claims' `subject` is **repointed** to the canonical node and the node's claims block regenerated; **Claims is not re-run** | test:connectStage.test.ts | DATA-5; CLAIMS-9 |
-| CONNECT-12  | must     | Connect **promotes** `relatesTo` hints (and agent `links[]`) into real Obsidian **`[[wikilinks]]`** in a delimited, regenerated links block, so the graph view connects | **deferred-slice** | DATA-8; LIFE-3; VAULT |
-| CONNECT-13  | should   | A link target that cannot be resolved to a canonical node is **not** rendered as a dangling guess — it becomes a `note` signal or a Review | **deferred-slice** | PRIN-4; SCOPE-5 |
+| CONNECT-12  | must     | Connect **promotes** `relatesTo` hints into real Obsidian **`[[wikilinks]]`** in a delimited, regenerated links block, so the graph view connects | test:connectStage.test.ts, connectPipeline.test.ts | DATA-8; LIFE-3; VAULT |
+| CONNECT-13  | should   | A link target that cannot be resolved to a canonical node is **not** rendered as a dangling guess — it becomes a `note` signal or a Review | test:connectStage.test.ts | PRIN-4; SCOPE-5 |
 | CONNECT-14  | must     | The agent decision is **validated against a schema**; an invalid verdict never loses candidates — the block is flagged and retried, then set aside after K | test:connect.test.ts, connectAgent.test.ts, connectStage.test.ts | ORCH-12; INGEST-8 |
 | CONNECT-15  | must     | An **ambiguous** merge/link raises a yes/no **Review** (SPEC-0018) via the decision channel; the affected cluster **parks** (no merge applied) until answered, then resumes with the verdict as context | test:connectStage.test.ts | LIFE-6; AUTO-10; REVIEW-5,6,14 |
 | CONNECT-16  | must     | Resolution is **committed per block** and the canonical tree advances only by completed commits via the **serialized canonical writer** | test:connectStage.test.ts | ORCH-3; DATA-9 |
@@ -479,7 +479,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   claims block) keeps links correct across merges/renames and replay-safe. Rich typed-edge
   metadata, if ever needed, layers on without removing the wikilinks (§7).
 - **Traces:** DATA-8, LIFE-3
-- **Verify:** deferred-slice (link-promotion; see §3.7 note + changelog)
+- **Verify:** test:connectStage.test.ts, connectPipeline.test.ts
 
 ### CONNECT-15 — ambiguous merges park for Review, never guess
 - **Status:** draft · **Priority:** must
@@ -614,3 +614,15 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
   constant `BASE_BRANCH='main'`, flipped to `staging` on integration). The SPEC-0015/0016/0007
   §8 amendments land with KB-Architect's Decompose→candidates (slice 2) + staging slices, not
   this PR. Full suite green (235 tests).
+- 2026-06-02 — **implemented LINK PROMOTION (CONNECT-12/13)** — the "Visible Enrich" slice 3.
+  `ConnectStage`'s drain gains a link pass (`readLinkQueue`/`linkOne`) after the candidate pass:
+  it reads each canonical node's claims' `relatesTo` hints and resolves them **deterministically**
+  (no agent) by normalized name to a canonical node — exactly-one match → a real Obsidian
+  `[[entities/<kind>/<slug>]]` link in a delimited, regenerated-WHOLE `kb:links:start/end` block
+  (`applyLinksBlock`, mirroring the claims block); zero/ambiguous → a `note` signal, never a
+  dangling guess (CONNECT-13). Idempotent (byte-stable node ⇒ no-op, no churn). Triggered by
+  Claims' `afterDrain` poke (the Connect-before-Claims reorder means hints only exist post-Claims)
+  + the sweep backstop; the slice-1 promote-hook publishes linked nodes → `main`, so Obsidian's
+  graph view connects. CONNECT-12/13 graduated `Verify: deferred-slice → test:`. **Still deferred:**
+  CONNECT-20 typed-link-as-object, agent `links[]` consumption, and Review escalation for
+  ambiguous links (CONNECT-15 path) — tracked fast-follows. Full suite green (250 tests).

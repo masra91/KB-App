@@ -26,13 +26,15 @@ import path from 'node:path';
 import simpleGit from 'simple-git';
 import { ulid, dateShard, isUlid } from './ulid';
 import { ensureGitIdentity } from './vault';
-import { validCandidate, blockKey, type Candidate } from './connect';
+import { validCandidate, blockKey, normalizeName, type Candidate } from './connect';
 import {
   renderEntityNode,
   parseEntityNode,
   entityFileRel,
   unionOrdered,
+  applyLinksBlock,
   type EntityNode,
+  type NodeLink,
   type ParsedNode,
 } from './connectDoc';
 import { applyClaimsBlock, type ClaimBacklink } from './claimDoc';
@@ -289,13 +291,15 @@ async function appendAudit(wt: string, text: string): Promise<void> {
 
 // ── Claim repoint (CONNECT-11): point a loser node's claims at the canonical node ──────────
 
-/** Minimal claim view for repointing + regenerating the canonical node's claims block. */
+/** Minimal claim view for repointing + regenerating the canonical node's claims block, plus the
+ *  soft `relatesTo` hints Connect promotes into links (CONNECT-12). */
 interface ClaimRef {
   rel: string; // repo-relative claim file path
   subject: string; // current subject (entity rel path)
   statement: string;
   status: string;
   confidence: number;
+  relatesTo: string[]; // unresolved target-name hints Claims left for Connect (CLAIMS-10)
 }
 
 function parseClaim(md: string, rel: string): ClaimRef | null {
@@ -306,14 +310,23 @@ function parseClaim(md: string, rel: string): ClaimRef | null {
   let subject = '';
   let status = '';
   let confidence = 0;
+  let relatesTo: string[] = [];
   for (const line of fm.split('\n')) {
     let m: RegExpMatchArray | null;
     if ((m = line.match(/^subject:\s*(.+)$/))) subject = m[1].trim().replace(/^"|"$/g, '');
     else if ((m = line.match(/^status:\s*(.+)$/))) status = m[1].trim();
     else if ((m = line.match(/^confidence:\s*(.+)$/))) confidence = Number(m[1].trim()) || 0;
+    else if ((m = line.match(/^relatesTo:\s*(\[.*\])\s*$/))) {
+      try {
+        const arr = JSON.parse(m[1]) as unknown[];
+        if (Array.isArray(arr)) relatesTo = arr.map(String).filter((s) => s.trim().length > 0);
+      } catch {
+        /* malformed hint list — ignore (links are best-effort, never a dangling guess) */
+      }
+    }
   }
   if (!subject) return null;
-  return { rel, subject, statement: body, status, confidence };
+  return { rel, subject, statement: body, status, confidence, relatesTo };
 }
 
 async function readClaims(wtRoot: string): Promise<ClaimRef[]> {
@@ -581,6 +594,104 @@ export async function connectOne(
   }
 }
 
+// ── Link promotion (CONNECT-12/13): relatesTo hints → real Obsidian [[wikilinks]] ───────────
+
+export interface LinkOneResult {
+  nodeRel: string;
+  changed: boolean; // false when the regenerated node was byte-identical (idempotent no-op)
+  links: number; // resolved [[wikilink]]s rendered
+  unresolved: string[]; // hint names with zero/ambiguous matches → note signals (CONNECT-13)
+}
+
+/**
+ * The link-promotion queue (CONNECT-12): canonical nodes whose claims carry ≥1 `relatesTo` hint.
+ * Idempotency (no churn on already-linked nodes) is NOT enforced here — `linkOne` is a no-op when
+ * the regenerated node is unchanged, so re-queuing a done node is cheap. Sorted for deterministic
+ * drains. A hint whose subject points at a since-merged loser node is dropped (node must exist).
+ */
+export async function readLinkQueue(root: string): Promise<string[]> {
+  root = path.resolve(root);
+  const claims = await readClaims(root);
+  const subjects = new Set<string>();
+  for (const c of claims) if (c.relatesTo.length > 0) subjects.add(c.subject);
+  const existing = new Set((await readEntityNodes(root)).map((n) => n.rel));
+  return [...subjects].filter((rel) => existing.has(rel)).sort();
+}
+
+/**
+ * Promote ONE canonical node's claims' `relatesTo` hints into a regenerated `[[wikilinks]]` block
+ * (CONNECT-12). DETERMINISTIC (no agent): each hint name is resolved by normalized name to a
+ * canonical node — exactly-one match → a wikilink; zero or ambiguous (>1) → recorded as a `note`
+ * signal, never a dangling guess (CONNECT-13). The block is regenerated WHOLE, so the node is
+ * byte-stable across re-pokes: if nothing changed, it is a no-op (no commit, no repeated note).
+ * MUST be called serialized via the shared canonical-writer lock so the base branch is steady.
+ */
+export async function linkOne(root: string, nodeRel: string): Promise<LinkOneResult> {
+  root = path.resolve(root);
+  const { wt, base } = await ensureWorktree(root);
+  const wtGit = simpleGit(wt);
+  const rootGit = simpleGit(root);
+  await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
+  await wtGit.raw('clean', '-fd', 'entities', 'claims'); // drop stray files from a prior aborted run
+
+  const nodePath = path.join(wt, nodeRel);
+  let nodeMd: string;
+  try {
+    nodeMd = await fs.readFile(nodePath, 'utf8');
+  } catch {
+    return { nodeRel, changed: false, links: 0, unresolved: [] }; // node gone (merged away) — nothing to do
+  }
+
+  // Collect this node's claims' relatesTo hints (de-duped, order-preserved).
+  const claims = await readClaims(wt);
+  const hints = unionOrdered(
+    [],
+    claims.filter((c) => c.subject === nodeRel).flatMap((c) => c.relatesTo),
+  );
+
+  // Index every OTHER canonical node by normalized name for deterministic target resolution.
+  const byName = new Map<string, string[]>();
+  for (const n of await readEntityNodes(wt)) {
+    if (n.rel === nodeRel) continue; // never self-link
+    const key = normalizeName(n.name);
+    const arr = byName.get(key);
+    if (arr) arr.push(n.rel);
+    else byName.set(key, [n.rel]);
+  }
+
+  const links: NodeLink[] = [];
+  const unresolved: string[] = [];
+  const linkedTargets = new Set<string>();
+  for (const hint of hints) {
+    const matches = byName.get(normalizeName(hint)) ?? [];
+    if (matches.length === 1) {
+      if (!linkedTargets.has(matches[0])) {
+        links.push({ targetRel: matches[0] });
+        linkedTargets.add(matches[0]);
+      }
+    } else {
+      unresolved.push(hint); // zero (unknown) or ambiguous (>1) → note, never a dangling guess (CONNECT-13)
+    }
+  }
+  links.sort((a, b) => (a.targetRel < b.targetRel ? -1 : 1)); // deterministic block order
+
+  const newMd = applyLinksBlock(nodeMd, links);
+  if (newMd === nodeMd) return { nodeRel, changed: false, links: links.length, unresolved };
+
+  await fs.writeFile(nodePath, newMd, 'utf8');
+  const runId = ulid();
+  let audit = auditLine({ runId, event: 'links-start', node: nodeRel });
+  for (const u of unresolved) {
+    audit += auditLine({ runId, event: 'signal', type: 'note', note: `unresolved link target: ${u}`, node: nodeRel });
+  }
+  audit += auditLine({ runId, event: 'linked', node: nodeRel, links: links.length, unresolved: unresolved.length });
+  await appendAudit(wt, audit);
+  await wtGit.raw('add', '-A');
+  await wtGit.commit(`connect: links ${nodeRel} → ${links.length} link(s)${unresolved.length ? `, ${unresolved.length} unresolved` : ''}`);
+  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  return { nodeRel, changed: true, links: links.length, unresolved };
+}
+
 /**
  * Owns a vault's Connect stage: a poke/sweep drain loop sharing the canonical-writer lock with
  * the other stages (SPEC-0014 §5). Restartable: re-reads the derived queue and resumes.
@@ -665,9 +776,21 @@ export class ConnectStage {
       }
       queue = await readConnectQueue(this.root, this.maxAttempts);
     }
-    // Publish the now-resolved evergreen entities (+ repointed claims) staging→main (STAGING-3/11),
-    // serialized under the shared lock so promotion never races a stage ref advance. Gated on
-    // `worked` so idle sweeps don't churn the gate; promotion is idempotent regardless.
+    // Link-promotion pass (CONNECT-12): once blocks are resolved and Claims has left `relatesTo`
+    // hints, promote them into `[[wikilinks]]`. Process each queued node once; `linkOne` is a
+    // no-op when unchanged, so idle sweeps don't churn. Per-node failures are best-effort (a
+    // later poke/sweep retries) and never abort the whole pass.
+    for (const nodeRel of await readLinkQueue(this.root)) {
+      try {
+        const res = await this.lock.run(() => linkOne(this.root, nodeRel));
+        if (res.changed) worked = true;
+      } catch {
+        /* best-effort link promotion for this node; the rest of the pass continues */
+      }
+    }
+    // Publish the now-resolved evergreen entities (+ repointed claims + links) staging→main
+    // (STAGING-3/11), serialized under the shared lock so promotion never races a stage ref
+    // advance. Gated on `worked` so idle sweeps don't churn the gate; promotion is idempotent.
     if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!());
   }
 }
