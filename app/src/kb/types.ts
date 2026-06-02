@@ -1,5 +1,6 @@
 // Shell-agnostic KB types: the data shapes + the IPC contract between main & renderer.
 // No electron/obsidian imports here — this module must stay reusable (STACK-6).
+import type { SchedulePreset, AutonomyPosture } from './jobs';
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -124,6 +125,46 @@ export interface AskRequest {
   history?: RecallTurn[];
 }
 
+// --- Control Panel · Jobs (SPEC-0027 PANEL-2; over the SPEC-0023 registry) ---
+
+/** Last-run summary for a job, derived from its run-state journal (JOBS-7/8) for display. */
+export interface JobLastRun {
+  ts: string; // ISO timestamp of the last run
+  inspected: string; // what the pass looked at
+  applied: number; // findings auto-applied
+  deferred: number; // findings routed to Review
+  note?: string; // e.g. 'collision-exhausted' (a set-aside run)
+}
+
+/** One manageable job as the Jobs view needs it (PANEL-2): catalog metadata + current config + last run. */
+export interface JobView {
+  id: string;
+  type: string;
+  label: string; // catalog label (or the type, for a registered job with no catalog entry)
+  description: string;
+  production: boolean; // false → a reference/non-production job (flagged in the UI)
+  registered: boolean; // true once persisted in the registry (false = catalog-only, defaults shown)
+  enabled: boolean;
+  schedule: SchedulePreset;
+  posture: AutonomyPosture;
+  lastRun: JobLastRun | null; // null = never run
+}
+
+/** A config change from the Jobs view (PANEL-2/6). `type` lets the main process seed a catalog-only
+ *  job into the registry on first edit. Omitted fields are left unchanged. */
+export interface JobConfigPatch {
+  id: string;
+  type: string;
+  enabled?: boolean;
+  schedule?: SchedulePreset;
+  posture?: AutonomyPosture;
+}
+
+/** Outcome of a manual "Run now" (PANEL-2; JOBS-11). `ran:false` carries why it didn't run. */
+export type RunJobResult =
+  | { ran: true; outcome: 'advanced' | 'noop' | 'setaside'; applied: number; deferred: number }
+  | { ran: false; reason: 'skipped' | 'not-found' | 'unknown-type' | 'no-kb' };
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -136,4 +177,8 @@ export interface KbApi {
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   fullReplay(): Promise<FullReplayResult>;
   ask(req: AskRequest): Promise<AskResult>;
+  // Control Panel · Jobs (SPEC-0027 PANEL-2)
+  listJobs(): Promise<JobView[]>;
+  setJobConfig(patch: JobConfigPatch): Promise<JobView[]>;
+  runJobNow(id: string): Promise<RunJobResult>;
 }

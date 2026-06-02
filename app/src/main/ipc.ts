@@ -4,7 +4,16 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
 import { readAppConfig, writeAppConfig } from './appConfig';
-import { startPipeline, activePipeline, listActiveReviews, answerActiveReview, fullReplay } from './pipeline';
+import {
+  startPipeline,
+  activePipeline,
+  listActiveReviews,
+  answerActiveReview,
+  fullReplay,
+  listJobsForActive,
+  setActiveJobConfig,
+  runActiveJobNow,
+} from './pipeline';
 import { recall } from '../kb/recall';
 import type { CapturePayload } from '../kb/ingest';
 import type {
@@ -20,6 +29,9 @@ import type {
   FullReplayResult,
   AskRequest,
   AskResult,
+  JobView,
+  JobConfigPatch,
+  RunJobResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -145,6 +157,21 @@ export function registerIpc(): void {
       return { question: req.question, answer: 'No active knowledge base — set one up first.', citations: [], grounded: false, toolCalls: 0, truncated: false };
     }
     return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history });
+  });
+
+  // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config
+  // changes (enable/schedule/posture), and trigger a manual "Run now". The renderer gates risky
+  // changes behind a confirm; the main process owns the registry + scheduler.
+  ipcMain.handle('kb:listJobs', async (): Promise<JobView[]> => listJobsForActive());
+
+  ipcMain.handle('kb:setJobConfig', async (_e, patch: JobConfigPatch): Promise<JobView[]> => setActiveJobConfig(patch));
+
+  ipcMain.handle('kb:runJobNow', async (_e, id: string): Promise<RunJobResult> => {
+    try {
+      return await runActiveJobNow(id);
+    } catch {
+      return { ran: false, reason: 'not-found' };
+    }
   });
 }
 

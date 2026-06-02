@@ -10,6 +10,8 @@
 //
 // All stages share ONE canonical-writer lock per vault (SPEC-0014 §5): promotion + every stage
 // ref-advance serialize through it.
+import path from 'node:path';
+import simpleGit from 'simple-git';
 import { Orchestrator } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage } from '../kb/decomposeStage';
@@ -27,9 +29,13 @@ import { JobScheduler } from '../kb/jobScheduler';
 import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
 import { makeReflectJobBehavior, REFLECT_JOB_TYPE } from '../kb/reflectJob';
 import { makeReflectDecider } from '../kb/reflectAgent';
-import type { JobBehavior } from '../kb/jobs';
+import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/jobRegistry';
+import { readJournal } from '../kb/jobStage';
+import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
+import { buildJobViews } from '../kb/jobsPanel';
+import { DEFAULT_POSTURE, type JobBehavior, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
-import type { FullReplayResult } from '../kb/types';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult } from '../kb/types';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
  *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
@@ -138,6 +144,98 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
   const result = await answerReviewInVault(active.stagingWt, active.lock, id, answerInput);
   if (result.ok && result.stage === 'claims') void active.claims.poke(); // resume the unparked item
   return result;
+}
+
+// --- Control Panel · Jobs (SPEC-0027 PANEL-2/6/7) — read/manage the per-vault job registry ---
+
+/**
+ * List the manageable jobs for the active KB (PANEL-2): the known-job catalog merged with the
+ * registry, each row carrying its last-run summary from the journal. Reads `staging` (where the
+ * registry + journals live). No active KB → empty list (the view degrades gracefully, PANEL-9).
+ */
+export async function listJobsForActive(): Promise<JobView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  const registry = await readJobRegistry(root);
+  // Gather the newest journal entry for every job we will show (catalog types ∪ registered ids).
+  const ids = new Set<string>([...JOB_CATALOG.map((c) => c.type), ...registry.map((j) => j.id)]);
+  const lastEntryByJobId: Record<string, JournalEntry | undefined> = {};
+  for (const id of ids) {
+    const journal = await readJournal(root, id);
+    lastEntryByJobId[id] = journal[journal.length - 1];
+  }
+  return buildJobViews(JOB_CATALOG, registry, lastEntryByJobId);
+}
+
+/**
+ * Apply a Jobs-view config change (PANEL-2/6) and return the refreshed list. A catalog-only job is
+ * seeded into the registry on first edit. The write + commit run under the shared canonical-writer
+ * lock so they never race a stage's ff-advance; the commit is the v1 git-auditable record of the
+ * change (PANEL-7 interim, until SPEC-0029's audit envelope lands). The scheduler reads the registry
+ * fresh each tick and rebuilds a job's runner when its config signature changes, so the edit takes
+ * effect with no restart (PANEL-6).
+ */
+export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  await active.lock.run(async () => {
+    const registry = await readJobRegistry(root);
+    if (registry.some((j) => j.id === patch.id)) {
+      await patchJob(root, patch.id, {
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+        ...(patch.schedule !== undefined ? { schedule: patch.schedule } : {}),
+        ...(patch.posture !== undefined ? { posture: patch.posture } : {}),
+      });
+    } else {
+      await upsertJob(root, {
+        id: patch.id,
+        type: patch.type,
+        enabled: patch.enabled ?? false,
+        schedule: patch.schedule ?? 'off',
+        posture: patch.posture ?? DEFAULT_POSTURE,
+      });
+    }
+    await commitRegistryChange(root, `job ${patch.id} config change`);
+  });
+  return listJobsForActive();
+}
+
+/**
+ * Manual "Run now" for one job (PANEL-2; JOBS-11) — one bounded pass on demand, respecting
+ * single-flight. Run-now is independent of enable/schedule, so a catalog-only job is seeded
+ * (off/guarded) and committed before running, letting the Principal test a job without turning it on.
+ */
+export async function runActiveJobNow(id: string): Promise<RunJobResult> {
+  if (!active) return { ran: false, reason: 'no-kb' };
+  const root = active.stagingWt;
+  const registry = await readJobRegistry(root);
+  if (!registry.some((j) => j.id === id)) {
+    const entry = catalogEntry(id); // v1: catalog id === type
+    if (!entry) return { ran: false, reason: 'not-found' };
+    await active.lock.run(async () => {
+      await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: DEFAULT_POSTURE });
+      await commitRegistryChange(root, `seed job ${id} for run-now`);
+    });
+  }
+  const res = await active.jobs.runNow(id);
+  if (res === 'skipped' || res === 'not-found' || res === 'unknown-type') return { ran: false, reason: res };
+  return { ran: true, outcome: res.outcome, applied: res.applied, deferred: res.deferred };
+}
+
+/**
+ * Commit a job-registry change on the `staging` root (the v1 audit substrate, PANEL-7): the registry
+ * lives under `.kb/jobs/`, tracked on `staging` and never promoted, so a commit is durable + git
+ * -auditable and protects the file from a stray staging reset. MUST be called inside `lock.run` (it
+ * advances the canonical branch directly; under the lock it is just another linear advance that
+ * stages cherry-pick their disjoint work onto). A no-op write (identical bytes) commits nothing.
+ */
+async function commitRegistryChange(root: string, message: string): Promise<void> {
+  const git = simpleGit(root);
+  const rel = path.relative(root, jobRegistryPath(root));
+  await git.add(rel);
+  const staged = (await git.diff(['--cached', '--name-only'])).trim();
+  if (staged.length === 0) return; // nothing actually changed
+  await git.commit(`control-panel: ${message}`);
 }
 
 /** Stop and clear the active pipeline (used on shutdown / vault switch). */
