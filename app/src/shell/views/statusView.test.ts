@@ -76,6 +76,30 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     expect(lockHtml({ held: false, waiters: 0 })).toContain('free');
   });
 
+  it('lockHtml surfaces a STUCK lock loudly with the held-duration (#163 OBS-7)', () => {
+    const h = lockHtml({ held: true, waiters: 1, holder: 'claims:advance', stuck: true, heldMs: 125000 });
+    expect(h).toContain('Stuck');
+    expect(h).toContain('status-lock-stuck');
+    expect(h).toContain('2m 5s'); // heldFor(125000)
+    expect(h).toContain('wedged');
+  });
+
+  it('lockHtml shows the held-duration on a normal (non-stuck) hold', () => {
+    const h = lockHtml({ held: true, waiters: 0, holder: 'connect', since: '2026-06-02T00:01:00.000Z', heldMs: 3000 });
+    expect(h).toContain('held by <strong>Linking</strong>');
+    expect(h).toContain('3s');
+    expect(h).not.toContain('Stuck');
+  });
+
+  it('overallHtml surfaces a stuck write lock specifically (#163 OBS-11), even past the badge', () => {
+    const stuck: PipelineStatusView = { ...STALLED, lock: { held: true, waiters: 0, holder: 'claims:advance', stuck: true, heldMs: 60000 } };
+    const h = overallHtml(stuck);
+    expect(h).toContain('status-stuck-note');
+    expect(h).toContain('isn’t releasing'); // the wedge call-out
+    expect(h).toContain('Claim extraction'); // holder display name
+    expect(h).not.toContain('status-stall-note'); // stuck note replaces the generic stall note
+  });
+
   it('errorsHtml drills down to the cause when expanded (OBS-6)', () => {
     const collapsed = errorsHtml(STALLED.recentErrors, new Set());
     expect(collapsed).toContain('decompose.failed');

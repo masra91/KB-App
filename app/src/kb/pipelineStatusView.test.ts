@@ -98,6 +98,13 @@ describe('assemblePipelineStatus (OBS-5/11)', () => {
     expect(v.lock.holder).toBe('connect');
   });
 
+  it('#163: a STUCK held lock → overall=stalled (not "running") — the wedge is surfaced, not masked', () => {
+    const v = assemblePipelineStatus(parts({ lock: { held: true, waiters: 1, holder: 'claims:advance', stuck: true, heldMs: 45000 } }));
+    expect(v.overall).toBe('stalled'); // would be 'running' (lock.held) without the stuck override
+    expect(v.stalled).toBe(true);
+    expect(v.lock.stuck).toBe(true);
+  });
+
   it('overall=idle when all queues are empty and nothing runs', () => {
     const v = assemblePipelineStatus(parts({ stages: [stage({ stage: 'claims' }), stage({ stage: 'connect' })] }));
     expect(v.overall).toBe('idle');

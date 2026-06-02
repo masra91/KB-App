@@ -127,6 +127,15 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **#163: surface a STUCK write lock (OBS-7/11).** DEV-2's watchdog (#170) added
+  `LockState.stuck`/`heldMs`; this renders them so the silent canonical-writer deadlock the watchdog
+  catches is now **visible**: `lockHtml` shows "⚠️ Stuck — held by `<holder>` for `Ns`; the pipeline
+  is wedged" (and the held-duration on a normal hold); `overallHtml` adds a specific stuck banner; and
+  the assembler treats a stuck lock as **`overall: 'stalled'`** — without that, `lock.held` reads
+  `running` and masks the wedge (the exact silent-stall this spec exists to make loud). Holder labels
+  are `stage:op` (#170), shown via `holderLabel` as "Claim extraction (advance)" — naming the exact
+  stuck section. View-only (my half of the #163 lock split; DEV-2 owns the lock mechanics). Tests:
+  assembler stuck→stalled; lockHtml stuck + held-duration; overallHtml stuck banner.
 - 2026-06-02 — **#163 fix: stage error badges are now time-bounded (OBS-5/6).** `hasErrorFor` flagged
   a stage errored if *any* of the last-N warn/error log lines was an error — no time bound and (since
   the dev log only surfaces warn+error here) no info-level "progress" to supersede it — so a recovered
