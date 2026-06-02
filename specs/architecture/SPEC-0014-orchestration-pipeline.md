@@ -110,9 +110,9 @@ Three layers; only one has a brain.
 | ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | test:src/kb/ingest.test.ts | VISION-3; INGEST-7 |
 | ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | test:src/kb/orchestrator.test.ts | VISION-10 |
 | ORCH-16  | must     | **Every model invocation is recorded for posterity**: which decision was used (model vs fallback), the runtime, the **requested** model, launch params, outcome (ok/error), and timing — colocated with the item. Tokens/cost are out of scope | test:src/kb/copilotAgent.test.ts | DATA-10; LIFE-9 |
-| ORCH-17  | must     | **Stages run concurrently**: a stage's cognition + worktree writes happen **off a synced checkpoint, outside the lock**; multiple items/stages may run their agents at once | none-yet | DATA-9; PRIN-16 |
-| ORCH-18  | must     | The shared canonical-writer lock guards **only the ff-advance**. On advance: unchanged base → fast-forward; base moved but item paths **disjoint** (unique-ULID keying, ORCH-6) → replay/rebase the item commit and advance; **same-path collision** → re-sync to new canonical and **retry** the item | none-yet | ORCH-3,6; DATA-9 |
-| ORCH-19  | must     | **Optimistic-concurrency safety**: collisions retry up to a bounded K; on exhaustion the item is **set aside for review** (ORCH-12), never dropped or half-applied; canonical history stays linear and clean (ORCH-3) | none-yet | ORCH-3,12,13 |
+| ORCH-17  | must     | **Stages run concurrently**: a stage's cognition + worktree writes happen **off a synced checkpoint, outside the lock**; multiple items/stages may run their agents at once | test:orchConcurrency.test.ts | DATA-9; PRIN-16 |
+| ORCH-18  | must     | The shared canonical-writer lock guards **only the ff-advance**. On advance: unchanged base → fast-forward; base moved but item paths **disjoint** (unique-ULID keying, ORCH-6) → replay/rebase the item commit and advance; **same-path collision** → re-sync to new canonical and **retry** the item | test:canonicalAdvance.test.ts | ORCH-3,6; DATA-9 |
+| ORCH-19  | must     | **Optimistic-concurrency safety**: collisions retry up to a bounded K; on exhaustion the item is **set aside for review** (ORCH-12), never dropped or half-applied; canonical history stays linear and clean (ORCH-3) | test:canonicalAdvance.test.ts | ORCH-3,12,13 |
 | ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | none-yet | PRIN-16 |
 | ORCH-21  | must     | The **agent runtime is pluggable** behind the decider/agent interface: an agent runs via the **CLI single-shot** (`copilot -p`) OR the **Copilot SDK** (Sessions/tools/streaming), chosen **per-agent where it makes sense**; a **deterministic fallback** is always retained (ORCH-7) | none-yet | ORCH-7,8; AUTO-11 |
 | ORCH-22  | should   | Adopt the **Copilot SDK where its capabilities are load-bearing** (multi-turn sessions, agent-invoked tools/MCP, streaming) — Ask/Recall first, Research next, Connect/Reflect opportunistically; **thin single-shot stages stay on the CLI** until the SDK is **GA** and/or **concurrency-overhead evidence** (ORCH-20) justifies the server model. **Pin + age** the SDK per E1 (ENG-2,4,7) | none-yet | ORCH-20; ENG-2,4,7 |
@@ -260,3 +260,20 @@ Three layers; only one has a brain.
   (ORCH-20) justifies the server model; the deterministic fallback is always retained. Recorded
   alongside SPEC-0010 (stack), SPEC-0026 (ASK pilot), and a new **ENG-7** (E1): preview/fast-
   moving packages may be critical deps, but pin + age (≥7-day) — no hot-off-the-presses releases.
+- 2026-06-02 — **ORCH concurrency slice 1 implemented (ORCH-17/18/19).** Narrowed the shared
+  canonical-writer lock from the whole per-item cycle to **only the ff-advance**. New
+  `kb/canonicalAdvance.ts`: `advanceOrCollide` (under-lock — fast-forward when the canonical is
+  unchanged, cherry-pick *replay* a disjoint item onto a moved canonical keeping history linear
+  (ORCH-3/6), or detect a same-path collision) + `withOptimisticAdvance` (prepare OFF the lock →
+  advance UNDER it → re-sync + retry same-path collisions to a bounded K → set aside, ORCH-19).
+  All four stages (archivist/decompose/claims/connect `*One`) refactored onto it: cognition +
+  writes happen off a synced checkpoint, only the advance serializes. Each `*One` takes an
+  optional `lock` (default mutex) so standalone calls still serialize. **Consequence:** because
+  each stage already runs its own drain, narrowing the lock makes **cross-stage cognition overlap**
+  (ORCH-17) — the rebase/collision paths run in production; the final canonical state is unchanged
+  (linear, ORCH-3), only interleaving differs. Each stage's *own* drain stays serial (cap=1). Tests:
+  `canonicalAdvance.test.ts` (helper interleavings: ff / disjoint-replay / collision / retry /
+  K-exhaust→set-aside) + `orchConcurrency.test.ts` (stage-level disjoint-lands-linear + Connect↔Claims
+  same-path collision→retry→converge, ORCH-3 asserted). **Deferred to slice 2:** ORCH-20 — within-stage
+  concurrency cap>1 + ephemeral per-item worktrees (default cap stays 1); and narrowing Connect's
+  link-promotion (`linkOne`) pass, which stays coarse-locked for now.

@@ -18,6 +18,7 @@ import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
+import { withOptimisticAdvance } from './canonicalAdvance';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'archivist');
 const WORK_BRANCH = 'kb/archive-work';
@@ -86,47 +87,59 @@ async function ensureWorktree(root: string): Promise<{ wt: string; branch: strin
 }
 
 /**
- * Archive one inbox unit, returning its new `sources/` path. MUST be called serialized
- * (the canonical branch must not move mid-cycle, so the final ff-merge always applies).
+ * Archive one inbox unit, returning its new `sources/` path, under optimistic concurrency
+ * (SPEC-0014 ORCH-17/18). The move + source.md + audit write happen OFF the lock, synced to a
+ * canonical checkpoint; only the ff-advance runs under `lock`. Archive items write disjoint
+ * `sources/<id>` paths (unique ULID, ORCH-6) and the archivist is the sole writer of `sources/`
+ * on `staging`, so the advance is always a fast-forward or a clean disjoint replay — a collision
+ * is not expected, and an (impossible) exhaustion throws so the drain leaves the unit in the inbox
+ * (never half-applied, ORCH-12). `lock` defaults to a private mutex so standalone calls serialize.
  */
 export async function archiveOne(
   root: string,
   id: string,
   decider: ArchivistDecider = deterministicDecider,
+  lock: Mutex = new Mutex(),
 ): Promise<string> {
   root = path.resolve(root);
-  const { wt, branch } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
-
-  // Sync the worktree to the canonical HEAD — brings in items captured since last cycle.
-  await wtGit.raw('reset', '--hard', branch);
-
-  const unitDir = path.join(wt, 'inbox', id);
-  const meta = await readCapturedMeta(unitDir);
-  const decision = await decider(meta);
-
   const destRel = path.join('sources', dateShard(id), id);
-  const dest = path.join(wt, destRel);
-  await fs.mkdir(path.dirname(dest), { recursive: true });
-  await fs.rename(unitDir, dest); // move the raw bytes verbatim — never rewritten (DATA-2)
 
-  const archivedAt = new Date().toISOString();
-  const textContent = meta.kind === 'text' ? await fs.readFile(path.join(dest, meta.raw), 'utf8') : null;
-  await fs.writeFile(path.join(dest, 'source.md'), renderSourceMd(meta, decision, archivedAt, bodyFor(meta, textContent)), 'utf8');
-  // ORCH-16: record the agent invocation (runtime/model/params/outcome) for posterity.
-  const { agent, ...coreDecision } = decision;
-  await fs.appendFile(
-    path.join(dest, 'audit.jsonl'),
-    JSON.stringify({ action: 'archived', id, archivedAt, decision: coreDecision, agent: agent ?? { via: 'deterministic' } }) + '\n',
-    'utf8',
-  );
+  const prepare = async (base: string): Promise<boolean> => {
+    const { wt } = await ensureWorktree(root);
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('reset', '--hard', base); // sync to the canonical checkpoint (OFF the lock)
 
-  await wtGit.raw('add', '-A');
-  await wtGit.commit(`archive: ${id}`);
+    const unitDir = path.join(wt, 'inbox', id);
+    const meta = await readCapturedMeta(unitDir);
+    const decision = await decider(meta);
 
-  // Advance the canonical tree by fast-forward — root working tree refreshes, never dirty.
-  await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
+    const dest = path.join(wt, destRel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.rename(unitDir, dest); // move the raw bytes verbatim — never rewritten (DATA-2)
+
+    const archivedAt = new Date().toISOString();
+    const textContent = meta.kind === 'text' ? await fs.readFile(path.join(dest, meta.raw), 'utf8') : null;
+    await fs.writeFile(path.join(dest, 'source.md'), renderSourceMd(meta, decision, archivedAt, bodyFor(meta, textContent)), 'utf8');
+    // ORCH-16: record the agent invocation (runtime/model/params/outcome) for posterity.
+    const { agent, ...coreDecision } = decision;
+    await fs.appendFile(
+      path.join(dest, 'audit.jsonl'),
+      JSON.stringify({ action: 'archived', id, archivedAt, decision: coreDecision, agent: agent ?? { via: 'deterministic' } }) + '\n',
+      'utf8',
+    );
+
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`archive: ${id}`);
+    return true;
+  };
+
+  const onExhausted = async (): Promise<void> => {
+    // Unreachable in practice (disjoint sources/ paths, sole writer) — if it ever happens, fail so
+    // the drain leaves the unit in the inbox for a later sweep rather than half-applying (ORCH-12).
+    throw new Error(`archive: ${id} exhausted optimistic-advance retries (unexpected same-path collision)`);
+  };
+
+  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
   return destRel;
 }
 
@@ -250,7 +263,8 @@ export class Orchestrator {
       const id = queue[0];
       await this.updateStatus(queue.length, id);
       try {
-        await this.lock.run(() => archiveOne(this.root, id, this.decider));
+        // ORCH-17/18: archiveOne prepares OFF the lock and advances UNDER it (shared lock passed in).
+        await archiveOne(this.root, id, this.decider, this.lock);
         this.lastArchived = id;
       } catch {
         // ORCH-12: never lose the item — it stays in the inbox; stop this pass and let a
