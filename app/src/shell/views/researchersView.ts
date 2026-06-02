@@ -14,6 +14,7 @@ import {
   isRiskyResearcherChange,
   RESEARCHER_TEMPLATE_OPTIONS,
   EGRESS_TIER_LABELS,
+  EGRESS_TIER_HINTS,
   defaultEgressFor,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS } from '../../kb/researchers';
@@ -50,7 +51,8 @@ async function render(container: HTMLElement): Promise<void> {
 
 /** The add-from-template control (RESEARCH-15/16): pick a template → create a disabled researcher. */
 function addForm(): string {
-  const opts = RESEARCHER_TEMPLATE_OPTIONS.map((o) => `<option value="${esc(o.template)}">${esc(o.label)} — ${esc(o.description)}</option>`).join('');
+  // Short option text (#108) — the full description rides along as a hover title, not inline clutter.
+  const opts = RESEARCHER_TEMPLATE_OPTIONS.map((o) => `<option value="${esc(o.template)}" title="${esc(o.description)}">${esc(o.label)}</option>`).join('');
   return `
     <div class="researcher-add">
       <label>Add a researcher
@@ -66,7 +68,7 @@ function addForm(): string {
 function researcherItem(r: ResearcherView): string {
   const scheduleOpts = SCHEDULE_OPTIONS.map((p) => `<option value="${esc(p)}"${p === r.schedule ? ' selected' : ''}>${esc(schedulePresetLabel(p))}</option>`).join('');
   const postureOpts = (['guarded', 'autonomous'] as const).map((p) => `<option value="${p}"${p === r.posture ? ' selected' : ''}>${POSTURE_LABEL[p]}</option>`).join('');
-  const egressOpts = EGRESS_TIERS.map((t) => `<option value="${esc(t)}"${t === r.egressTier ? ' selected' : ''}>${esc(EGRESS_TIER_LABELS[t])}</option>`).join('');
+  const egressOpts = EGRESS_TIERS.map((t) => `<option value="${esc(t)}" title="${esc(EGRESS_TIER_HINTS[t])}"${t === r.egressTier ? ' selected' : ''}>${esc(EGRESS_TIER_LABELS[t])}</option>`).join('');
   const last = r.lastRun
     ? `Last run ${esc(r.lastRun.ts)} — ${esc(r.lastRun.eventType)}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
     : 'Never run';
@@ -195,8 +197,12 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       askConfirm(
         `Run “${current.label}” now? It performs one bounded research pass.`,
         async () => {
+          // PANEL-10 state machine: idle → running (disabled + "Running…" on the button itself, so it's
+          // unmistakable something's in flight) → back to idle (the re-render restores "Run now") or, on
+          // failure, reset in place so the user can retry.
           status.textContent = 'Running…';
           runBtn.disabled = true;
+          runBtn.textContent = 'Running…';
           try {
             const res = await window.kbApi.runResearcherNow(id);
             let msg: string;
@@ -208,6 +214,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
           } catch {
             status.textContent = 'Run failed.';
             runBtn.disabled = false;
+            runBtn.textContent = 'Run now';
           }
         },
         () => {},

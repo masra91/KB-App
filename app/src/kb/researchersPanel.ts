@@ -28,9 +28,17 @@ export const RESEARCHER_TEMPLATE_OPTIONS: ResearcherTemplateOption[] = [
 
 /** Human labels for the egress tiers (RESEARCH-8), least→most exposed. */
 export const EGRESS_TIER_LABELS: Record<EgressTier, string> = {
-  'local-only': 'Local only (never leaves this machine)',
-  'internal-tenant': 'Internal tenant (your org)',
+  'local-only': 'Local only',
+  'internal-tenant': 'Internal tenant',
   'public-web': 'Public web',
+};
+
+/** Longer one-line gloss for an egress tier — used as a `title`/tooltip so the dropdown option text
+ *  stays short (#108) while the full meaning is still a hover away. */
+export const EGRESS_TIER_HINTS: Record<EgressTier, string> = {
+  'local-only': 'Never leaves this machine',
+  'internal-tenant': 'Your org / tenant (e.g. WorkIQ, M365)',
+  'public-web': 'The public internet',
 };
 
 /** Egress exposure rank (higher = data can reach a less-trusted destination). Widening egress to a

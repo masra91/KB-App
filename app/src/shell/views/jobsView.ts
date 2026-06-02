@@ -163,8 +163,11 @@ function wire(container: HTMLElement, jobs: JobView[]): void {
       askConfirm(
         `Run “${current.label}” now? It performs one bounded pass.`,
         async () => {
+          // PANEL-10 state machine: idle → running (disabled + "Running…" on the button) → idle (the
+          // re-render restores "Run now"), or reset in place on failure so the user can retry.
           status.textContent = 'Running…';
           runBtn.disabled = true;
+          runBtn.textContent = 'Running…';
           try {
             const res = await window.kbApi.runJobNow(id);
             const msg = !('reason' in res)
@@ -181,6 +184,7 @@ function wire(container: HTMLElement, jobs: JobView[]): void {
           } catch {
             status.textContent = 'Run failed.';
             runBtn.disabled = false;
+            runBtn.textContent = 'Run now';
           }
         },
         () => {},

@@ -81,7 +81,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts + settingsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | test:app/src/shell/reviewBadge.test.ts, app/src/shell/shell.test.ts | REVIEW-?; AUTO-10 |
 | PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/views/agentsView.test.ts (degrade) | ORCH-10 |
-| PANEL-10| should   | Action buttons (e.g. **Run now**) reflect a clear **state machine** — idle → confirm → **running** (disabled + status text) → back to idle on completion — never leaving the user unsure whether something is running | none-yet | OBS-5; [#108](https://github.com/masra91/KB-App/issues/108) |
+| PANEL-10| should   | Action buttons (e.g. **Run now**) reflect a clear **state machine** — idle → confirm → **running** (disabled + status text) → back to idle on completion — never leaving the user unsure whether something is running | test:app/src/shell/views/researchersView.test.ts, app/src/shell/views/jobsView.test.ts | OBS-5; [#108](https://github.com/masra91/KB-App/issues/108) |
 
 ## 5. User flows / surface
 
@@ -161,3 +161,17 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   Graduated **PANEL-8** `Verify: none-yet → test:` (node `reviewBadge.test.ts`; happy-dom
   `shell.test.ts`). **SPEC-0027 slices 1+2 complete** — only the **Researchers** Manage view remains
   a stub, pending SPEC-0028.
+- 2026-06-02 — **#108 UI polish pass (KB-Lead's batch).** One styling pass across the Manage +
+  Activity surfaces: (1) **dropdowns** — a single dark, theme-native `<select>` look with a custom
+  caret (the UA default rendered light); (2) **short option labels** — researcher templates → `Public
+  Web` / `Local Repository` / `WorkIQ-M365` / `Custom`, egress tiers de-parenthesized (`Local only`
+  etc.), with the full gloss moved to a hover `title` (new `EGRESS_TIER_HINTS`) so the option text
+  stays short; (3) **Run-now state machine (PANEL-10)** — the button itself now goes disabled +
+  "Running…" while a pass is in flight and resets to "Run now" on completion/failure, in **both** the
+  Researchers and Jobs views (graduated PANEL-10 `none-yet → test:`); (4) **Researchers card** — head
+  + controls `flex-wrap` with gaps so rows no longer clip/cramp; (5) **Activity feed** — entry rows
+  were default UA `<button>`s (light boxes) and raw events light `<pre>`s; both are now dark/
+  theme-native (`var(--card)`/`var(--bg)`, hover + focus-visible states). Tests:
+  `researchersView.test.ts` + `jobsView.test.ts` cover the run-now state machine + the short option
+  labels/titles. The pure visual tuning (spacing/caret/contrast) is best confirmed by KB-Lead on a
+  running build.

@@ -141,6 +141,60 @@ describe('instructions + scope (RESEARCH-17)', () => {
   });
 });
 
+describe('#108 polish — run-now state machine (PANEL-10) + short option labels', () => {
+  it('Run now shows a clear running state on the button itself (disabled + "Running…") then resets', async () => {
+    let resolveRun!: (v: { ran: boolean; sourceIds: string[]; note: string }) => void;
+    runResearcherNow = vi.fn(() => new Promise((res) => (resolveRun = res)));
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
+    await flush();
+
+    const runBtn = c.querySelector<HTMLButtonElement>('.researcher-run')!;
+    expect(runBtn.disabled).toBe(true); // running → disabled
+    expect(runBtn.textContent).toBe('Running…'); // …and unmistakably labeled
+
+    resolveRun({ ran: true, sourceIds: ['SRC1'], note: 'ok' });
+    await flush();
+    // The re-render restores an idle row → "Run now", enabled.
+    const after = c.querySelector<HTMLButtonElement>('.researcher-run')!;
+    expect(after.disabled).toBe(false);
+    expect(after.textContent).toBe('Run now');
+  });
+
+  it('resets the button on a failed run so it stays retryable', async () => {
+    runResearcherNow = vi.fn(async () => {
+      throw new Error('egress blocked');
+    });
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
+    await flush();
+    const runBtn = c.querySelector<HTMLButtonElement>('.researcher-run')!;
+    expect(runBtn.disabled).toBe(false);
+    expect(runBtn.textContent).toBe('Run now');
+    expect(c.querySelector('.researcher-status')?.textContent).toContain('failed');
+  });
+
+  it('add-template options use short labels with the description as a hover title (declutter)', async () => {
+    const c = await mount();
+    const webOpt = c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="web"]')!;
+    expect(webOpt.textContent).toBe('Public Web'); // short, no " — description" inline
+    expect(webOpt.title).toContain('Public-web'); // full gloss available on hover
+    expect(c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="code"]')!.textContent).toBe('Local Repository');
+    expect(c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="m365"]')!.textContent).toBe('WorkIQ/M365');
+  });
+
+  it('egress dropdown options are short labels with a tier hint as title', async () => {
+    const c = await mount();
+    const opt = c.querySelector<HTMLOptionElement>('.researcher-egress-sel option[value="local-only"]')!;
+    expect(opt.textContent).toBe('Local only'); // no parenthetical clutter
+    expect(opt.title).toContain('Never leaves this machine');
+  });
+});
+
 describe('XSS-safety', () => {
   it('escapes hostile researcher labels', async () => {
     listResearchers = vi.fn(async () => [{ ...webRow, label: '<img src=x onerror=alert(1)>' }]);

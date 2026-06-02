@@ -157,6 +157,27 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     expect(li(root, 'reflect').querySelector('.job-status')?.textContent).toContain('2 applied, 1 deferred');
   });
 
+  it('Run now shows a clear running state on the button (PANEL-10) then resets on completion', async () => {
+    type RunOk = { ran: true; outcome: 'advanced'; applied: number; deferred: number };
+    let resolveRun!: (v: RunOk) => void;
+    const runJobNow = vi.fn((): Promise<RunOk> => new Promise<RunOk>((res) => (resolveRun = res)));
+    setApi({ listJobs: vi.fn(async () => [job({ id: 'reflect' })]), setJobConfig: vi.fn(), runJobNow });
+    await mountJobs(root);
+    li(root, 'reflect').querySelector<HTMLButtonElement>('.job-run')!.click();
+    li(root, 'reflect').querySelector<HTMLButtonElement>('.job-confirm-go')!.click();
+    await tick();
+
+    const runBtn = li(root, 'reflect').querySelector<HTMLButtonElement>('.job-run')!;
+    expect(runBtn.disabled).toBe(true);
+    expect(runBtn.textContent).toBe('Running…');
+
+    resolveRun({ ran: true, outcome: 'advanced', applied: 1, deferred: 0 });
+    await tick();
+    const after = li(root, 'reflect').querySelector<HTMLButtonElement>('.job-run')!;
+    expect(after.disabled).toBe(false);
+    expect(after.textContent).toBe('Run now');
+  });
+
   it('renders an error instead of throwing if listing fails (PANEL-9)', async () => {
     setApi({
       listJobs: vi.fn(async () => {

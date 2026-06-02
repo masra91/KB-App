@@ -437,3 +437,69 @@ button:disabled {
   text-align: center;
 }
 .sidebar .nav-item[aria-current='page'] .nav-badge { background: rgba(255, 255, 255, 0.25); }
+
+/* === #108 UI polish pass (KB-Lead's batch) ===================================================== */
+
+/* 1. Dropdowns — one dark, consistent <select> look everywhere (was the UA default light control).
+   Scoped rules (.job-controls select, .autonomy-row select) already match this; make it the base so
+   the Researchers + add-from-template selects pick it up too, with a custom caret. */
+select {
+  font: inherit;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 1.6rem 0.25rem 0.5rem;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 0.7rem center, right 0.45rem center;
+  background-size: 0.3rem 0.3rem, 0.3rem 0.3rem;
+  background-repeat: no-repeat;
+  max-width: 100%;
+}
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+option { background: var(--card); color: var(--fg); }
+
+/* 4. Researchers card — was clipping / wrapping cramped. Give each row room and let the head +
+   controls wrap cleanly instead of overflowing. */
+.researcher-list { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.researcher { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; overflow: hidden; }
+.researcher-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.researcher-label { font-weight: 600; }
+.researcher-toggle { margin-left: auto; font-size: 0.85rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.researcher-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 0.6rem; }
+.researcher-controls label { font-size: 0.85rem; color: var(--muted); display: inline-flex; align-items: center; gap: 0.3rem; }
+.researcher-controls .researcher-run { margin-left: auto; }
+.researcher-lastrun { margin: 0.6rem 0 0; font-size: 0.82rem; }
+.researcher-status { margin: 0.35rem 0 0; font-size: 0.82rem; min-height: 1em; }
+.researcher-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
+.researcher-add label { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); }
+.researcher-add-status { flex: 1 1 100%; margin: 0; }
+
+/* 5. Activity feed — the entry rows were default UA <button>s (light boxes clashing with the dark
+   theme) and the raw JSON a light <pre>. Make them theme-native. */
+.activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.activity-entry { border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; }
+.activity-entry-head {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-align: left;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  padding: 0.55rem 0.7rem;
+  cursor: pointer;
+}
+.activity-entry-head:hover { background: rgba(255, 255, 255, 0.05); }
+.activity-entry-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.activity-actor-badge { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; flex: none; }
+.activity-summary { flex: 1; }
+.activity-ts { font-size: 0.78rem; flex: none; }
+.activity-body { padding: 0 0.7rem 0.6rem; }
+.activity-event { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.6rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; }
+.activity-event code { color: var(--fg); }
+.activity-event-src { font-size: 0.75rem; }
