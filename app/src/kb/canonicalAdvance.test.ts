@@ -412,9 +412,13 @@ describe.skipIf(!gitAvailable)('reapEphemeralWorktrees — #135 cascade recovery
       const jobId = ulid();
       await git.raw('worktree', 'add', '--force', '-B', 'staging', path.join(wtRoot, 'staging'), base);
       await git.raw('worktree', 'add', '--force', '-B', `kb/job-${jobId}`, path.join(wtRoot, `job-${jobId}`), base);
+      // An UNKNOWN-prefix worktree whose name still matches the ULID shape — the allowlist must leave
+      // it ALONE (fail-safe: never destroy a worktree we don't recognize, only a known stage's).
+      const unkId = ulid();
+      await git.raw('worktree', 'add', '--force', '-B', `kb/mystery-${unkId}`, path.join(wtRoot, `mystery-${unkId}`), base);
 
       const { worktrees, branches } = await reapEphemeralWorktrees(root);
-      expect(worktrees).toBe(2); // only the two ephemerals — NOT staging, NOT the job worktree
+      expect(worktrees).toBe(2); // only the two KNOWN-stage ephemerals — NOT staging/job/unknown
       expect(branches).toBe(2);
       // Ephemeral worktrees + their work branches are gone.
       expect(await exists(root, path.join('.kb/cache/worktrees', `claims-${u1}`))).toBe(false);
@@ -422,11 +426,14 @@ describe.skipIf(!gitAvailable)('reapEphemeralWorktrees — #135 cascade recovery
       const local = (await git.branchLocal()).all;
       expect(local).not.toContain(`kb/claims-work-${u1}`);
       expect(local).not.toContain(`kb/decompose-work-${u2}`);
-      // Persistent worktrees + their branches survive untouched — incl. the regex-matching `job-<ULID>`.
+      // Persistent + unrecognized worktrees survive untouched — incl. the ULID-shaped `job-<ULID>`
+      // and the unknown `mystery-<ULID>` (the allowlist's fail-safe: only known stages are reaped).
       expect(await exists(root, '.kb/cache/worktrees/staging')).toBe(true);
       expect(await exists(root, path.join('.kb/cache/worktrees', `job-${jobId}`))).toBe(true);
+      expect(await exists(root, path.join('.kb/cache/worktrees', `mystery-${unkId}`))).toBe(true);
       expect(local).toContain('staging');
       expect(local).toContain(`kb/job-${jobId}`);
+      expect(local).toContain(`kb/mystery-${unkId}`);
     } finally {
       await rmTempDir(dir);
     }

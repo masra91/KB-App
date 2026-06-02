@@ -33,20 +33,20 @@ export function boundedGit(dir: string): ReturnType<typeof simpleGit> {
   return simpleGit(dir, { timeout: { block: WORKTREE_GIT_TIMEOUT_MS } });
 }
 
-/** The persistent staging worktree dir name — never reaped. */
-const STAGING_WT_NAME = 'staging';
-/** Per-job worktrees are `job-<id>` (jobStage `worktreeRel`) — persistent, never reaped. A job id
- *  could itself be 26 chars, so this PREFIX exclusion is the real guard, not the ULID-shape regex. */
-const JOB_WT_PREFIX = 'job-';
-/** Matches an EPHEMERAL per-item worktree dir name — `<stage>-<26-char ULID>` (e.g. `claims-01JZ…`).
- *  NOTE: this shape alone is NOT a safe discriminator (a `job-<26-char-id>` would also match), so
- *  {@link reapEphemeralWorktrees} additionally excludes `staging` + the `job-` prefix explicitly. */
-const EPHEMERAL_WT_NAME = /-[0-9A-Za-z]{26}$/;
+/** The stages that create EPHEMERAL per-item worktrees via {@link withEphemeralWorktree} (named
+ *  `<stage>-<ULID>`). `connect` is included for when its cap migration lands (today it uses a fixed
+ *  worktree). This is an explicit ALLOWLIST, NOT a `-<ULID>$` shape match — a shape match would also
+ *  hit a persistent `job-<id>` worktree whose id is 26 chars (a ULID, which `isSafeJobId` permits) or
+ *  the `staging` worktree, and reaping one of those is latent data loss. The allowlist fails safe: an
+ *  unrecognized worktree (incl. a future persistent type) is left ALONE rather than destroyed; the
+ *  cost is only that a NEW ephemeral stage must be added here to be reaped (a recoverable leak, not
+ *  data loss). (KB-QD #151 gate; allowlist > denylist for a destructive guard.) */
+const EPHEMERAL_STAGES = ['archive', 'claims', 'connect', 'decompose'] as const;
+const EPHEMERAL_WT_NAME = new RegExp(`^(${EPHEMERAL_STAGES.join('|')})-[0-9A-Za-z]{26}$`);
 
-/** True iff `name` is an ephemeral per-item worktree dir safe to reap — explicitly NOT the persistent
- *  `staging` or any `job-<id>` worktree, AND shaped like `<stage>-<ULID>` (#135 cascade, KB-QD gate). */
+/** True iff `name` is an ephemeral per-item worktree dir safe to reap — i.e. `<known-stage>-<ULID>`.
+ *  The persistent `staging` + `job-<id>` worktrees never match (they are not stage prefixes). */
 function isReapableEphemeralWorktree(name: string): boolean {
-  if (name === STAGING_WT_NAME || name.startsWith(JOB_WT_PREFIX)) return false;
   return EPHEMERAL_WT_NAME.test(name);
 }
 
