@@ -34,6 +34,7 @@ and a unique `key` here.
 | SPEC-0019 | CANON   | Evergreen Canonical & Working-State Isolation | architecture | draft | `architecture/` |
 | SPEC-0020 | CONNECT | Connect & Expand (Enrich v3)                | feature | draft | `features/` |
 | SPEC-0021 | STAGING | Staging Branch & Promotion Gate             | architecture | draft | `architecture/` |
+| SPEC-0022 | REPLAY  | Replay & Reprocessing (full rebuild v1)     | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -55,7 +56,7 @@ assigned at creation time.
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
 | REFLECT    | Reflect (self-maintenance)       | feature | Reflect   | stale/emergent/coherence |
 | AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
-| REPLAY     | Replay & Reprocessing            | feature | Replay    | rebuild from primary + secondary |
+| ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
 | PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
 
