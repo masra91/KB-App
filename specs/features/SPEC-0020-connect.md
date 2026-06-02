@@ -341,6 +341,17 @@ source" assumption (the open question SPEC-0016 §7 deferred "to Connect"). v1 r
 
 ### 3.7 Link promotion — Expand (the graph lights up)
 
+> **v1 status: DEFERRED to a follow-up slice (CONNECT-12/13/20 not yet built).** Link
+> promotion consumes Claims' `relatesTo` hints (SPEC-0016 §3.2) — but the Enrich reorder runs
+> Connect *before* Claims, so on the first resolution pass those hints **do not exist yet**.
+> Link promotion is therefore a **Connect re-pass that runs after Claims** (re-poke an entity
+> once its claims gain `relatesTo` hints), a clean separate slice. The **resolver core**
+> (block / match / merge / dedup / born-resolved nodes — §3.2–3.6) ships first and is
+> independent of links. The design below is the target for that follow-up slice; the v1 code
+> writes **no** links block. (Exact re-poke trigger semantics to be pinned with that slice;
+> KB-Architect confirmed the promotion gate is order-agnostic + idempotent, so a re-pass just
+> re-promotes the delta.)
+
 The Principal's directive: **links are real Obsidian `[[wikilinks]]`**, kept updated and
 preserved; **not** link-as-file objects unless we genuinely need rich per-link metadata
 (deferred, §7). The graph view must work.
@@ -397,26 +408,26 @@ appends JSONL. Structure in the envelope, freedom in the payload.
 
 | ID          | Priority | Statement (short)                                                  | Verify   | Traces |
 | ----------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
-| CONNECT-1   | must     | A Connect stage resolves per-source entity **candidates** into **canonical nodes** in `entities/`, deduped one-per-real-thing | none-yet | LIFE-3; VISION-5 |
-| CONNECT-2   | must     | Connect is **one instance of the SPEC-0014 harness** (own worktree, own instruction file/model); the engine is reused unchanged | none-yet | ORCH-9 |
-| CONNECT-3   | must     | **`entities/` has exactly one writer — Connect.** Decompose emits candidates into the working zone (`staging`; CANON-8), not entity nodes; unresolved extraction never appears in the canonical graph | none-yet | DATA-1; CANON-2,4,5 |
-| CONNECT-4   | must     | **Blocking is deterministic (orchestrator):** candidates are grouped into candidate sets by `kind` + normalized name; the agent receives one bounded set, never the whole graph | none-yet | ORCH-7 |
-| CONNECT-5   | must     | The Connect agent is **thin / cognition-only**: given one candidate set it returns a resolution verdict; it is granted **no** shell/write/git tools; the orchestrator performs all effects | none-yet | ORCH-7; AUTO-3 |
-| CONNECT-6   | must     | Each work item (candidate set) is handled in a **fresh, isolated agent session** (empty context) | none-yet | ORCH-5; AUTO-2 |
-| CONNECT-7   | must     | A canonical node has a **human filename** (`entities/<kind>/<slug>.md`); identity is the stable `id:` (ULID) in frontmatter, with `aliases: [<ULID>, …]` — Connect may rename without breaking lineage | none-yet | DATA-3; (issue #21) |
-| CONNECT-8   | must     | A canonical node records **provenance over all contributing sources** (`derivedFrom[]`) and the candidates it consumed (`resolvedFrom[]`) | none-yet | DATA-5 |
-| CONNECT-9   | must     | When candidates resolve to an **existing** node, Connect **folds them in** (extends provenance/aliases); it does not create a duplicate | none-yet | DATA-3; LIFE-3 |
-| CONNECT-10  | must     | When two existing nodes are the same thing, Connect picks a **canonical** node, repoints references, and **deletes** the loser (recoverable via git; **no tombstone files**) | none-yet | DATA-9,11 |
-| CONNECT-11  | must     | On merge, affected claims' `subject` is **repointed** to the canonical node and the node's claims block regenerated; **Claims is not re-run** | none-yet | DATA-5; CLAIMS-9 |
-| CONNECT-12  | must     | Connect **promotes** `relatesTo` hints (and agent `links[]`) into real Obsidian **`[[wikilinks]]`** in a delimited, regenerated links block, so the graph view connects | none-yet | DATA-8; LIFE-3; VAULT |
-| CONNECT-13  | should   | A link target that cannot be resolved to a canonical node is **not** rendered as a dangling guess — it becomes a `note` signal or a Review | none-yet | PRIN-4; SCOPE-5 |
-| CONNECT-14  | must     | The agent decision is **validated against a schema**; an invalid verdict never loses candidates — the block is flagged and retried, then set aside after K | none-yet | ORCH-12; INGEST-8 |
-| CONNECT-15  | must     | An **ambiguous** merge/link raises a yes/no **Review** (SPEC-0018) via the decision channel; the affected cluster **parks** (no merge applied) until answered, then resumes with the verdict as context | none-yet | LIFE-6; AUTO-10; REVIEW-5,6,14 |
-| CONNECT-16  | must     | Resolution is **committed per block** and the canonical tree advances only by completed commits via the **serialized canonical writer** | none-yet | ORCH-3; DATA-9 |
-| CONNECT-17  | must     | Connect is **idempotent / restartable**: candidates are marked resolved only in the commit that writes their node; node/link/claims blocks regenerate whole; crash/re-poke resumes without duplicating | none-yet | ORCH-4,13 |
-| CONNECT-18  | must     | The agent may emit optional **signals** (open `{type, note, refs?}`) routed to the **audit log only**; every run emits append-only audit in the rigid envelope | none-yet | DATA-10; AUTO-8; ORCH-11 |
-| CONNECT-19  | should   | v1 blocks/ resolves **within a single `kind`** and on the **forward pass + re-poke sweep**; cross-kind resolution and continuous recooks/reconcilers are deferred (Reflect-adjacent) | none-yet | LIFE-8 |
-| CONNECT-20  | should   | v1 links are untyped `[[wikilinks]]` (graph connectivity); a **typed link-as-object** model (predicate + own confidence/evidence) is deferred | none-yet | DATA-8 |
+| CONNECT-1   | must     | A Connect stage resolves per-source entity **candidates** into **canonical nodes** in `entities/`, deduped one-per-real-thing | test:connectStage.test.ts | LIFE-3; VISION-5 |
+| CONNECT-2   | must     | Connect is **one instance of the SPEC-0014 harness** (own worktree, own instruction file/model); the engine is reused unchanged | test:connectStage.test.ts | ORCH-9 |
+| CONNECT-3   | must     | **`entities/` has exactly one writer — Connect.** Decompose emits candidates into the working zone (`staging`; CANON-8), not entity nodes; unresolved extraction never appears in the canonical graph | test:connectStage.test.ts | DATA-1; CANON-2,4,5 |
+| CONNECT-4   | must     | **Blocking is deterministic (orchestrator):** candidates are grouped into candidate sets by `kind` + normalized name; the agent receives one bounded set, never the whole graph | test:connect.test.ts, connectStage.test.ts | ORCH-7 |
+| CONNECT-5   | must     | The Connect agent is **thin / cognition-only**: given one candidate set it returns a resolution verdict; it is granted **no** shell/write/git tools; the orchestrator performs all effects | test:connectAgent.test.ts | ORCH-7; AUTO-3 |
+| CONNECT-6   | must     | Each work item (candidate set) is handled in a **fresh, isolated agent session** (empty context) | test:connectAgent.test.ts | ORCH-5; AUTO-2 |
+| CONNECT-7   | must     | A canonical node has a **human filename** (`entities/<kind>/<slug>.md`); identity is the stable `id:` (ULID) in frontmatter, with `aliases: [<ULID>, …]` — Connect may rename without breaking lineage | test:connectDoc.test.ts, connectStage.test.ts | DATA-3; (issue #21) |
+| CONNECT-8   | must     | A canonical node records **provenance over all contributing sources** (`derivedFrom[]`) and the candidates it consumed (`resolvedFrom[]`) | test:connectDoc.test.ts, connectStage.test.ts | DATA-5 |
+| CONNECT-9   | must     | When candidates resolve to an **existing** node, Connect **folds them in** (extends provenance/aliases); it does not create a duplicate | test:connectStage.test.ts | DATA-3; LIFE-3 |
+| CONNECT-10  | must     | When two existing nodes are the same thing, Connect picks a **canonical** node, repoints references, and **deletes** the loser (recoverable via git; **no tombstone files**) | test:connectStage.test.ts | DATA-9,11 |
+| CONNECT-11  | must     | On merge, affected claims' `subject` is **repointed** to the canonical node and the node's claims block regenerated; **Claims is not re-run** | test:connectStage.test.ts | DATA-5; CLAIMS-9 |
+| CONNECT-12  | must     | Connect **promotes** `relatesTo` hints (and agent `links[]`) into real Obsidian **`[[wikilinks]]`** in a delimited, regenerated links block, so the graph view connects | **deferred-slice** | DATA-8; LIFE-3; VAULT |
+| CONNECT-13  | should   | A link target that cannot be resolved to a canonical node is **not** rendered as a dangling guess — it becomes a `note` signal or a Review | **deferred-slice** | PRIN-4; SCOPE-5 |
+| CONNECT-14  | must     | The agent decision is **validated against a schema**; an invalid verdict never loses candidates — the block is flagged and retried, then set aside after K | test:connect.test.ts, connectAgent.test.ts, connectStage.test.ts | ORCH-12; INGEST-8 |
+| CONNECT-15  | must     | An **ambiguous** merge/link raises a yes/no **Review** (SPEC-0018) via the decision channel; the affected cluster **parks** (no merge applied) until answered, then resumes with the verdict as context | test:connectStage.test.ts | LIFE-6; AUTO-10; REVIEW-5,6,14 |
+| CONNECT-16  | must     | Resolution is **committed per block** and the canonical tree advances only by completed commits via the **serialized canonical writer** | test:connectStage.test.ts | ORCH-3; DATA-9 |
+| CONNECT-17  | must     | Connect is **idempotent / restartable**: candidates are marked resolved only in the commit that writes their node; node/claims blocks regenerate whole; crash/re-poke resumes without duplicating | test:connectStage.test.ts | ORCH-4,13 |
+| CONNECT-18  | must     | The agent may emit optional **signals** (open `{type, note, refs?}`) routed to the **audit log only**; every run emits append-only audit in the rigid envelope | test:connectStage.test.ts | DATA-10; AUTO-8; ORCH-11 |
+| CONNECT-19  | should   | v1 blocks/ resolves **within a single `kind`** and on the **forward pass + re-poke sweep**; cross-kind resolution and continuous recooks/reconcilers are deferred (Reflect-adjacent) | test:connect.test.ts | LIFE-8 |
+| CONNECT-20  | should   | v1 links are untyped `[[wikilinks]]` (graph connectivity); a **typed link-as-object** model (predicate + own confidence/evidence) is deferred | **deferred-slice** | DATA-8 |
 
 ### CONNECT-3 — entities/ is resolution-only, one writer
 - **Status:** draft · **Priority:** must
@@ -430,7 +441,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   canonical node unique, real, and human-named — naming and duplication are the same problem,
   solved at the source.
 - **Traces:** DATA-1, LIFE-3
-- **Verify:** none-yet
+- **Verify:** test:connectStage.test.ts
 
 ### CONNECT-4 — deterministic blocking keeps the agent thin
 - **Status:** draft · **Priority:** must
@@ -442,7 +453,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   judges one cluster) while the deterministic orchestrator does the cheap cross-graph scan —
   preserving SPEC-0014's "orchestration deterministic, cognition disposable" exactly.
 - **Traces:** ORCH-7
-- **Verify:** none-yet
+- **Verify:** test:connect.test.ts, connectStage.test.ts
 
 ### CONNECT-10 — merge by delete, recoverable via git (no tombstones)
 - **Status:** draft · **Priority:** must
@@ -454,7 +465,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   and graph; git already makes merges reversible and preserves lineage (DATA-11), so a clean
   delete is both tidy and safe. Reversibility comes from version control, not from litter.
 - **Traces:** DATA-9, DATA-11
-- **Verify:** none-yet
+- **Verify:** test:connectStage.test.ts
 
 ### CONNECT-12 — links are real Obsidian wikilinks
 - **Status:** draft · **Priority:** must
@@ -468,7 +479,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   claims block) keeps links correct across merges/renames and replay-safe. Rich typed-edge
   metadata, if ever needed, layers on without removing the wikilinks (§7).
 - **Traces:** DATA-8, LIFE-3
-- **Verify:** none-yet
+- **Verify:** deferred-slice (link-promotion; see §3.7 note + changelog)
 
 ### CONNECT-15 — ambiguous merges park for Review, never guess
 - **Status:** draft · **Priority:** must
@@ -482,7 +493,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   autonomy high where safe (AUTO-1) and asks only where it matters (LIFE-6). Review now exists
   (SPEC-0018), so this is buildable, not deferred.
 - **Traces:** LIFE-6, AUTO-10, REVIEW-5, REVIEW-6, REVIEW-14
-- **Verify:** none-yet
+- **Verify:** test:connectStage.test.ts
 
 ## 5. Concurrency & failure model (v1 posture)
 
@@ -587,3 +598,19 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
   code-contract amendments at this spec per CANON §5; flagged promotion-gate mechanics as ORCH
   / staging-mission territory. All other Connect decisions unchanged. (Also: merged latest
   `main` to pick up SPEC-0019; resolved the INDEX.md row conflict.)
+- 2026-05-31 — **implemented the RESOLVER CORE** (new files `connect.ts`, `connectAgent.ts`,
+  `connectDoc.ts`, `connectStage.ts` + tests). Deterministic blocking (kind + normalized name)
+  → thin `copilot -p` matching on one candidate set → born-resolved `entities/<kind>/<slug>.md`
+  nodes (human filename, `id`/`aliases`, multi-source `derivedFrom`/`resolvedFrom`; CANON-6);
+  fold-into-existing, merge-two-nodes (delete loser, no tombstone) + claim `subject` repoint &
+  claims-block regen; commit-to-dequeue (candidate files deleted on resolve), retry/set-aside
+  after K, ambiguity→Review park (SPEC-0018), signals→audit-only. CONNECT-1..11,14..19
+  graduated `Verify: none-yet → test:`. **Link promotion (CONNECT-12/13/20) DEFERRED to a
+  follow-up slice** — it consumes Claims' `relatesTo` hints, which require a Connect re-pass
+  *after* Claims (the reorder runs Connect first); §3.7 reframed as that slice's target, v1
+  writes no links block (SPECSYS-7 — explicit refinement, not silent scope-drop). Scope guard
+  (KB-Architect coordination): resolver core only in NEW files; `pipeline.ts` wiring + the
+  uniform `branch→staging` retarget are KB-Architect's (the base ref is the single exported
+  constant `BASE_BRANCH='main'`, flipped to `staging` on integration). The SPEC-0015/0016/0007
+  §8 amendments land with KB-Architect's Decompose→candidates (slice 2) + staging slices, not
+  this PR. Full suite green (235 tests).
