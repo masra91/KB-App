@@ -1,0 +1,372 @@
+/* === "The Line" — SPEC-0032 pipeline-visualization SURFACE styles ============================== */
+/* Surface-specific composition for the Pipeline Status view, built ON the shared `_design-system`
+   foundation (#179): it consumes the `--viz-*` tokens, type-role utilities (.viz-signage/.viz-numeric/
+   .viz-body), flat-ink primitives (.viz-ruled/.viz-chip/.viz-btn/.viz-focusable) and the ember-breathe
+   keyframe + reduced-motion reset declared there. Per the design-system boundary rule, the Line's own
+   components (stations, gauge-rails, carriages, siding, alarm) live HERE, not in the shared layer.
+   Guardrails (§6): flat ink, NO card chrome (no radius on structure, no shadow/elevation), ember focus,
+   state never by colour alone (glyph + hue + fill), oxide never on small text. */
+
+.the-line {
+  padding: 1rem 1.25rem 2rem;
+  min-height: 100%;
+}
+.line-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Loading / empty / error — quiet, on-token. */
+.line-loading,
+.line-empty,
+.line-flight-empty,
+.line-readout-empty {
+  color: var(--viz-ink-muted);
+}
+.line-error {
+  color: var(--viz-ink);
+  border-left: 3px solid var(--viz-oxide);
+  padding-left: 0.6rem;
+}
+
+/* ── Header / overall state ──────────────────────────────────────────────────────────────────── */
+.line-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  padding-bottom: 0.6rem;
+}
+.line-title {
+  font-size: 1.125rem;
+  color: var(--viz-ink-muted);
+}
+.line-overall {
+  font-size: 1.75rem; /* the §4 28px display step — the only one this large */
+  line-height: 1;
+}
+.line-overall-glyph {
+  margin-right: 0.15rem;
+}
+/* State hue on the headline badge — a large/display element, so the hue is allowed (§3). */
+.line-overall-running { color: var(--viz-ember); }
+.line-overall-idle { color: var(--viz-idle); }
+.line-overall-stalled { color: var(--viz-oxide); }
+.line-lastact {
+  margin-left: auto;
+  color: var(--viz-ink-muted);
+  font-size: 0.8rem;
+}
+
+/* ── Alarm (the "silent stall, made loud") ──────────────────────────────────────────────────── */
+/* Oxide carries the glyph + the box's left edge ONLY; the text stays --viz-ink (oxide is sub-AA on
+   small text, §3 / Design-Lead cert). No card chrome — a ruled left edge, not a floating panel. */
+.line-alarm {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  border-left: 3px solid var(--viz-oxide);
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+}
+.line-alarm-glyph {
+  font-size: 1.25rem;
+  line-height: 1.2;
+}
+.line-alarm-text {
+  color: var(--viz-ink);
+}
+
+/* ── Pivot toggle (VIZ-5) ───────────────────────────────────────────────────────────────────── */
+.line-pivot {
+  display: flex;
+  gap: 0.4rem;
+}
+.line-pivot-btn.line-pivot-on {
+  border-color: var(--viz-ember);
+  color: var(--viz-ember);
+}
+
+/* ── Core (spine + carriages), lens weighting ──────────────────────────────────────────────────
+   Same data under both lenses — only the visual weight shifts (VIZ-5). The non-foreground half dims
+   to context (opacity), nothing is hidden. */
+.line-core {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.line-lens-stage .line-flight { opacity: 0.62; }
+.line-lens-item .line-spine-wrap { opacity: 0.62; }
+
+/* ── Station spine (§2/§6) ──────────────────────────────────────────────────────────────────── */
+.line-spine-wrap {
+  /* the horizontal rule the stations sit on (registration line, not a card edge) */
+  border-top: 1px solid var(--viz-rule);
+  padding-top: 0.75rem;
+}
+.line-spine {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.line-station {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  text-align: center;
+  min-width: 0;
+}
+.line-station-glyph {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+/* The one running station embers + breathes (§5 ambient). Reduced-motion reset (design-system.css
+   `.viz-surface *`) zeroes this to a static ember fill — full parity, state still reads via glyph+hue. */
+.line-station-running .line-station-glyph,
+.line-cell-breathe {
+  animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite;
+}
+.line-station-name {
+  font-size: 0.72rem;
+  color: var(--viz-ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line-station-state {
+  /* small text → ink-muted (state already reads via glyph + bar); just a quiet ruled chip */
+  font-size: 0.6rem;
+}
+/* Gauge-rail — a vertical volume bar (graphic → hue allowed). Bar height tweens in the odometer window. */
+.line-rail {
+  width: 0.5rem;
+  height: 2.5rem;
+  border-bottom: 1px solid var(--viz-rule);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.line-rail-bar {
+  width: 100%;
+  min-height: 1px;
+  background: currentColor; /* inherits the station-state hue class set on the bar */
+  transition: height var(--viz-dur-odometer) ease-out;
+}
+.line-rail-bar-slow { background: var(--viz-oxide); } /* slowest station tints oxide (§6, VIZ-4) */
+.line-rail-count {
+  font-size: 0.8rem;
+  color: var(--viz-ink);
+}
+.line-rail-caption {
+  /* directional conversion delta — small text, stays ink-muted (never a state hue, §3) */
+  font-size: 0.68rem;
+  color: var(--viz-ink-muted);
+}
+.line-station-queue,
+.line-station-current,
+.line-station-latency {
+  font-size: 0.66rem;
+  color: var(--viz-ink-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Set-aside count under a station — oxide BORDER + ink text (oxide off small text, §3). */
+.line-badge-error {
+  font-family: var(--viz-font-signage);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.6rem;
+  border: 1px solid var(--viz-oxide);
+  color: var(--viz-ink-muted);
+  padding: 0.02rem 0.3rem;
+}
+
+/* ── In-flight carriages (§2/VIZ-2 — the "pizza tracker") ───────────────────────────────────── */
+.line-flight .line-h2,
+.line-siding .line-h2,
+.line-readout .line-h2 {
+  font-size: 0.78rem;
+  color: var(--viz-ink-muted);
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.08em;
+}
+.line-carriages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.line-carriage {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.2rem 0;
+}
+.line-carriage-name {
+  flex: 0 0 11rem;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.line-stepper {
+  display: inline-flex;
+  gap: 3px;
+}
+/* Stepper cells — graphics (hue allowed): done = patina, current = ember (lit), pending = idle dot. */
+.line-cell {
+  width: 0.8rem;
+  height: 0.4rem;
+  background: var(--viz-rule);
+}
+.line-cell-done { background: var(--viz-patina); }
+.line-cell-current { background: var(--viz-ember); }
+.line-cell-pending { background: transparent; border: 1px solid var(--viz-rule); }
+.line-carriage-stage {
+  font-size: 0.72rem;
+  color: var(--viz-ink);
+  flex: 0 0 7rem;
+}
+.line-carriage-dwell {
+  font-size: 0.72rem;
+  color: var(--viz-ink-muted);
+}
+.line-carriage-more {
+  color: var(--viz-ink-muted);
+  font-size: 0.78rem;
+}
+
+/* ── Set-aside siding (§2/§6 VIZ-7) ─────────────────────────────────────────────────────────── */
+/* Pulled OFF the line — oxide left border (large) + oxide-fill badge; the reason stays ink (§3). */
+.line-siding {
+  border-left: 3px solid var(--viz-oxide);
+  padding-left: 0.75rem;
+}
+.line-siding-msg {
+  color: var(--viz-ink-muted);
+  font-size: 0.78rem;
+}
+.line-siding-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.line-siding-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.line-siding-badge {
+  font-family: var(--viz-font-signage);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.62rem;
+  background: var(--viz-oxide); /* oxide FILL (allowed) with dark field text on top */
+  color: var(--viz-field);
+  padding: 0.08rem 0.4rem;
+}
+.line-siding-where {
+  color: var(--viz-ink);
+}
+.line-siding-reason {
+  color: var(--viz-ink-muted);
+  font-size: 0.8rem;
+}
+.line-siding-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.4rem;
+}
+
+/* ── Secondary instrument readout (OBS-6/7/15) ─────────────────────────────────────────────── */
+.line-readout {
+  border-top: 1px solid var(--viz-rule);
+  padding-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  color: var(--viz-ink-muted);
+  font-size: 0.85rem;
+}
+.line-readout .line-h2 {
+  margin-top: 0.5rem;
+}
+.line-lock-stuck { color: var(--viz-ink); }
+.line-errors,
+.line-throughput,
+.line-worktrees,
+.line-slowops ul {
+  list-style: none;
+  margin: 0.25rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.line-err-head {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.15rem 0;
+}
+.line-err-level { font-size: 0.6rem; }
+.line-err-ts { color: var(--viz-ink-muted); margin-left: auto; font-size: 0.72rem; }
+.line-err-detail pre {
+  margin: 0.25rem 0;
+  padding: 0.5rem;
+  border-left: 2px solid var(--viz-rule);
+  overflow-x: auto;
+  font-family: var(--viz-font-numeric);
+  font-size: 0.78rem;
+}
+.line-err-runid { font-size: 0.72rem; }
+
+/* ── Responsive: narrow → vertical spine (hierarchy preserved, nothing hidden) ─────────────── */
+@media (max-width: 720px) {
+  .line-spine {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .line-station {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 0.6rem;
+    text-align: left;
+    border-bottom: 1px solid var(--viz-rule);
+    padding: 0.35rem 0;
+  }
+  .line-rail {
+    width: 3rem;
+    height: 0.5rem;
+    border-bottom: 0;
+    border-left: 1px solid var(--viz-rule);
+    align-items: center;
+  }
+  .line-rail-bar {
+    height: 100% !important; /* horizontal fill in the rotated layout */
+    width: var(--rail-w, 100%);
+  }
+  .line-carriage-name { flex-basis: 7rem; }
+}

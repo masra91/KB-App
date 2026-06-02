@@ -362,3 +362,22 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   funnel stays legible where volume grows (§2/§6, mock updated). **Both gates GREEN → status `active`,
   checked in as the living design spec.** Implementation mission carries the §9 data deps + the
   watch-items.
+- 2026-06-02 — **"The Line" surface IMPLEMENTED (DEV-4).** The Status view (`app/src/shell/views/
+  statusView.ts` + the pure model `theLineModel.ts` + surface CSS `theLine.css`) now renders The Line
+  on the shared `_design-system` foundation (#179), binding to `pipelineStatusView()` on the 2.5s poll
+  (no mocks; the three §9 data fields — `inFlight` #175, `conversion` #169, `STAGE_ORDER` #168 — are
+  live). **Built:** the six-station spine + gauge-rail funnel (directional `−deduped`/`+×ratio` deltas
+  with the bucket→station map documented in `theLineModel.ts`; PROMOTE completion-ratio with the
+  `0/0 · 0%` guard; bars scaled to the peak bucket so a fan-out reads as widening); in-flight carriages
+  (six-cell `stageIndex` stepper + active-only dwell, `>12` virtualized to "+K more"); the set-aside
+  siding (OBS-17 Retry/Dismiss, contract verbatim); the **stuck-lock alarm** as the primary oxide
+  call-out (#170 `lock.stuck`/`heldMs`/holder); the per-stage↔per-item **pivot** (default per-stage);
+  ember-breathe on the active station/step with the **reduced-motion parity** reset (`.viz-surface`
+  root) and tabular numerics; the §6 flat-ink guardrails (no card chrome, ember focus) and the §3
+  contrast rule (**oxide only on glyphs/borders/large + the badge fill — never small text**). **Deferred
+  fast-follows (each gated on an input not yet present, not a scope cut):** (1) the §9 **event-push
+  channel** (`kb:pipelineEvent`) — poll is the floor (DEV-3 owns it); (2) the **keyed cross-poll
+  odometer/index digit-roll** — the tabular-nums + ember-breathe land now; the literal digit-roll rides
+  the push channel / keyed-DOM diffing; a change-guard keeps the ambient motion smooth across unchanged
+  polls (VIZ-9); (3) the **carriage → per-hop trace drill-down** (VIZ-2 expand) — needs an OBS-16
+  `spansForItem` IPC not yet exposed. Tests trace to VIZ-1/2/3/4/5/6/7/9 + OBS-5/6/7/11/15/17.

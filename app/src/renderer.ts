@@ -10,6 +10,7 @@ import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
+import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
 import './index.css';
 import type { PathInspection } from './kb/types';
 import { esc, baseName } from './shell/html';
