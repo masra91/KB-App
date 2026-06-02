@@ -136,7 +136,7 @@ describe.skipIf(!gitAvailable)('promote — the evergreen gate (STAGING-3/4/6)',
     });
   });
 
-  it('publishes resolved entities/ and claims/ to main (CONNECT output joins the evergreen set)', async () => {
+  it('publishes resolved entities/ and claims/ to main (CONNECT output joins the evergreen set; STAGING-11)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       await ensureStagingBranch(root);
@@ -155,7 +155,7 @@ describe.skipIf(!gitAvailable)('promote — the evergreen gate (STAGING-3/4/6)',
     });
   });
 
-  it('mirrors deletions: a node CONNECT merged away on staging is removed from main (§8 fix)', async () => {
+  it('mirrors deletions: a node CONNECT merged away on staging is removed from main (STAGING-10)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       await ensureStagingBranch(root);

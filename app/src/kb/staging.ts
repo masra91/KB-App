@@ -11,12 +11,13 @@ import { ensureGitIdentity } from './vault';
 export const STAGING_BRANCH = 'staging';
 
 /**
- * The evergreen path set promoted to `main` (STAGING-3). `sources/` is evergreen the moment it
- * exists (immutable ground truth, DATA-2). `entities/` + `claims/` join now that CONNECT
- * (SPEC-0020) resolves candidates into born-resolved nodes on `staging` — they become evergreen
- * once resolved (CANON-10), so the gate publishes them. `outputs/` joins when the Research/Query
- * stage that writes it lands. Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`) are
- * never listed, so `main` can never hold them (STAGING-6).
+ * The active evergreen path set promoted to `main` — the single source of truth for what reaches
+ * `main` (STAGING-3/11). It **grows with its producers**: `sources/` is evergreen the moment it
+ * exists (immutable ground truth, DATA-2); `entities/` + `claims/` join now that CONNECT
+ * (SPEC-0020) resolves candidates into born-resolved nodes on `staging` and Claims attaches to
+ * them — evergreen once resolved (CANON-10). `outputs/` joins when the Research/Query stage that
+ * writes it lands. Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`) are never listed,
+ * so `main` can never hold them (STAGING-6).
  */
 export const EVERGREEN_PATHS = ['sources', 'entities', 'claims'] as const;
 
@@ -41,12 +42,15 @@ export async function advanceStaging(root: string, ref: string): Promise<void> {
 }
 
 /**
- * The promotion gate (STAGING-3/4): advance `main` to hold EXACTLY the evergreen subset of
- * `staging`. For each evergreen path, **clear `main`'s copy then restore `staging`'s** (index +
- * worktree). Clearing first is what makes `main` mirror DELETIONS: a node CONNECT merged away on
- * `staging` (a deleted loser, CONNECT-10/11) leaves `main` too — plain `checkout staging -- P`
- * only adds/updates, never removes (the §8 gap). Working paths are never named, so `main` cannot
- * contain them (STAGING-6). Idempotent: a no-op (returns false) when nothing evergreen changed.
+ * The promotion gate (STAGING-3/4), **deletion-aware** (STAGING-10): advance `main` to be an
+ * EXACT MIRROR of `staging`'s evergreen subset — adds, edits, AND removals. For each evergreen
+ * path, **clear `main`'s copy then restore `staging`'s** (index + worktree). Clearing first is
+ * what makes `main` mirror DELETIONS: a node CONNECT merged away on `staging` (a deleted loser +
+ * its repointed claims, SPEC-0020 §3 / CONNECT-10,11) leaves `main` too, so a deduped duplicate
+ * never lingers — plain `checkout staging -- P` only adds/updates, never removes. `sources/` is
+ * append-only, so mirroring never removes ground truth. Working paths are never named, so `main`
+ * cannot contain them (STAGING-6). Idempotent: a no-op (returns false) when nothing evergreen
+ * changed.
  *
  * MUST be called serialized via the shared canonical-writer lock so it never races a stage's
  * ref advance.
