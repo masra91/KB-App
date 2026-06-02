@@ -43,6 +43,7 @@ and a unique `key` here.
 | SPEC-0028 | RESEARCH | Researchers (Enrich & Research)            | feature | draft | `features/` |
 | SPEC-0029 | AUDIT   | Audit & Activity (lineage + read-only views) | feature | draft | `features/` |
 | SPEC-0030 | OBS     | Pipeline Status & Diagnostics (status view + dev logs) | feature | draft | `features/` |
+| SPEC-0031 | VAULT   | Obsidian Vault Representation (the human view) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -66,6 +67,6 @@ assigned at creation time.
 | ~~AUDIT~~  | _written → SPEC-0029 (key AUDIT)_ | feature | Audit     | canonical audit model + coverage mandate + read-only Activity/Lineage views |
 | ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
 | ~~PANEL~~  | _written → SPEC-0027 (key PANEL)_ | feature | _x-cut_  | Manage section: Jobs/Agents/Sources/Settings views |
-| VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
+| ~~VAULT~~  | _written → SPEC-0031 (key VAULT)_ | feature | _x-cut_  | clean graph (entities only), readable entity pages, shipped .obsidian config |
 
 > Numbers are assigned at creation time, in order, to avoid gaps.
