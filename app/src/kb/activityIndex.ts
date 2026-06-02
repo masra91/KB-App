@@ -98,8 +98,8 @@ async function listAuditFiles(root: string): Promise<AuditFile[]> {
   for (const abs of await findFiles(path.join(root, '.kb', 'jobs'), 'journal.jsonl')) {
     files.push({ abs, rel: path.relative(root, abs), jobId: path.basename(path.dirname(abs)) });
   }
-  // .kb/ask/audit.jsonl — recall transparency log.
-  const askAbs = path.join(root, '.kb', 'ask', 'audit.jsonl');
+  // .kb/cache/ask/audit.jsonl — recall transparency log (working zone, gitignored; CANON-8/9).
+  const askAbs = path.join(root, '.kb', 'cache', 'ask', 'audit.jsonl');
   if (await fileExists(askAbs)) files.push({ abs: askAbs, rel: path.relative(root, askAbs) });
 
   // .kb/audit.jsonl — cross-cutting control log (the Control Panel's Principal config changes).

@@ -366,9 +366,12 @@ async function verifyCitations(root: string, tools: RecallTools, citations: Cita
   return out;
 }
 
-/** ASK-11: append a transparency event recording the question, retrieval, and answer summary. */
+/** ASK-11: append a transparency event recording the question, retrieval, and answer summary.
+ *  Lives under the gitignored, never-promoted working zone `.kb/cache/ask/` (CANON-8/9): recall
+ *  runs against the vault ROOT (the `main` checkout Obsidian browses), so writing it anywhere
+ *  tracked would leave that checkout perpetually git-dirty with non-evergreen machinery state. */
 async function writeRecallAudit(root: string, result: AskResult, toolDefs: RecallToolDef[], ts: string): Promise<void> {
-  const dir = path.join(root, '.kb', 'ask');
+  const dir = path.join(root, '.kb', 'cache', 'ask');
   const line =
     JSON.stringify({
       ts,

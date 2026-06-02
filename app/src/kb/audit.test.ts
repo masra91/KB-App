@@ -57,7 +57,7 @@ describe('normalizeAuditLine — per-actor adapters (AUDIT-1)', () => {
 
   it('recall line: actor from event, question in payload', () => {
     const raw = { ts: '2026-01-06T00:00:00.000Z', event: 'recall', question: 'who is Atlas?', grounded: true, agent: { model: 'copilot' } };
-    const e = normalizeAuditLine(raw, ctx({ file: '.kb/ask/audit.jsonl' }))!;
+    const e = normalizeAuditLine(raw, ctx({ file: '.kb/cache/ask/audit.jsonl' }))!;
     expect(e).toMatchObject({ actor: 'recall', eventType: 'recall', model: 'copilot' });
     expect(e.payload).toMatchObject({ question: 'who is Atlas?', grounded: true });
   });

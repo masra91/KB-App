@@ -5,3 +5,9 @@
 .clubhouse/settings.local.json
 
 .clubhouse/agents.json.bak
+
+# Claude Code agent runtime — ephemeral / agent-local machinery, never tracked.
+# (The scheduled-tasks lock carries a live pid + session id; .mcp.json is agent-local
+#  MCP config. Tracked skills under .claude/skills/ are intentionally NOT ignored.)
+.claude/scheduled_tasks.lock
+.mcp.json
