@@ -2,6 +2,14 @@
 // minimal UI, no framework. On launch it asks main for state and shows either the
 // Setup wizard (no KB yet — a full-screen pre-shell gate, SHELL-9) or the navigation
 // shell (KB loaded; Capture is the default view, SHELL-4).
+// Bundled design-system fonts (SPEC-0033 DESIGN-7) — self-hosted @fontsource faces (pinned, OFL, no
+// CDN) backing the `--viz-font-*` roles. Saira Condensed SemiBold (signage) + IBM Plex Mono 400/500
+// (tabular numerics) + IBM Plex Sans 400 (body). Imported before the design system so @font-face is live.
+import '@fontsource/saira-condensed/600.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-sans/400.css';
+import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
 import './index.css';
 import type { PathInspection } from './kb/types';
 import { esc, baseName } from './shell/html';
