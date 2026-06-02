@@ -78,12 +78,12 @@ From #56's repro + DEV-2's signing analysis (#25 area):
 | ID       | Priority | Statement (short) | Verify | Traces |
 | -------- | -------- | ----------------- | ------ | ------ |
 | MACOS-1  | must     | **Interim mitigation (shipped):** first-run setup **detects** a vault path at/inside a TCC-protected location (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive — `detectTccProtectedDir`, darwin-only, dot-boundary-safe) and **warns + steers** the user to an unprotected folder, so the silent break is at least visible until the signed build lands | test:app/src/kb/vault.test.ts (detectTccProtectedDir); app/src/renderer.ts (setup warning) | STACK-10; SETUP-1; #56 |
-| MACOS-2  | must     | On a **signed, entitled** build, a vault in a TCC-protected folder **ingests + enriches end-to-end** (capture → sources → entities/claims/wikilinks on `main`) with **no `Operation not permitted`** — the headline #56 acceptance | none-yet → test: packaged-app smoke + DEV-2 empirical run (§5) | STACK-10; DATA-9; #56 |
+| MACOS-2  | must     | On a **signed, entitled** build, a vault in a TCC-protected folder **ingests + enriches end-to-end** (capture → sources → entities/claims/wikilinks on `main`) with **no `Operation not permitted`** — the headline #56 acceptance. **v1 scope (LOCKED, KB-Lead 2026-06-02):** the end-to-end guarantee covers the **local TCC folders only** — `~/Documents`, `~/Desktop`, `~/Downloads`. **iCloud Drive is detect-warn-only (MACOS-1) for v1** — its eviction/placeholder materialization edges must not block the #56 MUST; steer users off iCloud until a later spec | none-yet → test: packaged-app smoke + DEV-2 empirical run (§5) | STACK-10; DATA-9; #56 |
 | MACOS-3  | must     | The packaged build is **code-signed with a STABLE identity** under the **hardened runtime** — `Apple Development` for dev/test, `Developer ID Application` for release — so the TCC grant persists across same-identity rebuilds. Ad-hoc `-` is insufficient: its designated requirement is a `cdhash` that changes every build → the grant re-prompts every rebuild (the STACK-10 root cause today — the shipped `.app` is `flags=0x2(adhoc)`). Configured in `forge.config.ts` `osxSign` (gated opt-in `KB_OSX_SIGN=1`; #181) | **verified** (DEV-2, #181): `KB_OSX_SIGN=1 npm run package` → `codesign -d --requirements -` is an **identity-based DR** (`subject.OU=…`), **stable across rebuilds**, `flags=0x10000(runtime)` (vs the ad-hoc `cdhash` before). Not CI-automatable (cert-gated) | STACK-10; STACK-2 |
 | MACOS-4  | must     | The app is **explicitly NON-sandboxed** (hardened runtime, not App Sandbox). Chosen-folder access **persists via the TCC grant (by stable signature)** — the stored `activeVaultPath` (appConfig) **re-opens directly across launches**, with **no NSURL bookmark / security-scoped-resource dance** (those are App-Sandbox APIs; Electron exposes no regular NSURL bookmark without native code, and it buys nothing here). A **moved/renamed** vault is handled by the **MACOS-1 detect-and-warn re-pick**, not a bookmark; **iCloud eviction is not a re-resolution case** (eviction offloads file *content* to a dataless placeholder — the path stays valid and opening it triggers re-download). **No new runtime code** beyond the signing | none-yet → test: relaunch re-opens the stored vault without re-prompting (signed build, §5); the config path re-resolution is already covered by SETUP-6 (app/src/main/ipc.test.ts — a 2nd launch loads the persisted `activeVaultPath`) | STACK-10 |
 | MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed (child inherits the parent's TCC grant). Satisfied **by the MACOS-3 stable signature + hardened-runtime entitlements** (`com.apple.security.cs.allow-jit`, `…allow-unsigned-executable-memory`, `…disable-library-validation`) — **no spawn-code change** (`simpleGit(dir)` + the copilot SDK `forStdio({path})` are unchanged). **DEV-2 proved the mechanism** (§5): a parent spawning `git` into `~/Documents` succeeds; hardened-runtime library-validation gates *loading* a bad dylib, not *spawning* a signed binary — so `Operation not permitted` is specifically the ad-hoc/unpersisted-grant case, not an inherent inheritance failure. **No new runtime code** | **verified** (DEV-2, #183 green on the signed build, §5): the signed app's `ensureStagingWorktree` git-write into a `~/Documents` vault succeeds, **zero `Operation not permitted`**. It's a **BYOA signed-build smoke, release-gated (NOT CI)** — TCC propagation can't be CI-gated (cert + signed build + OS grant); skip-guarded (`darwin && KB_SIGNED_E2E`), run before any notarized release (MACOS-8), recipe in MACOS-9 | test:app/e2e/signedProtectedFolder.e2e.ts (cert-gated); STACK-10; ORCH-2; #56 |
 | MACOS-6  | should   | The build declares **folder usage-description strings** (`NSDocumentsFolderUsageDescription`, `NSDesktopFolderUsageDescription`, `NSDownloadsFolderUsageDescription`) so the macOS TCC prompt explains *why* the app wants the folder (consent rationale) | **verified** (DEV-2, #181): `plutil -p Info.plist` on the packaged build shows all 3 usage strings (via `extendInfo`) | STACK-10; PRIN-19 |
-| MACOS-7  | must     | **First-launch permission-grant UX + denial fallback** (the #56 permission flow — **DEV-4's lane**). On first pipeline use against a protected folder the app's own **TCC prompt fires** once ("Allow access to Documents" — the one human-in-loop step, can't be headless); the surrounding UX makes clear *why* (ties to MACOS-6 rationale) and confirms when granted. **On denial** the app must **degrade visibly, never silently stall**: fall back to the MACOS-1 warn + **guide the user to System Settings → Privacy & Security → Files and Folders** (or to relocate the vault). *The exact denial-fallback posture (warn-and-steer vs deep-link to System Settings vs block-with-explainer) is a **product call routed to KB-Lead** (§8).* | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn/guide path | STACK-10; SETUP-1; PRIN-19; [#56](https://github.com/masra91/KB-App/issues/56) |
+| MACOS-7  | must     | **First-launch permission-grant UX + denial fallback** (the #56 permission flow — **DEV-4's lane**). On first pipeline use against a protected folder the app's own **TCC prompt fires** once ("Allow access to Documents" — the one human-in-loop step, can't be headless); the surrounding UX makes clear *why* (ties to MACOS-6 rationale) and confirms when granted. **On denial** the app must **degrade visibly, never silently stall**. **v1 posture (LOCKED, KB-Lead 2026-06-02):** **warn + steer the user to System Settings → Privacy & Security → Files and Folders** (reuses the MACOS-1 fallback message; clear, no silent failure, no dead-end). A System-Settings deep-link (`x-apple.systempreferences:`) is an optional fast-follow, not v1. | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn/guide path | STACK-10; SETUP-1; PRIN-19; [#56](https://github.com/masra91/KB-App/issues/56) |
 | MACOS-8  | must     | The **distribution** build is **Developer-ID-signed + notarized** (Gatekeeper/quarantine). **Reframed gate (DEV-2 verified):** NOT the cert — both `Apple Development` **and** `Developer ID Application` certs are in the keychain, so dev *and* Developer-ID signing work **now**; the only missing piece is **notarization credentials** (a `notarytool` `AC_PASSWORD`/App-Store-Connect API profile). So #56 is **signing-ungated; only notarized *distribution* is creds-gated** — release-only, not dev/test. **Release gate:** the MACOS-5 BYOA protected-folder smoke MUST be run (green) on the signed build **before notarizing/shipping** — that's the recurring trigger that keeps the cert-gated proof from rotting | none-yet (notarization-creds-gated) | STACK-10; MACOS-5 |
 | MACOS-9  | should   | A **documented signed-build run recipe** — the exact steps to reproduce the MACOS-5 smoke + MACOS-3 DR check: `KB_OSX_SIGN=1 npm run package` with a stable signing identity present → `codesign -d --requirements -` (identity-based DR check) → put a vault in `~/Documents/<x>` → run the pipeline → assert **zero `Operation not permitted`** in the dev log. Anti-rot: because the smoke is cert-gated + never runs in CI, this doc is what keeps it reproducible + runnable on demand (esp. at release) | none-yet → test: the dev-setup/run-recipe doc (committed) | STACK-10; MACOS-5; TEST-* |
 
@@ -143,7 +143,8 @@ cert-gated (`darwin && KB_SIGNED_E2E=1`) + release-gated (MACOS-8) so it can't s
   adjacent to the MACOS-1 warn fallback.)
 - **KB-Lead / Principal:** **notarization credentials** (a `notarytool` / App-Store-Connect API
   profile) — unblocks notarized *distribution* (MACOS-8) only. The signing certs are already present
-  (DEV-2 verified), so nothing else waits on the Principal. Plus the two product calls in §8.
+  (DEV-2 verified), so nothing else waits on the Principal. The two §8 product calls are **resolved**
+  (KB-Lead, 2026-06-02 — folded into MACOS-2 + MACOS-7).
 
 ## 7. Out of scope (for now)
 
@@ -151,22 +152,29 @@ cert-gated (`darwin && KB_SIGNED_E2E=1`) + release-gated (MACOS-8) so it can't s
 - App Sandbox + Mac App Store distribution (we are deliberately non-sandboxed — MACOS-4).
 - Auto-update signing (later, with the distribution pipeline).
 
-## 8. Open questions (product calls — routed to KB-Lead)
+## 8. Product calls — RESOLVED (KB-Lead, 2026-06-02)
 
-- [ ] **iCloud Drive scope.** Is iCloud Drive (`~/Library/Mobile Documents/com~apple~CloudDocs`) in
-      **MACOS-2's end-to-end acceptance**, or **detect-warn-only** (MACOS-1)? Its TCC class **and**
-      file-materialization model (on-demand download / evict) differ from Documents/Desktop/Downloads
-      — a git repo on a partially-materialized iCloud tree is its own risk. Recommend **detect-warn
-      only for v1** (steer off iCloud) unless KB-Lead wants the harder end-to-end guarantee.
-- [ ] **Denial-fallback posture (MACOS-7).** When the user denies the TCC grant: warn-and-steer
-      (MACOS-1 message), deep-link to System Settings → Privacy, or block-with-explainer? Product/UX
-      call; DEV-4 implements once decided. Recommend **warn-and-steer + textual guidance to System
-      Settings → Privacy & Security → Files and Folders for v1** (reuses the MACOS-1 fallback, never a
-      silent stall, ships without new native code), with the **System-Settings deep-link as a
-      fast-follow** (`x-apple.systempreferences:` URL — small, additive) unless KB-Lead wants it in v1.
+Both v1 product forks are **decided** (KB-Lead sign-off on #159) and folded into the requirements
+above (MACOS-2, MACOS-7); recorded here for provenance:
+
+- [x] **iCloud Drive scope → detect-warn-only for v1.** v1's MACOS-2 end-to-end guarantee covers the
+      **local TCC folders** (`~/Documents`, `~/Desktop`, `~/Downloads` = the #56 MUST) only. **iCloud
+      Drive** (`~/Library/Mobile Documents/com~apple~CloudDocs`) is **detect-warn-only (MACOS-1)** — its
+      on-demand-download / eviction materialization model (a git repo on a partially-materialized tree
+      is its own risk) must **not** block the #56 MUST. Steer users off iCloud until a later spec.
+- [x] **Denial-fallback posture (MACOS-7) → warn + steer to System Settings.** On TCC denial the app
+      **warns + steers the user to System Settings → Privacy & Security → Files and Folders** (reuses
+      the MACOS-1 fallback; clear, no silent failure, no dead-end). A System-Settings deep-link is an
+      optional fast-follow, not v1.
 
 ## 9. Changelog
 
+- 2026-06-02 — **KB-Lead product sign-off (both §8 calls ruled) → spec LOCKED (product forks closed).** (a)
+  **iCloud Drive = detect-warn-only for v1** — MACOS-2's end-to-end guarantee covers local TCC folders
+  (Documents/Desktop/Downloads) only; iCloud's eviction/placeholder edges must not block the #56 MUST.
+  (b) **Denial fallback = warn + steer to System Settings → Privacy & Security → Files and Folders.**
+  Folded into MACOS-2 + MACOS-7 as locked v1 posture (no longer "routed to KB-Lead"); §8 marked
+  resolved. Core mechanics (MACOS-3/4/5) already greenlit + verified-by-running → spec clear to land.
 - 2026-06-02 — **§8 denial-fallback question made decision-ready** (recommended v1 default added,
   mirroring the iCloud call): warn-and-steer + textual System-Settings guidance for v1 (reuses MACOS-1,
   no silent stall, no new native code), deep-link as a fast-follow. Both §8 product calls now carry a
