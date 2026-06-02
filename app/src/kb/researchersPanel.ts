@@ -20,9 +20,9 @@ export interface ResearcherTemplateOption {
 }
 
 export const RESEARCHER_TEMPLATE_OPTIONS: ResearcherTemplateOption[] = [
-  { template: 'web', label: 'Web', description: 'Public-web search & fetch — prior art, press releases, definitions.', defaultEgress: 'public-web' },
-  { template: 'code', label: 'Code', description: 'Local repos + GitHub/Azure DevOps reads (read-only). Slices 2.', defaultEgress: 'local-only' },
-  { template: 'm365', label: 'M365 / WorkIQ', description: 'Mail/calendar/SharePoint/Teams via your tenant (OAuth). Slice 3.', defaultEgress: 'internal-tenant' },
+  { template: 'web', label: 'Public Web', description: 'Public-web search & fetch — prior art, press releases, definitions.', defaultEgress: 'public-web' },
+  { template: 'code', label: 'Local Repository', description: 'Local repos + GitHub/Azure DevOps reads (read-only). Slices 2.', defaultEgress: 'local-only' },
+  { template: 'm365', label: 'WorkIQ/M365', description: 'Mail/calendar/SharePoint/Teams via your tenant (OAuth). Slice 3.', defaultEgress: 'internal-tenant' },
   { template: 'custom', label: 'Custom', description: 'Your own prompt + MCP/tools + declared egress tier.', defaultEgress: 'local-only' },
 ];
 
@@ -65,6 +65,7 @@ export function buildResearcherViews(
     id: r.id,
     template: r.template,
     label: r.label ?? r.template,
+    prompt: r.prompt,
     egressTier: r.egressTier,
     scope: r.scope,
     enabled: r.enabled,
@@ -115,7 +116,7 @@ const RESEARCHER_AUDIT_WHY = 'Principal change via Control Panel';
  * (egress `local-only`), so e.g. creating a public-web researcher records local-only→public-web.
  */
 export function researcherConfigAuditEvents(
-  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier'> | undefined,
+  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier' | 'scope' | 'prompt'> | undefined,
   patch: ResearcherConfigPatch,
 ): AuditEventInput[] {
   const base = {
@@ -123,9 +124,13 @@ export function researcherConfigAuditEvents(
     schedule: prior?.schedule ?? 'off',
     posture: prior?.posture ?? DEFAULT_POSTURE,
     egressTier: prior?.egressTier ?? ('local-only' as EgressTier),
+    scope: prior?.scope ?? '',
+    prompt: prior?.prompt ?? '',
   };
   const events: AuditEventInput[] = [];
-  for (const field of ['enabled', 'schedule', 'posture', 'egressTier'] as const) {
+  // scope + prompt (RESEARCH-17) are steering config the Principal edits in the Manage view — audited
+  // too (AUDIT-2: a change to what a researcher does / which scope it serves is never silent).
+  for (const field of ['enabled', 'schedule', 'posture', 'egressTier', 'scope', 'prompt'] as const) {
     const to = patch[field];
     if (to === undefined || to === base[field]) continue;
     events.push({
