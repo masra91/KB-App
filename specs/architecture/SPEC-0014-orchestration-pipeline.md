@@ -116,7 +116,7 @@ Three layers; only one has a brain.
 | ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | test:orchConcurrency.test.ts | PRIN-16 |
 | ORCH-21  | must     | The **agent runtime is pluggable** behind the decider/agent interface: an agent runs via the **CLI single-shot** (`copilot -p`) OR the **Copilot SDK** (Sessions/tools/streaming), chosen **per-agent where it makes sense**; a **deterministic fallback** is always retained (ORCH-7) | none-yet | ORCH-7,8; AUTO-11 |
 | ORCH-22  | should   | Adopt the **Copilot SDK where its capabilities are load-bearing** (multi-turn sessions, agent-invoked tools/MCP, streaming) — Ask/Recall first, Research next, Connect/Reflect opportunistically; **thin single-shot stages stay on the CLI** until the SDK is **GA** and/or **concurrency-overhead evidence** (ORCH-20) justifies the server model. **Pin + age** the SDK per E1 (ENG-2,4,7) | none-yet | ORCH-20; ENG-2,4,7 |
-| ORCH-23  | must     | A **process-wide copilot-concurrency ceiling** bounds the TOTAL in-flight `copilot` subprocesses spawned by **background** work, independent of per-stage caps (ORCH-20). Every **background** spawner — all stages, jobs/Reflect, and the live researcher runner (background + fan-out-capable = the multiplicative vector) — acquires from one shared semaphore (`withCopilotSlot`). **Interactive recall is EXEMPT by design** (single-flight, ≤1 concurrent, interactive priority — a user's Ask must never queue behind autonomous background work; bounded +1 overage is acceptable). This is the safety bound that makes raising per-stage caps safe (cap×stages can't multiply into unbounded subprocesses → rate-limit / CPU blowup). Ceiling cores-aware, env-overridable, per-Instance setting later. *Revisit recall's exemption if it ever becomes multi-flight/batch.* | test:src/kb/copilotConcurrency.test.ts | ORCH-20; PRIN-16; STACK-9 |
+| ORCH-23  | must     | A **process-wide copilot-concurrency ceiling** bounds the TOTAL in-flight `copilot` subprocesses spawned by **background** work, independent of per-stage caps (ORCH-20). Every **background** spawner — all stages, jobs/Reflect, and the live researcher runner (background + fan-out-capable = the multiplicative vector) — acquires from one shared semaphore (`withCopilotSlot`). **Interactive recall is EXEMPT by design** (single-flight, ≤1 concurrent, interactive priority — a user's Ask must never queue behind autonomous background work; bounded +1 overage is acceptable). This is the safety bound that makes raising per-stage caps safe (cap×stages can't multiply into unbounded subprocesses → rate-limit / CPU blowup). Ceiling cores-aware, env-overridable; a per-Instance cap/ceiling setting is **low priority** — a live A/B measured cap=3 at only ~1.72× (copilot itself is the concurrency bottleneck, not the ceiling), so the knob has limited headroom (see changelog). *Revisit recall's exemption if it ever becomes multi-flight/batch.* | test:src/kb/copilotConcurrency.test.ts | ORCH-20; PRIN-16; STACK-9 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -199,6 +199,16 @@ Three layers; only one has a brain.
 
 ## 6. Changelog
 
+- 2026-06-02 — **perf Phase 1 MEASURED (durable design fact — do not relitigate).** Live real-copilot A/B
+  on the claims drain (same 21 entities, cap=1 vs cap=3): **cap=1 304s (14.5s/entity) → cap=3 177s
+  (8.4s/entity) = 1.72× faster**. Crucially the speedup is **sub-linear** even though the semaphore had
+  headroom (ceiling 4 on a 16-core box, cap 3 < 4 → not throttled): the limiter is the **`copilot` CLI
+  itself not fully parallelizing concurrent sessions** (backend/local contention) — **inherent LLM-runtime
+  latency, not our serialization or the semaphore**. Consequences: (1) **cap=3 is well-chosen** — a real
+  bounded-safe ~1.7× win; (2) **raising caps further is low-value** (diminishing returns + rate-limit risk,
+  since copilot is the bottleneck) — so (3) the **per-Instance cap/ceiling setting is LOW priority** (the
+  knob has limited headroom on real copilot). Phase 2 (Connect) expects the same bounded ~1.7×, sequenced
+  after DEV-1's connectStage work settles (collision avoidance), matched to its bounded payoff.
 - 2026-06-02 — **perf Phase 1: global copilot-concurrency ceiling + raised stage caps (ORCH-23; dogfood #4).**
   Added `src/kb/copilotConcurrency.ts` — one process-wide FIFO semaphore (`withCopilotSlot`/`acquireCopilotSlot`,
   cores-aware ceiling, `KB_COPILOT_MAX_CONCURRENCY` override) that every **background** copilot spawner
