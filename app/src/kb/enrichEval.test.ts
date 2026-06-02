@@ -42,10 +42,13 @@ describe('evaluateGranularity (DECOMP-17 behavioral eval)', () => {
     expect(sub.presentMustNot).toContain('first computer programmer');
   });
 
-  it('FAILS on over-extraction beyond the loose bound', () => {
-    const r = evaluateGranularity(decision(['Ada Lovelace', 'Charles Babbage', 'Analytical Engine', 'Engine', 'Programmer', 'England']), ada);
+  it('flags over-extraction (overMax) but does NOT hard-fail pass — the count bound is loose', () => {
+    // 5 nodes > maxNodes(3), but recall+precision hold (no descriptor trap) → pass stays true;
+    // the loose count is surfaced via overMax (reported, never a hard fail — bar: ±tolerance only
+    // on raw totals). (Avoids 'Programmer' here, which would trip the precision guard.)
+    const r = evaluateGranularity(decision(['Ada Lovelace', 'Charles Babbage', 'Analytical Engine', 'Mathematics', 'England']), ada);
     expect(r.overMax).toBe(true);
-    expect(r.pass).toBe(false);
+    expect(r.pass).toBe(true);
   });
 });
 
