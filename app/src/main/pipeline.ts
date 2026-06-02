@@ -56,23 +56,20 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     await promote(vaultPath);
   };
   const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen);
-  // The stages run on the staging worktree (root-agnostic) and serialize their canonical
+  // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen
-  // `entities/`, Claims attaches to the resolved graph. They drain independently; the lock keeps
-  // their staging ff-advances from racing. Connect carries the promotion gate as its afterDrain
-  // so resolved entities become visible on `main` (the archivist already promotes sources/).
+  // `entities/` (carrying source-dir provenance Claims can read), Claims attaches claims to the
+  // resolved graph. They drain independently; the lock keeps their staging ff-advances from
+  // racing. Connect + Claims each carry the promotion gate as their afterDrain so resolved
+  // entities and their claims become visible on `main` (the archivist already promotes sources/).
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen);
-  // ClaimsStage is constructed (the Review-answer path pokes it via answerActiveReview) but NOT
-  // started in this slice: Connect-produced nodes carry source-ULID provenance in `derivedFrom`,
-  // which `claimsOne` can't yet resolve to a source dir, so a running Claims sweep would fail on
-  // every entity and churn (no terminal marker recordable). Claims is wired + started with its
-  // promote-after-drain hook in the claims-after-Connect slice, alongside the provenance fix.
-  const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock);
+  const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, promoteEvergreen);
   orch.start();
   decompose.start();
   connect.start();
+  claims.start();
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, lock };
   return orch;
 }

@@ -24,7 +24,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { ulid, dateShard } from './ulid';
+import { ulid, dateShard, isUlid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { validCandidate, blockKey, type Candidate } from './connect';
 import {
@@ -83,6 +83,18 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve a candidate's `sourceId` to the repo-relative SOURCE DIR the archivist wrote it to
+ * (`sources/<dateShard(id)>/<id>`, orchestrator.ts). A candidate carries only the source's ULID
+ * (the frozen Candidate contract), but the node's `derivedFrom` must be a source-DIR path so the
+ * downstream Claims stage can read the whole source from it (CLAIMS-5; `claimsOne` does
+ * `path.join(root, derivedFrom)`). The layout is deterministic, so no directory walk is needed. A
+ * non-ULID `sourceId` (only ever in unit fixtures) is passed through unchanged.
+ */
+function sourceDirRel(sourceId: string): string {
+  return isUlid(sourceId) ? path.join('sources', dateShard(sourceId), sourceId) : sourceId;
 }
 
 // ── Reading the working zone: candidates + existing nodes ──────────────────────────────────
@@ -446,7 +458,7 @@ export async function connectOne(
 
     for (const cluster of decision.clusters) {
       const members = cluster.memberCandidateIds.map((id) => candidateById.get(id)).filter((c): c is Candidate => !!c);
-      const memberSources = members.map((m) => m.sourceId);
+      const memberSources = members.map((m) => sourceDirRel(m.sourceId)); // source-DIR paths (CLAIMS-5)
       consumedCandidateIds.push(...members.map((m) => m.id));
 
       // Merge targets: the fold-into node + any explicit merge-existing nodes (CONNECT-9/10).
