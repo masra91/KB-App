@@ -219,4 +219,25 @@ describe('buildInFlightRoster (SPEC-0032 VIZ-2)', () => {
     ]);
     expect(r.map((x) => x.stage)).toEqual(['archive', 'claims']);
   });
+
+  // Edge cases the live Line renderer hits during real drains — guard the contract DEV-4 binds to.
+  it('a busy stage with an empty queue yields no carriages (busy ≠ a guaranteed carriage)', () => {
+    // Transient: a stage can read busy while its queue is momentarily empty (items moving between
+    // stages). The renderer must not assume busy implies ≥1 carriage.
+    const r = buildInFlightRoster([{ stage: 'claims', items: [], busy: true, cap: 3, since: 'T1' }]);
+    expect(r).toEqual([]);
+  });
+
+  it('when cap exceeds the queue length, every item is active (cap is an upper bound, not exact)', () => {
+    // The final drain batch is smaller than cap — all of it is the active batch.
+    const r = buildInFlightRoster([
+      { stage: 'decompose', items: [{ id: 'A' }, { id: 'B' }], busy: true, cap: 5, since: 'T2' },
+    ]);
+    expect(r.map((x) => x.active ?? false)).toEqual([true, true]);
+    expect(r.every((x) => x.sinceTs === 'T2')).toBe(true);
+  });
+
+  it('returns an empty roster for no stages (empty Line)', () => {
+    expect(buildInFlightRoster([])).toEqual([]);
+  });
 });
