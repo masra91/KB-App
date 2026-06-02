@@ -38,6 +38,7 @@ and a unique `key` here.
 | SPEC-0023 | JOBS    | Autonomous Jobs & Scheduler                 | architecture | draft | `architecture/` |
 | SPEC-0024 | REFLECT | Reflect & Rumination (self-maintenance v1)  | feature | draft | `features/` |
 | SPEC-0025 | META    | Rich Metadata, Tags & Properties            | feature | draft | `features/` |
+| SPEC-0026 | ASK     | Ask & Recall (grounded NL query v1)         | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -54,7 +55,7 @@ assigned at creation time.
 | ~~CLAIMS~~ | _written → SPEC-0016 (key CLAIMS)_ | feature | Enrich  | Claims (Enrich v2) — internal substance about entities |
 | RESEARCH   | Enrich & Research                | feature | Enrich    | external corroboration/expansion (egress, AUTO-4; thick agent) — was `ENRICH` |
 | ~~CONNECT~~ | _written → SPEC-0020 (key CONNECT)_ | feature | Enrich  | Connect & Expand (Enrich v3) — sole writer of evergreen `entities/` + promotion gate (SPEC-0019 CANON-5) |
-| ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
+| ~~ASK~~    | _written → SPEC-0026 (key ASK)_  | feature | Query     | grounded NL query — agentic structure-aware retrieval |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
 | ~~REFLECT~~ | _written → SPEC-0024 (key REFLECT)_ | feature | Reflect | Reflect & Rumination — runs on the Autonomous Jobs engine (SPEC-0023, key JOBS) |
