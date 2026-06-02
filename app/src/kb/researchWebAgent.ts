@@ -60,7 +60,10 @@ export const WEB_RESEARCH_SKILL = [
   'substantive claim with the source URL it rests on. If the web does not support a useful finding,',
   'say so plainly (a no-finding is a valid outcome). Mind your retrieval budget.',
   '',
-  'FINISH by returning the markdown findings-note and the list of source URLs it cites.',
+  'FINISH by calling the submitFindings tool EXACTLY ONCE — with your markdown findings-note and the',
+  'list of source URLs it cites. This tool call is the ONLY way your findings are recorded: do not',
+  'just write them in a normal reply. If the web does not support a useful finding, still call',
+  'submitFindings once, with an empty note and no citations.',
 ].join('\n');
 
 /** Normalize a hostname for allowlist comparison (lowercase, strip leading `www.`). */
