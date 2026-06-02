@@ -113,6 +113,8 @@ export function buildResearcherViews(
     schedule: r.schedule,
     posture: r.posture,
     topics: r.topics ?? [],
+    budget: { maxToolCalls: r.budget.maxToolCalls, maxDepth: r.budget.maxDepth },
+    allowedTools: r.allowedTools ?? [],
     lastRun: lastRunFromEvent(lastEventByResearcherId[r.id]),
   }));
 }

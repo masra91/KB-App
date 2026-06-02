@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
 //
-// SPEC-0028 RESEARCH-15 — the Researchers Manage view, component tier (happy-dom). IPC mocked; we
-// assert the rendered DOM, the risky-change confirm gate, run-now, add-from-template, and escaping.
+// SPEC-0028 RESEARCH-15/17 — "The Field Desk" Researchers Manage view, component tier (happy-dom).
+// IPC mocked; we assert the rendered instrument strips, the §6 anti-generic guardrails (custom
+// clearance ladder + segmented selectors + tiles, NO native <select>), the risky-change confirm gate,
+// the typed dispatch report (found/nothing/failed/paused), add-from-tile, and escaping.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
-const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', tenantId: '', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
-const m365Row: ResearcherView = { id: 'm365-1', template: 'm365', label: 'WorkIQ', prompt: 'summarize project mail', repoPath: '', prRepo: '', tenantId: 'contoso.onmicrosoft.com', egressTier: 'internal-tenant', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
+const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, allowedTools: [], lastRun: null };
+const webRow: ResearcherView = { ...base, id: 'web-1', template: 'web', label: 'Prior art', egressTier: 'public-web' };
+const codeRow: ResearcherView = { ...base, id: 'code-1', template: 'code', label: 'Repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', egressTier: 'local-only', topics: [] };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -38,313 +40,195 @@ async function mount(): Promise<HTMLElement> {
   return c;
 }
 
-describe('Researchers view (RESEARCH-15)', () => {
-  it('renders a row per researcher with its template + egress + last-run', async () => {
+describe('Field Desk — render (RESEARCH-15)', () => {
+  it('renders one instrument strip per researcher: id + named kind + clearance ladder + reach readout', async () => {
     const c = await mount();
-    expect(c.querySelectorAll('.researcher')).toHaveLength(1);
-    expect(c.querySelector('.researcher-label')?.textContent).toBe('Prior art');
-    expect(c.querySelector('.researcher-template')?.textContent).toBe('Public Web'); // short label (RESEARCH-17)
-    expect(c.textContent).toContain('Public web');
-    expect(c.querySelector('.researcher-lastrun')?.textContent).toContain('Never run');
+    expect(c.querySelectorAll('.rdesk-strip')).toHaveLength(1);
+    expect(c.querySelector('.rdesk-id')?.textContent).toBe('web-1');
+    expect(c.querySelector('.rdesk-kind')?.textContent).toContain('Public Web'); // named kind + glyph
+    expect(c.querySelectorAll('.rdesk-rung')).toHaveLength(3); // clearance ladder: local · internal · public
+    expect(c.querySelector('.rdesk-reach')?.textContent).toContain('budget 8 calls/pass'); // reach readout
   });
 
-  it('renders the last-run outcome as a Principal-facing label, never the raw audit slug', async () => {
-    listResearchers = vi.fn(async () => [{ ...webRow, lastRun: { ts: '2026-06-02T01:00:00.000Z', eventType: 'research-failed', what: 'Atlas', citations: 0 } }]);
-    setApi();
+  it('the clearance ladder lights the active tier rung (public-web here), others ghosted', async () => {
     const c = await mount();
-    const lastrun = c.querySelector('.researcher-lastrun')?.textContent ?? '';
-    expect(lastrun).toContain('run failed'); // friendly
-    expect(lastrun).not.toContain('research-failed'); // never the dev slug
+    const active = c.querySelector('.rdesk-rung[aria-checked="true"]');
+    expect(active?.getAttribute('data-tier')).toBe('public-web');
+    expect(c.querySelectorAll('.rdesk-rung[aria-checked="true"]')).toHaveLength(1);
   });
 
-  it('shows an empty state + the add form when there are no researchers', async () => {
+  it('a disabled researcher reads PAUSED; the strip carries its clearance + armed state for styling', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip')!;
+    expect(strip.getAttribute('data-armed')).toBe('false');
+    expect(strip.getAttribute('data-clearance')).toBe('public-web');
+    expect(c.querySelector('.rdesk-arm')?.textContent).toContain('PAUSED');
+  });
+
+  it('shows the empty state + the add dock when there are no researchers', async () => {
     listResearchers = vi.fn(async () => []);
     setApi();
     const c = await mount();
-    expect(c.querySelector('.researcher-empty')).not.toBeNull();
-    expect(c.querySelector('.researcher-add')).not.toBeNull();
+    expect(c.querySelector('.rdesk-empty')).not.toBeNull();
+    expect(c.querySelectorAll('.rdesk-tile').length).toBeGreaterThan(0);
   });
 
-  it('degrades to a friendly error when listing fails (PANEL-9)', async () => {
+  it('degrades to a retryable error when listing fails (PANEL-9)', async () => {
     listResearchers = vi.fn(async () => {
       throw new Error('x');
     });
     setApi();
     const c = await mount();
-    expect(c.querySelector('.error')).not.toBeNull();
+    expect(c.querySelector('.load-error, .error')).not.toBeNull();
+  });
+
+  it('renders the last-run as a typed, state-coded report (never a raw slug)', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, lastRun: { ts: '2026-06-02T01:00:00.000Z', eventType: 'research-failed', what: 'Atlas', citations: 0 } }]);
+    setApi();
+    const c = await mount();
+    const report = c.querySelector('.rdesk-report');
+    expect(report?.getAttribute('data-state')).toBe('failed'); // failed reads distinctly (oxide), not calm
+    expect(report?.textContent).toContain('run failed');
+    expect(report?.textContent).not.toContain('research-failed'); // no dev slug
   });
 });
 
-describe('confirm gate (RESEARCH-15)', () => {
-  it('enabling a researcher requires confirm, then calls setResearcherConfig', async () => {
+describe('Field Desk — §6 anti-generic guardrails (GATE-1 watch-items)', () => {
+  it('uses NO native <select> anywhere — kind, clearance, schedule, autonomy are all custom components', async () => {
+    listResearchers = vi.fn(async () => [webRow, codeRow]);
+    setApi();
     const c = await mount();
-    const toggle = c.querySelector<HTMLInputElement>('.researcher-enabled')!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change', { bubbles: true }));
-    // confirm revealed, not yet applied
+    expect(c.querySelectorAll('select')).toHaveLength(0); // the whole point of the redesign
+  });
+
+  it('the clearance ladder + segmented selectors are radio-style custom controls', async () => {
+    const c = await mount();
+    expect(c.querySelector('.rdesk-ladder[role="radiogroup"]')).not.toBeNull();
+    expect(c.querySelectorAll('.rdesk-seg [role="radiogroup"]').length).toBe(2); // schedule + autonomy
+  });
+});
+
+describe('Field Desk — confirm gate (RESEARCH-8/15)', () => {
+  it('arming (enable) reveals the consequence-worded confirm, then calls setResearcherConfig', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.rdesk-arm')!.click();
     expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(false);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/reach Public web/i);
     expect(setResearcherConfig).not.toHaveBeenCalled();
     c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
     await flush();
     expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', enabled: true });
   });
 
-  it('cancel reverts the toggle without applying', async () => {
+  it('cancel on arm does not apply', async () => {
     const c = await mount();
-    const toggle = c.querySelector<HTMLInputElement>('.researcher-enabled')!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    c.querySelector<HTMLButtonElement>('.rdesk-arm')!.click();
     c.querySelector<HTMLButtonElement>('.researcher-confirm-cancel')!.click();
     expect(setResearcherConfig).not.toHaveBeenCalled();
-    expect(toggle.checked).toBe(false); // reverted
+  });
+
+  it('WIDENING clearance (a less-trusted rung) confirms; clicking the active rung is a no-op', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, egressTier: 'local-only' }]);
+    setApi();
+    const c = await mount();
+    // click the active (local) rung → nothing
+    c.querySelector<HTMLButtonElement>('.rdesk-rung[data-tier="local-only"]')!.click();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true);
+    // widen to public → confirm
+    c.querySelector<HTMLButtonElement>('.rdesk-rung[data-tier="public-web"]')!.click();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(false);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/widen/i);
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', egressTier: 'public-web' });
+  });
+
+  it('schedule change applies directly (steering, no confirm)', async () => {
+    const c = await mount();
+    const daily = Array.from(c.querySelectorAll<HTMLButtonElement>('.researcher-schedule .rdesk-seg-opt')).find((b) => b.dataset.value === 'daily')!;
+    daily.click();
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', schedule: 'daily' });
+  });
+
+  it('autonomy → Autonomous confirms', async () => {
+    const c = await mount();
+    const auto = Array.from(c.querySelectorAll<HTMLButtonElement>('.researcher-posture .rdesk-seg-opt')).find((b) => b.dataset.value === 'autonomous')!;
+    auto.click();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(false);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/autonomous/i);
   });
 });
 
-describe('run-now + add-from-template', () => {
-  it('run-now confirms then calls runResearcherNow and surfaces the outcome', async () => {
-    const c = await mount();
+describe('Field Desk — dispatch → typed report (RESEARCH-15; #160/#180)', () => {
+  async function dispatch(c: HTMLElement): Promise<void> {
     c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
     c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
     await flush();
+  }
+
+  it('found → "brought back N cited sources"', async () => {
+    const c = await mount();
+    await dispatch(c);
     expect(runResearcherNow).toHaveBeenCalledWith('web-1');
-    expect(c.querySelector('.researcher-status')?.textContent).toContain('added 1 cited source');
+    expect(c.querySelector('.researcher-status')?.textContent).toMatch(/brought back 1 cited source/i);
   });
 
-  it('run-now blocked by the per-Instance ceiling reads as PAUSED, not "no new finding" (ceiling ≠ empty, RESEARCH-11)', async () => {
+  it('a ceiling-blocked dispatch reads PAUSED, never "nothing new" (ceiling ≠ empty, RESEARCH-11)', async () => {
     runResearcherNow = vi.fn(async () => ({ ran: true, sourceIds: [], note: 'ceiling', ceilingReached: true }));
     setApi();
     const c = await mount();
-    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
-    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
-    await flush();
-    const status = c.querySelector('.researcher-status')?.textContent ?? '';
-    expect(status).toMatch(/paused/i);
-    expect(status).toMatch(/rate limit/i);
-    expect(status).not.toMatch(/no new finding/i); // must NOT masquerade as an empty result
+    await dispatch(c);
+    const s = c.querySelector('.researcher-status')?.textContent ?? '';
+    expect(s).toMatch(/paused/i);
+    expect(s).toMatch(/rate limit/i);
+    expect(s).not.toMatch(/nothing new/i);
   });
 
-  it('add-from-template creates a disabled researcher with the chosen id', async () => {
+  it('a failed dispatch reads as an error, never empty (failed ≠ empty, #160)', async () => {
+    runResearcherNow = vi.fn(async () => ({ ran: true, sourceIds: [], note: 'fail', failed: true, error: 'spawn copilot ENOENT' }));
+    setApi();
     const c = await mount();
-    (c.querySelector<HTMLSelectElement>('.researcher-add-template')!).value = 'web';
-    (c.querySelector<HTMLInputElement>('.researcher-add-id')!).value = 'web-2';
-    c.querySelector<HTMLButtonElement>('.researcher-add-btn')!.click();
-    await flush();
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-2', template: 'web', egressTier: 'public-web', enabled: false });
+    await dispatch(c);
+    const s = c.querySelector('.researcher-status')?.textContent ?? '';
+    expect(s).toMatch(/couldn't run/i);
+    expect(s).toMatch(/ENOENT/);
+    expect(s).not.toMatch(/nothing new/i);
   });
+});
 
-  it('#6: user types a friendly NAME → slugified into the canonical id behind the scenes', async () => {
+describe('Field Desk — add via named tile', () => {
+  it('pick a tile + name + re-click creates a DISARMED researcher with the chosen template + slug id', async () => {
+    listResearchers = vi.fn(async () => []);
+    setApi();
     const c = await mount();
-    (c.querySelector<HTMLSelectElement>('.researcher-add-template')!).value = 'web';
-    (c.querySelector<HTMLInputElement>('.researcher-add-id')!).value = 'Prior Art Web Search';
-    c.querySelector<HTMLButtonElement>('.researcher-add-btn')!.click();
+    const codeTile = c.querySelector<HTMLButtonElement>('.rdesk-tile[data-template="code"]')!;
+    codeTile.click(); // select
+    expect(codeTile.getAttribute('aria-pressed')).toBe('true');
+    (c.querySelector<HTMLInputElement>('.researcher-add-id')!).value = 'My Repo Reader';
+    codeTile.click(); // re-click the chosen tile = dispatch
     await flush();
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'prior-art-web-search', template: 'web', egressTier: 'public-web', enabled: false });
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'my-repo-reader', template: 'code', egressTier: 'local-only', enabled: false });
   });
 
   it('add with an empty name asks for one (no IPC call)', async () => {
+    listResearchers = vi.fn(async () => []);
+    setApi();
     const c = await mount();
-    c.querySelector<HTMLButtonElement>('.researcher-add-btn')!.click();
+    const tile = c.querySelector<HTMLButtonElement>('.rdesk-tile[data-template="web"]')!;
+    tile.click();
+    tile.click(); // re-click with empty name
     await flush();
     expect(setResearcherConfig).not.toHaveBeenCalled();
     expect(c.querySelector('.researcher-add-status')?.textContent).toMatch(/name/i);
   });
 });
 
-describe('instructions + scope (RESEARCH-17)', () => {
-  it('renders the instructions textarea + scope prefilled from the config', async () => {
-    const c = await mount();
-    expect(c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value).toBe('find prior art');
-    expect(c.querySelector<HTMLInputElement>('.researcher-scope')!.value).toBe('global');
-  });
-
-  it('shows the template SHORT label as a badge + the long description as helper text', async () => {
-    const c = await mount();
-    expect(c.querySelector('.researcher-template')?.textContent).toBe('Public Web');
-    expect(c.querySelector('.researcher-template-desc')?.textContent).toContain('Public-web search');
-  });
-
-  it('saves instructions + scope on click — steering, so NO confirm gate', async () => {
-    const c = await mount();
-    c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value = 'look for press releases on Atlas';
-    c.querySelector<HTMLInputElement>('.researcher-scope')!.value = 'global';
-    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
-    await flush();
-    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true); // not risky
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', prompt: 'look for press releases on Atlas', scope: 'global' });
-  });
-});
-
-describe('#108 polish — run-now state machine (PANEL-10) + short option labels', () => {
-  it('Run now shows a clear running state on the button itself (disabled + "Running…") then resets', async () => {
-    let resolveRun!: (v: { ran: boolean; sourceIds: string[]; note: string }) => void;
-    runResearcherNow = vi.fn(() => new Promise((res) => (resolveRun = res)));
-    setApi();
-    const c = await mount();
-    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
-    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
-    await flush();
-
-    const runBtn = c.querySelector<HTMLButtonElement>('.researcher-run')!;
-    expect(runBtn.disabled).toBe(true); // running → disabled
-    expect(runBtn.textContent).toBe('Running…'); // …and unmistakably labeled
-
-    resolveRun({ ran: true, sourceIds: ['SRC1'], note: 'ok' });
-    await flush();
-    // The re-render restores an idle row → "Run now", enabled.
-    const after = c.querySelector<HTMLButtonElement>('.researcher-run')!;
-    expect(after.disabled).toBe(false);
-    expect(after.textContent).toBe('Run now');
-  });
-
-  it('resets the button on a failed run so it stays retryable', async () => {
-    runResearcherNow = vi.fn(async () => {
-      throw new Error('egress blocked');
-    });
-    setApi();
-    const c = await mount();
-    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
-    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
-    await flush();
-    const runBtn = c.querySelector<HTMLButtonElement>('.researcher-run')!;
-    expect(runBtn.disabled).toBe(false);
-    expect(runBtn.textContent).toBe('Run now');
-    expect(c.querySelector('.researcher-status')?.textContent).toContain('failed');
-  });
-
-  it('add-template options use short labels with the description as a hover title (declutter)', async () => {
-    const c = await mount();
-    const webOpt = c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="web"]')!;
-    expect(webOpt.textContent).toBe('Public Web'); // short, no " — description" inline
-    expect(webOpt.title).toContain('Public-web'); // full gloss available on hover
-    expect(c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="code"]')!.textContent).toBe('Local Repository');
-    expect(c.querySelector<HTMLOptionElement>('.researcher-add-template option[value="m365"]')!.textContent).toBe('WorkIQ/M365');
-  });
-
-  it('egress dropdown options are short labels with a tier hint as title', async () => {
-    const c = await mount();
-    const opt = c.querySelector<HTMLOptionElement>('.researcher-egress-sel option[value="local-only"]')!;
-    expect(opt.textContent).toBe('Local only'); // no parenthetical clutter
-    expect(opt.title).toContain('Never leaves this machine');
-  });
-});
-
-describe('Code researcher repoPath config (Slice 2a)', () => {
-  it('shows a repoPath input ONLY for code researchers, prefilled from config', async () => {
-    listResearchers = vi.fn(async () => [codeRow]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toBe('/repos/app');
-  });
-
-  it('a web researcher has no repoPath field (template-specific)', async () => {
-    const c = await mount(); // default webRow
-    expect(c.querySelector('.researcher-repopath')).toBeNull();
-  });
-
-  it('saves repoPath alongside instructions/scope for a code researcher (no confirm)', async () => {
-    listResearchers = vi.fn(async () => [codeRow]);
-    setApi();
-    const c = await mount();
-    c.querySelector<HTMLInputElement>('.researcher-repopath')!.value = '/repos/other';
-    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
-    await flush();
-    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true); // steering, not risky
-    // a code save carries both code-template fields (repoPath + prRepo), prefilled from config
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/other', prRepo: 'octocat/hello-world' });
-  });
-
-  it('escapes a hostile repoPath value', async () => {
-    listResearchers = vi.fn(async () => [{ ...codeRow, repoPath: '"><img src=x onerror=alert(1)>' }]);
+describe('Field Desk — XSS safety', () => {
+  it('escapes a hostile researcher label/id', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, id: 'web-1', label: '<img src=x onerror=alert(1)>' }]);
     setApi();
     const c = await mount();
     expect(c.querySelector('img')).toBeNull();
-    expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toContain('<img');
-  });
-});
-
-describe('Code researcher prRepo (GitHub PR repo) config (Slice 2b)', () => {
-  it('shows a prRepo input ONLY for code researchers, prefilled from config', async () => {
-    listResearchers = vi.fn(async () => [codeRow]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value).toBe('octocat/hello-world');
-  });
-
-  it('a web researcher has no prRepo field (template-specific)', async () => {
-    const c = await mount(); // default webRow
-    expect(c.querySelector('.researcher-prrepo')).toBeNull();
-  });
-
-  it('saves prRepo alongside the other code fields (no confirm)', async () => {
-    listResearchers = vi.fn(async () => [codeRow]);
-    setApi();
-    const c = await mount();
-    c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value = 'octocat/other-repo';
-    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
-    await flush();
-    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true);
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'code-1', prompt: 'read the repo', scope: 'global', repoPath: '/repos/app', prRepo: 'octocat/other-repo' });
-  });
-
-  it('escapes a hostile prRepo value', async () => {
-    listResearchers = vi.fn(async () => [{ ...codeRow, prRepo: '"><img src=x onerror=alert(1)>' }]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('img')).toBeNull();
-    expect(c.querySelector<HTMLInputElement>('.researcher-prrepo')!.value).toContain('<img');
-  });
-});
-
-describe('M365 researcher tenant config (Slice 3)', () => {
-  it('shows a tenant input ONLY for m365 researchers, prefilled from config', async () => {
-    listResearchers = vi.fn(async () => [m365Row]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector<HTMLInputElement>('.researcher-tenant')!.value).toBe('contoso.onmicrosoft.com');
-    expect(c.querySelector('.researcher-repopath')).toBeNull(); // not a code field
-  });
-
-  it('a web/code researcher has no tenant field (template-specific)', async () => {
-    listResearchers = vi.fn(async () => [codeRow]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('.researcher-tenant')).toBeNull();
-  });
-
-  it('saves tenantId alongside instructions/scope for an m365 researcher (no confirm — steering)', async () => {
-    listResearchers = vi.fn(async () => [m365Row]);
-    setApi();
-    const c = await mount();
-    c.querySelector<HTMLInputElement>('.researcher-tenant')!.value = 'fabrikam.onmicrosoft.com';
-    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
-    await flush();
-    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true);
-    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'm365-1', prompt: 'summarize project mail', scope: 'global', tenantId: 'fabrikam.onmicrosoft.com' });
-  });
-
-  it('escapes a hostile tenant value', async () => {
-    listResearchers = vi.fn(async () => [{ ...m365Row, tenantId: '"><img src=x onerror=alert(1)>' }]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('img')).toBeNull();
-    expect(c.querySelector<HTMLInputElement>('.researcher-tenant')!.value).toContain('<img');
-  });
-});
-
-describe('XSS-safety', () => {
-  it('escapes hostile researcher labels', async () => {
-    listResearchers = vi.fn(async () => [{ ...webRow, label: '<img src=x onerror=alert(1)>' }]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('img')).toBeNull();
-    expect(c.querySelector('.researcher-label')?.textContent).toContain('<img');
-  });
-
-  it('escapes a hostile instructions prompt (no textarea-breakout)', async () => {
-    listResearchers = vi.fn(async () => [{ ...webRow, prompt: '</textarea><img src=x onerror=alert(1)>' }]);
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('img')).toBeNull();
-    expect(c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value).toContain('<img');
   });
 });

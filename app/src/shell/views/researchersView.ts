@@ -1,12 +1,18 @@
-// Researchers view (SPEC-0028 RESEARCH-15) — a Manage sibling for the Principal's external-enrichment
-// agents. Add-from-template, configure (enable/schedule/posture/egress), Run now (a test pass), and
-// see last-run (findings + citations). Thin DOM over the typed IPC; the pure logic (view-build +
-// risk gate) lives in `kb/researchersPanel` (node-tested). Mirrors jobsView.
+// Researchers / Manage view — "The Field Desk" (SPEC-0028 RESEARCH-15/17; design: researchers-manage.md).
+// The roster of agents the Principal briefs + dispatches OUTSIDE the KB. Built on the shared design
+// system ("The Line" — shell/design-system.css: --viz-* tokens, type-roles, flat-ink primitives), so
+// the app reads as one instrument language (DESIGN-7). Thin DOM over the typed IPC; pure logic
+// (view-build + risk gate + labels) lives in `kb/researchersPanel` (node-tested).
 //
-// Confirm gate (RESEARCH-15, PANEL-7-style): risky changes — enabling a researcher (starts external
-// egress), → Autonomous, widening egress — reveal an inline confirm before they apply + audit. The
-// view degrades to a friendly message when no KB is active or IPC fails. Read-only viewing needs no
-// confirm. Run now executes the real egress-gated cognition (no synthetic data ever reaches a vault).
+// Design language (§§1–6):
+// - Each researcher is a flat **instrument strip** on a ruled spine — NO card chrome (§6 guardrails).
+// - **Clearance = temperature**: egress tier is a 3-rung ladder (local=patina · internal=brass ·
+//   public=ember), a custom spatial control, NOT a <select>. Widening confirms (RESEARCH-8 risky).
+// - **Armed vs at-rest**: a custom arm switch (◉ ENABLED in clearance color / ○ PAUSED graphite).
+// - **Brief → dispatch → report**: standing-orders box + a Run that dispatches + a TYPED report
+//   (found=patina / nothing=calm / failed=oxide / paused-rate-limit=brass / escalation=brass), so
+//   failure/blocked never masquerade as empty (#160/#180; RESEARCH-11).
+// - schedule/autonomy + the add-kind picker are custom segmented/tile controls, never native <select>.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import { formatTimestamp } from '../formatTime';
@@ -16,24 +22,32 @@ import {
   isRiskyResearcherChange,
   RESEARCHER_TEMPLATE_OPTIONS,
   EGRESS_TIER_LABELS,
-  EGRESS_TIER_HINTS,
   defaultEgressFor,
   researcherOutcomeLabel,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS } from '../../kb/researchers';
+import type { EgressTier } from '../../kb/researchers';
 import type { ResearcherView, ResearcherConfigPatch } from '../../kb/types';
 
+/** Source-kind glyph (design §2) — a named instrument, not a dropdown value. */
+const KIND_GLYPH: Record<ResearcherView['template'], string> = { web: '◇', code: '◆', m365: '▣', custom: '＋' };
+/** Clearance rung label (short) + the temperature it lights, per egress tier (design §3). */
+const CLEARANCE: Record<EgressTier, { rung: string }> = {
+  'local-only': { rung: 'LOCAL' },
+  'internal-tenant': { rung: 'INTERNAL' },
+  'public-web': { rung: 'PUBLIC' },
+};
+const POSTURE_OPTIONS = ['guarded', 'autonomous'] as const;
 const POSTURE_LABEL: Record<string, string> = { guarded: 'Guarded', autonomous: 'Autonomous' };
 
-// Template short label + long description (RESEARCH-17): the row badge shows the short label
-// (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`); the description is helper text.
 const TEMPLATE_BY_KEY = new Map(RESEARCHER_TEMPLATE_OPTIONS.map((o) => [o.template, o]));
 const templateLabel = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.label ?? t;
 const templateDesc = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.description ?? '';
-const HEADER = `<h1>🔬 Researchers</h1><p class="muted">Configurable agents that reach outside your KB to corroborate and expand — Web, Code, your work tools. Findings come back as cited sources.</p>`;
+
+const HEADER = `<h1 class="rdesk-title viz-signage">Researchers</h1><p class="rdesk-sub viz-body">Agents you brief and dispatch outside your KB — they bring back cited sources. Clearance shows how far each one's data can travel.</p>`;
 
 export async function mountResearchers(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card">${HEADER}<p class="muted">Loading…</p></div>`;
+  container.innerHTML = `<div class="rdesk viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;
   await render(container);
 }
 
@@ -46,90 +60,149 @@ async function render(container: HTMLElement): Promise<void> {
     renderLoadError(container, HEADER, () => void render(container));
     return;
   }
-  const list = researchers.length
-    ? `<ul class="researcher-list">${researchers.map(researcherItem).join('')}</ul>`
-    : `<p class="muted researcher-empty">No researchers yet — add one from a template below.</p>`;
-  container.innerHTML = `<div class="card">${HEADER}${list}${addForm()}</div>`;
+  const roster = researchers.length
+    ? `<ul class="rdesk-roster">${researchers.map(strip).join('')}</ul>`
+    : `<p class="rdesk-empty viz-body">No researchers yet — dispatch one from a template below.</p>`;
+  container.innerHTML = `<div class="rdesk viz-surface">${HEADER}${roster}${addDock()}</div>`;
   wire(container, researchers);
 }
 
-/** The add-from-template control (RESEARCH-15/16): pick a template → create a disabled researcher. */
-function addForm(): string {
-  // Short option text (#108) — the full description rides along as a hover title, not inline clutter.
-  const opts = RESEARCHER_TEMPLATE_OPTIONS.map((o) => `<option value="${esc(o.template)}" title="${esc(o.description)}">${esc(o.label)}</option>`).join('');
-  return `
-    <div class="researcher-add">
-      <label>Add a researcher
-        <select class="researcher-add-template">${opts}</select>
-      </label>
-      <input class="researcher-add-id" type="text" placeholder="Name (e.g. Prior-art web search)" aria-label="researcher name" />
-      <button type="button" class="btn researcher-add-btn">Add</button>
-      <p class="muted researcher-add-status" role="status" aria-live="polite"></p>
-    </div>`;
+/** Segmented instrument selector (§6) — custom radio-style control, NOT a native <select>. */
+function segmented(cls: string, label: string, options: readonly { value: string; text: string }[], selected: string): string {
+  const rungs = options
+    .map((o) => `<button type="button" role="radio" class="rdesk-seg-opt viz-signage viz-focusable" data-value="${esc(o.value)}" aria-checked="${o.value === selected ? 'true' : 'false'}">${esc(o.text)}</button>`)
+    .join('');
+  return `<div class="rdesk-seg"><span class="rdesk-seg-label viz-signage">${esc(label)}</span><span class="${esc(cls)}" role="radiogroup" aria-label="${esc(label)}">${rungs}</span></div>`;
 }
 
-/** One researcher row: identity + egress + last-run + the enable/schedule/posture/egress controls + Run now. */
-function researcherItem(r: ResearcherView): string {
-  const scheduleOpts = SCHEDULE_OPTIONS.map((p) => `<option value="${esc(p)}"${p === r.schedule ? ' selected' : ''}>${esc(schedulePresetLabel(p))}</option>`).join('');
-  const postureOpts = (['guarded', 'autonomous'] as const).map((p) => `<option value="${p}"${p === r.posture ? ' selected' : ''}>${POSTURE_LABEL[p]}</option>`).join('');
-  const egressOpts = EGRESS_TIERS.map((t) => `<option value="${esc(t)}" title="${esc(EGRESS_TIER_HINTS[t])}"${t === r.egressTier ? ' selected' : ''}>${esc(EGRESS_TIER_LABELS[t])}</option>`).join('');
-  const last = r.lastRun
-    ? `Last run ${esc(formatTimestamp(r.lastRun.ts))} — ${esc(researcherOutcomeLabel(r.lastRun.eventType))}${r.lastRun.eventType === 'researched' ? ` on “${esc(r.lastRun.what)}” (${r.lastRun.citations} citation${r.lastRun.citations === 1 ? '' : 's'})` : ''}`
-    : 'Never run';
+/** The clearance ladder (§2/§3) — 3 rungs, the active one lit in its temperature; a spatial exposure
+ *  scale that replaces the egress <select>. Widening (toward public) triggers the confirm at wire-time. */
+function clearanceLadder(active: EgressTier): string {
+  const rungs = EGRESS_TIERS.map(
+    (t) =>
+      `<button type="button" role="radio" class="rdesk-rung viz-signage viz-focusable" data-tier="${esc(t)}" data-temp="${esc(t)}" aria-checked="${t === active ? 'true' : 'false'}" title="${esc(EGRESS_TIER_LABELS[t])}">${esc(CLEARANCE[t].rung)}</button>`,
+  ).join('');
+  return `<div class="rdesk-clearance"><span class="rdesk-clearance-label viz-signage">clearance</span><span class="rdesk-ladder" role="radiogroup" aria-label="Data clearance">${rungs}</span></div>`;
+}
+
+/** The dispatch report (§6) — typed + state-coded so failed/paused never read as a legit empty result. */
+function reportLine(r: ResearcherView): string {
+  if (!r.lastRun) return `<span class="rdesk-report" data-state="never">never dispatched</span>`;
+  const lr = r.lastRun;
+  const when = esc(formatTimestamp(lr.ts));
+  const outcome = researcherOutcomeLabel(lr.eventType);
+  const state =
+    lr.eventType === 'researched' ? 'found' : lr.eventType === 'research-failed' ? 'failed' : lr.eventType === 'ceiling-reached' || lr.eventType === 'escalated' ? 'paused' : 'nothing';
+  const detail =
+    lr.eventType === 'researched'
+      ? ` — brought back <span class="viz-numeric">${lr.citations}</span> cited source${lr.citations === 1 ? '' : 's'} on “${esc(lr.what)}”`
+      : '';
+  return `<span class="rdesk-report" data-state="${state}">last dispatch ${when} · ${esc(outcome)}${detail}</span>`;
+}
+
+/** The always-visible reach readout (§2/§6) — budget + tool allowlist, mono/tabular, read-only in v1. */
+function reachReadout(r: ResearcherView): string {
+  const tools = r.allowedTools.length ? r.allowedTools.join(' · ') : 'template default';
+  return `<p class="rdesk-reach viz-numeric">budget ${r.budget.maxToolCalls} calls/pass · depth ≤ ${r.budget.maxDepth} · tools: ${esc(tools)}</p>`;
+}
+
+/** One researcher strip — a briefed instrument (design §2). */
+function strip(r: ResearcherView): string {
+  const armed = r.enabled;
+  const fields = [
+    r.template === 'code' ? field('repo', 'researcher-repopath', r.repoPath, '/absolute/path/to/local/repo') : '',
+    r.template === 'code' ? field('PRs (read-only)', 'researcher-prrepo', r.prRepo, 'owner/name') : '',
+    r.template === 'm365' ? field('tenant', 'researcher-tenant', r.tenantId, 'your-org.onmicrosoft.com') : '',
+  ].join('');
   return `
-    <li class="researcher" data-id="${esc(r.id)}">
-      <div class="researcher-head">
-        <span class="researcher-label">${esc(r.label)}</span>
-        <span class="badge researcher-template">${esc(templateLabel(r.template))}</span>
-        <span class="badge researcher-egress">${esc(EGRESS_TIER_LABELS[r.egressTier])}</span>
-        <label class="researcher-toggle"><input type="checkbox" class="researcher-enabled"${r.enabled ? ' checked' : ''}> Enabled</label>
+    <li class="rdesk-strip viz-no-chrome viz-spine" data-id="${esc(r.id)}" data-clearance="${esc(r.egressTier)}" data-armed="${armed ? 'true' : 'false'}">
+      <div class="rdesk-strip-head">
+        <span class="rdesk-id viz-numeric">${esc(r.id)}</span>
+        <button type="button" class="rdesk-arm viz-signage viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}">${armed ? '◉ ENABLED' : '○ PAUSED'}</button>
       </div>
-      <p class="muted researcher-template-desc">${esc(templateDesc(r.template))}</p>
-      <div class="researcher-instructions">
-        <label class="researcher-prompt-label">Instructions
-          <textarea class="researcher-prompt" rows="3" placeholder="What should this researcher look for? Which sites/sources, repo, or WorkIQ surfaces?">${esc(r.prompt)}</textarea>
-        </label>
-        <label>Scope <input type="text" class="researcher-scope" value="${esc(r.scope)}" /></label>
-        ${r.template === 'code' ? `<label>Repository path <input type="text" class="researcher-repopath" value="${esc(r.repoPath)}" placeholder="/absolute/path/to/local/repo" /></label>` : ''}
-        ${r.template === 'code' ? `<label>GitHub PR repo <input type="text" class="researcher-prrepo" value="${esc(r.prRepo)}" placeholder="owner/name (PRs read via the GitHub CLI)" /></label>` : ''}
-        ${r.template === 'm365' ? `<label>M365 tenant <input type="text" class="researcher-tenant" value="${esc(r.tenantId)}" placeholder="your-org.onmicrosoft.com" /></label>` : ''}
-        <button type="button" class="btn researcher-save">Save instructions</button>
+      <div class="rdesk-identity">
+        <span class="rdesk-kind viz-signage" title="${esc(templateDesc(r.template))}">${esc(KIND_GLYPH[r.template])} ${esc(templateLabel(r.template))}</span>
+        ${clearanceLadder(r.egressTier)}
       </div>
-      <div class="researcher-controls">
-        <label>Schedule <select class="researcher-schedule">${scheduleOpts}</select></label>
-        <label>Autonomy <select class="researcher-posture">${postureOpts}</select></label>
-        <label>Data reach <select class="researcher-egress-sel">${egressOpts}</select></label>
-        <button type="button" class="btn researcher-run">Run now</button>
+      ${reachReadout(r)}
+      <div class="rdesk-orders">
+        <label class="rdesk-orders-label viz-signage">Standing orders</label>
+        <textarea class="researcher-prompt rdesk-prompt viz-body viz-focusable" rows="3" placeholder="What should this researcher look for? Which sites, repo, or work surfaces?">${esc(r.prompt)}</textarea>
+        <div class="rdesk-fields">
+          ${field('scope', 'researcher-scope', r.scope, '')}
+          ${fields}
+          <button type="button" class="viz-btn researcher-save rdesk-save">Save orders</button>
+        </div>
       </div>
-      <p class="muted researcher-lastrun">${last}</p>
-      <div class="confirm researcher-confirm" hidden>
-        <p class="warn researcher-confirm-msg"></p>
-        <button type="button" class="btn researcher-confirm-cancel">Cancel</button>
-        <button type="button" class="btn-danger researcher-confirm-go">Confirm</button>
+      <div class="rdesk-config">
+        ${segmented('researcher-schedule', 'schedule', SCHEDULE_OPTIONS.map((p) => ({ value: p, text: schedulePresetLabel(p) })), r.schedule)}
+        ${segmented('researcher-posture', 'autonomy', POSTURE_OPTIONS.map((p) => ({ value: p, text: POSTURE_LABEL[p] })), r.posture)}
       </div>
-      <p class="muted researcher-status" role="status" aria-live="polite"></p>
+      <div class="rdesk-footer viz-ruled">
+        ${reportLine(r)}
+        <button type="button" class="viz-btn rdesk-run researcher-run" data-clearance="${esc(r.egressTier)}">▷ Run</button>
+      </div>
+      <div class="rdesk-confirm researcher-confirm" hidden>
+        <p class="rdesk-confirm-msg researcher-confirm-msg viz-body"></p>
+        <button type="button" class="viz-btn researcher-confirm-cancel">Cancel</button>
+        <button type="button" class="viz-btn rdesk-confirm-go researcher-confirm-go">Confirm</button>
+      </div>
+      <p class="rdesk-status researcher-status viz-body" role="status" aria-live="polite"></p>
     </li>`;
+}
+
+/** A labeled instrument field (caption + input) — flat, captioned, not a loose input (§2). */
+function field(label: string, cls: string, value: string, placeholder: string): string {
+  return `<label class="rdesk-field"><span class="rdesk-field-label viz-signage">${esc(label)}</span><input type="text" class="${esc(cls)} rdesk-input viz-body viz-focusable" value="${esc(value)}" placeholder="${esc(placeholder)}" /></label>`;
+}
+
+/** The add-dock (§2) — named template TILES (glyph + label), not a <select>. Each creates a disarmed
+ *  researcher; arming it later is the gated step. */
+function addDock(): string {
+  const tiles = RESEARCHER_TEMPLATE_OPTIONS.map(
+    (o) => `<button type="button" class="rdesk-tile viz-no-chrome viz-focusable" data-template="${esc(o.template)}" title="${esc(o.description)}"><span class="rdesk-tile-glyph">${esc(KIND_GLYPH[o.template])}</span><span class="rdesk-tile-label viz-signage">${esc(o.label)}</span></button>`,
+  ).join('');
+  return `
+    <div class="rdesk-add">
+      <span class="rdesk-add-head viz-signage">Dispatch a new researcher</span>
+      <div class="rdesk-tiles" role="group" aria-label="Researcher templates">${tiles}</div>
+      <input class="researcher-add-id rdesk-add-id viz-body viz-focusable" type="text" placeholder="Name it (e.g. Prior-art web search)" aria-label="researcher name" />
+      <p class="researcher-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
+    </div>`;
 }
 
 function wire(container: HTMLElement, researchers: ResearcherView[]): void {
   const byId = new Map(researchers.map((r) => [r.id, r]));
 
-  // Add-from-template: creating a researcher is safe (it starts disabled); enabling it later confirms.
-  const addBtn = container.querySelector<HTMLButtonElement>('.researcher-add-btn');
-  addBtn?.addEventListener('click', () => void addResearcher(container));
+  // Add-from-tile: a tile selects the template (highlights) — the Name input + Enter (or re-click) creates.
+  let chosenTemplate: ResearcherConfigPatch['template'] | null = null;
+  const tiles = Array.from(container.querySelectorAll<HTMLButtonElement>('.rdesk-tile'));
+  const addId = container.querySelector<HTMLInputElement>('.researcher-add-id');
+  for (const tile of tiles) {
+    tile.addEventListener('click', () => {
+      const t = tile.dataset.template as ResearcherConfigPatch['template'];
+      if (chosenTemplate === t) {
+        void addResearcher(container, t); // re-click a chosen tile = dispatch
+        return;
+      }
+      chosenTemplate = t;
+      for (const x of tiles) x.setAttribute('aria-pressed', x === tile ? 'true' : 'false');
+      addId?.focus();
+    });
+  }
+  addId?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && chosenTemplate) void addResearcher(container, chosenTemplate);
+  });
 
-  for (const li of Array.from(container.querySelectorAll<HTMLElement>('.researcher'))) {
+  for (const li of Array.from(container.querySelectorAll<HTMLElement>('.rdesk-strip'))) {
     const id = li.dataset.id!;
     const current = byId.get(id)!;
-    const enabledEl = li.querySelector<HTMLInputElement>('.researcher-enabled')!;
-    const scheduleEl = li.querySelector<HTMLSelectElement>('.researcher-schedule')!;
-    const postureEl = li.querySelector<HTMLSelectElement>('.researcher-posture')!;
-    const egressEl = li.querySelector<HTMLSelectElement>('.researcher-egress-sel')!;
+    const armEl = li.querySelector<HTMLButtonElement>('.rdesk-arm')!;
     const promptEl = li.querySelector<HTMLTextAreaElement>('.researcher-prompt')!;
     const scopeEl = li.querySelector<HTMLInputElement>('.researcher-scope')!;
-    const repoPathEl = li.querySelector<HTMLInputElement>('.researcher-repopath'); // present only for code
-    const prRepoEl = li.querySelector<HTMLInputElement>('.researcher-prrepo'); // present only for code
-    const tenantEl = li.querySelector<HTMLInputElement>('.researcher-tenant'); // present only for m365
+    const repoPathEl = li.querySelector<HTMLInputElement>('.researcher-repopath'); // code only
+    const prRepoEl = li.querySelector<HTMLInputElement>('.researcher-prrepo'); // code only
+    const tenantEl = li.querySelector<HTMLInputElement>('.researcher-tenant'); // m365 only
     const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
@@ -161,72 +234,79 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       }
     };
 
-    enabledEl.addEventListener('change', () => {
-      const patch: ResearcherConfigPatch = { id, enabled: enabledEl.checked };
+    // Arm switch (enable/disable) — enabling reaches outside the KB → consequence-worded confirm.
+    armEl.addEventListener('click', () => {
+      const next = !current.enabled;
+      const patch: ResearcherConfigPatch = { id, enabled: next };
       if (isRiskyResearcherChange(asConfig(current), patch)) {
         askConfirm(
-          `Enable “${current.label}”? It will reach outside your KB (${EGRESS_TIER_LABELS[current.egressTier]}) on its ${schedulePresetLabel(current.schedule)} schedule.`,
+          `Arm “${current.label}”? It will reach ${EGRESS_TIER_LABELS[current.egressTier]} on its ${schedulePresetLabel(current.schedule)} schedule.`,
           () => apply(patch),
-          () => (enabledEl.checked = false),
+          () => {},
         );
       } else void apply(patch);
     });
 
-    postureEl.addEventListener('change', () => {
-      const posture = postureEl.value as ResearcherConfigPatch['posture'];
+    // Clearance ladder — set egress by rung; WIDENING (more exposure) confirms (RESEARCH-8).
+    for (const rung of Array.from(li.querySelectorAll<HTMLButtonElement>('.rdesk-rung'))) {
+      rung.addEventListener('click', () => {
+        const egressTier = rung.dataset.tier as ResearcherConfigPatch['egressTier'];
+        if (!egressTier || egressTier === current.egressTier) return;
+        const patch: ResearcherConfigPatch = { id, egressTier };
+        if (isRiskyResearcherChange(asConfig(current), patch)) {
+          askConfirm(
+            `Widen where “${current.label}” can send data to ${EGRESS_TIER_LABELS[egressTier]}? More of your KB can leave to a less-trusted destination.`,
+            () => apply(patch),
+            () => {},
+          );
+        } else void apply(patch);
+      });
+    }
+
+    // Autonomy segmented — → Autonomous confirms (findings applied without Review).
+    wireSegment(li, '.researcher-posture', (value) => {
+      const posture = value as ResearcherConfigPatch['posture'];
+      if (posture === current.posture) return;
       const patch: ResearcherConfigPatch = { id, posture };
       if (isRiskyResearcherChange(asConfig(current), patch)) {
-        askConfirm(
-          `Set “${current.label}” to Autonomous? Its findings will be applied without routing to Reviews first.`,
-          () => apply(patch),
-          () => (postureEl.value = current.posture),
-        );
+        askConfirm(`Set “${current.label}” to Autonomous? Its findings will be applied without routing to Reviews first.`, () => apply(patch), () => {});
       } else void apply(patch);
     });
 
-    egressEl.addEventListener('change', () => {
-      const egressTier = egressEl.value as ResearcherConfigPatch['egressTier'];
-      const patch: ResearcherConfigPatch = { id, egressTier };
-      if (isRiskyResearcherChange(asConfig(current), patch)) {
-        askConfirm(
-          `Widen where “${current.label}” can send data to ${egressTier ? EGRESS_TIER_LABELS[egressTier] : ''}? More of your KB can leave to a less-trusted destination.`,
-          () => apply(patch),
-          () => (egressEl.value = current.egressTier),
-        );
-      } else void apply(patch);
+    // Schedule segmented — steering, not risky → applies directly.
+    wireSegment(li, '.researcher-schedule', (value) => {
+      if (value === current.schedule) return;
+      void apply({ id, schedule: value as ResearcherConfigPatch['schedule'] });
     });
 
-    scheduleEl.addEventListener('change', () => void apply({ id, schedule: scheduleEl.value as ResearcherConfigPatch['schedule'] }));
-
-    // Instructions + scope (RESEARCH-17): steering, not risky → saved on an explicit button, no confirm.
-    // The backend drops an empty/whitespace prompt or scope (keeps the prior value), so a stray blank
-    // save can't wipe a researcher's instructions.
+    // Standing orders + scope — steering, saved on an explicit button, no confirm. The backend keeps the
+    // prior value on a blank save, so a stray empty save can't wipe a researcher's instructions.
     saveBtn.addEventListener('click', () => void apply({ id, prompt: promptEl.value, scope: scopeEl.value, ...(repoPathEl ? { repoPath: repoPathEl.value } : {}), ...(prRepoEl ? { prRepo: prRepoEl.value } : {}), ...(tenantEl ? { tenantId: tenantEl.value } : {}) }));
 
     runBtn.addEventListener('click', () => {
       askConfirm(
-        `Run “${current.label}” now? It performs one bounded research pass.`,
+        `Dispatch “${current.label}” now? It performs one bounded research pass.`,
         async () => {
-          // PANEL-10 state machine: idle → running (disabled + "Running…" on the button itself, so it's
-          // unmistakable something's in flight) → back to idle (the re-render restores "Run now") or, on
-          // failure, reset in place so the user can retry.
-          status.textContent = 'Running…';
+          // PANEL-10 state machine: idle → DISPATCHING (button disabled + breathing) → typed report.
+          status.textContent = '';
           runBtn.disabled = true;
-          runBtn.textContent = 'Running…';
+          runBtn.textContent = 'DISPATCHING…';
+          li.classList.add('rdesk-dispatching');
           try {
             const res = await window.kbApi.runResearcherNow(id);
             let msg: string;
-            if ('reason' in res) msg = `Could not run (${res.reason}).`;
-            else if (res.failed) msg = `Run failed${res.error ? ` — ${res.error}` : ''}.`; // failed ≠ empty (#160)
+            if ('reason' in res) msg = `Couldn't run (${res.reason}).`;
+            else if (res.failed) msg = `Couldn't run${res.error ? ` — ${res.error}` : ''}.`; // failed ≠ empty (#160)
             else if (res.ceilingReached) msg = 'Paused — research rate limit reached for now; try again later.'; // ceiling ≠ empty (RESEARCH-11)
-            else msg = res.sourceIds.length ? `Ran — added ${res.sourceIds.length} cited source(s).` : 'Ran — no new finding this pass.';
+            else msg = res.sourceIds.length ? `Brought back ${res.sourceIds.length} cited source${res.sourceIds.length === 1 ? '' : 's'}.` : 'Nothing new this pass.';
             await render(container);
-            const after = container.querySelector<HTMLElement>(`.researcher[data-id="${id}"] .researcher-status`);
+            const after = container.querySelector<HTMLElement>(`.rdesk-strip[data-id="${id}"] .researcher-status`);
             if (after) after.textContent = msg;
           } catch {
-            status.textContent = 'Run failed.';
+            status.textContent = "Couldn't run.";
             runBtn.disabled = false;
-            runBtn.textContent = 'Run now';
+            runBtn.textContent = '▷ Run';
+            li.classList.remove('rdesk-dispatching');
           }
         },
         () => {},
@@ -247,27 +327,34 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
   }
 }
 
-/** Build the minimal ResearcherConfig-shaped object the pure risk gate needs from a view row. */
+/** Wire a segmented control: clicking an option fires `onPick(value)` (the caller applies/confirms). */
+function wireSegment(li: HTMLElement, groupCls: string, onPick: (value: string) => void): void {
+  for (const opt of Array.from(li.querySelectorAll<HTMLButtonElement>(`${groupCls} .rdesk-seg-opt`))) {
+    opt.addEventListener('click', () => {
+      const v = opt.dataset.value;
+      if (v) onPick(v);
+    });
+  }
+}
+
+/** Build the minimal ResearcherConfig-shaped object the pure risk gate needs from a strip's view row. */
 function asConfig(v: ResearcherView): import('../../kb/researchers').ResearcherConfig {
   return { id: v.id, template: v.template, prompt: '', egressTier: v.egressTier, scope: v.scope, budget: { maxToolCalls: 0, maxDepth: 0 }, schedule: v.schedule, posture: v.posture, enabled: v.enabled, topics: v.topics };
 }
 
-async function addResearcher(container: HTMLElement): Promise<void> {
-  const templateEl = container.querySelector<HTMLSelectElement>('.researcher-add-template')!;
+async function addResearcher(container: HTMLElement, template: ResearcherConfigPatch['template']): Promise<void> {
   const idEl = container.querySelector<HTMLInputElement>('.researcher-add-id')!;
   const status = container.querySelector<HTMLElement>('.researcher-add-status')!;
-  const template = templateEl.value as ResearcherConfigPatch['template'];
-  // #6: the user types a friendly NAME; we slugify it into the canonical id behind the scenes — they
-  // never hand-craft a slug. (The stored id is the slug; the name lives on via the slug + future label.)
-  const name = idEl.value.trim();
-  const id = slugifyId(name);
+  // #6: the user types a friendly NAME; we slugify it into the canonical id behind the scenes.
+  const id = slugifyId(idEl.value.trim());
   if (!id) {
     status.textContent = 'Give the researcher a name (letters or digits).';
+    idEl.focus();
     return;
   }
   status.textContent = 'Adding…';
   try {
-    // Created disabled with the template's default egress — safe; enabling it later is the confirm gate.
+    // Created DISARMED with the template's default clearance — safe; arming it later is the confirm gate.
     await window.kbApi.setResearcherConfig({ id, template, egressTier: template ? defaultEgressFor(template) : undefined, enabled: false });
     await render(container);
   } catch {
