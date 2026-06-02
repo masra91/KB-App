@@ -75,16 +75,16 @@ plugins.
 
 | ID       | Priority | Statement (short)                                                                  | Verify   | Traces |
 | -------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
-| META-1   | must     | Metadata is **Obsidian-native**: typed **Properties** (frontmatter) + tags as the frontmatter **`tags:` list**, on sources/entities/claims/outputs — works in **core Obsidian** (Properties/Tags/Bases), no third-party plugins | none-yet | DATA-3; VISION-12 |
-| META-2   | must     | Tags/properties use a **hybrid vocabulary** — a small **curated core** (`type`, `topic/`, `status`, `scope`, `sensitivity`, dates) the views/colors depend on, plus **emergent** LLM-coined tags beyond it | none-yet | DATA-3; LIFE-8 |
-| META-3   | must     | Tags use the **`tags:` frontmatter list** (not inline `#tags` in v1), **nested** with `/`, obeying Obsidian's no-space/valid-char rules | none-yet | VISION-12 |
-| META-4   | must     | **Connect is the authoritative metadata writer**: minting/updating a canonical node writes its Properties + `tags:` in the **identity region**, disjoint from the claims block (SPEC-0020 region discipline) | none-yet | CONNECT-3; CANON-5 |
+| META-1   | must     | Metadata is **Obsidian-native**: typed **Properties** (frontmatter) + tags as the frontmatter **`tags:` list**, on sources/entities/claims/outputs — works in **core Obsidian** (Properties/Tags/Bases), no third-party plugins | test:connectStage.test.ts, connectPipeline.test.ts (entities) | DATA-3; VISION-12 |
+| META-2   | must     | Tags/properties use a **hybrid vocabulary** — a small **curated core** (`type`, `topic/`, `status`, `scope`, `sensitivity`, dates) the views/colors depend on, plus **emergent** LLM-coined tags beyond it | test:metaVocab.test.ts, connectStage.test.ts | DATA-3; LIFE-8 |
+| META-3   | must     | Tags use the **`tags:` frontmatter list** (not inline `#tags` in v1), **nested** with `/`, obeying Obsidian's no-space/valid-char rules | test:metaVocab.test.ts, connectDoc.test.ts | VISION-12 |
+| META-4   | must     | **Connect is the authoritative metadata writer**: minting/updating a canonical node writes its Properties + `tags:` in the **identity region**, disjoint from the claims block (SPEC-0020 region discipline) | test:connectStage.test.ts, connectDoc.test.ts | CONNECT-3; CANON-5 |
 | META-5   | should   | **Capture** applies light source-level Properties (class/kind/scope/sensitivity + `created`); rich inference stays deferred (CAPTURE-10); **Decompose stays thin** (kind + optional tag signals) | none-yet | CAPTURE-10; DECOMP-1 |
 | META-6   | must     | **Reflect maintains metadata** (SPEC-0024): tags under-tagged nodes, refreshes stale tags/properties, curates the vocabulary; **additive auto, destructive/schema → Review** | none-yet | LIFE-8; REFLECT-3,5 |
 | META-7   | must     | Metadata writes are **disposition-governed** (AUTO): adding/auto-tagging is additive (auto, audited); removing/retagging/merging tags or changing the **curated schema** is destructive → Review (Guarded) | none-yet | AUTO-3,7 |
-| META-8   | should   | The **curated-core** vocabulary is **versioned** (a small checked-in schema) so views/colors have a stable contract; **emergent** tags need no schema change | none-yet | DATA-3 |
-| META-9   | should   | Metadata is **promoted to `main`** with its node (it lives in entity/source frontmatter — evergreen), visible in Obsidian | none-yet | STAGING-11 |
-| META-10  | must     | Metadata writes are **audited/provenance-aware** — which stage/agent set a tag/property and why (AUTO-8); a Replay rebuild reproduces them (unmodified pipeline, REPLAY-14) | none-yet | AUTO-8; REPLAY-14 |
+| META-8   | should   | The **curated-core** vocabulary is **versioned** (a small checked-in schema) so views/colors have a stable contract; **emergent** tags need no schema change | test:metaVocab.test.ts | DATA-3 |
+| META-9   | should   | Metadata is **promoted to `main`** with its node (it lives in entity/source frontmatter — evergreen), visible in Obsidian | test:connectPipeline.test.ts | STAGING-11 |
+| META-10  | must     | Metadata writes are **audited/provenance-aware** — which stage/agent set a tag/property and why (AUTO-8); a Replay rebuild reproduces them (unmodified pipeline, REPLAY-14) | test:connectStage.test.ts | AUTO-8; REPLAY-14 |
 
 ## 6. User flows / surface
 
@@ -123,3 +123,16 @@ plugins.
   **metadata now / generated views as a fast follow**. **Authoritative injection at Connect**
   (sole writer of canonical nodes), light at Capture, thin at Decompose, **maintained by Reflect**
   (SPEC-0024) — which is gated on this producer existing.
+- 2026-06-02 — **implemented the Connect-side metadata producer.** Canonical entity nodes now
+  carry a curated `type` Property + an Obsidian-native `tags:` list in the identity frontmatter
+  (disjoint from the links/claims body blocks; META-4): the deterministic curated core
+  (`type/<kind>`, always present) plus emergent topic tags the Connect agent coins via the new
+  optional `ClusterDecision.tags` (no extra agent call), normalized to Obsidian's tag rules
+  (META-3) and folded WHOLE across re-resolves/merges (idempotent). New checked-in
+  `metaVocab.ts` is the versioned curated-core source of truth (`normalizeTag`, namespaces,
+  `CURATED_VOCAB_VERSION`; META-8). Tags ride to `main` with the node via Connect's promote-hook
+  (META-9) and are recorded in the resolve audit (META-10). Graduated META-1/2/3/4/8/9/10
+  `→ test:` for the Connect/entity producer. **Deferred (other producers / passes):** source &
+  claim & output metadata (Capture/Claims/Outputs, META-5), Reflect hygiene + emergent backfill
+  (META-6), the destructive→Review disposition gate (META-7), and `scope`/`sensitivity` carry-
+  forward onto nodes (kept to the `type`+topic core this slice; CAPTURE-10 posture).

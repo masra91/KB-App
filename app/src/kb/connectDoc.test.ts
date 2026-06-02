@@ -9,6 +9,7 @@ const node = (over: Partial<EntityNode> = {}): EntityNode => ({
   aliases: ['01JENT'],
   derivedFrom: ['sources/2026/05/30/01JA', 'sources/2026/05/31/01JB'],
   resolvedFrom: ['01CA', '01CB'],
+  tags: ['type/person', 'topic/tech'],
   createdAt: '2026-05-31T00:00:00Z',
   updatedAt: '2026-05-31T00:00:00Z',
   agent: { via: 'copilot', model: 'test' },
@@ -28,13 +29,22 @@ describe('renderEntityNode (CONNECT-7/8, CANON-6)', () => {
     expect(md).toContain('# Steve Jobs');
   });
 
-  it('round-trips through parseEntityNode (fold/merge needs this)', () => {
-    const parsed = parseEntityNode(renderEntityNode(node({ aliases: ['01JENT', 'Steven Jobs'] })));
+  it('emits the curated `type` Property + Obsidian `tags:` list (SPEC-0025 META-1/2/4)', () => {
+    const md = renderEntityNode(node());
+    expect(md).toContain('type: person'); // curated Property seeded from kind
+    expect(md).toContain('tags: ["type/person", "topic/tech"]'); // native frontmatter tags list
+    // region discipline (META-4): metadata is in the identity frontmatter, not a body block
+    expect(md.indexOf('tags:')).toBeLessThan(md.indexOf('---', 4));
+  });
+
+  it('round-trips through parseEntityNode (fold/merge needs this — incl. tags)', () => {
+    const parsed = parseEntityNode(renderEntityNode(node({ aliases: ['01JENT', 'Steven Jobs'], tags: ['type/person', 'topic/ml'] })));
     expect(parsed.id).toBe('01JENT');
     expect(parsed.name).toBe('Steve Jobs');
     expect(parsed.aliases).toEqual(['01JENT', 'Steven Jobs']);
     expect(parsed.derivedFrom).toHaveLength(2);
     expect(parsed.resolvedFrom).toEqual(['01CA', '01CB']);
+    expect(parsed.tags).toEqual(['type/person', 'topic/ml']); // tags survive parse (fold preserves them)
   });
 
   it('parseEntityNode throws on a node missing identity (foreign/malformed → skipped by caller)', () => {

@@ -40,6 +40,13 @@ export interface ClusterDecision {
    */
   mergeExistingNodeIds?: string[];
   confidence: number; // 0..1 the cluster is correct
+  /**
+   * Optional (SPEC-0025 META-2/4): emergent topic tags the agent coins for this node, e.g.
+   * `["topic/ml", "topic/startups"]`. Connect adds them (normalized) to the node's `tags:`
+   * alongside the deterministic curated core (`type/<kind>`). Bare names are fine — the
+   * orchestrator normalizes via `normalizeTag`. No new agent call: it's one extra verdict field.
+   */
+  tags?: string[];
 }
 
 /** The whole verdict returned by one disposable Connect session (SPEC-0020 §3.3). */
@@ -132,6 +139,12 @@ function validCluster(v: unknown, i: number): ClusterDecision {
       throw new Error(`connect: clusters[${i}].mergeExistingNodeIds must be an array of non-empty strings when present`);
     }
     if (o.mergeExistingNodeIds.length > 0) cluster.mergeExistingNodeIds = o.mergeExistingNodeIds as string[];
+  }
+  if (o.tags !== undefined) {
+    if (!Array.isArray(o.tags) || !o.tags.every(isNonEmptyString)) {
+      throw new Error(`connect: clusters[${i}].tags must be an array of non-empty strings when present`);
+    }
+    if (o.tags.length > 0) cluster.tags = o.tags as string[];
   }
   return cluster;
 }

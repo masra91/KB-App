@@ -67,6 +67,7 @@ async function seedNode(root: string, kind: string, name: string, derivedFrom: s
       aliases: [id],
       derivedFrom,
       resolvedFrom: [],
+      tags: [],
       createdAt: '2026-05-30T00:00:00Z',
       updatedAt: '2026-05-30T00:00:00Z',
     }),
@@ -420,6 +421,55 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       expect(res.unresolved).toContain('Apple');
       const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
       expect(md).not.toContain('[['); // no guessed link to either Apple
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on the node (SPEC-0025 META-2/3/4)', () => {
+  it('writes the curated type/<kind> tag + normalized agent topic tags into the node', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedCandidate(root, 'person', 'Steve Jobs', '01S1');
+      await commitAll(root, 'seed');
+
+      const tagger: ConnectDecider = async (set) => ({
+        blockKey: set.blockKey,
+        clusters: [
+          {
+            canonicalName: 'Steve Jobs',
+            memberCandidateIds: set.candidates.map((c) => c.id),
+            confidence: 0.95,
+            tags: ['Topic/Machine Learning', 'startups'], // emergent, un-normalized — Connect normalizes
+          },
+        ],
+        agent: { via: 'copilot', model: 'test' },
+      });
+      await connectOne(root, 'person|steve jobs', tagger);
+
+      const md = await fs.readFile(path.join(root, 'entities/person/steve-jobs.md'), 'utf8');
+      expect(md).toContain('type: person'); // curated Property
+      expect(md).toMatch(/tags: \[[^\]]*"type\/person"[^\]]*\]/); // deterministic curated core, always present
+      expect(md).toContain('"topic/machine-learning"'); // agent tag, normalized (META-3)
+      expect(md).toContain('"startups"');
+      // provenance (META-10): the resolve audit records the tags it set
+      const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
+      const resolved = audit
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l))
+        .find((o) => o.event === 'resolved');
+      expect(resolved.tags).toContain('type/person');
+    });
+  });
+
+  it('always emits at least the deterministic type/<kind> tag, even with no agent tags', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedCandidate(root, 'organization', 'Apple', '01S1');
+      await commitAll(root, 'seed');
+      await connectOne(root, 'organization|apple', oneClusterDecider('Apple')); // no tags in verdict
+      const md = await fs.readFile(path.join(root, 'entities/organization/apple.md'), 'utf8');
+      expect(md).toContain('tags: ["type/organization"]');
     });
   });
 });

@@ -68,6 +68,7 @@ export interface EntityNode {
   aliases: string[]; // ULID + prior names/spellings folded in (CANON-6)
   derivedFrom: string[]; // ALL contributing source dirs (CONNECT-8)
   resolvedFrom: string[]; // candidate ids this node consumed (lineage; CONNECT-8)
+  tags: string[]; // Obsidian `tags:` — curated `type/<kind>` + emergent topic tags (SPEC-0025 META-1/2)
   createdAt: string; // ISO
   updatedAt: string; // ISO
   agent?: AgentTrace;
@@ -84,9 +85,14 @@ export function renderEntityNode(node: EntityNode): string {
   const fm: string[] = [
     `id: ${node.id}`,
     `kind: ${scalar(node.kind)}`,
+    // Curated `type` Property (SPEC-0025 META-2): the views' filter key, seeded from `kind`.
+    `type: ${scalar(node.kind)}`,
     `name: ${scalar(node.name)}`,
     `confidence: ${node.confidence}`,
     `aliases: ${flowSeq(node.aliases)}`,
+    // Obsidian-native `tags:` (META-1/3): curated `type/<kind>` + emergent topic tags. The graph
+    // colors + Bases filter off these. A node always has at least its `type/<kind>` tag.
+    `tags: ${flowSeq(node.tags)}`,
     'provenance:',
     `  derivedFrom: ${flowSeq(node.derivedFrom)}`,
     `  resolvedFrom: ${flowSeq(node.resolvedFrom)}`,
@@ -107,6 +113,7 @@ export interface ParsedNode {
   aliases: string[];
   derivedFrom: string[];
   resolvedFrom: string[];
+  tags: string[];
   createdAt: string;
 }
 
@@ -146,6 +153,7 @@ export function parseEntityNode(md: string): ParsedNode {
   let aliases: string[] = [];
   let derivedFrom: string[] = [];
   let resolvedFrom: string[] = [];
+  let tags: string[] = [];
   let createdAt = '';
   for (const line of fm.split('\n')) {
     let m: RegExpMatchArray | null;
@@ -154,12 +162,13 @@ export function parseEntityNode(md: string): ParsedNode {
     else if ((m = line.match(/^name:\s*(.+)$/))) name = fmScalar(m[1]);
     else if ((m = line.match(/^confidence:\s*(.+)$/))) confidence = Number(m[1].trim()) || 0;
     else if ((m = line.match(/^aliases:\s*(\[.*\])\s*$/))) aliases = fmSeq(m[1]);
+    else if ((m = line.match(/^tags:\s*(\[.*\])\s*$/))) tags = fmSeq(m[1]);
     else if ((m = line.match(/^\s+derivedFrom:\s*(\[.*\])\s*$/))) derivedFrom = fmSeq(m[1]);
     else if ((m = line.match(/^\s+resolvedFrom:\s*(\[.*\])\s*$/))) resolvedFrom = fmSeq(m[1]);
     else if ((m = line.match(/^createdAt:\s*(.+)$/))) createdAt = fmScalar(m[1]);
   }
   if (!id || !kind || !name) throw new Error('connect: entity node missing id/kind/name');
-  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, createdAt };
+  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, tags, createdAt };
 }
 
 /** Union helper preserving order, de-duplicated — for folding derivedFrom/resolvedFrom/aliases. */
