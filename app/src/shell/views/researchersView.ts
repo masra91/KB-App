@@ -6,7 +6,7 @@
 // Confirm gate (RESEARCH-15, PANEL-7-style): risky changes — enabling a researcher (starts external
 // egress), → Autonomous, widening egress — reveal an inline confirm before they apply + audit. The
 // view degrades to a friendly message when no KB is active or IPC fails. Read-only viewing needs no
-// confirm. (Slice 1a: Run now uses the deterministic stub — no network.)
+// confirm. Run now executes the real egress-gated cognition (no synthetic data ever reaches a vault).
 import { esc } from '../html';
 import {
   schedulePresetLabel,
