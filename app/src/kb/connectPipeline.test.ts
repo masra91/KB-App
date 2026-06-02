@@ -290,4 +290,58 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
       await rmTempDir(dir);
     }
   });
+
+  // REGRESSION (BUG #62, CONNECT-12/13): the test above triggers link-promotion with a MANUAL
+  // `connect.poke()`. Live, nothing pokes Connect by hand — the only post-Claims trigger is
+  // Claims' `afterDrain`, wired in pipeline.ts as `await promote(); void connect.poke()`. This
+  // test drives link-promotion EXCLUSIVELY through that wiring (Claims' afterDrain pokes Connect;
+  // we retain the returned drain promise only to await it deterministically — we never poke
+  // Connect ourselves as the trigger). If the post-Claims auto-poke is missing/broken, the
+  // wikilink never renders on `main` and this fails — the live symptom #35's tests masked.
+  it('link-promotion fires from Claims’ afterDrain alone — no manual Connect poke (regression; CONNECT-12)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const promoteEvergreen = async (): Promise<void> => {
+        await promote(root);
+      };
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, promoteEvergreen);
+
+      await orch.capture('s1', [{ kind: 'text', text: 'Steve co-founded Apple in 1976.' }]);
+      await orch.poke();
+      for (const srcRel of await readDecomposeQueue(stagingWt)) {
+        await decomposeOne(stagingWt, srcRel, decompDeciderTwo);
+      }
+
+      const connect = new ConnectStage(stagingWt, connectDeciderEach, lock, undefined, promoteEvergreen);
+      await connect.poke();
+      expect((await findEntityFiles(root)).length).toBe(2);
+
+      // Wire Claims EXACTLY as pipeline.ts does: afterDrain promotes claims, then pokes Connect so
+      // its link-promotion pass turns the `relatesTo` hint into a real [[wikilink]]. We keep the
+      // poke's promise (pipeline.ts discards it via `void`) ONLY to await the auto-triggered drain.
+      let linkDrain: Promise<void> = Promise.resolve();
+      const claims = new ClaimsStage(stagingWt, claimsDeciderLink, lock, undefined, async () => {
+        await promoteEvergreen();
+        linkDrain = connect.poke(); // the post-Claims trigger under test — NOT a manual test poke
+      });
+      await claims.poke();
+      await linkDrain; // settle the link-promotion drain Claims' afterDrain kicked off
+
+      const ents = await findEntityFiles(root);
+      const steveRel = ents.find((r) => r.includes(`${path.sep}person${path.sep}`));
+      const appleRel = ents.find((r) => r.includes(`${path.sep}organization${path.sep}`));
+      expect(steveRel).toBeTruthy();
+      expect(appleRel).toBeTruthy();
+      const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
+      expect(steveMd).toContain(LINKS_BLOCK_START);
+      expect(steveMd).toContain(`[[${appleRel}]]`); // wikilink rendered on main via the auto-poke alone
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
 });
