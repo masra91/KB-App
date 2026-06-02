@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseDecomposeDecision } from './decompose';
+import { parseDecomposeDecision, MAX_SIGNAL_CONTEXT_CHARS } from './decompose';
 
 const ok = JSON.stringify({
   sourceId: '01JSRC',
@@ -79,6 +79,15 @@ describe('open vocabularies — kind & signal type are NOT allow-listed (DECOMP-
     expect(() =>
       parseDecomposeDecision(JSON.stringify({ sourceId: 's', entities: [], signals: [{ type: 'research-request', what: '  ', note: 'n' }] })),
     ).toThrow(/what/);
+  });
+
+  it('TRUNCATES an absurdly long research-request `context` defensively, without failing the decision (KB-QD #96)', () => {
+    const huge = 'y'.repeat(MAX_SIGNAL_CONTEXT_CHARS + 3000);
+    const d = parseDecomposeDecision(
+      JSON.stringify({ sourceId: 's', entities: [{ kind: 'person', name: 'A', confidence: 0.5, mentions: ['a'] }], signals: [{ type: 'research-request', what: 'Atlas', note: 'why', context: huge }] }),
+    );
+    expect(d.entities).toHaveLength(1); // the real entity survives — one over-long context never fails the whole decision
+    expect(d.signals?.[0].context?.length).toBe(MAX_SIGNAL_CONTEXT_CHARS); // stored context bounded
   });
 });
 

@@ -96,13 +96,25 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
 }
 
 /**
+ * The hard cap on how much request `context` may ride outbound (D6a / RESEARCH-8). `context` is meant
+ * to be the *surrounding sentence/phrase* a request rests on — the soft "one sentence" limit is only
+ * prompt-instructed upstream, so this is the deterministic backstop: even if a producer (or an
+ * injection) packs a long span into `context`, only this many characters can ever leave the process.
+ * Generous enough for a real sentence, tight enough that unbounded source text can't be exfiltrated.
+ */
+export const MAX_OUTBOUND_CONTEXT_CHARS = 500;
+
+/**
  * Build the outbound query for a request — the ONLY KB-derived material a Slice-1 researcher may send
  * outbound (D6a / RESEARCH-8). Deliberately tiny + pure: the request's `what`, lightly grounded by
- * its `context`. Never reads entities/claims/sources. The SDK adapter calls this; exported for the
- * egress test that proves no arbitrary KB content leaks into the query.
+ * its `context` **hard-capped to {@link MAX_OUTBOUND_CONTEXT_CHARS}** (KB-QD #96 flag — the egress
+ * chokepoint, so an over-long/injected context can't leak unbounded source text). Never reads
+ * entities/claims/sources. The SDK adapter calls this; exported for the egress test that proves no
+ * arbitrary KB content leaks into the query.
  */
 export function buildOutboundQuery(req: ResearchRequest): string {
   const what = req.what.trim();
-  const ctx = req.context.trim();
+  let ctx = req.context.trim();
+  if (ctx.length > MAX_OUTBOUND_CONTEXT_CHARS) ctx = `${ctx.slice(0, MAX_OUTBOUND_CONTEXT_CHARS)}…`;
   return ctx ? `${what} — ${ctx}` : what;
 }

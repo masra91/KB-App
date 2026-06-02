@@ -43,6 +43,11 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
+/** Defensive storage cap for a research-request `context` (D1). A "surrounding sentence" is never
+ *  this long; truncating here stops a pathological/injected blob from being stored. The real egress
+ *  bound is tighter + enforced separately at buildOutboundQuery (MAX_OUTBOUND_CONTEXT_CHARS). */
+export const MAX_SIGNAL_CONTEXT_CHARS = 2000;
+
 /** Coerce a confidence to a number in [0,1]; throw if absent/out of range. */
 function validConfidence(v: unknown): number {
   if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
@@ -86,16 +91,20 @@ export function validSignal(v: unknown, i: number): SignalDecision {
     }
     sig.refs = o.refs as string[];
   }
-  // Research-request fields (SPEC-0028 RESEARCH-3 / D1) — optional, carried through verbatim. `what`
-  // is the only field a downstream researcher dispatches on; `context` is the bounded KB material
-  // egress may use (D6a). Validated as non-empty strings when present; never allow-listed.
+  // Research-request fields (SPEC-0028 RESEARCH-3 / D1) — optional, carried through. `what` is the
+  // only field a downstream researcher dispatches on; `context` is the bounded KB material egress may
+  // use (D6a). Validated as non-empty strings when present; never allow-listed.
   if (o.what !== undefined) {
     if (!isNonEmptyString(o.what)) throw new Error(`decompose: signals[${i}].what must be a non-empty string`);
     sig.what = o.what;
   }
   if (o.context !== undefined) {
     if (typeof o.context !== 'string') throw new Error(`decompose: signals[${i}].context must be a string`);
-    sig.context = o.context;
+    // Defensive depth (KB-QD #96 flag): `context` should be the surrounding sentence/phrase. The hard
+    // egress bound lives at buildOutboundQuery (MAX_OUTBOUND_CONTEXT_CHARS); here we just TRUNCATE an
+    // absurdly long span so a producer dumping a whole document can't even be stored — truncating (not
+    // throwing) so one over-long context never fails the whole decision (losing its real entities).
+    sig.context = o.context.length > MAX_SIGNAL_CONTEXT_CHARS ? o.context.slice(0, MAX_SIGNAL_CONTEXT_CHARS) : o.context;
   }
   return sig;
 }
