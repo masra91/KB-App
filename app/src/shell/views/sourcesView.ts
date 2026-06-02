@@ -1,11 +1,39 @@
-// Sources view (SPEC-0027 PANEL-4) — shows the vault + watched folders with placeholder slots for
+// Sources view (SPEC-0027 PANEL-4) — shows the vault (today's only source) + placeholder slots for
 // future connected sources (Proactive Intake: email/calendar/news). Thin in v1, grows as integrations
-// land. Slice-1 stub: the Manage section registers the view now; the vault + placeholders land in slice 2.
+// land. Read-only over existing IPC (`getState`); no new persistence. Degrades gracefully (PANEL-9).
+import { esc } from '../html';
+
 export async function mountSources(container: HTMLElement): Promise<void> {
+  container.innerHTML = `<div class="card"><h1>🔌 Sources</h1><p class="muted">Loading…</p></div>`;
+
+  let name = '—';
+  let vaultPath = '—';
+  try {
+    const state = await window.kbApi.getState();
+    name = state.vaultConfig?.name ?? '—';
+    vaultPath = state.activeVaultPath ?? '—';
+  } catch {
+    // Fall through to the placeholders with em-dash vault info — the view never errors the shell.
+  }
+
   container.innerHTML = `
     <div class="card">
       <h1>🔌 Sources</h1>
-      <p class="muted">Where your knowledge comes from — your vault today, and connected sources (email, calendar, news) as they’re built.</p>
-      <p class="muted">The vault summary and connected-source slots are coming in a later slice.</p>
+      <p class="muted">Where your knowledge comes from.</p>
+      <dl class="settings">
+        <dt>Vault</dt>
+        <dd>${esc(name)}</dd>
+        <dt>Path</dt>
+        <dd><span class="path">${esc(vaultPath)}</span></dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h2>Connected sources</h2>
+      <p class="muted">Pull in context from beyond your vault — arriving with Proactive Intake. Not connected yet.</p>
+      <ul class="source-slots">
+        <li class="muted">📧 Email — coming soon</li>
+        <li class="muted">📅 Calendar — coming soon</li>
+        <li class="muted">📰 News &amp; feeds — coming soon</li>
+      </ul>
     </div>`;
 }

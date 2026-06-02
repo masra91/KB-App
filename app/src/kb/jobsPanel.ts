@@ -53,16 +53,19 @@ function lastRunOf(entry: JournalEntry | undefined): JobLastRun | null {
  * Merge the known-job catalog with the per-vault registry into display rows (PANEL-2).
  *
  * Every catalog type yields a row — registered (its persisted config) or catalog-only (defaults:
- * disabled / off / guarded, `registered:false`) so the Principal can manage a known job before it
- * is ever persisted. Registry jobs whose `type` has no catalog entry (e.g. a job registered before
- * its catalog row, or a since-removed type) are still listed, labeled by their type, so nothing the
- * scheduler might run is hidden. Catalog order first, then any extra registry jobs by id. Each row's
- * `lastRun` comes from `lastEntryByJobId[id]` (the newest journal line for that job).
+ * disabled / off / `registered:false`) so the Principal can manage a known job before it is ever
+ * persisted. A catalog-only job's displayed posture is the **resolved/effective** posture it would
+ * run at — its inherited Instance default (`instanceDefault`) — NOT a hardcoded Guarded, so the
+ * safety control's display equals what enabling it actually persists+runs (`resolveJobPosture`,
+ * PANEL-5/7). Registry jobs whose `type` has no catalog entry are still listed, labeled by their
+ * type, so nothing the scheduler might run is hidden. Catalog order first, then extra registry jobs
+ * by id. Each row's `lastRun` comes from `lastEntryByJobId[id]`.
  */
 export function buildJobViews(
   catalog: JobCatalogEntry[],
   registry: JobConfig[],
   lastEntryByJobId: Record<string, JournalEntry | undefined>,
+  instanceDefault: AutonomyPosture,
 ): JobView[] {
   // For v1 a catalog type maps to a single job whose id === type (one instance per type).
   const byId = new Map<string, JobConfig>(registry.map((j) => [j.id, j]));
@@ -82,7 +85,9 @@ export function buildJobViews(
       registered: cfg !== undefined,
       enabled: cfg?.enabled ?? false,
       schedule: cfg?.schedule ?? 'off',
-      posture: cfg?.posture ?? DEFAULT_POSTURE,
+      // Effective posture: an explicit per-job posture wins; a catalog-only job inherits the
+      // Instance default (display == what enabling it would run — QA #74 blocker).
+      posture: cfg?.posture ?? instanceDefault,
       lastRun: lastRunOf(lastEntryByJobId[id]),
     });
   }

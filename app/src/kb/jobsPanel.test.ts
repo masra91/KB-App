@@ -24,7 +24,7 @@ function cfg(over: Partial<JobConfig> & Pick<JobConfig, 'id' | 'type'>): JobConf
 
 describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
   it('yields one row per catalog type even when the registry is empty (catalog-only defaults)', () => {
-    const views = buildJobViews(CATALOG, [], {});
+    const views = buildJobViews(CATALOG, [], {}, 'guarded');
     expect(views.map((v) => v.id)).toEqual(['example', 'reflect']);
     for (const v of views) {
       expect(v.registered).toBe(false);
@@ -38,9 +38,19 @@ describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
     expect(views[1]).toMatchObject({ label: 'Reflect', production: true });
   });
 
+  it('shows a catalog-only job’s RESOLVED posture — the inherited Instance default, not hardcoded Guarded (QA #74)', () => {
+    // Instance default = Autonomous → an unregistered job displays Autonomous (what enabling it runs),
+    // so the safety control's display == effective posture (resolveJobPosture inherit).
+    const auto = buildJobViews(CATALOG, [], {}, 'autonomous');
+    expect(auto.every((v) => v.posture === 'autonomous')).toBe(true);
+    // An explicit per-job posture still wins over the Instance default.
+    const registry = [cfg({ id: 'reflect', type: 'reflect', posture: 'guarded' })];
+    expect(buildJobViews(CATALOG, registry, {}, 'autonomous').find((v) => v.id === 'reflect')!.posture).toBe('guarded');
+  });
+
   it('overlays a registered job’s persisted config and marks it registered', () => {
     const registry = [cfg({ id: 'reflect', type: 'reflect', enabled: true, schedule: 'hourly', posture: 'autonomous' })];
-    const views = buildJobViews(CATALOG, registry, {});
+    const views = buildJobViews(CATALOG, registry, {}, 'guarded');
     const reflect = views.find((v) => v.id === 'reflect')!;
     expect(reflect).toMatchObject({ registered: true, enabled: true, schedule: 'hourly', posture: 'autonomous' });
     // The unregistered catalog job still shows its defaults.
@@ -49,7 +59,7 @@ describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
 
   it('lists a registered job that has no catalog entry (never hide a runnable job), after catalog rows', () => {
     const registry = [cfg({ id: 'legacy', type: 'legacy', enabled: true, schedule: 'daily' })];
-    const views = buildJobViews(CATALOG, registry, {});
+    const views = buildJobViews(CATALOG, registry, {}, 'guarded');
     expect(views.map((v) => v.id)).toEqual(['example', 'reflect', 'legacy']);
     const legacy = views.find((v) => v.id === 'legacy')!;
     expect(legacy).toMatchObject({ label: 'legacy', registered: true, enabled: true, production: false });
@@ -64,7 +74,7 @@ describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
       deferred: 2,
     };
     const setAside: JournalEntry = { ts: '2026-06-02T08:00:00.000Z', runId: 'r2', inspected: 'entities/', applied: 0, deferred: 0, note: 'collision-exhausted' };
-    const views = buildJobViews(CATALOG, [], { example: entry, reflect: setAside });
+    const views = buildJobViews(CATALOG, [], { example: entry, reflect: setAside }, 'guarded');
     expect(views.find((v) => v.id === 'example')!.lastRun).toEqual({
       ts: '2026-06-02T07:00:00.000Z',
       inspected: 'entities/ (3 nodes)',

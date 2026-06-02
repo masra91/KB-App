@@ -74,13 +74,13 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | ------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
 | PANEL-1 | must     | The Control Panel is a **"Manage" section of sibling views** registered in the nav shell — **Jobs, Agents, Sources, Settings** — to observe+configure the machine; one active at a time; Capture stays default | test:app/src/shell/navModel.test.ts | VISION-11; SHELL-2,4 |
 | PANEL-2 | must     | The **Jobs** view lists autonomous jobs (SPEC-0023) and lets the Principal **enable/disable**, set **schedule preset**, set **autonomy posture** (Guarded/Autonomous), **run-now**, and see **last-run** state from the job journal | test:app/src/kb/jobsPanel.test.ts, app/src/shell/views/jobsView.test.ts | JOBS-1,2,11,14,15; AUTO-12 |
-| PANEL-3 | must     | The **Agents** view lists librarian/stage agents with **status + key config** (model, instruction file); v1 is observe + safe knobs (full agent authoring deferred) | none-yet | VISION-11; ORCH-9 |
+| PANEL-3 | must     | The **Agents** view lists librarian/stage agents with **status + key config** (model, instruction file); v1 is observe + safe knobs (full agent authoring deferred) | test:app/src/kb/agentCatalog.test.ts, app/src/shell/views/agentsView.test.ts | VISION-11; ORCH-9 |
 | PANEL-4 | should   | The **Sources** view shows the vault + watched folders and **placeholder** slots for future connected sources (Proactive Intake); thin in v1, grows as integrations land | none-yet | VISION-11 |
-| PANEL-5 | must     | The **Settings** view (elevating the display-only stub) holds vault config, **Copilot status**, and editable **autonomy defaults** (per-Instance posture) | none-yet | SETUP-8; AUTO-12 |
-| PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | none-yet | SETUP-6; SCOPE-1 |
-| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts (confirm UI) | AUTO-1,8 |
+| PANEL-5 | must     | The **Settings** view (elevating the display-only stub) holds vault config, **Copilot status**, and editable **autonomy defaults** (per-Instance posture) | test:app/src/kb/instanceConfig.test.ts, app/src/shell/views/settingsView.test.ts | SETUP-8; AUTO-12 |
+| PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | test:app/src/kb/instanceConfig.test.ts, jobRegistry.test.ts | SETUP-6; SCOPE-1 |
+| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts + settingsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | none-yet | REVIEW-?; AUTO-10 |
-| PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | none-yet | ORCH-10 |
+| PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/views/agentsView.test.ts (degrade) | ORCH-10 |
 
 ## 5. User flows / surface
 
@@ -138,3 +138,17 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   Sources vault+placeholders (PANEL-4), Settings elevation + per-Instance autonomy default via
   `.kb/instance.json` (PANEL-5), Review-queue link (PANEL-8), live-status polling (PANEL-9) — these
   ship as thin stubs in slice 1. **Researchers** view is a stub pending SPEC-0028.
+- 2026-06-02 — **slice 2 implemented** in `app/`. Filled the Manage views' content: **Agents**
+  (PANEL-3) — observe-only list of the librarian/stage agents (archivist/decompose/connect/claims/
+  recall/reflect) with role, model (env-requested or Copilot default), instruction pointer, and live
+  running/idle status; **Sources** (PANEL-4) — the vault + placeholder connected-source slots;
+  **Settings autonomy** (PANEL-5) — an editable **per-Instance autonomy default** stored at
+  per-vault **`.kb/instance.json`** (git-committed on `staging` for durability; conforming `panel`
+  audit on change), with → Autonomous gated behind a confirm (PANEL-7). New jobs inherit the
+  Instance default via a thin **`resolveJobPosture`** seam (AUTO-12 cascade: explicit per-job posture
+  wins, else inherit — the single swap point if the Principal's ruling lands differently). **PANEL-9**
+  live status (Agents poll, updated in place) + graceful degrade. Graduated **PANEL-3/5/6/9**
+  `Verify: none-yet → test:` (node `instanceConfig` + `agentCatalog`; happy-dom `agentsView` +
+  `settingsView`). **Deferred:** **PANEL-8** Review-queue link — needs an additive shell
+  `navigate(viewId)` hook, sequenced **after DEV-5's Activity PR** to avoid a `shell.ts` collision.
+  **Researchers** view remains a stub pending SPEC-0028.

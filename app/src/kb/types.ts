@@ -181,6 +181,23 @@ export type RunJobResult =
   | { ran: true; outcome: 'advanced' | 'noop' | 'setaside'; applied: number; deferred: number }
   | { ran: false; reason: 'skipped' | 'not-found' | 'unknown-type' | 'no-kb' };
 
+// --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
+
+/** Editable per-Instance settings surfaced in Settings (PANEL-5 / AUTO-12). */
+export interface InstanceSettings {
+  autonomyDefault: AutonomyPosture;
+}
+
+/** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
+export interface AgentView {
+  key: string; // stable agent key (e.g. 'decompose')
+  label: string; // Principal-facing name
+  role: string; // one-line description of what it does
+  model: string; // the model it runs (or 'deterministic' / '—' when not agent-backed)
+  instructions: string; // pointer to its instruction source (file/built-in)
+  status: 'running' | 'idle'; // live: running when the pipeline is active, else idle (PANEL-9)
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -201,6 +218,10 @@ export interface KbApi {
   activityFeed(filter?: ActivityFilter): Promise<ActivityFeedResult>;
   activityEvents(filter?: ActivityFilter): Promise<AuditEvent[]>;
   activityLineage(id: string): Promise<Lineage>;
+  // Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5)
+  getInstanceSettings(): Promise<InstanceSettings>;
+  setInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings>;
+  listAgents(): Promise<AgentView[]>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT

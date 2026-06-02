@@ -394,3 +394,18 @@ button:disabled {
 .btn:hover { background: rgba(255, 255, 255, 0.06); }
 .btn-danger { appearance: none; font: inherit; border: 0; border-radius: 8px; background: var(--error); color: #1a1a1a; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: 600; }
 .btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Control Panel: Agents / Sources / Settings autonomy (SPEC-0027 slice 2) --- */
+.agent-list, .source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.agent { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+.agent-head { display: flex; align-items: center; gap: 0.5rem; }
+.agent-label { font-weight: 600; }
+.agent-status { margin-left: auto; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.4rem; color: var(--muted); }
+.agent-status.status-running { color: #7ad17a; border-color: #2f5c2f; }
+.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; }
+.agent-meta { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.82rem; }
+.agent-meta dt { color: var(--muted); }
+.agent-meta dd { margin: 0; }
+.source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
+.autonomy-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.autonomy-row select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.4rem; }

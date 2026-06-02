@@ -33,10 +33,12 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture } from '../kb/instanceConfig';
+import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
-import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
+import { type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult } from '../kb/types';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView } from '../kb/types';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
  *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
@@ -165,6 +167,7 @@ export async function listJobsForActive(): Promise<JobView[]> {
   if (!active) return [];
   const root = active.stagingWt;
   const registry = await readJobRegistry(root);
+  const instance = await readInstanceConfig(root); // a catalog-only job displays its inherited posture
   // Gather the newest journal entry for every job we will show (catalog types ∪ registered ids).
   const ids = new Set<string>([...JOB_CATALOG.map((c) => c.type), ...registry.map((j) => j.id)]);
   const lastEntryByJobId: Record<string, JournalEntry | undefined> = {};
@@ -172,7 +175,7 @@ export async function listJobsForActive(): Promise<JobView[]> {
     const journal = await readJournal(root, id);
     lastEntryByJobId[id] = journal[journal.length - 1];
   }
-  return buildJobViews(JOB_CATALOG, registry, lastEntryByJobId);
+  return buildJobViews(JOB_CATALOG, registry, lastEntryByJobId, instance.autonomyDefault);
 }
 
 /**
@@ -217,12 +220,15 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
         ...(clean.posture !== undefined ? { posture: clean.posture } : {}),
       });
     } else {
+      // New job: an explicit per-job posture wins; otherwise inherit the Instance default (AUTO-12
+      // cascade — `resolveJobPosture` is the single swap point if the ruling lands differently).
+      const instanceCfg = await readInstanceConfig(root);
       await upsertJob(root, {
         id: clean.id,
         type: clean.type,
         enabled: clean.enabled ?? false,
         schedule: clean.schedule ?? 'off',
-        posture: clean.posture ?? DEFAULT_POSTURE,
+        posture: resolveJobPosture(instanceCfg.autonomyDefault, clean.posture),
       });
     }
     await commitRegistryChange(root, summarizeJobChange(clean));
@@ -250,7 +256,8 @@ export async function runActiveJobNow(id: string): Promise<RunJobResult> {
     const entry = catalogEntry(id); // v1: catalog id === type
     if (!entry) return { ran: false, reason: 'not-found' };
     await active.lock.run(async () => {
-      await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: DEFAULT_POSTURE });
+      const instanceCfg = await readInstanceConfig(root);
+      await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: resolveJobPosture(instanceCfg.autonomyDefault, undefined) });
       await commitRegistryChange(root, `seed job ${id} for run-now`);
     });
   }
@@ -276,17 +283,66 @@ function summarizeJobChange(patch: JobConfigPatch): string {
   return `job ${patch.id}${parts.length ? ` set ${parts.join(', ')}` : ' config change'}`;
 }
 
+// --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
+
+/** The per-Instance settings for the active KB (PANEL-5). No active KB → safe defaults. */
+export async function getActiveInstanceSettings(): Promise<InstanceSettings> {
+  if (!active) return { autonomyDefault: 'guarded' };
+  return readInstanceConfig(active.stagingWt);
+}
+
 /**
- * Commit a job-registry change on the `staging` root — the **durability record**: the registry lives
- * under `.kb/jobs/`, tracked on `staging` and never promoted, so a commit is durable and protects the
- * file from a stray staging reset (the *conforming* audit is the separate `panel` event emitted by
- * the caller). MUST be called inside `lock.run` (it advances the canonical branch directly; under the
- * lock it is just another linear advance that stages cherry-pick their disjoint work onto). A no-op
- * write (identical bytes) commits nothing.
+ * Persist the per-Instance settings (PANEL-5/6): write `.kb/instance.json` + git-commit on `staging`
+ * under the lock (durability), then emit a conforming `panel` audit event when the autonomy default
+ * changed (PANEL-7 / AUDIT-2/11 — `→ Autonomous` is a risky, audited change). An invalid posture is
+ * refused (fail-safe). Takes effect immediately (new jobs inherit it via `resolveJobPosture`).
  */
+export async function setActiveInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings> {
+  if (!active) return { autonomyDefault: 'guarded' };
+  const root = active.stagingWt;
+  if (!isAutonomyPosture(settings.autonomyDefault)) return readInstanceConfig(root); // reject invalid
+  let prior: InstanceSettings = { autonomyDefault: 'guarded' };
+  await active.lock.run(async () => {
+    prior = await readInstanceConfig(root);
+    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault });
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault}`);
+  });
+  if (prior.autonomyDefault !== settings.autonomyDefault) {
+    await appendAuditEvent(root, {
+      actor: 'panel',
+      eventType: 'instance-config-change',
+      subjects: {},
+      payload: { field: 'autonomyDefault', from: prior.autonomyDefault, to: settings.autonomyDefault, why: 'Principal change via Control Panel' },
+    });
+  }
+  return readInstanceConfig(root);
+}
+
+/** The librarian/stage agents for observe-only display (PANEL-3): the static catalog overlaid with
+ *  the resolved model (env-requested or Copilot default) + live running/idle status (PANEL-9). */
+export async function listAgentsForActive(): Promise<AgentView[]> {
+  return buildAgentViews(AGENT_CATALOG, {
+    requestedModel: process.env.KB_COPILOT_MODEL || undefined,
+    pipelineActive: active !== null,
+  });
+}
+
+/** Commit a job-registry change on `staging` — the durability record (audit is a separate `panel` event). */
 async function commitRegistryChange(root: string, message: string): Promise<void> {
+  await commitControlFile(root, jobRegistryPath(root), message);
+}
+
+/**
+ * Commit one Control-Panel working file on the `staging` root — the **durability record**: these
+ * files (`.kb/jobs/registry.json`, `.kb/instance.json`) are tracked on `staging`, never promoted, so
+ * a commit is durable and protects them from a stray staging reset (the *conforming* audit is the
+ * separate `panel` event the caller emits). MUST be called inside `lock.run` (it advances the
+ * canonical branch directly; under the lock it is just another linear advance that stages cherry-pick
+ * their disjoint work onto). A no-op write (identical bytes) commits nothing.
+ */
+async function commitControlFile(root: string, absPath: string, message: string): Promise<void> {
   const git = simpleGit(root);
-  const rel = path.relative(root, jobRegistryPath(root));
+  const rel = path.relative(root, absPath);
   await git.add(rel);
   const staged = (await git.diff(['--cached', '--name-only'])).trim();
   if (staged.length === 0) return; // nothing actually changed
