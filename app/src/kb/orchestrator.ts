@@ -191,7 +191,7 @@ export class Orchestrator {
 
   /** Fire-and-forget capture (CAPTURE-2): preserve+commit under the lock, then poke. */
   async capture(surface: string, payloads: CapturePayload[]): Promise<CaptureOutcome> {
-    const res = await this.lock.run(() => captureToInbox(this.root, surface, payloads));
+    const res = await this.lock.run(() => captureToInbox(this.root, surface, payloads), 'capture');
     void this.poke();
     return res;
   }
@@ -233,7 +233,7 @@ export class Orchestrator {
 
   private async drainOnce(): Promise<void> {
     // ORCH-14: adopt any foreign drops into canonical units before draining.
-    await this.lock.run(() => normalizeInbox(this.root));
+    await this.lock.run(() => normalizeInbox(this.root), 'normalize');
     let queue = await readQueue(this.root);
     await this.updateStatus(queue.length, null);
     while (queue.length > 0) {
@@ -273,7 +273,7 @@ export class Orchestrator {
     await this.updateStatus(0, null);
     // SPEC-0021: publish freshly-archived evergreen sources from `staging` to `main`,
     // serialized under the shared lock so it never races a stage's ref advance.
-    if (this.afterDrain) await this.lock.run(() => this.afterDrain!());
+    if (this.afterDrain) await this.lock.run(() => this.afterDrain!(), 'archive:afterDrain');
   }
 
   private async updateStatus(queueDepth: number, processing: string | null): Promise<void> {

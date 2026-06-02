@@ -521,7 +521,7 @@ export async function connectOne(
   // canonical is unchanged, cherry-pick replay when it moved with disjoint paths. On a same-path
   // collision, re-sync + retry the whole block (recursion) up to K, then set aside (ORCH-19).
   const advance = async (onSuccess: ConnectOneResult): Promise<ConnectOneResult> => {
-    const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint));
+    const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint), 'connect:advance');
     if (outcome === 'advanced') return onSuccess;
     if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
       return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1, log, span);
@@ -536,7 +536,7 @@ export async function connectOne(
       await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
       await wtGit.raw('add', '-A');
       await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
-      if ((await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp))) === 'advanced') {
+      if ((await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp), 'connect:advance-retry')) === 'advanced') {
         log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
         return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
       }
@@ -1052,7 +1052,7 @@ export class ConnectStage {
     // later poke/sweep retries) and never abort the whole pass.
     for (const nodeRel of await readLinkQueue(this.root)) {
       try {
-        const res = await this.lock.run(() => linkOne(this.root, nodeRel));
+        const res = await this.lock.run(() => linkOne(this.root, nodeRel), 'connect:link');
         if (res.changed) worked = true;
       } catch (err) {
         this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
@@ -1064,7 +1064,7 @@ export class ConnectStage {
     // `main` via the deletion-aware gate), so set `worked` when it committed. Best-effort: a failure
     // is logged and a later poke/sweep retries — it never aborts the rest of the drain.
     try {
-      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root));
+      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root), 'connect:dedup');
       if (dedup.committed) {
         worked = true;
         this.log.info('connect.claim-dedup', {
@@ -1079,6 +1079,6 @@ export class ConnectStage {
     // Publish the now-resolved evergreen entities (+ repointed claims + links) staging→main
     // (STAGING-3/11), serialized under the shared lock so promotion never races a stage ref
     // advance. Gated on `worked` so idle sweeps don't churn the gate; promotion is idempotent.
-    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!());
+    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!(), 'connect:afterDrain');
   }
 }

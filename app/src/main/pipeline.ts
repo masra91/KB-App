@@ -142,7 +142,10 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   await reapEphemeralWorktrees(stagingWt, log.child({ scope: 'pipeline' })).catch((err) =>
     log.child({ scope: 'pipeline' }).warn('startup.worktree-reap-failed', { itemId: vaultPath, err }),
   );
-  const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
+  // The shared serialized canonical writer for this vault (§5). The watchdog logs a loud `lock.stuck`
+  // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
+  // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
+  const lock = new Mutex({ log: log.child({ scope: 'lock' }) });
   // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
   // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
   // (archive→sources; connect→entities), so `main` tracks the resolved graph.
@@ -383,7 +386,7 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
   // deletion-aware gate (STAGING-10). Promote under the shared lock, like the stages' afterDrain.
   if (result.ok) {
     const consolidation = await executeApprovedConsolidation(active.stagingWt, id, active.lock);
-    if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath));
+    if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath), 'consolidation:promote');
   }
   return result;
 }
@@ -413,7 +416,7 @@ export async function saveRecallOutput(result: AskResult): Promise<SaveRecallOut
     await git.add(built.rel);
     await git.commit(`recall: save output ${id}`);
     await promote(a.vaultPath); // mirror the new outputs/ note to main (evergreen, deletion-aware gate)
-  });
+  }, 'recall-output:save');
   // Conforming audit — appends to the gitignored cross-cutting control log (not canonical); fine off-lock.
   await appendAuditEvent(root, {
     actor: 'output',
@@ -500,7 +503,7 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
       });
     }
     await commitRegistryChange(root, summarizeJobChange(clean));
-  });
+  }, 'job-config:write');
   if (applied) {
     // Conforming audit (PANEL-7 / AUDIT-2/11): one `panel` event per changed field, carrying the why.
     // Appends to the gitignored `.kb/audit.jsonl` (not canonical) — fine outside the lock.
@@ -527,7 +530,7 @@ export async function runActiveJobNow(id: string): Promise<RunJobResult> {
       const instanceCfg = await readInstanceConfig(root);
       await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: resolveJobPosture(instanceCfg.autonomyDefault, undefined) });
       await commitRegistryChange(root, `seed job ${id} for run-now`);
-    });
+    }, 'job:seed-for-run-now');
   }
   const res = await active.jobs.runNow(id);
   const outcome = res === 'skipped' || res === 'not-found' || res === 'unknown-type' ? res : res.outcome;
@@ -578,7 +581,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
     devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : prior.devLogLevel;
     await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel });
     await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel}`);
-  });
+  }, 'instance-settings:write');
   if (prior.autonomyDefault !== settings.autonomyDefault) {
     await appendAuditEvent(root, {
       actor: 'panel',
@@ -703,7 +706,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
     }
     applied = true;
     await commitControlFile(root, researcherRegistryPath(root), `researcher ${clean.id} config change`);
-  });
+  }, 'researcher-config:write');
   if (applied) {
     // Conforming `panel` audit: one event per changed behavior-relevant field (from→to), validated
     // values only — never a dropped-invalid field, never a no-op re-assert (QA-2 #81 follow-up).

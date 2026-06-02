@@ -81,7 +81,7 @@ export async function runFullReplay(
   lock: Mutex,
   opts: ReplayOptions = {},
 ): Promise<ReplayCounts> {
-  return lock.run(() => purgeResetPromote(vaultRoot, stagingWt, opts));
+  return lock.run(() => purgeResetPromote(vaultRoot, stagingWt, opts), 'replay:purge-reset-promote');
 }
 
 async function purgeResetPromote(vaultRoot: string, stagingWt: string, opts: ReplayOptions): Promise<ReplayCounts> {

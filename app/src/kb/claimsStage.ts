@@ -414,7 +414,7 @@ export async function claimsOne(
       const wtGit = simpleGit(wt);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`claims: set aside ${entityId} (collision-exhausted)`);
-      await lock.run(() => advanceOrCollide(root, workBranch, base));
+      await lock.run(() => advanceOrCollide(root, workBranch, base), 'claims:setaside-advance');
     });
     log.warn('claims.setaside', { itemId: entityId, reason: 'collision-exhausted' });
     result = { ...result, ok: false, setAside: true };
@@ -638,6 +638,6 @@ export class ClaimsStage {
     }
     // Publish entity nodes' newly-attached claims staging→main (STAGING-3/11), serialized under
     // the shared lock. Gated on `worked` so idle sweeps don't churn the gate (it's idempotent).
-    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!());
+    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!(), 'claims:afterDrain');
   }
 }
