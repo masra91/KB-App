@@ -5,6 +5,7 @@
 // SETUP-3 (git from the start), SETUP-5 (init structure + first commit).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -40,6 +41,33 @@ async function safeIsRepo(git: SimpleGit): Promise<boolean> {
   }
 }
 
+/** macOS TCC gates these per-app; the canonical iCloud Drive container too. */
+const TCC_PROTECTED = [
+  { name: 'Documents', segs: ['Documents'] },
+  { name: 'Desktop', segs: ['Desktop'] },
+  { name: 'Downloads', segs: ['Downloads'] },
+  { name: 'iCloud Drive', segs: ['Library', 'Mobile Documents', 'com~apple~CloudDocs'] },
+] as const;
+
+/**
+ * If `resolved` is AT or INSIDE a macOS TCC-protected location under `home`, return that location's
+ * friendly name, else null. On non-darwin platforms always null (TCC is macOS-only). Pure — `home`
+ * and `platform` are injected so it's deterministically testable (BUG #56 / STACK-10).
+ *
+ * Why it matters: macOS gates Documents/Desktop/Downloads/iCloud per-app. An unsigned/unentitled
+ * dev build's git + copilot SUBPROCESSES don't inherit the folder grant, so their writes fail with
+ * `Operation not permitted` — the pipeline silently never drains. Setup steers the user elsewhere.
+ */
+export function detectTccProtectedDir(resolved: string, home: string, platform: NodeJS.Platform): string | null {
+  if (platform !== 'darwin') return null;
+  for (const { name, segs } of TCC_PROTECTED) {
+    const base = path.join(home, ...segs);
+    const rel = path.relative(base, resolved);
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return name; // base itself or under it
+  }
+  return null;
+}
+
 export async function inspectPath(p: string): Promise<PathInspection> {
   const resolved = path.resolve(p);
   let exists = false;
@@ -67,7 +95,8 @@ export async function inspectPath(p: string): Promise<PathInspection> {
   }
 
   const copilot = await detectCopilot();
-  return { path: resolved, exists, isDirectory, gitInstalled, isGitRepo, alreadyKb, copilot };
+  const tccProtectedDir = detectTccProtectedDir(resolved, os.homedir(), process.platform);
+  return { path: resolved, exists, isDirectory, gitInstalled, isGitRepo, alreadyKb, copilot, tccProtectedDir };
 }
 
 /** Set a local committer identity if none is resolvable, so commits never fail. */

@@ -120,6 +120,18 @@ ul.checks li {
   font-size: 0.9rem;
 }
 
+/* Non-blocking caution (e.g. a TCC-protected vault path, BUG #56) — louder than .muted,
+   not a hard stop like .error. */
+.warning {
+  color: #8a6d00;
+  background: #fff8e1;
+  border: 1px solid #f0d98c;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
 /* --- Simple Capture panel (SPEC-0013) --- */
 textarea.capture {
   display: block;

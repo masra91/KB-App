@@ -25,6 +25,11 @@ export interface PathInspection {
   isGitRepo: boolean; // the folder is already a git repo
   alreadyKb: boolean; // already has a .kb/config.json
   copilot: CopilotStatus; // SETUP-4 (detect-only)
+  /** Non-null when the path is inside a macOS TCC-protected location (Documents/Desktop/Downloads/
+   *  iCloud Drive): the dir's friendly name. A vault here silently breaks the pipeline — git/copilot
+   *  subprocess writes fail with `Operation not permitted` until the app is signed+entitled (STACK-10,
+   *  BUG #56). Setup warns and steers the user to an unprotected location. Null elsewhere. */
+  tccProtectedDir: string | null;
 }
 
 export interface CreateKbOptions {
