@@ -99,7 +99,11 @@ export function parseClaimMd(md: string): ParsedClaim {
     else if ((m = line.match(/^relatesTo:\s*(\[.*\])\s*$/))) relatesTo = fmSeq(m[1]);
   }
   if (!id || !subject) throw new Error('recall: claim file missing id/subject');
-  return { id, subject, status, confidence, derivedFrom, mentions, relatesTo, statement: body.trim() };
+  // The statement is the claim's FIRST line. A claim file's body may carry a trailing
+  // "Source: [[…]]" citation (VAULT-13) which is provenance, NOT part of the assertion — so the
+  // whole-body string is no longer the statement. (Statements are always single-line `oneLine`.)
+  const statement = body.trim().split('\n', 1)[0]?.trim() ?? '';
+  return { id, subject, status, confidence, derivedFrom, mentions, relatesTo, statement };
 }
 
 /** Extract `[[target]]` wikilink targets from a node body. */

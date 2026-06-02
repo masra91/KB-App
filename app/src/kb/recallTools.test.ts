@@ -2,8 +2,22 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir } from '../../test/tempVault';
-import { makeReadOnlyTools } from './recallTools';
+import { makeReadOnlyTools, parseClaimMd } from './recallTools';
+import { renderClaimMd } from './claimDoc';
 import type { RecallTools } from './recall';
+
+describe('parseClaimMd — statement excludes the VAULT-13 source trailer (regression: #99×#102)', () => {
+  it('reads the statement as the first body line, not the whole body with its Source: [[…]] citation', () => {
+    const md = renderClaimMd(
+      { statement: 'Ada Lovelace worked with Charles Babbage.', status: 'fact', confidence: 0.9, mentions: ['m'] },
+      { id: '01C', subject: 'entities/person/ada.md', derivedFrom: 'sources/2026/06/02/01SRC', createdAt: '2026-06-02T00:00:00Z' },
+    );
+    expect(md).toContain('Source: [['); // the file DOES carry the clickable citation (VAULT-13)
+    const parsed = parseClaimMd(md);
+    expect(parsed.statement).toBe('Ada Lovelace worked with Charles Babbage.'); // …but the statement is clean
+    expect(parsed.statement).not.toContain('Source:');
+  });
+});
 
 describe('recall read-only tools (ASK-4/5)', () => {
   let v: RecallVault;
