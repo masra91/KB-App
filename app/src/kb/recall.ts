@@ -157,6 +157,9 @@ export interface RecallOptions {
   tools?: RecallTools;
   /** Model hint passed to the SDK session. */
   model?: string;
+  /** Absolute path to the BYOA `copilot` CLI for the default SDK client (BUG #65); resolved by the
+   *  main tier (STACK-9). Ignored when a `client` is injected. */
+  cliPath?: string;
   /** F3 budget: max read-only retrieval tool calls per question. */
   maxToolCalls?: number;
   /** Injectable clock for deterministic audit timestamps in tests. */
@@ -192,7 +195,7 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   const question = typeof q === 'string' ? q : q.question;
   const history = (typeof q === 'string' ? undefined : q.history) ?? [];
   const tools = opts.tools ?? makeReadOnlyTools(root);
-  const client = opts.client ?? makeSdkRecallClient({ model: opts.model });
+  const client = opts.client ?? makeSdkRecallClient({ model: opts.model, cliPath: opts.cliPath });
   const maxToolCalls = opts.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS;
   const clock = opts.now ?? erasedClock;
 

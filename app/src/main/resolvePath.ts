@@ -11,6 +11,8 @@
 // the node tier (no spawning, no Electron) — STACK-6 / TEST-2.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { existsSync, statSync } from 'node:fs';
+import path from 'node:path';
 import os from 'node:os';
 
 const run = promisify(execFile);
@@ -97,4 +99,27 @@ export async function ensurePath(opts: EnsurePathOptions = {}): Promise<string> 
   const merged = mergePath(env.PATH, resolved ?? undefined, fallbacks);
   env.PATH = merged;
   return merged;
+}
+
+/**
+ * Resolve an executable to its absolute path by scanning `PATH` (a `which`/`where` in pure JS, no
+ * subprocess). Used to give the Copilot SDK an explicit `cliPath` for the user's BYOA `copilot`
+ * binary (SPEC-0030 BUG #65 / ORCH-21): in the packaged app the SDK's default search can't reach a
+ * binary, and `copilot` lives on the (STACK-9-ensured) PATH — pass the resolved path so it spawns.
+ * Returns the first match, or null if not found. On Windows, also tries PATHEXT-style suffixes.
+ */
+export function resolveExecutable(name: string, env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): string | null {
+  const dirs = (env.PATH ?? '').split(path.delimiter).filter((d) => d.length > 0);
+  const candidates = platform === 'win32' ? [name, `${name}.exe`, `${name}.cmd`, `${name}.bat`] : [name];
+  for (const dir of dirs) {
+    for (const cand of candidates) {
+      const full = path.join(dir, cand);
+      try {
+        if (existsSync(full) && statSync(full).isFile()) return full;
+      } catch {
+        /* unreadable entry — skip */
+      }
+    }
+  }
+  return null;
 }

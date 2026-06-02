@@ -7,8 +7,8 @@
 //
 // The SDK owns the multi-turn loop; recall.ts owns grounding/citation-verification/budget. The
 // adapter is the ONLY module that imports the SDK, so the rest stays unit-testable behind the seam.
-import { CopilotClient, defineTool, approveAll } from '@github/copilot-sdk';
-import type { SessionConfig, SystemMessageConfig, Tool, ToolHandler } from '@github/copilot-sdk';
+import { CopilotClient, defineTool, approveAll, RuntimeConnection } from '@github/copilot-sdk';
+import type { CopilotClientOptions, SessionConfig, SystemMessageConfig, Tool, ToolHandler } from '@github/copilot-sdk';
 import type { RecallClient, RecallSession, RecallSessionConfig, RecallToolDef } from './recall';
 
 /** Version of the recall skill/instruction (for the audit trail; ORCH-16 / SPEC-0014 Q9). */
@@ -50,6 +50,13 @@ export const RECALL_SKILL = [
 export interface SdkRecallClientOptions {
   /** Default model for sessions (overridable per session). */
   model?: string;
+  /**
+   * Absolute path to the BYOA `copilot` CLI (SPEC-0030 BUG #65 / ORCH-21). The SDK spawns THIS
+   * binary instead of searching for its bundled runtime — which it can't reach inside the packaged
+   * app's asar, leaving recall ungrounded. Resolved by the caller (main tier, STACK-9 resolvePath).
+   * When absent, the SDK falls back to its default runtime search (fine in dev).
+   */
+  cliPath?: string;
 }
 
 /**
@@ -59,10 +66,12 @@ export interface SdkRecallClientOptions {
  */
 export function makeSdkRecallClient(opts: SdkRecallClientOptions = {}): RecallClient {
   let client: CopilotClient | null = null;
+  // BUG #65: point the SDK at the resolved BYOA `copilot` CLI so it spawns in the packaged app.
+  const clientOptions: CopilotClientOptions = opts.cliPath ? { connection: RuntimeConnection.forStdio({ path: opts.cliPath }) } : {};
 
   return {
     async createSession(config: RecallSessionConfig): Promise<RecallSession> {
-      if (!client) client = new CopilotClient();
+      if (!client) client = new CopilotClient(clientOptions);
       const tools: Tool[] = (config.tools ?? []).map((d: RecallToolDef) =>
         defineTool(d.name, {
           description: d.description,
