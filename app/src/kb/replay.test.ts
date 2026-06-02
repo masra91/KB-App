@@ -138,6 +138,31 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
     }
   });
 
+  it('epoch-marks the stage-wide connect audit so resolved blocks re-derive (REPLAY-6)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      const stagingWt = await seedDecomposed(root);
+      const lock = new Mutex();
+      // Simulate Connect having run: a stage-wide connect/audit.jsonl with a resolved block.
+      const connectAudit = path.join(stagingWt, 'connect', 'audit.jsonl');
+      await fs.mkdir(path.dirname(connectAudit), { recursive: true });
+      await fs.writeFile(connectAudit, JSON.stringify({ stage: 'connect', blockKey: 'person|steve', event: 'connected' }) + '\n');
+      const g = simpleGit(stagingWt);
+      await g.raw('add', '-A');
+      await g.commit('test: seed a connect audit');
+
+      await runFullReplay(root, stagingWt, lock, { replayId: 'TESTEPOCH_CONNECT' });
+
+      const after = await fs.readFile(connectAudit, 'utf8');
+      expect(after).toContain('connected'); // history preserved (append-only)
+      expect(after).toContain(REPLAY_RESET_EVENT); // …with the epoch marker appended
+      expect((await simpleGit(stagingWt).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
   it('is a safe no-op on an empty KB (no Sources to purge; STAGING-4 idempotent promotion)', async () => {
     const dir = await makeTempDir();
     try {

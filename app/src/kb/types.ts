@@ -100,6 +100,17 @@ export interface AnswerReviewResult {
   message: string;
 }
 
+// --- Replay & Reprocessing (SPEC-0022 REPLAY) ---
+
+/** Result of a Principal-initiated full replay (clean & rebuild). */
+export interface FullReplayResult {
+  ok: boolean;
+  replayId?: string; // the epoch minted for this replay (REPLAY-6)
+  sourcesReset?: number; // how many Sources were epoch-reset for reprocessing
+  purgedTrees?: string[]; // which derived trees were cleared (REPLAY-4)
+  message: string;
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -110,4 +121,5 @@ export interface KbApi {
   pipelineStatus(): Promise<PipelineStatus>;
   listReviews(): Promise<ReviewSummary[]>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
+  fullReplay(): Promise<FullReplayResult>;
 }
