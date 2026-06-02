@@ -43,8 +43,8 @@ import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
-import { stubResearchFn } from '../kb/researchStub';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
+import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { buildRecallOutput } from '../kb/outputDoc';
@@ -511,10 +511,12 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
 
 /**
  * Manual "Run now" for a researcher (RESEARCH-15, "run-now to test") — a single on-demand pass via
- * the run-pass against a synthetic request derived from the researcher's config. Slice 1a uses the
- * deterministic `stubResearchFn` (no external egress); Slice 1b swaps the real Web adapter behind
- * the same seam. The Principal's trigger is audited as a `panel` event; the run's own work is audited
- * by the run-pass (actor `researcher`).
+ * the run-pass against a synthetic request derived from the researcher's config. It runs the REAL
+ * cognition (`makeWebResearchFn` — egress-gated + SSRF-safe), the same adapter the scheduler uses, so
+ * "Run now" can never ingest synthetic scaffolding into the Principal's vault. Until the live SDK
+ * web-fetch session is wired (gated separately), the gated adapter yields a graceful no-finding rather
+ * than fabricate a source. The Principal's trigger is audited as a `panel` event; the run's own work
+ * is audited by the run-pass (actor `researcher`).
  */
 export async function runActiveResearcherNow(id: string): Promise<RunResearcherResult> {
   if (!active) return { ran: false, reason: 'no-kb' };
@@ -531,7 +533,7 @@ export async function runActiveResearcherNow(id: string): Promise<RunResearcherR
     context: '',
     dedupKey: dedupKeyFor({ what, by: {} }),
   };
-  const res = await runResearcher(root, r, req, { research: stubResearchFn });
+  const res = await runResearcher(root, r, req, { research: makeWebResearchFn() });
   await appendAuditEvent(root, {
     actor: 'panel',
     eventType: 'researcher-run-now',
