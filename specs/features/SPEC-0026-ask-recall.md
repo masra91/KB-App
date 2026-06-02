@@ -267,8 +267,12 @@ behind it substrate-agnostic and unit-testable.
   — a crafted `..`/symlink ref can't deep-link outside the vault) → `shell.openExternal('obsidian://open?path='
   + encodeURIComponent(abs))`. A numbered **References** list renders from `citations[]` (same handler).
   **Saved Output:** `outputDoc` rewrites entities + claims to native `[[wikilinks]]` (a `source` is a
-  directory → path ref), numbered `[n]` to match the answer's markers. Citation↔marker mapping is
-  DEV-3's locked contract: `[n] ↔ citations[n-1]`, dense/gap-free + deduped after `verifyCitations`
-  (ASK-7), so index-mapping needs no explicit key. Covered by `citationLink.test.ts` (URI encoding +
-  wikilink targets), `ipc.test.ts` (resolve/contain/open + escape rejection), `askView.test.ts`
-  (clickable markers, References list, click/keyboard → IPC), `outputDoc.test.ts` (wikilink rewrite).
+  directory → path ref), numbered `[n]` to match the answer's markers. The inline-panel deep-link maps
+  `[n] → citations[n-1]` **by index**, which is correct because **ASK-13 (#121, now on main) enforces
+  it**: `finalizeCitations` verifies-resolves (ASK-7), dedups by `ref`, and **dense-renumbers** the
+  markers so they're gap-free + 1:1 with `citations[]` (no dangling markers) — so index-mapping needs
+  no explicit key. (This PR was briefly held `none-yet` until ASK-13 landed, per QA-2 + KB-PM; now
+  delivered whole — References + saved-Output wikilinks + inline deep-links all correct.) Covered by
+  `citationLink.test.ts` (URI encoding + wikilink targets), `ipc.test.ts` (resolve/contain/open +
+  escape rejection), `askView.test.ts` (clickable markers, References list, click/keyboard → IPC),
+  `outputDoc.test.ts` (wikilink rewrite).
