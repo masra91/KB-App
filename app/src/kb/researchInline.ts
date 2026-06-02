@@ -12,31 +12,54 @@ import { readEvents } from './activityIndex';
 import { dispatchResearch, type DispatchDeps, type DispatchResult } from './researchDispatcher';
 import { makeCliSelfNominate, type NominateRunner } from './researchNominate';
 import { makeWebResearchFn, type WebResearchOptions } from './researchWebAgent';
+import { makeCodeResearchFn, type CodeResearchOptions } from './researchCodeAgent';
 import { runResearcher, type ResearchFn } from './researchRun';
-import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearchRequest } from './researchers';
+import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
 export interface ResearchDepsOptions {
   /** Thin-CLI relevance runtime for self-nomination (omit → deterministic heuristic only). */
   nominateRunner?: NominateRunner;
   /** Web SDK options (model + injectable session). Omit `session` → live SDK (CI/e2e). */
   web?: WebResearchOptions;
-  /** Override the research cognition entirely (tests / future non-Web templates). Defaults to Web. */
+  /** Code researcher options (read-only git layer pass-through). */
+  code?: CodeResearchOptions;
+  /** Override the research cognition for EVERY researcher (tests). Wins over per-template selection. */
   researchFn?: ResearchFn;
   maxFanout?: number;
   globalCeiling?: number;
 }
 
+/** A no-op cognition for templates whose behavior hasn't landed yet (m365/custom in Slice 2) — a
+ *  graceful no-finding, never an error, so an enabled-but-unimplemented researcher just does nothing. */
+const noResearchFn: ResearchFn = async (_r, req) => ({ found: false, note: '', citations: [], query: req.what });
+
+/**
+ * Select the cognition for ONE researcher by its template (RESEARCH-16) — the seam where Web/Code/M365
+ * diverge. An explicit `opts.researchFn` (tests) overrides all templates. Bound to `root` so a code
+ * researcher's sandbox + a web finding both land in this vault.
+ */
+export function selectResearchFn(root: string, r: ResearcherConfig, opts: ResearchDepsOptions = {}): ResearchFn {
+  if (opts.researchFn) return opts.researchFn;
+  switch (r.template) {
+    case 'web':
+      return makeWebResearchFn(opts.web);
+    case 'code':
+      return makeCodeResearchFn(root, opts.code);
+    default:
+      return noResearchFn; // m365 (Slice 3) / custom — not yet implemented
+  }
+}
+
 /**
  * Build the dispatcher's `DispatchDeps` from the production cognition (RESEARCH-4): self-nomination =
  * CLI-refined heuristic; run = the per-pass research that writes a cited secondary source + audit.
- * `run` is bound to `root` so a nominated researcher's finding lands in this vault. Web is the v1
- * cognition (RESEARCH-16); Slices 2/3 add Code/M365 behind the same `researchFn` seam.
+ * `run` is bound to `root` and selects the cognition PER-RESEARCHER by template (Web/Code), so a
+ * mixed registry routes each researcher to its own runtime behind the one `ResearchFn` seam.
  */
 export function makeResearchDeps(root: string, opts: ResearchDepsOptions = {}): DispatchDeps {
-  const research = opts.researchFn ?? makeWebResearchFn(opts.web);
   return {
     selfNominate: makeCliSelfNominate(opts.nominateRunner),
-    run: (r, req) => runResearcher(root, r, req, { research }),
+    run: (r, req) => runResearcher(root, r, req, { research: selectResearchFn(root, r, opts) }),
     ...(opts.maxFanout !== undefined ? { maxFanout: opts.maxFanout } : {}),
     ...(opts.globalCeiling !== undefined ? { globalCeiling: opts.globalCeiling } : {}),
   };

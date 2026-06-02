@@ -14,9 +14,8 @@ import path from 'node:path';
 import { PRESET_INTERVAL_MS } from './jobs';
 import { readResearcherRegistry } from './researcherRegistry';
 import { readEvents } from './activityIndex';
-import { runResearcher, type ResearchFn } from './researchRun';
-import { makeWebResearchFn } from './researchWebAgent';
-import { runInlineResearchSweep, type ResearchDepsOptions } from './researchInline';
+import { runResearcher } from './researchRun';
+import { runInlineResearchSweep, selectResearchFn, type ResearchDepsOptions } from './researchInline';
 import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { ulid } from './ulid';
 import { Mutex } from './stageLock';
@@ -42,7 +41,6 @@ export function standingRequest(r: ResearcherConfig, id: string, ts: string): Re
 export class ResearcherScheduler {
   private readonly root: string;
   private readonly opts: ResearchDepsOptions;
-  private readonly research: ResearchFn;
   private readonly log: DevLog;
   private readonly inFlight = new Set<string>(); // single-flight per researcher id (across ticks)
   private tickTimer: ReturnType<typeof setInterval> | null = null;
@@ -57,7 +55,6 @@ export class ResearcherScheduler {
   constructor(root: string, opts: ResearchDepsOptions = {}, _lock: Mutex = new Mutex(), log: DevLog = noopDevLog) {
     this.root = path.resolve(root);
     this.opts = opts;
-    this.research = opts.researchFn ?? makeWebResearchFn(opts.web);
     this.log = log;
   }
 
@@ -125,7 +122,8 @@ export class ResearcherScheduler {
       const ts = new Date(now).toISOString();
       // Stamp the pass (provenance + the audit event the due-check reads) with the tick's logical
       // time, so cadence is computed against the scheduler clock, not wall-clock.
-      await runResearcher(this.root, r, standingRequest(r, ulid(now), ts), { research: this.research, now: () => ts });
+      // Template-aware cognition (Web/Code), same selection the inline dispatcher uses.
+      await runResearcher(this.root, r, standingRequest(r, ulid(now), ts), { research: selectResearchFn(this.root, r, this.opts), now: () => ts });
     } catch (err) {
       this.log.child({ scope: 'researcher-scheduler' }).error('standing-pass-failed', { itemId: r.id, err });
     } finally {

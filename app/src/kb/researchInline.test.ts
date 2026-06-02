@@ -8,7 +8,8 @@ import { createKb } from './vault';
 import { upsertResearcher } from './researcherRegistry';
 import { readCapturedMeta } from './ingest';
 import { promises as fs } from 'node:fs';
-import { runInlineResearch, makeResearchDeps, collectResearchRequests, runInlineResearchSweep } from './researchInline';
+import { runInlineResearch, makeResearchDeps, collectResearchRequests, runInlineResearchSweep, selectResearchFn } from './researchInline';
+import type { ResearchFn } from './researchRun';
 import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
 function gitInstalledSync(): boolean {
@@ -48,6 +49,26 @@ describe('makeResearchDeps', () => {
     expect(typeof deps.run).toBe('function');
     expect(deps.maxFanout).toBe(2);
     expect(deps.globalCeiling).toBe(5);
+  });
+});
+
+describe('selectResearchFn — per-template dispatch (RESEARCH-16)', () => {
+  const r = (template: ResearcherConfig['template']): ResearcherConfig => web({ template, egressTier: template === 'code' ? 'local-only' : 'public-web' });
+  const sampleReq: ResearchRequest = { id: 'r', ts: 't', by: { stage: 'decompose' }, what: 'Atlas', why: 'w', context: '', dedupKey: 'k' };
+
+  it('an explicit researchFn override wins for EVERY template (tests)', () => {
+    const override: ResearchFn = async () => ({ found: true, note: 'x', citations: [], query: 'q' });
+    expect(selectResearchFn('/x', r('web'), { researchFn: override })).toBe(override);
+    expect(selectResearchFn('/x', r('code'), { researchFn: override })).toBe(override);
+  });
+
+  it('routes web→Web fn, code→Code fn, and m365/custom→a no-op no-finding', async () => {
+    // distinct functions per template (no override)
+    expect(typeof selectResearchFn('/x', r('web'))).toBe('function');
+    expect(typeof selectResearchFn('/x', r('code'))).toBe('function');
+    // m365/custom have no runtime yet → a graceful no-finding (never throws / fabricates)
+    expect(await selectResearchFn('/x', r('m365'))(r('m365'), sampleReq)).toMatchObject({ found: false, citations: [] });
+    expect(await selectResearchFn('/x', r('custom'))(r('custom'), sampleReq)).toMatchObject({ found: false });
   });
 });
 
