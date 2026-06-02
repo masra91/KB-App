@@ -44,8 +44,16 @@ export async function advanceOrCollide(root: string, workBranch: string, base: s
     await git.raw('cherry-pick', `${base}..${workBranch}`);
     return 'advanced';
   } catch {
-    // Same-path collision: leave the canonical untouched and signal a retry.
-    await git.raw('cherry-pick', '--abort').catch(() => {});
+    // Same-path collision: abort to leave the canonical untouched, then signal a retry. A FAILED
+    // abort would leave the sole canonical worktree mid-cherry-pick (dirty) — surface it, never
+    // swallow, so the stage stops rather than advancing on a corrupt tree (QA #45 note).
+    try {
+      await git.raw('cherry-pick', '--abort');
+    } catch (abortErr) {
+      throw new Error(
+        `canonicalAdvance: cherry-pick conflict could not be aborted — canonical worktree may be left dirty: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`,
+      );
+    }
     return 'collision';
   }
 }
@@ -72,8 +80,10 @@ export type OptimisticAdvanceResult = 'advanced' | 'noop' | 'setaside';
  *  3. advance UNDER the lock via `advanceOrCollide`.
  * A same-path collision re-runs from step 1 against the fresh canonical, bounded to K retries; on
  * exhaustion `onExhausted()` records the set-aside (ORCH-19) — the item is never dropped or
- * half-applied. With cap=1 (serial drain) the canonical never moves between prepare and advance,
- * so this always takes the fast-forward path — behavior identical to the pre-concurrency drain.
+ * half-applied. When this item is the only writer between its prepare and advance the advance is a
+ * fast-forward; but even with a stage's own drain serial (cap=1), CROSS-STAGE concurrency (or
+ * cap>1) can move the canonical in that window, exercising the replay/collision paths. Either way
+ * the canonical state is the same — linear history (ORCH-3), only the interleaving differs.
  */
 export async function withOptimisticAdvance(
   opts: OptimisticAdvanceOptions,

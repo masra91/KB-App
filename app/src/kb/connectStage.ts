@@ -423,14 +423,21 @@ export async function connectOne(
     if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
       return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1);
     }
-    const cp = await canonicalHead(root);
-    await wtGit.raw('reset', '--hard', cp);
-    await wtGit.raw('clean', '-fd', 'candidates', 'entities');
-    await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
-    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp));
-    return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+    // Persist the set-aside, retrying its OWN advance against a fresh checkpoint — the marker is a
+    // disjoint connect-audit append, so this converges. Never silently drop the set-aside (QA #45):
+    // if it somehow can't land, surface it rather than return a setAside we failed to commit.
+    for (let i = 0; i <= DEFAULT_MAX_COLLISION_RETRIES; i++) {
+      const cp = await canonicalHead(root);
+      await wtGit.raw('reset', '--hard', cp);
+      await wtGit.raw('clean', '-fd', 'candidates', 'entities');
+      await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
+      if ((await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp))) === 'advanced') {
+        return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+      }
+    }
+    throw new Error(`connect: could not persist collision-exhausted set-aside for ${key}`);
   };
 
   // Re-derive the set INSIDE the worktree (authoritative view at this commit).
@@ -661,6 +668,9 @@ export async function readLinkQueue(root: string): Promise<string[]> {
  * signal, never a dangling guess (CONNECT-13). The block is regenerated WHOLE, so the node is
  * byte-stable across re-pokes: if nothing changed, it is a no-op (no commit, no repeated note).
  * MUST be called serialized via the shared canonical-writer lock so the base branch is steady.
+ * NOTE: unlike the other stages, the link pass stays COARSE-LOCKED (whole cycle under the lock) —
+ * it CONSUMES Claims' `relatesTo` output, so making it optimistic/concurrent with Claims is a
+ * producer-consumer ordering concern that needs its own design (deferred slice-2 follow-up).
  */
 export async function linkOne(root: string, nodeRel: string): Promise<LinkOneResult> {
   root = path.resolve(root);
