@@ -6,6 +6,7 @@
 // stageLock Mutex (SPEC-0014 §5); these helpers are the ref-level mechanics under it.
 import path from 'node:path';
 import simpleGit from 'simple-git';
+import { boundedGit } from './canonicalAdvance';
 import { ensureGitIdentity } from './vault';
 
 export const STAGING_BRANCH = 'staging';
@@ -56,9 +57,13 @@ export async function advanceStaging(root: string, ref: string): Promise<void> {
  * MUST be called serialized via the shared canonical-writer lock so it never races a stage's
  * ref advance.
  */
-export async function promote(root: string, paths: readonly string[] = EVERGREEN_PATHS): Promise<boolean> {
+export async function promote(root: string, paths: readonly string[] = EVERGREEN_PATHS, timeoutMs?: number): Promise<boolean> {
   root = path.resolve(root);
-  const git = simpleGit(root);
+  // Time-bounded (#163): promote is the sole writer of `main` and ALWAYS runs under the canonical-
+  // writer lock (afterDrain / consolidation / recall / replay). A git op that blocks indefinitely
+  // here would wedge the lock forever and silently. A bounded client makes a hang throw → the
+  // section releases → the watchdog surfaces it, rather than a permanent deadlock.
+  const git = boundedGit(root, timeoutMs);
   await ensureGitIdentity(git);
   for (const p of paths) {
     // Drop main's current tracked copy of P (worktree + index) so removals mirror. `--ignore-unmatch`
