@@ -9,7 +9,7 @@ created: 2026-06-02
 updated: 2026-06-02
 related: [SPEC-0032, SPEC-0033, SPEC-0030, SPEC-0017, SPEC-0031]
 gates:
-  ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
+  ai-patterns: approved     # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02, no rejections
   qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
 stage: Cross-cutting
 ---
@@ -111,20 +111,35 @@ named by role so dark/light and future surfaces stay coherent (DESIGN-7).
 | Text primary | `--viz-ink` | `#E6E3DC` | `#1C1B18` | Labels, body |
 | Text muted | `--viz-ink-muted` | `#9298A0` | `#6A6557` | Secondary, units |
 
-- **Contrast:** ember on graphite and oxide on graphite both clear WCAG AA for the sizes used;
-  state is **never carried by color alone** — each state also has a glyph (`◐ ▣ ○ ✓ ⟳ ✕`) and a
+- **Contrast (measured on dark, vs `--viz-field` `#15171A`):** ink `14.0:1`, brass `7.4:1`,
+  patina `6.1:1`, ember `6.0:1`, **oxide `3.96:1`**. Rule that follows from this:
+  - **State hues color fills, glyphs, borders, and large/display elements only** — all clear the
+    `≥3:1` WCAG bar for graphics + large text.
+  - **Small body text stays `--viz-ink`** (14:1). In particular **oxide must NOT color normal-size
+    text** (3.96 < 4.5 AA) — the set-aside *reason* line renders in ink; oxide carries the badge
+    fill, the `✕` glyph, and the siding's left border. (Resolves the GATE-1 ember/contrast
+    watch-item — and catches that oxide, not ember, was the actual sub-AA case.)
+- **State is never carried by color alone** — each state also has a glyph (`◐ ▣ ○ ✓ ⟳ ✕`) and a
   fill pattern, so it survives color-blindness and grayscale (accessibility, DESIGN-4 adjacent).
 - **Theme** follows the app shell's existing dark/light setting (SPEC-0017); both palettes above
   are first-class, not an afterthought.
 
 ## 4. Typography
 
-| Role | Face (role, not a mandate) | Treatment |
+| Role | Typeface (named — bundle it) | Treatment |
 | --- | --- | --- |
-| Station signage | Condensed industrial grotesque | **UPPERCASE**, letter-spaced `+0.08em` — reads like stencilled station labels |
-| Numerics (all counts, latency, throughput) | **Monospaced, tabular figures** | Fixed-width so odometer rolls and live updates never reflow the layout |
-| Body / descriptions | Neutral humanist sans | Sentence case, generous line-height |
-| Reason / status notes | Same body, muted | e.g. "set aside after 3 failed attempts" |
+| Station signage | **Saira Condensed** (SemiBold) | **UPPERCASE**, letter-spaced `+0.08em` — reads like stencilled station labels |
+| Numerics (all counts, latency, throughput) | **IBM Plex Mono** | `font-variant-numeric: tabular-nums`; fixed-width so odometer rolls and live updates never reflow the layout |
+| Body / descriptions | **IBM Plex Sans** | Sentence case, generous line-height |
+| Reason / status notes | IBM Plex Sans, muted | e.g. "set aside after 3 failed attempts" |
+
+All three are **OFL-licensed and MUST be self-hosted/bundled** with the app and declared via
+`@font-face` — **not** loaded from a CDN and **never** left to a system fallback. The fallback
+stacks are shape-matched so a load failure degrades gracefully without collapsing the identity:
+`'Saira Condensed','Arial Narrow',sans-serif` · `'IBM Plex Mono',ui-monospace,monospace` ·
+`'IBM Plex Sans',system-ui,sans-serif`. **If these fall back to `system-ui`/Inter the whole
+identity is lost** (GATE-1 watch-item 1) — the bundled faces are a hard requirement, not a
+preference.
 
 Type scale (4-step, restrained): `12 / 14 / 18 / 28`px. The headline state badge (`RUNNING`) is
 the only 28px element. **Tabular numerics are non-negotiable** — they are why animated counts feel
@@ -170,6 +185,17 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
 - **Siding item** — oxide badge + `stage · name` + reason + **Retry** / **Dismiss**. Single-flight
   (buttons disable while acting); Dismiss confirms first. Reuses the existing OBS-17
   `kb:pipelineControl` contract — no new mutation surface.
+
+### Implementation guardrails — keep it from regressing to generic (GATE-1 watch-item 2)
+
+The fastest way "The Line" reverts to a generic AI app is a component-library default sneaking
+back in. The implementer MUST hold these:
+- **Flat ink, no card chrome** — no `border-radius` on structural surfaces (small radius only on
+  buttons, ≤4px), **no drop-shadows / elevation**, no glass/blur. The structure is ruled lines +
+  registration ticks, not floating cards.
+- **Focus rings use `--viz-ember`** (a 2px outline), **never the framework's default indigo**.
+- **No bundled UI-kit Card/Paper/Chip surfaces** — they re-introduce the rounded-shadow tells.
+- **Selection / hover / active states** tint with the state hues (ember/brass), not a default blue.
 
 ## 7. Key user flows covered (GATE 2 — KB-Quality-Driver)
 
@@ -245,3 +271,9 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   motion vocabulary (index / breathe / odometer) with full reduced-motion parity, and the
   anti-generic-AI identity. Flags two OBS data dependencies (in-flight roster, conversion counts) +
   the event-push channel for the implementer. Pending GATE 1 (KB-AI-Detector) + GATE 2 (KB-QD).
+- 2026-06-02 — **GATE 1 (KB-AI-Detector) APPROVED**, no rejections. Hardened against the three
+  non-blocking implementation watch-items: named + bundled typefaces (Saira Condensed / IBM Plex
+  Mono / IBM Plex Sans, self-hosted, shape-matched fallbacks — §4); explicit "flat ink, no card
+  chrome" implementation guardrails (§6); concrete measured contrast ratios + the rule that state
+  hues never color small text — which caught that **oxide** (3.96:1), not ember, was the actual
+  sub-AA case (§3). Awaiting GATE 2 (KB-QD, flow coverage).
