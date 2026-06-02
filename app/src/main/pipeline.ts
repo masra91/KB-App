@@ -167,6 +167,7 @@ export async function listJobsForActive(): Promise<JobView[]> {
   if (!active) return [];
   const root = active.stagingWt;
   const registry = await readJobRegistry(root);
+  const instance = await readInstanceConfig(root); // a catalog-only job displays its inherited posture
   // Gather the newest journal entry for every job we will show (catalog types ∪ registered ids).
   const ids = new Set<string>([...JOB_CATALOG.map((c) => c.type), ...registry.map((j) => j.id)]);
   const lastEntryByJobId: Record<string, JournalEntry | undefined> = {};
@@ -174,7 +175,7 @@ export async function listJobsForActive(): Promise<JobView[]> {
     const journal = await readJournal(root, id);
     lastEntryByJobId[id] = journal[journal.length - 1];
   }
-  return buildJobViews(JOB_CATALOG, registry, lastEntryByJobId);
+  return buildJobViews(JOB_CATALOG, registry, lastEntryByJobId, instance.autonomyDefault);
 }
 
 /**

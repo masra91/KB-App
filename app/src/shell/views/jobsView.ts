@@ -121,8 +121,15 @@ function wire(container: HTMLElement, jobs: JobView[]): void {
     enabledEl.addEventListener('change', () => {
       const patch: JobConfigPatch = { id, type, enabled: enabledEl.checked };
       if (isRiskyJobChange(current, patch)) {
+        // Name the posture it will run at — and that it's inherited from the Instance default for a
+        // not-yet-registered job: enabling is the consent moment for inherited Autonomous (PANEL-7).
+        const inherited = current.registered ? '' : ' (inherited from the Instance default)';
+        const postureNote =
+          current.posture === 'autonomous'
+            ? ` It will run with Autonomous autonomy${inherited} — the agent applies changes, including destructive ones, without routing to Reviews first.`
+            : ` It will run Guarded${inherited}.`;
         askConfirm(
-          `Enable “${current.label}”? It will run on its schedule (${schedulePresetLabel(current.schedule)}).`,
+          `Enable “${current.label}”? It runs on its ${schedulePresetLabel(current.schedule)} schedule.${postureNote}`,
           () => apply(patch),
           () => (enabledEl.checked = false),
         );
