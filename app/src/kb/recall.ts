@@ -270,12 +270,16 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   }
 
   if (!result) {
-    const citations = captured.answered ? await verifyCitations(root, tools, captured.citations) : [];
+    // ASK-7 + ASK-13: verify citations resolve, dedup by ref, and renumber the answer's inline
+    // [n] markers so they are dense + 1:1 with the final citations[] ([n] → citations[n-1]).
+    const finalized = captured.answered
+      ? await finalizeCitations(tools, captured.answer, captured.citations)
+      : { answer: 'I could not reach a grounded answer within the retrieval budget.', citations: [] as Citation[] };
     result = {
       question,
-      answer: captured.answered ? captured.answer : 'I could not reach a grounded answer within the retrieval budget.',
-      citations,
-      grounded: citations.length > 0 && captured.declaredGrounded,
+      answer: finalized.answer,
+      citations: finalized.citations,
+      grounded: finalized.citations.length > 0 && captured.declaredGrounded,
       toolCalls: budget.used,
       truncated: budget.truncated || !captured.answered,
       trace: trace!,
@@ -392,16 +396,48 @@ function asCitation(x: unknown): Citation | null {
   return { kind: o.kind, ref: o.ref, label: typeof o.label === 'string' ? o.label : undefined };
 }
 
-/** Keep only citations that actually resolve on disk — the grounding guarantee (ASK-7). */
-async function verifyCitations(root: string, tools: RecallTools, citations: Citation[]): Promise<Citation[]> {
-  const out: Citation[] = [];
-  for (const c of citations) {
-    if (!c || typeof c.ref !== 'string') continue;
-    const exists =
-      c.kind === 'source' ? (await tools.readSource({ dir: c.ref })) !== null : (await tools.readNode({ rel: c.ref })) !== null;
-    if (exists) out.push({ kind: c.kind, ref: c.ref, label: c.label });
+/** Does a citation's target resolve on disk? — the grounding guarantee (ASK-7). */
+async function citationResolves(tools: RecallTools, c: Citation): Promise<boolean> {
+  if (!c || typeof c.ref !== 'string') return false;
+  return c.kind === 'source' ? (await tools.readSource({ dir: c.ref })) !== null : (await tools.readNode({ rel: c.ref })) !== null;
+}
+
+/**
+ * Verify + dedup + renumber (ASK-7 + ASK-13). Keep only citations that resolve on disk, dedup by
+ * `ref` (a target cited twice ⇒ one number, reused), and rewrite the answer's inline `[n]` markers
+ * so they are **dense + 1:1** with the returned `citations[]` (`[n]` → `citations[n-1]`). A marker
+ * whose citation didn't resolve is dropped, and the survivors are renumbered with no gaps — so a
+ * dual-render (ASK-14) can map by index without holes or dangling markers.
+ */
+export async function finalizeCitations(
+  tools: RecallTools,
+  answer: string,
+  raw: Citation[],
+): Promise<{ answer: string; citations: Citation[] }> {
+  const refToNum = new Map<string, number>(); // dedup key → assigned dense number (1-based)
+  const citations: Citation[] = [];
+  const origToNum: Array<number | null> = []; // per RAW citation index → its final number (null = dropped)
+  for (const c of raw) {
+    if (!(await citationResolves(tools, c))) {
+      origToNum.push(null);
+      continue;
+    }
+    const key = `${c.kind}:${c.ref}`;
+    let num = refToNum.get(key);
+    if (num === undefined) {
+      num = citations.length + 1;
+      refToNum.set(key, num);
+      citations.push({ kind: c.kind, ref: c.ref, label: c.label });
+    }
+    origToNum.push(num);
   }
-  return out;
+  // Rewrite each `[k]` (1-based into the agent's raw citations) → its dense number, or drop it.
+  const renumbered = answer.replace(/\[(\d+)\]/g, (_m, d: string) => {
+    const k = Number(d);
+    const num = k >= 1 && k <= origToNum.length ? origToNum[k - 1] : null;
+    return num === null ? '' : `[${num}]`;
+  });
+  return { answer: renumbered, citations };
 }
 
 /** ASK-11: append a transparency event recording the question, retrieval, and answer summary.

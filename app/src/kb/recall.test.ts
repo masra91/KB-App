@@ -7,7 +7,7 @@ import path from 'node:path';
 import simpleGit from 'simple-git';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir, pathExists, makeTempDir } from '../../test/tempVault';
-import { recall, makeReadOnlyTools, buildRecallToolDefs, recallBudget, countEntityNodes, RECALL_BUDGET, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
+import { recall, makeReadOnlyTools, buildRecallToolDefs, recallBudget, countEntityNodes, RECALL_BUDGET, finalizeCitations, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
 import { createKb } from './vault';
 
 interface ScriptStep {
@@ -285,5 +285,66 @@ describe('countEntityNodes — entity-graph size for the budget', () => {
     await fs.writeFile(path.join(root, 'claims', 'person', 'c.md'), '# claim');
 
     expect(await countEntityNodes(root)).toBe(3);
+  });
+});
+
+// ── ASK-13: inline numbered citations — verify + dedup + dense renumber ───────────────────────────
+describe('finalizeCitations (ASK-13) — dense, deduped, verified [n] ↔ citations[n-1]', () => {
+  let v: RecallVault | undefined;
+  afterEach(async () => {
+    if (v) await rmTempDir(v.root);
+    v = undefined;
+  });
+
+  it('renumbers inline [n] to be dense + 1:1, deduping a repeated ref to one number', async () => {
+    v = await buildRecallVault();
+    const tools = makeReadOnlyTools(v.root);
+    const raw: Citation[] = [
+      { kind: 'claim', ref: v.claimRel },
+      { kind: 'entity', ref: v.adaRel },
+      { kind: 'claim', ref: v.claimRel }, // duplicate of [1]
+    ];
+    const { answer, citations } = await finalizeCitations(tools, 'Ada [1] is a programmer [2][3].', raw);
+    expect(citations).toHaveLength(2); // dup collapsed
+    expect(citations[0].ref).toBe(v.claimRel);
+    expect(citations[1].ref).toBe(v.adaRel);
+    expect(answer).toBe('Ada [1] is a programmer [2][1].'); // [3] reused [1]'s number
+  });
+
+  it('drops a marker whose citation does not resolve, then renumbers the survivors densely (ASK-7)', async () => {
+    v = await buildRecallVault();
+    const tools = makeReadOnlyTools(v.root);
+    const raw: Citation[] = [
+      { kind: 'claim', ref: 'claims/person/does-not-exist.md' }, // unresolvable → dropped
+      { kind: 'entity', ref: v.adaRel }, // resolvable → becomes [1]
+    ];
+    const { answer, citations } = await finalizeCitations(tools, 'A [1] and B [2].', raw);
+    expect(citations).toHaveLength(1);
+    expect(citations[0].ref).toBe(v.adaRel);
+    expect(answer).toBe('A  and B [1].'); // [1] dropped (unresolvable), [2] → [1]
+  });
+
+  it('flows through recall(): the result carries dense markers + matching citations', async () => {
+    v = await buildRecallVault();
+    const { client } = fakeClient([
+      {
+        tool: 'submitAnswer',
+        args: {
+          answer: 'Ada Lovelace [1] worked on the Analytical Engine [2], and is the first programmer [1].',
+          citations: [
+            { kind: 'claim', ref: v.claimRel },
+            { kind: 'entity', ref: v.engineRel },
+          ],
+          grounded: true,
+        },
+      },
+    ]);
+    const res = await recall(v.root, 'Tell me about Ada', { client, now: fixedNow });
+    expect(res.grounded).toBe(true);
+    expect(res.citations.map((c) => c.ref)).toEqual([v.claimRel, v.engineRel]);
+    expect(res.answer).toContain('[1]');
+    expect(res.answer).toContain('[2]');
+    // No dangling marker beyond the citation count.
+    expect(res.answer).not.toMatch(/\[3\]/);
   });
 });

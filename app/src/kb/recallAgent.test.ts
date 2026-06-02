@@ -39,8 +39,9 @@ describe('recall skill (ASK-4)', () => {
     expect(RECALL_SKILL).toContain('GROUNDING');
     expect(RECALL_SKILL).toContain('submitAnswer');
     expect(RECALL_SKILL).toMatch(/tags/); // metadata-aware (SPEC-0025 META)
-    expect(RECALL_SKILL).toMatch(/STOP calling tools/); // budget stop-criterion (dogfood #5)
-    expect(RECALL_SKILL_VERSION).toBe('recall/v3-sdk');
+    expect(RECALL_SKILL).toMatch(/STOP calling tools/); // budget stop-criterion (#113, dogfood #5)
+    expect(RECALL_SKILL).toMatch(/\[1\], \[2\]/); // inline numbered citations (ASK-13)
+    expect(RECALL_SKILL_VERSION).toBe('recall/v4-sdk'); // combined #113 + ASK-13 skill
   });
 });
 
