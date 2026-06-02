@@ -1,6 +1,8 @@
 // Claims stage tests (SPEC-0016 CLAIMS). Real FS + git + worktrees against a throwaway temp
 // vault (TEST-18); the deciders are injected so nothing shells out to copilot (TEST-2). The
-// pipeline under test: capture → archive → decompose (produce entity nodes) → CLAIMS.
+// real pipeline is capture → archive → decompose (candidates) → CONNECT (entities) → CLAIMS
+// (SPEC-0021 STAGING-5); these tests exercise the Claims tail with a seeded entity graph
+// (Connect's output stood in via renderEntityNode) rather than running Connect end-to-end.
 import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -12,8 +14,10 @@ import { captureToInbox } from './ingest';
 import { archiveOne, readQueue } from './orchestrator';
 import { deterministicDecider } from './archivist';
 import { Mutex } from './stageLock';
-import { decomposeOne, DecomposeStage } from './decomposeStage';
+import { DecomposeStage } from './decomposeStage';
 import type { DecomposeDecider } from './decomposeAgent';
+import { renderEntityNode, entityFileRel } from './connectDoc';
+import { ulid } from './ulid';
 import { claimsOne, readClaimsQueue, findEntityFiles, parseEntityNode, ClaimsStage, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision, ClaimsDecision } from './claims';
@@ -38,7 +42,8 @@ async function withTempVault(fn: (root: string) => Promise<void>): Promise<void>
   }
 }
 
-/** A decompose decider that mints the given entity names (kind=person). */
+/** A decompose decider that mints the given entity names as candidates (kind=person). Used only
+ *  by the shared-lock concurrency test, which runs Decompose alongside Claims. */
 function decompDeciderFor(names: string[]): DecomposeDecider {
   return async (input) => ({
     sourceId: input.sourceId,
@@ -60,13 +65,54 @@ const aClaim = (over: Partial<ClaimDecision> = {}): ClaimDecision => ({
   ...over,
 });
 
-/** Capture → archive → decompose one text source into entity nodes; return source + entity rels. */
+/**
+ * Seed resolved entity nodes directly (standing in for CONNECT's output, CONNECT-7/8) and commit
+ * them to canonical, so Claims has entities to attach to. Decompose now writes candidates, not
+ * entities (STAGING-5), so the Claims fixture seeds the post-resolution graph itself. Distinct
+ * names — and repeated names across sources — each get their own node (entityFileRel suffixes a
+ * within-vault collision), matching a graph that may hold un-merged same-name nodes.
+ */
+async function seedEntities(root: string, srcRel: string, names: string[]): Promise<string[]> {
+  const now = new Date().toISOString();
+  const taken = new Set(await findEntityFiles(root)); // existing nodes in THIS vault
+  const rels: string[] = [];
+  for (const name of names) {
+    const id = ulid();
+    const rel = entityFileRel('person', name, id, taken);
+    taken.add(rel);
+    const dest = path.join(root, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(
+      dest,
+      renderEntityNode({
+        id,
+        kind: 'person',
+        name,
+        confidence: 0.8,
+        aliases: [id],
+        derivedFrom: [srcRel],
+        resolvedFrom: [],
+        createdAt: now,
+        updatedAt: now,
+        agent: { via: 'copilot', model: 'test' },
+      }),
+      'utf8',
+    );
+    rels.push(rel);
+  }
+  const git = simpleGit(root);
+  await git.raw('add', '-A');
+  await git.commit('test: seed resolved entities');
+  return rels;
+}
+
+/** Capture → archive a source, then seed entity nodes for it; return source + entity rels. */
 async function setup(root: string, text: string, names: string[]): Promise<{ srcRel: string; entityRels: string[] }> {
   await captureToInbox(root, 'in-app-panel', [{ kind: 'text', text }]);
   const q = await readQueue(root);
   const srcRel = await archiveOne(root, q[q.length - 1], deterministicDecider);
-  await decomposeOne(root, srcRel, decompDeciderFor(names));
-  return { srcRel, entityRels: await findEntityFiles(root) };
+  const entityRels = await seedEntities(root, srcRel, names);
+  return { srcRel, entityRels };
 }
 
 async function readClaimFiles(root: string): Promise<string[]> {
@@ -242,7 +288,7 @@ describe.skipIf(!gitAvailable)('no cross-source claim dedup in v1 (CLAIMS-17)', 
       await setup(root, 'Steve owns budget A', ['Steve']);
       await setup(root, 'Steve owns budget B', ['Steve']);
       const ents = await findEntityFiles(root);
-      expect(ents).toHaveLength(2); // two un-merged Steve nodes (DECOMP-14)
+      expect(ents).toHaveLength(2); // two un-merged Steve nodes (the graph may hold same-name nodes)
       for (const e of ents) await claimsOne(root, e, claimsDeciderFor([aClaim()]));
       expect(await readClaimFiles(root)).toHaveLength(2); // one claim per entity, not merged
     });
@@ -277,7 +323,7 @@ describe.skipIf(!gitAvailable)('shares the canonical-writer lock with Decompose 
   it('decompose + claims advance the same canonical ref without racing', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
-      // One already-decomposed source gives Claims work; a second fresh source gives Decompose work.
+      // A seeded entity gives Claims work; a second fresh source gives Decompose work (candidates).
       await setup(root, 'Steve owns the Q3 budget', ['Steve']);
       await captureToInbox(root, 'in-app-panel', [{ kind: 'text', text: 'Dana' }]);
       const q = await readQueue(root);
@@ -289,8 +335,9 @@ describe.skipIf(!gitAvailable)('shares the canonical-writer lock with Decompose 
       await Promise.all([decompose.poke(), claims.poke()]);
       void src2;
 
+      // The shared lock serialized both stages' canonical ff-advances — no race, clean tree.
       expect((await simpleGit(root).status()).isClean()).toBe(true);
-      // Drain again to pick up entities Decompose produced concurrently.
+      // Decompose wrote a candidate (not an entity), so the Claims queue stays drained.
       await claims.poke();
       expect(await readClaimsQueue(root)).toHaveLength(0);
       expect((await simpleGit(root).status()).isClean()).toBe(true);

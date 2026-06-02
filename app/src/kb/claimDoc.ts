@@ -1,6 +1,6 @@
 // Render a claim's `<ULID>.md` (SPEC-0016 §3.2) and maintain the entity node's generated
 // claims block (§3.5, CLAIMS-9). Hand-rolled YAML (flat + one nested `provenance` block) —
-// no yaml dependency (ENG-5), matching entityDoc.ts / sourceDoc.ts.
+// no yaml dependency (ENG-5), matching sourceDoc.ts / connectDoc.ts.
 //
 // Hybrid storage (CLAIMS-9): the claim FILE is canonical (full epistemics + provenance);
 // the entity node additionally carries a clearly-delimited, regenerated block so its

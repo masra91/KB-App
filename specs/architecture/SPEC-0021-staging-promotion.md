@@ -6,7 +6,7 @@ type: architecture
 status: draft
 owners: [KB-Architect, Principal]
 created: 2026-05-31
-updated: 2026-05-31
+updated: 2026-06-02
 related: [SPEC-0007, SPEC-0013, SPEC-0014, SPEC-0015, SPEC-0016, SPEC-0018, SPEC-0019]
 supersedes: null
 stage: Cross-cutting (the engine that realizes SPEC-0019)
@@ -60,7 +60,10 @@ holds the **working path set**, which is never promoted.
 
 - A **source** is evergreen the moment it is archived (immutable ground truth, DATA-2) → it
   promotes immediately.
-- A **candidate** (Decompose output) is working → it stays on `staging` only (STAGING-5).
+- A **candidate** (Decompose output) is working → it stays on `staging` only (STAGING-5). Shape
+  (pinned in slice 2): **one JSON file per candidate** at `candidates/<dateShard(id)>/<id>.json`,
+  carrying SPEC-0020's `Candidate` contract (`id`, `sourceId`, `kind`, `name`, `confidence`,
+  `mentions`) — Decompose is the writer, CONNECT the reader.
 - An **entity** is evergreen only once **resolved** (SPEC-0020 CONNECT writes `entities/`);
   until then `entities/` is empty on both branches (CANON-10).
 - **`reviews/` and `inbox/` are working** — so the app must read them from **`staging`**, not
@@ -113,7 +116,7 @@ more moving parts). Copy-paths is dumb, deterministic, and easy to test.
 | STAGING-2  | must     | **Every stage targets `staging`** — syncs its worktree to `staging` and `ff-only`-advances `staging`; **no stage writes `main`** | test:stagingPipeline.test.ts | CANON-8; ORCH-3 |
 | STAGING-3  | must     | The **promotion gate** is the *only* writer of `main`; it advances `main` to hold exactly the **evergreen path set** (`sources/`, … ), never the working set | test:staging.test.ts, stagingPipeline.test.ts | CANON-1,2 |
 | STAGING-4  | must     | Promotion is **copy-the-evergreen-paths** from `staging`, serialized through the shared writer lock, and **idempotent** (no-op when nothing evergreen changed) | test:staging.test.ts | CANON-2; ORCH-3 |
-| STAGING-5  | must     | **Decompose emits candidates** into the working `candidates/` path on `staging` and **writes no `entities/`** (CANON-4 / issue #21); `entities/` stays empty until CONNECT | none-yet | CANON-4,10; DECOMP-1 |
+| STAGING-5  | must     | **Decompose emits candidates** into the working `candidates/` path on `staging` and **writes no `entities/`** (CANON-4 / issue #21); `entities/` stays empty until CONNECT | test:candidateDoc.test.ts, decomposeStage.test.ts, stagingPipeline.test.ts | CANON-4,10; DECOMP-1 |
 | STAGING-6  | must     | `main` **never contains working paths** (`inbox/`, `candidates/`, `queue/`, `reviews/`) — by construction (never checked out), so Obsidian/`grep`/Query on `main` see only evergreen state | test:stagingPipeline.test.ts | CANON-1,2,8 |
 | STAGING-7  | must     | App **working-state reads** (the Review queue, candidates) come from **`staging`**; **evergreen reads** (Obsidian/Query) from **`main`** | none-yet | CANON-9; REVIEW-11 |
 | STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | test:staging.test.ts | ORCH-13 |
@@ -127,7 +130,7 @@ The full conformance is large; this spec is built in slices, each green + shippa
    the promotion gate; promote `sources/` → `main`. Proves the topology end-to-end (main =
    sources only). *(This mission.)*
 2. **Decompose guardrail:** Decompose → `candidates/` on `staging`, stops writing `entities/`.
-   `entities/` empty on `main`. Retarget Decompose to `staging`.
+   `entities/` empty on `main`. Retarget Decompose to `staging`. *(Done — this mission.)*
 3. **Claims + app reads:** retarget Claims to `staging`; point the Review UI's working reads
    at `staging`. (Claims idles until CONNECT.)
 4. **CONNECT (SPEC-0020):** resolution writes evergreen `entities/` on `staging`; the gate
@@ -137,8 +140,11 @@ The full conformance is large; this spec is built in slices, each green + shippa
 
 - [ ] **Promotion trigger granularity** — v1 promotes after a drain; finer per-artifact or
       debounced promotion is a later optimization. Confirm the v1 coarse trigger is acceptable.
-- [ ] **`candidates/` shape** — one file per candidate vs. a per-source candidates record
-      (colocated with the source on `staging`). Pin in slice 2 (Decompose guardrail).
+- [x] **`candidates/` shape** — RESOLVED (slice 2): **one JSON file per candidate** at
+      `candidates/<dateShard(id)>/<id>.json`. Chosen over a per-source record because CONNECT's
+      blocking reasons ACROSS sources (it reads all candidates, groups by kind+name), so a flat
+      per-candidate file is the natural unit to read, sort, and delete-on-consume. The schema is
+      SPEC-0020's already-merged `Candidate` contract — Decompose writes exactly what CONNECT reads.
 - [ ] **Existing single-branch vaults** — throwaway, so slice 1 can just create `staging` on
       first run; no migration. Confirm no need to handle pre-existing dual-branch state.
 - [ ] **`main` history shape** — one "promote" commit per advance vs. squashed; low-stakes
@@ -153,6 +159,16 @@ The full conformance is large; this spec is built in slices, each green + shippa
   guardrail (no `entities/` writes) and that the app reads working state from `staging`,
   evergreen from `main`. Sequenced into slices (infra+archivist → Decompose guardrail →
   Claims+app-reads → CONNECT). Leaves resolution (SPEC-0020) untouched.
+- 2026-06-02 — **slice 2 (Decompose guardrail) implemented** (STAGING-5). Decompose stops writing
+  `entities/`: each entity mention the agent finds is now persisted as a per-mention **candidate**
+  (`candidates/<dateShard(id)>/<id>.json`, SPEC-0020's `Candidate` contract) on `staging`, via a
+  new `candidateDoc.ts` writer whose output round-trips through CONNECT's `validCandidate`. The
+  dead `entityDoc.ts` (Decompose's old entity renderer — CONNECT owns the evergreen entity renderer
+  in `connectDoc.ts`) was removed. `entities/` is now empty everywhere until CONNECT resolves
+  (CANON-10). Resolved the `candidates/` shape open question (one JSON file per candidate). Claims
+  tests now seed their entity fixture directly (the real order is Decompose→CONNECT→Claims), since
+  Decompose no longer produces entities. Graduated STAGING-5 → `test:`. **Still deferred:**
+  STAGING-7 (app working-reads unit coverage — e2e/IPC glue, TEST-9), STAGING-9 (periodic sweep).
 - 2026-06-01 — **staging infra implemented** (PR pending). The whole pipeline now runs on a
   persistent `staging` worktree (`app/src/kb/stagingWorktree.ts`); the stages are root-agnostic,
   so handing them that worktree makes their existing queue/marker/ff-advance logic operate on

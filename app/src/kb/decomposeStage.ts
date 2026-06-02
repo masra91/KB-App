@@ -5,21 +5,27 @@
 //
 // Queue model (v1): the archivist does not yet enqueue an Enrich queue, so the durable work
 // list is DERIVED — a source is "queued" iff its append-only `audit.jsonl` has no terminal
-// `decompose` marker yet. Committing the entities + the `decomposed` marker in one commit IS
+// `decompose` marker yet. Committing the candidates + the `decomposed` marker in one commit IS
 // the commit-to-dequeue (DECOMP-13): next sweep skips it. Idempotent restart for free
 // (ORCH-13). A failed attempt appends a `failed` event (durable count); after K it appends a
 // terminal `setaside` marker so a poison source never head-of-line-blocks (DECOMP-6/ORCH-12).
 //
 // Sources are NEVER mutated (DECOMP-8): raw payload + `source.md` identity are untouched; we
 // only append to the append-only `audit.jsonl` history (as the archivist already does) and
-// write NEW nodes under `entities/`.
+// write NEW CANDIDATE files under `candidates/`.
+//
+// CANON-4 / STAGING-5: Decompose does NOT write resolved `entities/` nodes. Each entity MENTION
+// the agent finds becomes a per-mention CANDIDATE (`candidates/<dateShard>/<id>.json`, Connect's
+// input contract) on the working `staging` branch; `entities/` stays empty until Connect resolves
+// (SPEC-0020). Candidates are working state — never promoted to evergreen `main` (STAGING-6).
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { ulid, dateShard } from './ulid';
+import { ulid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { readCapturedMeta } from './ingest';
-import { renderEntityMd } from './entityDoc';
+import { renderCandidate, candidateFileRel } from './candidateDoc';
+import type { Candidate } from './connect';
 import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from './decomposeAgent';
 import { Mutex } from './stageLock';
 
@@ -152,7 +158,7 @@ async function readSourceInput(sourceDir: string): Promise<SourceInput> {
 export interface DecomposeOneResult {
   sourceId: string;
   ok: boolean;
-  entityIds: string[];
+  candidateIds: string[]; // ULIDs of the candidate files written on `staging` (STAGING-5)
   setAside: boolean;
 }
 
@@ -181,34 +187,43 @@ export async function decomposeOne(
     const decision = await decider(input);
     const model = decision.agent?.model ?? 'default';
 
-    // Mint entity ULIDs + write nodes (orchestrator-owned effects; DECOMP-3/5).
-    const createdAt = new Date().toISOString();
-    const entityIds: string[] = [];
+    // Mint candidate ULIDs + write candidate files (orchestrator-owned effects; DECOMP-3/5).
+    // Each entity MENTION becomes one CANDIDATE on `staging` (STAGING-5 / CANON-4); we write NO
+    // `entities/` node — resolution into evergreen entities is Connect's job (SPEC-0020). The
+    // candidate's `sourceId` carries provenance back to its source (DECOMP-5; DATA-5).
+    const candidateIds: string[] = [];
     for (const entity of decision.entities) {
       const id = ulid();
-      const rel = path.join('entities', dateShard(id), `${id}.md`);
-      const dest = path.join(wt, rel);
+      const candidate: Candidate = {
+        id,
+        sourceId: input.sourceId,
+        kind: entity.kind,
+        name: entity.name,
+        confidence: entity.confidence,
+        mentions: entity.mentions,
+      };
+      const dest = path.join(wt, candidateFileRel(id));
       await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(dest, renderEntityMd(entity, { id, derivedFrom: sourceRel, createdAt, agent: decision.agent }), 'utf8');
-      entityIds.push(id);
+      await fs.writeFile(dest, renderCandidate(candidate), 'utf8');
+      candidateIds.push(id);
     }
 
     // Append audit (envelope-wrapped): start, every signal (audit-only; DECOMP-9), terminal
-    // `decomposed` marker. Signals NEVER touch entities or the source raw (DECOMP-8/9).
+    // `decomposed` marker. Signals NEVER touch candidates or the source raw (DECOMP-8/9).
     let audit = auditLine({ runId, sourceId: input.sourceId, model, event: 'start' });
     for (const sig of decision.signals ?? []) {
       audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
     }
-    audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'decomposed', entities: entityIds.length });
+    audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'decomposed', candidates: candidateIds.length });
     await fs.appendFile(auditPath, audit, 'utf8');
 
     await wtGit.raw('add', '-A');
-    await wtGit.commit(`decompose: ${entityIds.length} entities from ${input.sourceId}`);
+    await wtGit.commit(`decompose: ${candidateIds.length} candidates from ${input.sourceId}`);
     await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
-    return { sourceId: input.sourceId, ok: true, entityIds, setAside: false };
+    return { sourceId: input.sourceId, ok: true, candidateIds, setAside: false };
   } catch (err) {
     // DECOMP-6 / ORCH-12: never lose the source. Record the failed attempt durably; set aside
-    // after K so it can't head-of-line-block. No entities are written on failure.
+    // after K so it can't head-of-line-block. No candidates are written on failure.
     const error = err instanceof Error ? err.message : String(err);
     const priorFailures = (await readDecomposeState(sourceDirWt)).failures;
     const attempt = priorFailures + 1;
@@ -219,7 +234,7 @@ export async function decomposeOne(
     await wtGit.raw('add', '-A');
     await wtGit.commit(`decompose: failed ${input.sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
     await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-    return { sourceId: input.sourceId, ok: false, entityIds: [], setAside };
+    return { sourceId: input.sourceId, ok: false, candidateIds: [], setAside };
   }
 }
 

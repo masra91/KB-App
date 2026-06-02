@@ -18,6 +18,7 @@ import {
   DecomposeStage,
   DEFAULT_MAX_ATTEMPTS,
 } from './decomposeStage';
+import { findEntityFiles } from './claimsStage';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { DecomposeDecision } from './decompose';
 
@@ -58,8 +59,9 @@ function deciderFor(names: string[], signals?: DecomposeDecision['signals']): De
   });
 }
 
-async function readEntityFiles(root: string): Promise<string[]> {
-  const dir = path.join(root, 'entities');
+/** Walk a tree under `root/<sub>` and read every file matching `ext`. */
+async function readFilesUnder(root: string, sub: string, ext: string): Promise<string[]> {
+  const dir = path.join(root, sub);
   const out: string[] = [];
   async function walk(d: string): Promise<void> {
     let entries: import('node:fs').Dirent[];
@@ -71,11 +73,21 @@ async function readEntityFiles(root: string): Promise<string[]> {
     for (const e of entries) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) await walk(p);
-      else if (e.name.endsWith('.md')) out.push(await fs.readFile(p, 'utf8'));
+      else if (e.name.endsWith(ext)) out.push(await fs.readFile(p, 'utf8'));
     }
   }
   await walk(dir);
   return out;
+}
+
+/** The candidate JSON files Decompose writes on `staging` (STAGING-5). */
+async function readCandidateFiles(root: string): Promise<string[]> {
+  return readFilesUnder(root, 'candidates', '.json');
+}
+
+/** Parsed candidate objects, for asserting on shape/provenance. */
+async function readCandidates(root: string): Promise<Array<Record<string, unknown>>> {
+  return (await readCandidateFiles(root)).map((s) => JSON.parse(s) as Record<string, unknown>);
 }
 
 describe.skipIf(!gitAvailable)('readDecomposeQueue (DECOMP-13, DECOMP-16)', () => {
@@ -91,18 +103,22 @@ describe.skipIf(!gitAvailable)('readDecomposeQueue (DECOMP-13, DECOMP-16)', () =
   });
 });
 
-describe.skipIf(!gitAvailable)('decomposeOne (DECOMP-1/5/12)', () => {
-  it('writes entity nodes with provenance and ff-advances the clean canonical tree', async () => {
+describe.skipIf(!gitAvailable)('decomposeOne (DECOMP-1/5/12; STAGING-5)', () => {
+  it('writes candidate files with sourceId provenance, NO entities/, and ff-advances a clean tree', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const srcRel = await archiveText(root, 'call Steve re: Q3 budget');
       const res = await decomposeOne(root, srcRel, deciderFor(['Steve', 'Q3 budget']));
 
       expect(res.ok).toBe(true);
-      expect(res.entityIds).toHaveLength(2);
-      const ents = await readEntityFiles(root);
-      expect(ents).toHaveLength(2);
-      expect(ents.join('\n')).toContain(`derivedFrom: ["${srcRel}"]`); // DECOMP-5 provenance
+      expect(res.candidateIds).toHaveLength(2);
+      const cands = await readCandidates(root);
+      expect(cands).toHaveLength(2);
+      // STAGING-5: each candidate carries provenance via sourceId (= the source's ULID), not a node.
+      expect(cands.map((c) => c.sourceId)).toEqual([path.basename(srcRel), path.basename(srcRel)]);
+      expect(cands.map((c) => c.name).sort()).toEqual(['Q3 budget', 'Steve']);
+      // CANON-4: Decompose writes NO entity nodes — entities/ stays empty until Connect resolves.
+      expect(await findEntityFiles(root)).toHaveLength(0);
 
       const status = await simpleGit(root).status();
       expect(status.isClean()).toBe(true); // ORCH-3 canonical never left dirty
@@ -117,10 +133,10 @@ describe.skipIf(!gitAvailable)('idempotent commit-to-dequeue (DECOMP-13, ORCH-13
       const srcRel = await archiveText(root, 'hello');
       await decomposeOne(root, srcRel, deciderFor(['A']));
       expect(await readDecomposeQueue(root)).toHaveLength(0); // dequeued
-      // A second drain must not duplicate nodes.
+      // A second drain must not duplicate candidates.
       const stage = new DecomposeStage(root, deciderFor(['A']));
       await stage.poke();
-      expect(await readEntityFiles(root)).toHaveLength(1);
+      expect(await readCandidateFiles(root)).toHaveLength(1);
     });
   });
 });
@@ -140,7 +156,7 @@ describe.skipIf(!gitAvailable)('sources are never mutated (DECOMP-8)', () => {
 });
 
 describe.skipIf(!gitAvailable)('signals route to the audit log only (DECOMP-9, DECOMP-11)', () => {
-  it('writes signals into audit.jsonl with the rigid envelope, never into entities', async () => {
+  it('writes signals into audit.jsonl with the rigid envelope, never into candidates', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const srcRel = await archiveText(root, 'trip report');
@@ -154,42 +170,44 @@ describe.skipIf(!gitAvailable)('signals route to the audit log only (DECOMP-9, D
       expect(sigLine).toMatchObject({ stage: 'decompose', sourceId: expect.any(String), event: 'signal', type: 'ambiguity', note: 'which Austin?' });
       expect(sigLine.ts).toBeTruthy(); // envelope timestamp (DECOMP-11)
 
-      const ents = (await readEntityFiles(root)).join('\n');
-      expect(ents).not.toContain('ambiguity'); // signal must NOT leak into the KB graph
-      expect(ents).not.toContain('which Austin?');
+      const cands = (await readCandidateFiles(root)).join('\n');
+      expect(cands).not.toContain('ambiguity'); // signal must NOT leak into the working graph
+      expect(cands).not.toContain('which Austin?');
     });
   });
 });
 
 describe.skipIf(!gitAvailable)('empty result is valid (SPEC-0015 §3.5)', () => {
-  it('commits zero nodes and dequeues cleanly', async () => {
+  it('commits zero candidates and dequeues cleanly', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const srcRel = await archiveText(root, 'nthg');
       const res = await decomposeOne(root, srcRel, deciderFor([]));
       expect(res.ok).toBe(true);
-      expect(res.entityIds).toHaveLength(0);
+      expect(res.candidateIds).toHaveLength(0);
       expect(await readDecomposeQueue(root)).toHaveLength(0);
     });
   });
 });
 
-describe.skipIf(!gitAvailable)('fresh nodes, no cross-source resolution (DECOMP-14)', () => {
-  it('two sources mentioning the same name produce two distinct nodes', async () => {
+describe.skipIf(!gitAvailable)('fresh candidates, no cross-source resolution (DECOMP-14, STAGING-5)', () => {
+  it('two sources mentioning the same name produce two distinct candidates (resolution is Connect’s job)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const a = await archiveText(root, 'Steve A');
       const b = await archiveText(root, 'Steve B');
       await decomposeOne(root, a, deciderFor(['Steve']));
       await decomposeOne(root, b, deciderFor(['Steve']));
-      const ents = await readEntityFiles(root);
-      expect(ents).toHaveLength(2); // not merged — two Steve nodes
+      const cands = await readCandidates(root);
+      expect(cands).toHaveLength(2); // not merged — two Steve candidates, one per source
+      expect(new Set(cands.map((c) => c.sourceId)).size).toBe(2); // distinct provenance
+      expect(new Set(cands.map((c) => c.id)).size).toBe(2); // distinct candidate ids
     });
   });
 });
 
 describe.skipIf(!gitAvailable)('failure never loses the source; set aside after K (DECOMP-6, ORCH-12)', () => {
-  it('retries then sets aside a poison source without blocking the queue or writing entities', async () => {
+  it('retries then sets aside a poison source without blocking the queue or writing candidates', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const bad = await archiveText(root, 'poison');
@@ -213,6 +231,10 @@ describe.skipIf(!gitAvailable)('failure never loses the source; set aside after 
       expect(badAudit).not.toContain('"event":"decomposed"');
       // The good source WAS decomposed (the poison item didn't block it).
       expect(await fs.readFile(path.join(root, good, 'audit.jsonl'), 'utf8')).toContain('"event":"decomposed"');
+      // Exactly one candidate exists — the good source's; the poison source wrote none (DECOMP-6).
+      const cands = await readCandidates(root);
+      expect(cands).toHaveLength(1);
+      expect(cands[0].sourceId).toBe(path.basename(good));
       // The poison source is still preserved.
       expect(await fs.readFile(path.join(root, bad, 'raw.md'), 'utf8')).toBe('poison');
     });
