@@ -39,6 +39,7 @@ and a unique `key` here.
 | SPEC-0024 | REFLECT | Reflect & Rumination (self-maintenance v1)  | feature | draft | `features/` |
 | SPEC-0025 | META    | Rich Metadata, Tags & Properties            | feature | draft | `features/` |
 | SPEC-0026 | ASK     | Ask & Recall (grounded NL query v1)         | feature | draft | `features/` |
+| SPEC-0027 | PANEL   | Control Panel (manage agents, sources & jobs) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -61,7 +62,7 @@ assigned at creation time.
 | ~~REFLECT~~ | _written → SPEC-0024 (key REFLECT)_ | feature | Reflect | Reflect & Rumination — runs on the Autonomous Jobs engine (SPEC-0023, key JOBS) |
 | AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
 | ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
-| PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |
+| ~~PANEL~~  | _written → SPEC-0027 (key PANEL)_ | feature | _x-cut_  | Manage section: Jobs/Agents/Sources/Settings views |
 | VAULT      | Obsidian Vault Representation    | feature | _x-cut_   | KB as native markdown substrate |
 
 > Numbers are assigned at creation time, in order, to avoid gaps.
