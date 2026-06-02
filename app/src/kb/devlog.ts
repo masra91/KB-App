@@ -186,6 +186,55 @@ export function createVaultDevLog(vaultPath: string, opts: Omit<DevLogOptions, '
   return createDevLog({ ...opts, dir: vaultLogDir(vaultPath) });
 }
 
+/** A parsed dev-log line (the shape `emit` writes), for the Status view's recent-errors panel (OBS-6). */
+export interface DevLogEntry {
+  ts: string;
+  level: LogLevel;
+  event: string;
+  scope?: string;
+  runId?: string;
+  itemId?: string;
+  err?: { message: string; stack?: string };
+  [k: string]: unknown;
+}
+
+/**
+ * Read recent dev-log entries from a vault's active `pipeline.log` (OBS-6), newest-first, filtered
+ * to `minLevel` and up (default `warn` — the errors/warnings the Status view surfaces). Best-effort:
+ * a missing/torn log yields what parses, never throws. Reads only the active file (rotated `.N`
+ * files are older history); cross-links carry `runId`/`itemId` back to the audit (OBS-3).
+ */
+export async function readRecentDevLogEntries(
+  vaultPath: string,
+  opts: { minLevel?: LogLevel; limit?: number } = {},
+): Promise<DevLogEntry[]> {
+  const minRank = RANK[opts.minLevel ?? 'warn'];
+  const limit = opts.limit ?? 20;
+  let raw: string;
+  try {
+    raw = await fs.readFile(path.join(vaultLogDir(vaultPath), 'pipeline.log'), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: DevLogEntry[] = [];
+  // Walk newest-first (bottom-up) so we can stop once we have `limit` matches.
+  const lines = raw.split('\n');
+  for (let i = lines.length - 1; i >= 0 && out.length < limit; i--) {
+    const line = lines[i].trim();
+    if (line.length === 0) continue;
+    let obj: DevLogEntry;
+    try {
+      obj = JSON.parse(line) as DevLogEntry;
+    } catch {
+      continue; // a torn/partial line — skip
+    }
+    if (typeof obj.level !== 'string' || RANK[obj.level] === undefined) continue;
+    if (RANK[obj.level] < minRank) continue;
+    out.push(obj);
+  }
+  return out;
+}
+
 /** An app-level dev-log in Electron userData, for errors BEFORE a vault is open — setup /
  *  worktree-provision failures on boot that would otherwise vanish (OBS-2). */
 export function createAppDevLog(userDataDir: string, opts: Omit<DevLogOptions, 'dir' | 'file'> = {}): DevLog {
