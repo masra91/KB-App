@@ -9,6 +9,7 @@ import path from 'node:path';
 import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
+import { appendAuditEvent } from './audit';
 import { captureToInbox } from './ingest';
 import { archiveOne, readQueue } from './orchestrator';
 import { deterministicDecider } from './archivist';
@@ -21,6 +22,7 @@ import {
   readActivityIndexCache,
   writeActivityIndexCache,
   filterEvents,
+  readEvents,
   ACTIVITY_INDEX_REL,
   ACTIVITY_INDEX_VERSION,
 } from './activityIndex';
@@ -89,6 +91,21 @@ describe.skipIf(!gitAvailable)('readAllAuditEvents — the walker (AUDIT-4/10)',
       expect(events.find((e) => e.actor === 'connect')!.subjects.entityId).toBe('E1');
       // provenance points back at the raw line for drill-down.
       expect(events.find((e) => e.actor === 'decompose')!.provenance).toEqual({ file: path.join('sources', '2026', '01', 'S1', 'audit.jsonl'), line: 1 });
+    });
+  });
+
+  it('picks up the cross-cutting control log written by appendAuditEvent (panel actor)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await appendAuditEvent(root, { actor: 'panel', eventType: 'job-config-change', subjects: { jobId: 'reflect' }, payload: { field: 'enabled', from: false, to: true, why: 'Principal change' }, ts: '2026-02-01T00:00:00.000Z' });
+      const events = await readAllAuditEvents(root);
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ actor: 'panel', eventType: 'job-config-change' });
+      expect(events[0].provenance.file).toBe(path.join('.kb', 'audit.jsonl'));
+      // readEvents convenience: read + filter in one call.
+      expect(await readEvents(root, { actors: ['panel'] })).toHaveLength(1);
+      expect(await readEvents(root, { subjectId: 'reflect' })).toHaveLength(1);
+      expect(await readEvents(root, { actors: ['claims'] })).toHaveLength(0);
     });
   });
 

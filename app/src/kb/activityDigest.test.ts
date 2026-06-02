@@ -29,6 +29,7 @@ describe('digestEvent — deterministic templates (AUDIT-5 / AUTO-9)', () => {
     expect(digestEvent(ev('job', 'job-run', { subjects: { jobId: 'reflect' }, payload: { applied: 2, deferred: 1 } }))).toBe('Job reflect ran — 2 applied, 1 deferred');
     expect(digestEvent(ev('recall', 'recall', { payload: { question: 'who is Atlas?' } }))).toBe('Answered a question: "who is Atlas?"');
     expect(digestEvent(ev('replay', 'replay-reset'))).toBe('Full rebuild — reset derived stages');
+    expect(digestEvent(ev('panel', 'job-config-change', { subjects: { jobId: 'reflect' }, payload: { field: 'enabled', from: false, to: true } }))).toBe('Config change — enabled on reflect (false → true)');
   });
 
   it('handles generic / mid-run event-types with sensible fallbacks', () => {

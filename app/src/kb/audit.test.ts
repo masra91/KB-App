@@ -8,7 +8,8 @@
 import { describe, it, expect } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { normalizeAuditLine, AUDIT_ACTORS, AUDIT_COVERAGE, coverageFor, type NormalizeContext } from './audit';
+import { makeTempDir, rmTempDir } from '../../test/tempVault';
+import { normalizeAuditLine, appendAuditEvent, AUDIT_ACTORS, AUDIT_COVERAGE, CONTROL_AUDIT_REL, coverageFor, type NormalizeContext } from './audit';
 
 const ctx = (over: Partial<NormalizeContext> = {}): NormalizeContext => ({ file: 'sources/2026/01/S1/audit.jsonl', line: 0, ...over });
 
@@ -77,12 +78,51 @@ describe('normalizeAuditLine — per-actor adapters (AUDIT-1)', () => {
     expect(e.payload).toMatchObject({ verdict: 'confirm', question: 'q' });
   });
 
+  it('passes an already-canonical line through (what appendAuditEvent writes — e.g. the Control Panel)', () => {
+    const raw = { ts: '2026-01-09T00:00:00.000Z', actor: 'panel', eventType: 'job-config-change', subjects: { jobId: 'reflect' }, payload: { field: 'enabled', from: false, to: true, why: 'Principal change via Control Panel' }, runId: 'P1' };
+    const e = normalizeAuditLine(raw, ctx({ file: '.kb/audit.jsonl' }))!;
+    expect(e).toMatchObject({ actor: 'panel', eventType: 'job-config-change', runId: 'P1' });
+    expect(e.subjects).toEqual({ jobId: 'reflect' });
+    expect(e.payload).toMatchObject({ field: 'enabled', why: 'Principal change via Control Panel' });
+    expect(e.provenance).toEqual({ file: '.kb/audit.jsonl', line: 0 });
+  });
+
   it('returns null for foreign / malformed / timestamp-less lines (skipped, never fabricated)', () => {
     expect(normalizeAuditLine({ hello: 'world' }, ctx())).toBeNull(); // no recognizable actor
     expect(normalizeAuditLine({ stage: 'claims', event: 'claimed' }, ctx())).toBeNull(); // no ts
     expect(normalizeAuditLine(null, ctx())).toBeNull();
     expect(normalizeAuditLine('a string', ctx())).toBeNull();
     expect(normalizeAuditLine([1, 2], ctx())).toBeNull();
+  });
+});
+
+describe('appendAuditEvent — canonical writer (AUDIT-1/2)', () => {
+  it('writes a conforming line that reads back round-trip via the normalizer', async () => {
+    const dir = await makeTempDir();
+    try {
+      await appendAuditEvent(
+        dir,
+        { actor: 'panel', eventType: 'job-config-change', subjects: { jobId: 'reflect' }, payload: { field: 'enabled', from: false, to: true, why: 'Principal change' }, ts: '2026-01-10T00:00:00.000Z' },
+      );
+      const raw = await fs.readFile(path.join(dir, CONTROL_AUDIT_REL), 'utf8');
+      const parsed = JSON.parse(raw.trim());
+      const e = normalizeAuditLine(parsed, { file: CONTROL_AUDIT_REL, line: 0 })!;
+      expect(e).toMatchObject({ actor: 'panel', eventType: 'job-config-change', ts: '2026-01-10T00:00:00.000Z' });
+      expect(e.subjects.jobId).toBe('reflect');
+      expect(e.payload.why).toBe('Principal change');
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('refuses an unregistered actor — emit conformance is enforced at the source (AUDIT-2/11)', async () => {
+    const dir = await makeTempDir();
+    try {
+      // @ts-expect-error — deliberately an unregistered actor
+      await expect(appendAuditEvent(dir, { actor: 'rogue', eventType: 'x', subjects: {}, payload: {} })).rejects.toThrow(/not registered in AUDIT_COVERAGE/);
+    } finally {
+      await rmTempDir(dir);
+    }
   });
 });
 
@@ -115,13 +155,19 @@ describe('AUDIT_COVERAGE — the coverage gate (AUDIT-2/11)', () => {
 
   it('NO unregistered emitter: every src/kb file that appends audit/journal is in the registry', async () => {
     const registered = new Set(AUDIT_COVERAGE.flatMap((c) => c.emitters));
+    // The SPEC-0029 model/readers/writer are not actor-emitters: audit.ts owns the canonical writer
+    // (appendAuditEvent) and the readers reference audit paths, but they emit on behalf of registered
+    // actors, not as one. Exclude them so the scan flags only genuine, unregistered actor emitters.
+    const MODEL_MODULES = new Set(['audit', 'activityIndex', 'lineage', 'activityDigest']);
     const files = (await fs.readdir(kbDir)).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
     const emitters: string[] = [];
     for (const f of files) {
+      const mod = f.replace(/\.ts$/, '');
+      if (MODEL_MODULES.has(mod)) continue;
       const src = await fs.readFile(path.join(kbDir, f), 'utf8');
       const appends = /append(File|Audit)\s*\(/.test(src);
       const auditPath = /(audit|journal)\.jsonl/.test(src);
-      if (appends && auditPath) emitters.push(f.replace(/\.ts$/, ''));
+      if (appends && auditPath) emitters.push(mod);
     }
     // Sanity: the scan actually finds the known producers (guards against a broken detector).
     expect(emitters).toEqual(expect.arrayContaining(['orchestrator', 'decomposeStage', 'claimsStage', 'connectStage', 'jobStage', 'recall', 'replay']));

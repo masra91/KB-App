@@ -19,7 +19,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { normalizeAuditLine, type AuditEvent, type AuditActor, type NormalizeContext } from './audit';
+import { normalizeAuditLine, CONTROL_AUDIT_REL, type AuditEvent, type AuditActor, type NormalizeContext } from './audit';
 
 /** Bump when the cached shape changes so a stale cache from an older build is discarded. */
 export const ACTIVITY_INDEX_VERSION = 1;
@@ -101,6 +101,10 @@ async function listAuditFiles(root: string): Promise<AuditFile[]> {
   // .kb/ask/audit.jsonl — recall transparency log.
   const askAbs = path.join(root, '.kb', 'ask', 'audit.jsonl');
   if (await fileExists(askAbs)) files.push({ abs: askAbs, rel: path.relative(root, askAbs) });
+
+  // .kb/audit.jsonl — cross-cutting control log (the Control Panel's Principal config changes).
+  const controlAbs = path.join(root, CONTROL_AUDIT_REL);
+  if (await fileExists(controlAbs)) files.push({ abs: controlAbs, rel: path.relative(root, controlAbs) });
 
   return files;
 }
@@ -259,6 +263,13 @@ function haystack(event: AuditEvent): string {
   return [event.actor, event.eventType, event.model ?? '', event.runId ?? '', Object.values(event.subjects).join(' '), JSON.stringify(event.payload)]
     .join(' ')
     .toLowerCase();
+}
+
+/** Read + filter all audit events in one call (AUDIT-7) — the convenience the Control Panel and the
+ *  Activity view read through. Newest-first. For large vaults the cached {@link loadActivityIndex}
+ *  feed is cheaper; this reads the full audit, so prefer it for targeted filters (e.g. one job). */
+export async function readEvents(root: string, filter: ActivityFilter = {}): Promise<AuditEvent[]> {
+  return filterEvents(await readAllAuditEvents(root), filter);
 }
 
 /** Apply a filter to an event stream (AUDIT-7). Pure; preserves input order. */

@@ -12,9 +12,15 @@
 // until it emits conforming audit (AUDIT-11); `audit.test.ts` turns that into a checked gate by
 // scanning `src/kb` for emitters and asserting each is registered with the *why*.
 
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-/** Who acted. Stages, autonomous jobs, researchers, recall, replay, and the archivist. */
+/**
+ * Who acted. Stages, autonomous jobs, recall, replay, the archivist, and `panel` — the Control
+ * Panel (SPEC-0027): Principal-initiated config changes (enable/disable a job, schedule, posture),
+ * which are NOT a stage/job *run* and so don't fit `job`. New actors are added here; the coverage
+ * gate (`audit.test.ts`) and the writer (`appendAuditEvent`) both key off this union.
+ */
 export const AUDIT_ACTORS = [
   'archivist',
   'decompose',
@@ -23,6 +29,7 @@ export const AUDIT_ACTORS = [
   'job',
   'recall',
   'replay',
+  'panel',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
 
@@ -168,6 +175,24 @@ function modelOf(raw: Record<string, unknown>): string | undefined {
 export function normalizeAuditLine(raw: unknown, ctx: NormalizeContext): AuditEvent | null {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
+
+  // Already-canonical line (written by `appendAuditEvent` — e.g. the Control Panel). Recognized by
+  // a registered `actor` + an `eventType`; pass it through, attaching read-side provenance.
+  if (typeof obj.actor === 'string' && (AUDIT_ACTORS as readonly string[]).includes(obj.actor) && typeof obj.eventType === 'string' && typeof obj.ts === 'string') {
+    const subjects = obj.subjects && typeof obj.subjects === 'object' && !Array.isArray(obj.subjects) ? (obj.subjects as AuditSubjects) : {};
+    const e: AuditEvent = {
+      ts: obj.ts,
+      actor: obj.actor as AuditActor,
+      subjects,
+      eventType: obj.eventType,
+      payload: obj.payload && typeof obj.payload === 'object' && !Array.isArray(obj.payload) ? (obj.payload as Record<string, unknown>) : {},
+      provenance: { file: ctx.file, line: ctx.line },
+    };
+    if (typeof obj.runId === 'string') e.runId = obj.runId;
+    if (typeof obj.model === 'string') e.model = obj.model;
+    return e;
+  }
+
   const actor = actorOf(obj, ctx);
   if (actor === null) return null;
 
@@ -186,6 +211,46 @@ export function normalizeAuditLine(raw: unknown, ctx: NormalizeContext): AuditEv
   const model = modelOf(obj);
   if (model !== undefined) event.model = model;
   return event;
+}
+
+// ── Canonical writer (AUDIT-1/2) ───────────────────────────────────────────────────────────────
+//
+// The emit side of the canonical model, for NEW emitters that have no legacy line shape (the
+// Control Panel today). It does NOT touch the existing stage/job emitters — re-architecting their
+// emission is out of scope (§7). New emitters call this so their lines are born canonical (the
+// reader's already-canonical fast-path picks them up) AND conformant: the writer refuses an actor
+// that isn't registered in AUDIT_COVERAGE, so "emit conforming audit with the why" (AUDIT-2/11) is
+// enforced at the point of emission, not just in review.
+
+/** Cross-cutting working-zone audit log (gitignored under .kb, never promoted) for actors not tied
+ *  to a single item — e.g. the Control Panel's Principal-initiated config changes. */
+export const CONTROL_AUDIT_REL = path.join('.kb', 'audit.jsonl');
+
+/** The fields a caller supplies to {@link appendAuditEvent} — the envelope minus read-side provenance. */
+export type AuditEventInput = Omit<AuditEvent, 'provenance' | 'ts'> & { ts?: string };
+
+/**
+ * Append a conforming canonical event to an append-only audit log (AUDIT-1). `relFile` is
+ * vault-relative and defaults to the cross-cutting control log. Throws if `event.actor` is not a
+ * registered actor (AUDIT-2/11) — a feature cannot emit unregistered/uncovered audit. `ts` defaults
+ * to now; pass it for deterministic tests.
+ */
+export async function appendAuditEvent(root: string, event: AuditEventInput, relFile: string = CONTROL_AUDIT_REL): Promise<void> {
+  if (coverageFor(event.actor) === undefined) {
+    throw new Error(`appendAuditEvent: actor "${event.actor}" is not registered in AUDIT_COVERAGE — register it with the why (AUDIT-2/11)`);
+  }
+  const line: Record<string, unknown> = {
+    ts: event.ts ?? new Date().toISOString(),
+    actor: event.actor,
+    subjects: event.subjects,
+    eventType: event.eventType,
+    payload: event.payload,
+  };
+  if (event.runId !== undefined) line.runId = event.runId;
+  if (event.model !== undefined) line.model = event.model;
+  const abs = path.join(path.resolve(root), relFile);
+  await fs.mkdir(path.dirname(abs), { recursive: true });
+  await fs.appendFile(abs, JSON.stringify(line) + '\n', 'utf8');
 }
 
 // ── Coverage registry (AUDIT-2/11) ────────────────────────────────────────────────────────────
@@ -276,6 +341,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // resets derived queues — a Principal-initiated action
     carriesWhy: true, // the replayId ties the reset to its replay run
     traces: ['AUDIT-1', 'AUDIT-3', 'REPLAY-6'],
+  },
+  {
+    actor: 'panel',
+    what: 'Control Panel (SPEC-0027 PANEL-7): Principal-initiated config changes (job enable/disable, schedule, posture) — emitted via appendAuditEvent into the cross-cutting control audit.',
+    emitters: [], // emitted via the canonical writer by SPEC-0027 (no literal emitter file in src/kb)
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true,
+    carriesWhy: true, // payload must record field/from/to + the why (Principal change)
+    traces: ['AUDIT-1', 'AUDIT-2', 'PANEL-7'],
   },
 ] as const;
 

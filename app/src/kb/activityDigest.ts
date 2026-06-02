@@ -95,6 +95,8 @@ export function digestEvent(event: AuditEvent): string {
       return `Answered a question${typeof p.question === 'string' ? `: "${truncate(p.question, 80)}"` : ''}`;
     case 'replay:replay-reset':
       return 'Full rebuild — reset derived stages';
+    case 'panel:job-config-change':
+      return `Config change${typeof p.field === 'string' ? ` — ${p.field}` : ''} on ${subjectLabel(event)}${p.from !== undefined && p.to !== undefined ? ` (${String(p.from)} → ${String(p.to)})` : ''}`;
     default:
       if (event.eventType === 'setaside') return `${cap(event.actor)} set aside ${subjectLabel(event)}${typeof p.reason === 'string' ? ` (${p.reason})` : ''}`;
       if (event.eventType === 'failed') return `${cap(event.actor)} failed on ${subjectLabel(event)}`;
