@@ -107,6 +107,13 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
   alarm (stuck lock / errored stage, below). The distinction is the whole point of #192: "the
   machine needs a decision from you" reads calm + actionable; "the machine is broken" reads as the
   alarm. (A set-aside item's *cause* is shown as quiet context, not as the headline.)
+  - **Single source of truth — `N` == the list, always (no #110-class drift).** This queue is the
+    **one unified** needs-you surface; it does not run parallel to (and drift from) the per-flow
+    badges. **`N` is the actual count of actionable items aggregated across ALL needs-you flows**
+    (set-aside OBS-17 + ambiguous-link Reviews SPEC-0018 + researcher escalations RESEARCH-11), and
+    it MUST equal the number of rows shown — never "badge says 1, list says nothing needs you"
+    (the #110 bug). Each row **deep-links** to its decision affordance. If a flow has zero items it
+    contributes zero; when all are zero the queue is calm-empty/absent.
 - **Pivot toggle (footer)** — flips emphasis between **per-item** (carriages foreground, stations
   dim to context) and **per-stage** (station gauges foreground, carriages collapse to counts).
   Same Line, same data — only where the visual weight sits (VIZ-5).
