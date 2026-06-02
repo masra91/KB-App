@@ -19,6 +19,7 @@ import {
   VIEW_SETTINGS,
 } from './views';
 import { esc } from './html';
+import { reviewBadgeText, reviewBadgeAria } from './reviewBadge';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
 import { mountActivity } from './views/activityView';
@@ -106,4 +107,42 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
   }
   model.onChange(render);
   render(); // initial paint → Capture (SHELL-4)
+
+  // PANEL-8: surface the "needs you" review count on the Reviews rail item, so it's visible from
+  // anywhere (incl. the Manage section) and the item links to the queue (clicking it navigates).
+  // Live via a light poll; stops if the shell is detached. Never errors the shell (degrades to no badge).
+  const reviewsBtn = buttons.find((b) => b.dataset.view === VIEW_REVIEWS);
+  if (reviewsBtn) {
+    const updateReviewBadge = async (): Promise<void> => {
+      let count = 0;
+      try {
+        count = (await window.kbApi.listReviews()).length;
+      } catch {
+        return; // leave the last-known badge
+      }
+      let badge = reviewsBtn.querySelector<HTMLElement>('.nav-badge');
+      const text = reviewBadgeText(count);
+      if (!text) {
+        badge?.remove();
+        reviewsBtn.removeAttribute('aria-label');
+        return;
+      }
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'nav-badge';
+        badge.setAttribute('aria-hidden', 'true');
+        reviewsBtn.appendChild(badge);
+      }
+      badge.textContent = text;
+      reviewsBtn.setAttribute('aria-label', `${reviewsBtn.textContent?.trim() ?? 'Reviews'} — ${reviewBadgeAria(count)}`);
+    };
+    void updateReviewBadge();
+    const timer = setInterval(() => {
+      if (!document.contains(root)) {
+        clearInterval(timer);
+        return;
+      }
+      void updateReviewBadge();
+    }, 5000);
+  }
 }
