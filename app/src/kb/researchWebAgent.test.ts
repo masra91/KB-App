@@ -3,7 +3,7 @@
 // recallAgent; here we prove the egress gate, citation filtering, tier guard, and untrusted-content
 // skill framing.
 import { describe, it, expect } from 'vitest';
-import { isAllowedUrl, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL } from './researchWebAgent';
+import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL } from './researchWebAgent';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 const web = (over: Partial<ResearcherConfig> = {}): ResearcherConfig => ({
@@ -19,9 +19,37 @@ describe('isAllowedUrl — egress gate (RESEARCH-8)', () => {
     }
   });
 
-  it('empty allowlist permits any https/http host (public-web default)', () => {
+  it('empty allowlist permits any PUBLIC https/http host (public-web default)', () => {
     expect(isAllowedUrl('https://example.com/x')).toBe(true);
     expect(isAllowedUrl('http://example.org')).toBe(true);
+  });
+
+  it('SSRF backstop: rejects loopback/private/link-local/metadata hosts EVEN with an empty allowlist (KB-QD #85)', () => {
+    for (const u of [
+      'http://localhost/x',
+      'http://sub.localhost/x',
+      'http://127.0.0.1/x',
+      'http://127.1.2.3/x',
+      'https://[::1]/x',
+      'http://0.0.0.0/x',
+      'http://10.0.0.5/x',
+      'http://172.16.0.1/x',
+      'http://172.31.255.255/x',
+      'http://192.168.1.1/x',
+      'http://169.254.169.254/latest/meta-data/', // cloud metadata → credential theft
+      'https://[fe80::1]/x', // IPv6 link-local
+      'https://[fc00::1]/x', // IPv6 unique-local
+      'http://[::ffff:127.0.0.1]/x', // IPv4-mapped IPv6 loopback
+    ]) {
+      expect(isAllowedUrl(u), `${u} must be rejected`).toBe(false);
+    }
+  });
+
+  it('still ALLOWS public IPs + a 172.x outside the private 172.16/12 block', () => {
+    expect(isPublicHost('8.8.8.8')).toBe(true);
+    expect(isPublicHost('172.15.0.1')).toBe(true); // just below private range
+    expect(isPublicHost('172.32.0.1')).toBe(true); // just above
+    expect(isPublicHost('example.com')).toBe(true); // DNS name
   });
 
   it('a configured allowlist NARROWS to those hosts + their subdomains', () => {

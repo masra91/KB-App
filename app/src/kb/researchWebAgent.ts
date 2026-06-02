@@ -56,10 +56,49 @@ function hostOf(url: string): string | null {
 }
 
 /**
- * Egress gate (RESEARCH-8): may the Web researcher fetch `url`? Only `http(s)` public-web URLs, and
- * — when the researcher declares `allowedDomains` — only those hosts (or their subdomains). An empty
- * allowlist permits any https host (the `public-web` tier's default); a non-empty allowlist NARROWS.
- * Always rejects non-http(s) schemes (no `file:`/`data:`/etc. — no local/scheme escapes).
+ * Is `host` a PUBLIC host (not loopback/private/link-local/unspecified)? The SSRF backstop for the
+ * egress gate (KB-QD #85): a `public-web` researcher must never reach loopback, RFC-1918 private
+ * ranges, link-local `169.254/16` (incl. the `169.254.169.254` cloud-metadata endpoint), or the IPv6
+ * equivalents — the deterministic gate, not the soft prompt, has to stop an LLM steered into fetching
+ * such a URL. Bare DNS names are treated as public (DNS-rebinding is out of scope — the fetch handler
+ * resolves+re-checks at request time in the live wiring). Handles IPv6 brackets + IPv4-mapped IPv6.
+ */
+export function isPublicHost(host: string): boolean {
+  let h = host.toLowerCase().replace(/^\[|\]$/g, '');
+  if (h === 'localhost' || h.endsWith('.localhost')) return false;
+  const mapped = h.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/); // IPv4-mapped IPv6
+  if (mapped) h = mapped[1];
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const [a, b] = v4.slice(1).map(Number);
+    if (v4.slice(1).some((x) => Number(x) > 255)) return false; // malformed octet → reject
+    if (a === 0 || a === 127) return false; // unspecified/this-network + loopback
+    if (a === 10) return false; // 10/8 private
+    if (a === 172 && b >= 16 && b <= 31) return false; // 172.16/12 private
+    if (a === 192 && b === 168) return false; // 192.168/16 private
+    if (a === 169 && b === 254) return false; // 169.254/16 link-local (+ cloud metadata)
+    return true;
+  }
+  if (h.includes(':')) {
+    // IPv6 literal: reject loopback (::1), unspecified (::), link-local (fe80::/10), unique-local
+    // (fc00::/7), and ALL IPv4-mapped IPv6 (`::ffff:*` — a known SSRF-smuggling form, incl. the hex
+    // normalization `::ffff:7f00:1`; a legit public fetch never needs the mapped form).
+    if (h === '::1' || h === '::') return false;
+    if (h.startsWith('::ffff:')) return false;
+    if (/^fe[89ab]/.test(h)) return false;
+    if (/^f[cd]/.test(h)) return false;
+    return true;
+  }
+  return true; // a DNS name
+}
+
+/**
+ * Egress gate (RESEARCH-8): may the Web researcher fetch `url`? Only `http(s)` **public** URLs, and
+ * — when the researcher declares `allowedDomains` — only those hosts (or their subdomains). Always
+ * rejects: non-http(s) schemes (no `file:`/`data:`/etc.) and **non-public hosts** (loopback, RFC-1918
+ * private, link-local incl. cloud-metadata, IPv6 equivalents) — the SSRF backstop, enforced even on
+ * the empty-allowlist default (`public-web` means *public*). An empty allowlist then permits any
+ * remaining public host; a non-empty allowlist NARROWS to those domains.
  */
 export function isAllowedUrl(url: string, allowedDomains: readonly string[] = []): boolean {
   let scheme: string;
@@ -71,7 +110,8 @@ export function isAllowedUrl(url: string, allowedDomains: readonly string[] = []
   if (scheme !== 'http:' && scheme !== 'https:') return false;
   const host = hostOf(url);
   if (!host) return false;
-  if (allowedDomains.length === 0) return true; // public-web default: any https host
+  if (!isPublicHost(host)) return false; // SSRF backstop — applies before the allowlist (KB-QD #85)
+  if (allowedDomains.length === 0) return true; // public-web default: any remaining public host
   return allowedDomains.some((d) => {
     const dd = d.toLowerCase().replace(/^www\./, '');
     return host === dd || host.endsWith(`.${dd}`);
