@@ -79,7 +79,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | PANEL-5 | must     | The **Settings** view (elevating the display-only stub) holds vault config, **Copilot status**, and editable **autonomy defaults** (per-Instance posture) | test:app/src/kb/instanceConfig.test.ts, app/src/shell/views/settingsView.test.ts | SETUP-8; AUTO-12 |
 | PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | test:app/src/kb/instanceConfig.test.ts, jobRegistry.test.ts | SETUP-6; SCOPE-1 |
 | PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts + settingsView.test.ts (confirm UI) | AUTO-1,8 |
-| PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | none-yet | REVIEW-?; AUTO-10 |
+| PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | test:app/src/shell/reviewBadge.test.ts, app/src/shell/shell.test.ts | REVIEW-?; AUTO-10 |
 | PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/views/agentsView.test.ts (degrade) | ORCH-10 |
 
 ## 5. User flows / surface
@@ -152,3 +152,11 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   `settingsView`). **Deferred:** **PANEL-8** Review-queue link — needs an additive shell
   `navigate(viewId)` hook, sequenced **after DEV-5's Activity PR** to avoid a `shell.ts` collision.
   **Researchers** view remains a stub pending SPEC-0028.
+- 2026-06-02 — **PANEL-8 implemented** (slice-2 tail, after DEV-5's Activity #70 settled the shell).
+  The **Reviews rail item now carries a live "needs you" count badge** (`reviewBadgeText`/`reviewBadgeAria`,
+  capped 99+), so the open-review count is visible from anywhere — including the Manage section — and
+  the Reviews item is the link to the queue (clicking it navigates; no separate hook needed since the
+  rail already navigates). Light poll keeps it live, degrades to no badge on no-KB/IPC-failure.
+  Graduated **PANEL-8** `Verify: none-yet → test:` (node `reviewBadge.test.ts`; happy-dom
+  `shell.test.ts`). **SPEC-0027 slices 1+2 complete** — only the **Researchers** Manage view remains
+  a stub, pending SPEC-0028.
