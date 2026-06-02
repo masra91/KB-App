@@ -9,6 +9,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { parseEntityNode } from './connectDoc';
+import { resolveContainedRel } from './pathContainment';
 import type { RecallTools, EntityHit, ClaimHit, LinkHit, GrepHit } from './recall';
 
 const DEFAULT_ENTITY_LIMIT = 10;
@@ -16,13 +17,10 @@ const DEFAULT_CLAIM_LIMIT = 50;
 const DEFAULT_GREP_LIMIT = 50;
 const GREP_EXTS = new Set(['.md', '.txt']);
 
-/** Resolve a repo-relative path under `root`, or null if it escapes the vault (no `..` out). */
-function safeResolve(root: string, rel: string): string | null {
-  if (typeof rel !== 'string' || rel.length === 0) return null;
-  const abs = path.resolve(root, rel);
-  const within = abs === root || abs.startsWith(root + path.sep);
-  return within ? abs : null;
-}
+// Path containment for the LLM-/index-supplied `rel`s these read tools resolve now lives in the
+// shared, symlink-safe helper (SPEC-0030 / #30): `resolveContainedRel` returns the abs path or null
+// (skip) — reads never throw. It hardens the old lexical `safeResolve` against committed-symlink
+// escapes too (a symlinked vault file could otherwise surface host content as "cited KB content").
 
 /** Recursively collect files under `dir` (repo-relative to `root`) matching `keep`. */
 async function walkFiles(root: string, dir: string, keep: (name: string) => boolean): Promise<string[]> {
@@ -124,7 +122,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
     const hits: EntityHit[] = [];
     for (const rel of rels) {
       try {
-        const p = safeResolve(root, rel);
+        const p = await resolveContainedRel(root, rel);
         if (!p) continue;
         const node = parseEntityNode(await fs.readFile(p, 'utf8'));
         hits.push({
@@ -149,7 +147,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
     const out: Array<ParsedClaim & { rel: string }> = [];
     for (const rel of rels) {
       try {
-        const p = safeResolve(root, rel);
+        const p = await resolveContainedRel(root, rel);
         if (!p) continue;
         out.push({ ...parseClaimMd(await fs.readFile(p, 'utf8')), rel });
       } catch {
@@ -162,7 +160,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
   /** Resolve an entity reference (rel path OR name/alias) to its node rel-path, or null. */
   async function resolveEntityRel(entity: string): Promise<string | null> {
     if (typeof entity !== 'string' || entity.length === 0) return null;
-    const direct = safeResolve(root, entity);
+    const direct = await resolveContainedRel(root, entity);
     if (direct && entity.includes('/') && entity.endsWith('.md')) {
       try {
         await fs.access(direct);
@@ -219,7 +217,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
       const rel = await resolveEntityRel(entity);
       if (!rel) return { outgoing: [], incoming: [] };
       const outgoing: LinkHit[] = [];
-      const p = safeResolve(root, rel);
+      const p = await resolveContainedRel(root, rel);
       if (p) {
         try {
           for (const to of extractWikilinks(await fs.readFile(p, 'utf8'))) outgoing.push({ from: rel, to });
@@ -236,7 +234,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
       const target = `[[${rel}]]`;
       for (const fileRel of candidates) {
         if (fileRel === rel) continue;
-        const fp = safeResolve(root, fileRel);
+        const fp = await resolveContainedRel(root, fileRel);
         if (!fp) continue;
         try {
           if ((await fs.readFile(fp, 'utf8')).includes(target)) incoming.push({ from: fileRel, to: rel });
@@ -248,7 +246,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
     },
 
     async readNode({ rel }): Promise<string | null> {
-      const p = safeResolve(root, rel);
+      const p = await resolveContainedRel(root, rel);
       if (!p) return null;
       const r = typeof rel === 'string' ? rel : '';
       if (!(r.startsWith('entities/') || r.startsWith('entities' + path.sep) || r.startsWith('claims/') || r.startsWith('claims' + path.sep))) {
@@ -264,7 +262,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
     async readSource({ dir }): Promise<string | null> {
       if (typeof dir !== 'string' || dir.length === 0) return null;
       const rel = dir.endsWith('source.md') ? dir : path.join(dir, 'source.md');
-      const p = safeResolve(root, rel);
+      const p = await resolveContainedRel(root, rel);
       if (!p) return null;
       const r = path.relative(root, p);
       if (!(r === 'sources' || r.startsWith('sources/') || r.startsWith('sources' + path.sep))) return null;
@@ -287,7 +285,7 @@ export function makeReadOnlyTools(root: string): RecallTools {
       ];
       for (const rel of files) {
         if (hits.length >= cap) break;
-        const p = safeResolve(root, rel);
+        const p = await resolveContainedRel(root, rel);
         if (!p) continue;
         let text: string;
         try {

@@ -13,6 +13,7 @@ import { ensureGitIdentity } from './vault';
 import { Mutex } from './stageLock';
 import { withOptimisticAdvance, advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
+import { checkContainedRel } from './pathContainment';
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import {
@@ -53,42 +54,23 @@ async function pathExists(p: string): Promise<boolean> {
  */
 export const JOB_WRITE_PATHS = ['entities', 'claims', 'outputs'] as const;
 
-/** Realpath the deepest EXISTING ancestor of `target` and re-append the non-existent tail, so a
- *  symlink anywhere in the existing portion is resolved (the target file itself may not exist yet).
- *  This is what makes containment symlink-safe — lexical `path.resolve` alone would let a committed
- *  symlink (`entities/x -> ../../sources`) appear contained while the write follows it out. */
-async function resolveSymlinkSafe(target: string): Promise<string> {
-  let existing = target;
-  const tail: string[] = [];
-  while (!(await pathExists(existing))) {
-    tail.unshift(path.basename(existing));
-    const parent = path.dirname(existing);
-    if (parent === existing) return target; // hit the fs root without an existing ancestor
-    existing = parent;
-  }
-  const realBase = await fs.realpath(existing);
-  return tail.length > 0 ? path.join(realBase, ...tail) : realBase;
-}
-
 /**
  * Sink-side containment for an agent-emitted write set (JOBS-10) — defense-in-depth, independent of
  * disposition/posture, because `rel` is LLM output (a prompt-injection surface via node excerpts).
- * Returns a rejection reason for the FIRST offending write, or null if every write is safe. Both
- * checks run on the **symlink-resolved** path (not the raw string), so `..` traversal, absolute
- * paths, `entities/../sources/x`, and symlink escapes are all caught:
- *  - **containment:** the resolved real path must stay strictly within the worktree's real path;
- *  - **allowlist:** its top-level dir must be a JOB_WRITE_PATHS root (blocks `.git/`, `.kb/`, `app/`,
- *    repo-root files, AND `sources/`).
- * The caller treats any rejection as atomic over the whole finding (no partial writes).
+ * Returns a rejection reason for the FIRST offending write, or null if every write is safe. The
+ * symlink-safe containment + allowlist live in the shared `checkContainedRel` helper (SPEC-0030); we
+ * map its typed verdict back to this sink's exact reasons. Catches `..` traversal, absolute paths,
+ * `entities/../sources/x`, and committed-symlink escapes; the allowlist (JOB_WRITE_PATHS) blocks
+ * `.git/`, `.kb/`, `app/`, repo-root files, AND `sources/`. The caller treats any rejection as atomic
+ * over the whole finding (no partial writes).
  */
 export async function validateWrites(wt: string, writes: readonly { rel: string; content: string }[]): Promise<string | null> {
-  const wtReal = await fs.realpath(wt);
   for (const w of writes) {
-    const resolved = await resolveSymlinkSafe(path.resolve(wt, w.rel));
-    if (resolved === wtReal || !resolved.startsWith(wtReal + path.sep)) return `write escapes the worktree: ${w.rel}`;
-    const top = path.relative(wtReal, resolved).split(path.sep)[0];
-    if (!(JOB_WRITE_PATHS as readonly string[]).includes(top)) {
-      return `write outside the knowledge roots (${JOB_WRITE_PATHS.join('/')}): ${w.rel}`;
+    const r = await checkContainedRel(wt, w.rel, JOB_WRITE_PATHS);
+    if ('kind' in r) {
+      return r.kind === 'escape'
+        ? `write escapes the worktree: ${w.rel}`
+        : `write outside the knowledge roots (${JOB_WRITE_PATHS.join('/')}): ${w.rel}`;
     }
   }
   return null;
