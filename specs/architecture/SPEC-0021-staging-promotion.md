@@ -74,7 +74,10 @@ Promotion is **copy-the-evergreen-paths** (chosen for simplicity + git-native be
 promote(staging → main), under the shared canonical-writer lock:
   in a main-targeted worktree (or the root):
     for each path P in EVERGREEN_PATHS:
-      git checkout staging -- P        # bring staging's evergreen folder into the main index
+      # make main's P an EXACT MIRROR of staging's P — adds, edits, AND deletions
+      git rm -r --cached --ignore-unmatch -- P   # forget main's current P (so removals propagate)
+      git checkout staging -- P                  # re-materialize P from staging
+      git add -A -- P                            # stage the net adds + deletions
     if the index changed:
       git commit -m "promote: <summary>"   # main advances; working paths were never touched
 ```
@@ -82,6 +85,12 @@ promote(staging → main), under the shared canonical-writer lock:
 - **Serialized** through the same `stageLock` Mutex as every canonical advance (SPEC-0014 §5)
   — promotion and stage ff-advances never race.
 - **Idempotent:** if no evergreen path changed since the last promotion, it is a no-op.
+- **Deletion-aware (mirror, not append):** each promote makes every evergreen path on `main`
+  an **exact mirror** of `staging` — additions, modifications, **and removals**. Connect's
+  dedupe **deletes** merged-away loser nodes and **repoints** claims (SPEC-0020 §3); a
+  copy/add-only gate would leave stale duplicates on `main` and defeat the very dedupe the
+  Principal must be able to *see*. `sources/` is append-only, so mirroring never removes
+  ground truth (DATA-2).
 - **`main` never sees working paths** because they are simply never checked out into it — the
   invariant holds by construction, not by cleanup.
 - **Trigger (v1):** promote after each stage drain that may have changed an evergreen path
@@ -118,6 +127,8 @@ more moving parts). Copy-paths is dumb, deterministic, and easy to test.
 | STAGING-7  | must     | App **working-state reads** (the Review queue, candidates) come from **`staging`**; **evergreen reads** (Obsidian/Query) from **`main`** | none-yet | CANON-9; REVIEW-11 |
 | STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | test:staging.test.ts | ORCH-13 |
 | STAGING-9  | should   | A **periodic sweep** re-runs promotion as a backstop (recovers a missed post-drain promotion), mirroring ORCH-15 | none-yet | ORCH-15 |
+| STAGING-10 | must     | **Promotion mirrors deletions**: each promote makes every evergreen path on `main` an *exact mirror* of `staging` (adds, edits, **and removals**), so Connect's merged-away loser nodes and repointed claims (SPEC-0020 §3) are reflected on `main` — a deduped duplicate never lingers. `sources/` is append-only, so mirroring never removes ground truth | none-yet | CANON-1,2; CONNECT-3 |
+| STAGING-11 | must     | The **active evergreen set** is exactly `EVERGREEN_PATHS`, and it **grows with its producers**: `entities/` + `claims/` (+ `outputs/`) join the promoted set once CONNECT/Claims write them — `EVERGREEN_PATHS` is the single source of truth for what reaches `main` | none-yet | CANON-3,5; CONNECT-3 |
 
 ## 7. Sequencing (honest — this is multi-step)
 
@@ -130,8 +141,11 @@ The full conformance is large; this spec is built in slices, each green + shippa
    `entities/` empty on `main`. Retarget Decompose to `staging`.
 3. **Claims + app reads:** retarget Claims to `staging`; point the Review UI's working reads
    at `staging`. (Claims idles until CONNECT.)
-4. **CONNECT (SPEC-0020):** resolution writes evergreen `entities/` on `staging`; the gate
-   promotes them. `main`'s graph lights up. *(Separate spec/mission.)*
+4. **CONNECT (SPEC-0020) + activate derived promotion:** resolution writes evergreen
+   `entities/` (deduped, linked) on `staging`; **add `entities/` + `claims/` to `EVERGREEN_PATHS`**
+   (STAGING-11) and make the gate **deletion-aware** (STAGING-10) so merges/repoints reflect on
+   `main`. `main`'s graph lights up — the first **viewable end-to-end enrich** flow. *(Separate
+   spec/mission.)*
 
 ## 8. Open questions
 
@@ -166,3 +180,11 @@ The full conformance is large; this spec is built in slices, each green + shippa
   STAGING-7 (review reads ARE wired to `staging` in `pipeline.ts` but e2e-verified, not
   unit-tested — DOM/IPC glue, per TEST-9), STAGING-9 (sweep). All existing stage tests stayed
   green unchanged (root-agnostic), confirming the localized blast radius.
+- 2026-06-01 — **deletion-aware promotion (STAGING-10/11).** Closed the gap that the v1
+  copy-only gate (`git checkout staging -- P`) cannot mirror **deletions** — but Connect's
+  dedupe deletes merged-away loser nodes and repoints claims (SPEC-0020 §3), so without
+  mirroring, merged duplicates would linger on `main` and defeat the dedupe. Made the gate an
+  **exact mirror** per evergreen path (adds/edits/removals) and pinned that `EVERGREEN_PATHS`
+  grows with its producers (`entities/`+`claims/`+`outputs/` activate when CONNECT/Claims land).
+  This is the spec lever for the **viewable e2e ingestion→enrich** goal (source → deduped
+  entities → claims → `[[wikilinks]]`, visible on `main` in Obsidian). Impl rides slice 4.
