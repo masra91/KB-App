@@ -29,6 +29,7 @@ import type { Candidate } from './connect';
 import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from './decomposeAgent';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
+import { withOptimisticAdvance, advanceOrCollide, canonicalHead } from './canonicalAdvance';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'decompose');
 const WORK_BRANCH = 'kb/decompose-work';
@@ -166,79 +167,104 @@ export interface DecomposeOneResult {
 }
 
 /**
- * Decompose ONE source. MUST be called serialized via the shared canonical-writer lock so
- * the canonical branch does not move mid-cycle (the final ff-advance must always apply).
+ * Decompose ONE source under optimistic concurrency (SPEC-0014 ORCH-17/18/19). Cognition + the
+ * candidate/audit writes happen OFF the lock, synced to a canonical checkpoint; only the canonical
+ * ff-advance runs under `lock`. Disjoint items (unique candidate ULIDs + per-source audit; ORCH-6)
+ * replay cleanly onto a moved canonical; the same-path case retries against the fresh canonical and,
+ * on exhaustion, sets the source aside (ORCH-19) — never dropped. `lock` defaults to a private mutex
+ * so a standalone call (tests) still serializes its own advance; the stage passes the shared lock.
  */
 export async function decomposeOne(
   root: string,
   sourceRel: string,
   decider: DecomposeDecider,
+  lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
 ): Promise<DecomposeOneResult> {
   root = path.resolve(root);
-  const { wt, branch } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  const rootGit = simpleGit(root);
-  await wtGit.raw('reset', '--hard', branch); // sync to canonical HEAD
+  let result: DecomposeOneResult = { sourceId: path.basename(sourceRel), ok: false, candidateIds: [], setAside: false };
 
-  const sourceDirWt = path.join(wt, sourceRel);
-  const input = await readSourceInput(sourceDirWt);
-  const runId = ulid();
-  const auditPath = path.join(sourceDirWt, 'audit.jsonl');
+  // OFF-lock (ORCH-17): sync the worktree to the canonical checkpoint, run cognition, write the
+  // candidates + audit, and commit on the work branch. Returns true — there is always work to
+  // advance (the candidates+marker on success, or the failed/setaside marker on error).
+  const prepare = async (base: string): Promise<boolean> => {
+    const { wt } = await ensureWorktree(root);
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('reset', '--hard', base); // sync to the captured canonical checkpoint
+    const sourceDirWt = path.join(wt, sourceRel);
+    const input = await readSourceInput(sourceDirWt);
+    result.sourceId = input.sourceId;
+    const runId = ulid();
+    const auditPath = path.join(sourceDirWt, 'audit.jsonl');
+    try {
+      const decision = await decider(input);
+      const model = decision.agent?.model ?? 'default';
 
-  try {
-    const decision = await decider(input);
-    const model = decision.agent?.model ?? 'default';
+      // Mint candidate ULIDs + write candidate files (orchestrator-owned effects; DECOMP-3/5).
+      // Each entity MENTION becomes one CANDIDATE on `staging` (STAGING-5 / CANON-4); we write NO
+      // `entities/` node — resolution into evergreen entities is Connect's job (SPEC-0020).
+      const candidateIds: string[] = [];
+      for (const entity of decision.entities) {
+        const id = ulid();
+        const candidate: Candidate = {
+          id,
+          sourceId: input.sourceId,
+          kind: entity.kind,
+          name: entity.name,
+          confidence: entity.confidence,
+          mentions: entity.mentions,
+        };
+        const dest = path.join(wt, candidateFileRel(id));
+        await fs.mkdir(path.dirname(dest), { recursive: true });
+        await fs.writeFile(dest, renderCandidate(candidate), 'utf8');
+        candidateIds.push(id);
+      }
 
-    // Mint candidate ULIDs + write candidate files (orchestrator-owned effects; DECOMP-3/5).
-    // Each entity MENTION becomes one CANDIDATE on `staging` (STAGING-5 / CANON-4); we write NO
-    // `entities/` node — resolution into evergreen entities is Connect's job (SPEC-0020). The
-    // candidate's `sourceId` carries provenance back to its source (DECOMP-5; DATA-5).
-    const candidateIds: string[] = [];
-    for (const entity of decision.entities) {
-      const id = ulid();
-      const candidate: Candidate = {
-        id,
-        sourceId: input.sourceId,
-        kind: entity.kind,
-        name: entity.name,
-        confidence: entity.confidence,
-        mentions: entity.mentions,
-      };
-      const dest = path.join(wt, candidateFileRel(id));
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(dest, renderCandidate(candidate), 'utf8');
-      candidateIds.push(id);
+      let audit = auditLine({ runId, sourceId: input.sourceId, model, event: 'start' });
+      for (const sig of decision.signals ?? []) {
+        audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
+      }
+      audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'decomposed', candidates: candidateIds.length });
+      await fs.appendFile(auditPath, audit, 'utf8');
+
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`decompose: ${candidateIds.length} candidates from ${input.sourceId}`);
+      result = { sourceId: input.sourceId, ok: true, candidateIds, setAside: false };
+      return true;
+    } catch (err) {
+      // DECOMP-6 / ORCH-12: never lose the source. Record the failed attempt durably; set aside
+      // after K so it can't head-of-line-block. No candidates are written on failure.
+      const error = err instanceof Error ? err.message : String(err);
+      const priorFailures = (await readDecomposeState(sourceDirWt)).failures;
+      const attempt = priorFailures + 1;
+      const setAside = attempt >= maxAttempts;
+      let audit = auditLine({ runId, sourceId: input.sourceId, event: 'failed', attempt, error });
+      if (setAside) audit += auditLine({ runId, sourceId: input.sourceId, event: 'setaside', attempts: attempt });
+      await fs.appendFile(auditPath, audit, 'utf8');
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`decompose: failed ${input.sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
+      result = { sourceId: input.sourceId, ok: false, candidateIds: [], setAside };
+      return true;
     }
+  };
 
-    // Append audit (envelope-wrapped): start, every signal (audit-only; DECOMP-9), terminal
-    // `decomposed` marker. Signals NEVER touch candidates or the source raw (DECOMP-8/9).
-    let audit = auditLine({ runId, sourceId: input.sourceId, model, event: 'start' });
-    for (const sig of decision.signals ?? []) {
-      audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
-    }
-    audit += auditLine({ runId, sourceId: input.sourceId, model, event: 'decomposed', candidates: candidateIds.length });
-    await fs.appendFile(auditPath, audit, 'utf8');
+  // Same-path collision exhaustion (ORCH-19) — set the source aside so it can't head-of-line-block.
+  // Rare for Decompose (disjoint candidate paths + per-source audit); never drop the item.
+  const onExhausted = async (): Promise<void> => {
+    const { wt } = await ensureWorktree(root);
+    const wtGit = simpleGit(wt);
+    const base = await canonicalHead(root);
+    await wtGit.raw('reset', '--hard', base);
+    const auditPath = path.join(wt, sourceRel, 'audit.jsonl');
+    await fs.appendFile(auditPath, auditLine({ runId: ulid(), sourceId: result.sourceId, event: 'setaside', reason: 'collision-exhausted' }), 'utf8');
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
+    await lock.run(() => advanceOrCollide(root, WORK_BRANCH, base));
+    result = { ...result, ok: false, setAside: true };
+  };
 
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`decompose: ${candidateIds.length} candidates from ${input.sourceId}`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
-    return { sourceId: input.sourceId, ok: true, candidateIds, setAside: false };
-  } catch (err) {
-    // DECOMP-6 / ORCH-12: never lose the source. Record the failed attempt durably; set aside
-    // after K so it can't head-of-line-block. No candidates are written on failure.
-    const error = err instanceof Error ? err.message : String(err);
-    const priorFailures = (await readDecomposeState(sourceDirWt)).failures;
-    const attempt = priorFailures + 1;
-    const setAside = attempt >= maxAttempts;
-    let audit = auditLine({ runId, sourceId: input.sourceId, event: 'failed', attempt, error });
-    if (setAside) audit += auditLine({ runId, sourceId: input.sourceId, event: 'setaside', attempts: attempt });
-    await fs.appendFile(auditPath, audit, 'utf8');
-    await wtGit.raw('add', '-A');
-    await wtGit.commit(`decompose: failed ${input.sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-    await rootGit.raw('merge', '--ff-only', WORK_BRANCH);
-    return { sourceId: input.sourceId, ok: false, candidateIds: [], setAside };
-  }
+  await withOptimisticAdvance({ root, lock, workBranch: WORK_BRANCH }, prepare, onExhausted);
+  return result;
 }
 
 /**
@@ -310,7 +336,9 @@ export class DecomposeStage {
     while (queue.length > 0) {
       const sourceRel = queue[0];
       try {
-        await this.lock.run(() => decomposeOne(this.root, sourceRel, this.decider, this.maxAttempts));
+        // ORCH-17/18: decomposeOne prepares OFF the lock and advances UNDER it (passing the shared
+        // lock). The drain stays serial within Decompose (cap=1); cross-stage cognition overlaps.
+        await decomposeOne(this.root, sourceRel, this.decider, this.lock, this.maxAttempts);
       } catch {
         // Unexpected (decomposeOne handles its own failures) — stop this pass; a later
         // poke/sweep retries rather than spinning.
