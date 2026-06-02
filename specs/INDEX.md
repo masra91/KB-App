@@ -35,6 +35,8 @@ and a unique `key` here.
 | SPEC-0020 | CONNECT | Connect & Expand (Enrich v3)                | feature | draft | `features/` |
 | SPEC-0021 | STAGING | Staging Branch & Promotion Gate             | architecture | draft | `architecture/` |
 | SPEC-0022 | REPLAY  | Replay & Reprocessing (full rebuild v1)     | feature | draft | `features/` |
+| SPEC-0023 | JOBS    | Autonomous Jobs & Scheduler                 | architecture | draft | `architecture/` |
+| SPEC-0024 | REFLECT | Reflect & Rumination (self-maintenance v1)  | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -54,7 +56,7 @@ assigned at creation time.
 | ASK        | Ask / Recall                     | feature | Query     | NL → grounded report |
 | EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
-| REFLECT    | Reflect (self-maintenance)       | feature | Reflect   | stale/emergent/coherence |
+| ~~REFLECT~~ | _written → SPEC-0024 (key REFLECT)_ | feature | Reflect | Reflect & Rumination — runs on the Autonomous Jobs engine (SPEC-0023, key JOBS) |
 | AUDIT      | Audit & Activity                 | feature | Audit     | inspect lineage & activity |
 | ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
 | PANEL      | Control Panel                    | feature | _x-cut_   | agents/sources/tasks/settings |

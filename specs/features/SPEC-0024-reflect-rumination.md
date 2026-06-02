@@ -1,0 +1,161 @@
+---
+spec: SPEC-0024
+key: REFLECT
+title: Reflect & Rumination (self-maintenance v1)
+type: feature
+status: draft
+owners: [KB-Lead, Principal]
+created: 2026-06-01
+updated: 2026-06-01
+related: [SPEC-0004, SPEC-0006, SPEC-0014, SPEC-0016, SPEC-0018, SPEC-0020, SPEC-0021, SPEC-0023]
+stage: Reflect
+supersedes: null
+---
+
+# Reflect & Rumination (self-maintenance v1)
+
+> The KB's **rumination** pass: a scheduled, bounded agent that wakes semi-regularly, looks
+> at a slice of the KB, and catches what the event-driven pipeline missed or what has gone
+> stale — **missed entities/claims, lost connections, emergent topics, stale nodes to retire,
+> low-traction topics to consolidate.** It needn't change anything; as the KB grows it is
+> where missed/emergent structure gets found and cruft gets pruned. The first job on the
+> Autonomous Jobs engine (SPEC-0023). **Additive, high-confidence findings apply
+> autonomously; anything destructive or low-confidence routes to Review.** SPEC-0004 Stage 6,
+> LIFE-8.
+
+## 1. Intent (the why / JTBD)
+
+The Enrich pipeline (Decompose → Connect → Claims) is **per-source and forward-only**: it
+does its best on each capture as it arrives. But a second brain's value compounds *across*
+items over time — and the forward pass inevitably leaves gaps: an entity two sources both
+implied but neither named cleanly; a connection that only becomes obvious once a third
+source lands; a topic that quietly emerged across a dozen notes; a node that was hot last
+quarter and is now dead weight. Several specs already **defer to Reflect** for exactly this
+(SPEC-0020 recooks/re-clustering CONNECT-19; SPEC-0016 cross-source claim dedup CLAIMS-17;
+SPEC-0015 vocabulary curation).
+
+The job the Principal hires this for: *"keep noticing what I (and the first pass) missed, and
+quietly tidy what's gone stale — without me curating, and without surprising me with risky
+deletions."* Think of it as a **database cleanup job**: small, frequent, low-drama, fully
+audited — **not** a major event. It runs **multiple times a day on a schedule** (later,
+event-driven); most runs find little; occasionally one catches something real.
+
+## 2. Scope
+
+**In scope (v1):**
+- A **Reflect job** on the SPEC-0023 engine: scheduled, bounded, single-flight, **concurrent**
+  (optimistic, ORCH-17/18), richly audited, journal-backed.
+- **Detection** of: missed entities/claims · missing/lost connections · emergent
+  topics/themes · stale derived **metadata** (tags/labels/classifications) · low-traction topics.
+- **Additive, high-confidence** repairs applied **autonomously** (audited): add a missed
+  claim, restore a dropped link, group an emergent topic.
+- **Metadata hygiene** — refresh/repair stale tags, labels, classifications (additive-ish, low-stakes).
+- **Rare consolidation** — Reflect may **propose** entity merge/consolidation as **Review**
+  items, executed through **Connect's merge machinery** on approval.
+- **Disposition by posture** — default **Guarded** routes destructive/low-confidence to Review
+  (SPEC-0018); the Principal may opt into **Autonomous** (agent judgment governs all).
+
+**Out of scope (for now):**
+- **Full-KB scans / global recooks** — a run never loads the whole KB (context blow-up);
+  coverage is achieved over many bounded runs (§3.1). Whole-graph re-clustering is later.
+- **Routine auto-deletion** — entity retire/merge/delete is never *routine*: rare,
+  Review-gated curation under Guarded; only the opt-in **Autonomous** posture lets the agent
+  judge destructive dispositions itself (the KB biases to **growth**, REFLECT-13).
+- **New secondary sources** (re-fetching/researching) — that's Enrich/Research, not Reflect.
+- **Event-driven triggering** — inherited from SPEC-0023 (schedule + manual only in v1).
+
+## 3. How a rumination pass works
+
+### 3.1 Working-set selection (never the whole KB)
+
+Each run, the agent **adaptively picks** a **bounded working set** — leaning into churn when
+activity is high, drifting to aged areas when quiet — recorded in the job journal (JOBS-7) so
+coverage rotates over time:
+
+- **Recency / churn** — recently added or changed entities/sources, where new structure and
+  missed connections are most likely to have emerged.
+- **Aged sampling** — a topic/area/cluster **not visited in a while** (round-robin or
+  randomized via the journal cursor), so every corner of the KB is eventually revisited
+  **without ever scanning all of it at once**.
+
+The journal records what was visited and when; the next run reads it to choose the next slice
+and to avoid re-chewing the same ground.
+
+### 3.2 What it looks for
+
+Over its working set, the agent looks for: entities/claims the forward pass **missed**;
+**connections** that should exist but don't (or were lost on a merge); **emergent topics**
+(recurring themes with no node yet); **stale/inactive** nodes (no new claims/links/activity
+over a long window); **low-traction** topics (started but never developed, candidates to
+consolidate into a neighbor).
+
+### 3.3 Disposition (the autonomy split)
+
+| Finding | v1 disposition |
+| --- | --- |
+| Add a missed claim / restore a link / group an emergent topic (**additive, high-confidence**) | **Auto-apply** on `staging`, audited (AUTO-2/3) |
+| Refresh / repair a stale **tag / label / classification** (metadata, additive-ish) | **Auto-apply**, audited |
+| Retire / merge / consolidate / delete a node (**destructive**) | **Review** (approve-first) |
+| Anything **low-confidence / high-risk** | **Review** (approve-first) |
+
+The table above is the **default "Guarded" posture** (REFLECT-12); the Principal may opt a
+Reflect job into **"Autonomous"**, where the agent decides every disposition (including
+destructive) by its own judgment. The KB **biases to growth** (REFLECT-13): staleness is
+mostly **metadata hygiene**, and entity deletion/merge is rare, thoughtful curation — not
+routine expiry. Approved merges reuse **Connect's merge machinery** (cluster → repoint claims
+→ delete loser), deletions reaching `main` via deletion-aware promotion (STAGING-10). A run
+that finds nothing actionable records an audit event and exits.
+
+## 4. Requirements
+
+| ID         | Priority | Statement (short)                                                                  | Verify   | Traces |
+| ---------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
+| REFLECT-1  | must     | Reflect is an **autonomous job** on the SPEC-0023 engine — scheduled, bounded, single-flight, **concurrent** (optimistic, ORCH-17/18), richly audited — **not** an interactive stage | none-yet | JOBS-1,3,5; LIFE-8 |
+| REFLECT-2  | must     | Each run operates on a **bounded working set, never the whole KB** — the agent **adaptively** chooses, per run via the job journal, between **recency/churn** and **aged sampling** of an under-visited area (lean into churn when busy, drift to aged areas when quiet); coverage accrues over many runs | none-yet | JOBS-4,7; PRIN-5; VISION-8 |
+| REFLECT-3  | must     | Reflect detects at minimum: **missed entities/claims**, **missing/lost connections**, **emergent topics** (by the **agent's judgment** over the working set — no embeddings/preprocessing), **stale derived metadata** (tags/labels/classifications), and **low-traction topics** | none-yet | LIFE-8; PRIN-7,22 |
+| REFLECT-4  | must     | **Additive, high-confidence** findings (missed claim, restored link, emergent grouping) are **applied autonomously and audited** | none-yet | AUTO-2,3; LIFE-3 |
+| REFLECT-5  | must     | Under the **default "Guarded" posture**, **destructive** findings (retire/merge/consolidate/delete) and **all low-confidence/high-risk** findings **route to the Review queue** — never auto-applied; approved consolidation/merge **reuses Connect's merge machinery** | none-yet | AUTO-1,3,10; SPEC-0018; CONNECT |
+| REFLECT-6  | must     | A run **may make no changes** — finding nothing actionable is a valid, expected outcome (maintenance, not production) | none-yet | PRIN-7 |
+| REFLECT-7  | must     | Reflect writes on `staging`; changes publish via the gate, and retire/consolidate **deletions propagate to `main`** (deletion-aware promotion) | none-yet | STAGING-10; CANON-1,3 |
+| REFLECT-8  | must     | Every run records its findings + reasoning in the **audit log** (the *why*) and updates the **job journal** (visited areas, cursor, deferrals) for the next run | none-yet | JOBS-7,8; AUTO-8 |
+| REFLECT-9  | must     | Review items Reflect raises are **bounded decisions** (yes/no or small choice sets) with **provenance** to the entities/sources involved, consistent with SPEC-0018 | none-yet | REVIEW-?; AUTO-10 |
+| REFLECT-10 | should   | A manual **"Ruminate now"** trigger runs one bounded pass on demand (test/inspection affordance) | none-yet | JOBS-11 |
+| REFLECT-11 | should   | Reflect is the **convergence point** for deferred cross-KB concerns — Connect recooks/re-clustering (CONNECT-19), cross-source claim dedup (CLAIMS-17), vocabulary/kind curation — pulled in over later versions | none-yet | CONNECT-19; CLAIMS-17; DECOMP |
+| REFLECT-12 | must     | Reflect's autonomy is a **configurable posture** with a **safe default** (JOBS-15 / AUTO-12): **Guarded** (REFLECT-5) by default; the Principal may **opt in** to **Autonomous**, where the agent's judgment governs all dispositions, incl. destructive | none-yet | JOBS-15; AUTO-12 |
+| REFLECT-13 | must     | **The KB biases toward growth, not shrink**: staleness work targets **derived metadata** (tags/labels/classifications), not entity deletion; **retiring/merging/deleting entities is a rare, Review-gated act of curation**, never routine expiry | none-yet | PRIN-1; DATA-1,2 |
+
+## 5. Open questions
+
+- [x] **Confidence/risk rubric** — RESOLVED: a **configurable posture** (REFLECT-12) — Guarded
+      default (destructive→Review, additive auto above confidence), Autonomous opt-in. The
+      additive confidence *cutoff* stays **agent-judged** in v1 (no fixed numeric threshold).
+- [x] **Emergent-topic detection** — RESOLVED: **lean on the LLM** over the working set; cheap
+      existing signals may *inform* selection, but **no embeddings / no preprocessing**.
+- [x] **Consolidation semantics** — RESOLVED: reuse **Connect's merge machinery** (repoint
+      claims, delete loser) behind a **Review** gate (REFLECT-5).
+- [ ] **"Stale" signal thresholds** — prefilter+confirm is settled (mostly metadata, not
+      deletion); the concrete signals/windows (age since last claim/link, inbound count) still
+      need pinning for the impl mission.
+- [ ] **Working-set size / cadence defaults** — slice size + runs/day defaults before the
+      Principal tunes them.
+
+## 6. Changelog
+
+- 2026-06-01 — created (draft). First job on the Autonomous Jobs engine (SPEC-0023):
+  scheduled **rumination** that wakes semi-regularly, takes a **bounded** working set
+  (recency/churn or aged sampling via the job journal — **never a full-KB scan**), and looks
+  for missed entities/claims, lost connections, emergent topics, stale nodes, and low-traction
+  topics. **Additive high-confidence findings auto-apply (audited); destructive or
+  low-confidence findings route to Review (SPEC-0018)**; deletions reach `main` via the
+  deletion-aware gate (STAGING-10). Framed as a **DB-cleanup job, not a major event**.
+  Named convergence point for deferred Reflect concerns (CONNECT-19, CLAIMS-17). Forks
+  resolved with the Principal: **additive-auto / destructive→Review**; **no full scans**;
+  **rich per-run journaling for cross-run awareness**.
+- 2026-06-01 — **design walkthrough resolutions.** Autonomy is a **configurable posture**
+  (REFLECT-12): Guarded default (destructive→Review) / Autonomous opt-in. **Grow-not-shrink**
+  pinned (REFLECT-13): staleness = **metadata hygiene** (tags/labels/classifications); entity
+  delete/merge is rare, Review-gated curation, never routine expiry. v1 scope adds **rare
+  consolidation via Review** reusing **Connect's merge machinery**. Emergent topics: **lean on
+  the LLM**, no embeddings/preprocessing. Working-set: **adaptive, journal-driven** (REFLECT-2).
+  Runs **concurrently** (REFLECT-1 → ORCH-17/18), not idle-deferred. Still open: concrete
+  "stale" signal thresholds; working-set size/cadence defaults.
