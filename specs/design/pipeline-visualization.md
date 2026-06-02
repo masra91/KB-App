@@ -1,0 +1,247 @@
+---
+design: DESIGN-VIZ
+implements: SPEC-0032
+title: Pipeline Visualization — Visual Design ("The Line")
+type: design
+status: draft
+owners: [KB-Design-Lead, KB-Lead, Principal]
+created: 2026-06-02
+updated: 2026-06-02
+related: [SPEC-0032, SPEC-0033, SPEC-0030, SPEC-0017, SPEC-0031]
+gates:
+  ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
+  qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
+stage: Cross-cutting
+---
+
+# Pipeline Visualization — Visual Design ("The Line")
+
+> The design language for the SPEC-0032 surface. Authored per SPEC-0033: it documents
+> **structure · color · theme · typography · motion · visual language** and the **key user
+> flows** it covers, then passes the two gates before check-in. Implementation is downstream
+> (a dev builds against this); this is the pixels and the rationale, not the code.
+
+## 1. The concept — a refinery line, not a dashboard
+
+The pipeline is a **machine that refines raw capture into structured knowledge** (Capture →
+Archive → Decompose → Connect → Claims → Promote). The design makes that machine literal: a
+**precision conveyor line** seen in cross-section, like the schematic of a working instrument.
+
+A captured source is a **billet** — a piece of worked material that travels left-to-right along
+the line, getting cut, linked, and stamped at each station, and emerges as **promoted** (settled,
+archival) knowledge. You watch your billet ride the line. The funnel is the line seen end-on: the
+stream narrows as candidates dedup into entities.
+
+This earns the app a recognizable identity: **an engineered instrument panel**, warm where work
+is happening and cool where it rests. Idle is calm graphite; active work glows **ember**. Your eye
+goes straight to the heat.
+
+### What this is deliberately NOT (anti-generic-AI — GATE 1 / VIZ-8 / DESIGN-3)
+
+| Generic AI-app tell | What we do instead |
+| --- | --- |
+| Indigo/violet 500 + purple gradient | Cool **graphite** field; one warm **ember** signal for live work; **verdigris** for settled |
+| Inter / generic geometric sans everywhere | **Condensed industrial grotesque** for station signage (uppercase, tracked); **monospaced tabular** for every number |
+| Glass cards, soft drop-shadows, a rounded card grid | One **horizontal spine** with stations; flat ink, thin structural rules, registration ticks |
+| Chat bubbles / assistant avatar | No conversation metaphor — this is a machine readout |
+| Shimmer, floating particles, parallax, motion-for-its-own-sake | **One** signature motion (stepper *index*) + **one** ambient (ember breathe) + odometer counts. Nothing decorative |
+| Counts that snap 0 → 47 | **Odometer roll** on tabular figures; conversion shown as billets **merging**, not a number jump |
+
+## 2. Structure & layout
+
+One organizing element — **the Line** — replaces the stacked `<h2>` lists of today's Status view.
+It reads at a glance and is the same structure under both lenses (VIZ-5).
+
+```
+┌─ PIPELINE ───────────────────────────────────────────────────  ◐ RUNNING ──┐
+│                                                                              │
+│   CAPTURE ─────● ARCHIVE ─────● DECOMPOSE ════▣ CONNECT ─────○ CLAIMS ───○ PROMOTE
+│      │            │              │ (ember pulse)   │            │           │
+│   ▓▓▓▓▓        ▓▓▓▓           ▓▓▓░░          ▓▓░░░       ▓░░░░      ░░░░    ← gauge-rail
+│    10           10             8              7            7         5      ← tabular counts
+│                              ↓ −2 deduped                                    (conversion delta)
+│                                                                              │
+│   IN FLIGHT ──────────────────────────────────────────────────────────────│
+│   ▸ ada-lovelace.md      [██████▣·····]  Decompose ⟳   12s on Copilot       │
+│   ▸ turing-1936.md       [███▣········]  Archive  ✓ → Decompose             │
+│   ▸ kb-notes.md          [█████████▣··]  Claims   ⟳                          │
+│                                                                              │
+│   ⟂ SET ASIDE — needs attention (1)                                          │
+│   ▸ napier-bones.md      Claims ✕  set aside after 3 failed attempts         │
+│                                            [ Retry ]  [ Dismiss ]            │
+└──────────────────────────────────────────────────────────────────────────────┘
+        per-item ◉──○ per-stage          (pivot toggle — same data, shifted weight)
+```
+
+- **The Line (top)** — six stations on a single horizontal spine. Each station node shows its
+  state (idle/running/blocked/error) and, beneath, a **gauge-rail**: a short vertical bar of
+  current volume plus the **conversion delta** to the next station (the −2 "deduped" callout).
+  This *is* the funnel, integrated into the line rather than a separate chart (VIZ-3, VIZ-4).
+- **In-flight (middle)** — each live source is a **carriage**: a compact stepper across the six
+  stations, current step lit + animated, completed filled, with its current Copilot dwell time.
+  This is the "pizza tracker" (VIZ-2). Click a carriage → expand to its full per-hop trace
+  (OBS-16 `spansForItem`).
+- **Set-aside siding (below)** — errored/poison items pulled **off the line** onto a siding,
+  rust-colored and prominent, each carrying **Retry / Dismiss** (VIZ-7, OBS-17).
+- **Pivot toggle (footer)** — flips emphasis between **per-item** (carriages foreground, stations
+  dim to context) and **per-stage** (station gauges foreground, carriages collapse to counts).
+  Same Line, same data — only where the visual weight sits (VIZ-5).
+
+**Responsive:** below a narrow breakpoint the horizontal Line rotates to a **vertical** spine
+(stations top-to-bottom), carriages become rows. Hierarchy is preserved; nothing is hidden.
+
+**Default landing lens — `per-stage`.** Rationale: the most frequent job is "is it alive / where's
+the bottleneck," answered at a glance by the Line + gauges; "follow my capture" is the per-item
+moment you opt into by watching a carriage or pivoting. (Resolves SPEC-0032 §9 "primary lens".)
+
+## 3. Color & theme
+
+Semantic, not decorative. State maps to temperature: **work is warm, rest is cool.** Tokens are
+named by role so dark/light and future surfaces stay coherent (DESIGN-7).
+
+| Role | Token | Dark (default) | Light ("draughting paper") | Meaning |
+| --- | --- | --- | --- | --- |
+| Field | `--viz-field` | `#15171A` warm graphite | `#F4F1EA` warm paper | The line's ground |
+| Structure | `--viz-rule` | `#2B2F35` | `#CFC9BC` | Spine, ticks, registration marks |
+| Idle/at-rest | `--viz-idle` | `#6B7178` slate | `#8A8473` | Stations with nothing moving |
+| **Active (work)** | `--viz-ember` | `#E8743B` ember | `#C2541F` | The signature heat — running stage / lit step |
+| Settled/promoted | `--viz-patina` | `#5FA38C` verdigris | `#3E7D67` | Completed / promoted material |
+| Blocked/waiting | `--viz-brass` | `#C7A24A` brass | `#9A7B2E` | Queued, waiting on lock/sweep |
+| Error/set-aside | `--viz-oxide` | `#D2452F` oxide red | `#B02A18` | Set-aside, failed |
+| Text primary | `--viz-ink` | `#E6E3DC` | `#1C1B18` | Labels, body |
+| Text muted | `--viz-ink-muted` | `#9298A0` | `#6A6557` | Secondary, units |
+
+- **Contrast:** ember on graphite and oxide on graphite both clear WCAG AA for the sizes used;
+  state is **never carried by color alone** — each state also has a glyph (`◐ ▣ ○ ✓ ⟳ ✕`) and a
+  fill pattern, so it survives color-blindness and grayscale (accessibility, DESIGN-4 adjacent).
+- **Theme** follows the app shell's existing dark/light setting (SPEC-0017); both palettes above
+  are first-class, not an afterthought.
+
+## 4. Typography
+
+| Role | Face (role, not a mandate) | Treatment |
+| --- | --- | --- |
+| Station signage | Condensed industrial grotesque | **UPPERCASE**, letter-spaced `+0.08em` — reads like stencilled station labels |
+| Numerics (all counts, latency, throughput) | **Monospaced, tabular figures** | Fixed-width so odometer rolls and live updates never reflow the layout |
+| Body / descriptions | Neutral humanist sans | Sentence case, generous line-height |
+| Reason / status notes | Same body, muted | e.g. "set aside after 3 failed attempts" |
+
+Type scale (4-step, restrained): `12 / 14 / 18 / 28`px. The headline state badge (`RUNNING`) is
+the only 28px element. **Tabular numerics are non-negotiable** — they are why animated counts feel
+mechanical and precise rather than jittery.
+
+## 5. Motion
+
+The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs, nothing else:
+
+1. **Index** (signature) — when an item advances a station, its carriage step *indexes* forward:
+   a quick weighted settle, `transform: translateX` over **220ms, `cubic-bezier(.2,.8,.2,1)`**
+   (ease-out with a hint of overshoot, like a stepper motor seating). This is the "it moved" beat.
+2. **Ember breathe** (ambient) — the single active station/step pulses its ember glow,
+   **opacity 0.6↔1.0 over 1.8s**, `ease-in-out`, infinite. Only the *currently working* step
+   breathes; everything else is still. When the line goes idle, the ember **cools** to `--viz-idle`
+   over 600ms and the breathing stops — that cooling *is* the "work finished, at rest" signal.
+3. **Odometer** — counts and conversion deltas roll digit-by-digit to their new value
+   (**400ms, ease-out**) on tabular figures; the gauge-rail bar tweens height in the same window.
+   Conversion (10→7) additionally **merges** the absorbed billets into their neighbor before the
+   count settles — dedup made visible, not a silent decrement.
+
+- **Calm idle:** at rest the Line is static graphite with one slow "ready" tick on the spine
+  (a 2px mark fading 4s). No flashing, no looping motion competing for attention.
+- **Reduced-motion (`prefers-reduced-motion`):** every transition becomes an **instant state
+  change** — index → snap, breathe → static ember fill, odometer → snap to value. **Full
+  functional parity**; nothing is conveyed by motion alone (state also has glyph + color + fill).
+- **Performance (VIZ-9):** animate **only `transform`/`opacity`** (no layout-triggering props);
+  pushed updates are **coalesced into one rAF frame** and debounced (~120ms) so a burst of stage
+  transitions paints once; carriages beyond **N=12** visible collapse into an aggregated
+  "+K more in flight" row (virtualize) so motion stays at 60fps with many items.
+  (Resolves SPEC-0032 §9 "scale" and "motion budget".)
+
+## 6. Component anatomy
+
+- **Station node** — `◐/▣/○/✓/✕` glyph + UPPERCASE signage + gauge-rail. State = glyph + color +
+  fill. The one *running* station embers + breathes.
+- **Gauge-rail** — vertical fill bar (volume) with a conversion-delta caption to the next station;
+  the slowest station's rail tints toward oxide and shows its `p95` Copilot latency (VIZ-4, the
+  spatial "where time goes").
+- **Carriage** — `▸ name` + a six-cell stepper `[██████▣·····]` + current dwell ("12s on Copilot").
+  Filled = done (patina), `▣` lit = current (ember), `·` = pending. Expandable to the per-hop
+  trace.
+- **Siding item** — oxide badge + `stage · name` + reason + **Retry** / **Dismiss**. Single-flight
+  (buttons disable while acting); Dismiss confirms first. Reuses the existing OBS-17
+  `kb:pipelineControl` contract — no new mutation surface.
+
+## 7. Key user flows covered (GATE 2 — KB-Quality-Driver)
+
+Every flow in SPEC-0032 §7, mapped to the design:
+
+| # | Flow (SPEC-0032 §7) | How the design serves it |
+| --- | --- | --- |
+| 1 | Open Status → see funnel (10 captured → 7 entities → 22 claims → promoted) + in-flight trackers | The Line lands in **per-stage** lens: station counts + gauge-rail conversion deltas = the funnel; in-flight carriages listed below |
+| 2 | Capture a note → its tracker appears and **advances step-by-step**, active stage pulsing | A new carriage enters at CAPTURE; **indexes** station-by-station; the active step **embers + breathes** |
+| 3 | A source **set aside** → error step red with **Retry / Dismiss** | Carriage moves to the **siding** under the errored station; oxide-colored; Retry/Dismiss present (OBS-17) |
+| 4 | **Pivot to per-stage** → Connect 22/min, p95 14s | Pivot toggle foregrounds station gauges: throughput/min + Copilot p95 per station |
+
+Plus the cross-cutting requirements: real-time/event-driven + animated (VIZ-1), light purposeful
+motion with calm idle (VIZ-6), smooth at scale (VIZ-9), and the distinct identity (VIZ-8).
+
+## 8. Requirements traceability
+
+| Req | Where served |
+| --- | --- |
+| VIZ-1 real-time + animated, no "0→sudden" jank | §5 odometer + event-coalesced rAF; §10 push channel |
+| VIZ-2 per-item "pizza tracker" stepper | §2 carriage, §6 |
+| VIZ-3 funnel + conversion | §2 gauge-rail conversion deltas |
+| VIZ-4 per-stage bars + Copilot latency | §6 gauge-rail, slowest-station tint + p95 |
+| VIZ-5 pivot per-item ↔ per-stage | §2 pivot toggle (one structure, two weightings) |
+| VIZ-6 purposeful motion, calm idle | §5 (3 verbs; ember cools at idle) |
+| VIZ-7 set-aside prominent + Retry/Dismiss | §2 siding, §6 siding item |
+| VIZ-8 distinct identity, not generic AI | §1 concept + anti-tell table |
+| VIZ-9 smooth/performant | §5 transform/opacity-only, coalesce, virtualize >12 |
+| DESIGN-2 authored: structure/color/type/motion/language | §§2–6 |
+| DESIGN-5 checked in as a living design spec | this file (`specs/design/`) |
+
+## 9. Data dependencies (what the implementer needs — NOT yet in the OBS view-model)
+
+The design presents over SPEC-0030's `PipelineStatusView` + `PerfIndex`, but two inputs the design
+requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (these gate
+*implementation*, not this design):
+
+1. **In-flight item roster with current stage** — carriages (VIZ-2) need an enumerated list of
+   live sources and each one's current station. Today the model has a single `currentItem` per
+   stage + queue depths only. Needs either an added `inFlight: {itemId, name, stage, sinceTs}[]`
+   on the view-model, or derivation from open `stage.run` spans / the jobs table.
+2. **Funnel conversion counts** — captured → candidates → deduped entities → claims → promoted as
+   **cumulative** counts (VIZ-3). Today there's per-stage `queueDepth` + perf `throughput`, but no
+   cumulative conversion. Needs a counts source (likely from the activity/status index).
+3. **Event push channel (VIZ-1)** — current view polls every 2500ms. Smooth motion wants pushed
+   stage transitions (SPEC-0032 §4). **Graceful degradation:** absent push, the design still works
+   — odometer/index interpolate between polls; push just removes the residual latency.
+   (Resolves SPEC-0032 §9 "push mechanism": prefer a dedicated IPC event channel; poll is the
+   fallback, not a blocker.)
+
+## 10. Out of scope
+
+- The knowledge-graph view (Obsidian / VAULT, SPEC-0031) — VIZ is the **pipeline** tracker.
+- Historical replay of past runs (Activity, SPEC-0029) — VIZ is **now**.
+- The full cross-surface design system — this is the **first** surface; a shared system emerges
+  from it over time (DESIGN-7).
+
+## 11. Decisions (rationale → `decisions` topic per role)
+
+- **Primary lens = per-stage** (§2) — at-a-glance health is the more frequent JTBD.
+- **One signature motion (index) + one ambient (breathe)** — distinctiveness without
+  motion-for-its-own-sake; survives reduced-motion.
+- **Ember-for-work / cool-for-rest temperature mapping** — the core of the "alive" feeling and the
+  anti-generic-AI identity; warmth, not purple, signals activity.
+- **Funnel integrated into the Line as gauge-rails** rather than a separate chart — keeps one
+  organizing structure and makes conversion spatial.
+
+## 12. Changelog
+
+- 2026-06-02 — created (draft). Visual design for SPEC-0032 Pipeline Visualization: **"The Line"** —
+  a refinery-conveyor instrument panel (stations + carriages + gauge-rail funnel + set-aside
+  siding), ember-for-work color semantics, condensed signage + tabular numerics, a three-verb
+  motion vocabulary (index / breathe / odometer) with full reduced-motion parity, and the
+  anti-generic-AI identity. Flags two OBS data dependencies (in-flight roster, conversion counts) +
+  the event-push channel for the implementer. Pending GATE 1 (KB-AI-Detector) + GATE 2 (KB-QD).
