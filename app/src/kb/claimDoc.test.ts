@@ -1,6 +1,6 @@
 // Claim file rendering + the entity node's generated claims block (SPEC-0016 CLAIMS-6/9/11).
 import { describe, it, expect } from 'vitest';
-import { renderClaimMd, transformedByLabel, renderClaimsBlock, applyClaimsBlock, stripClaimsBlock, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END } from './claimDoc';
+import { renderClaimMd, transformedByLabel, renderClaimsBlock, applyClaimsBlock, stripClaimsBlock, sourceLink, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END } from './claimDoc';
 import type { ClaimDecision } from './claims';
 
 const claim: ClaimDecision = { statement: 'Owns the Q3 budget.', status: 'interpretation', confidence: 0.7, mentions: ['Steve owns the Q3 budget'] };
@@ -21,7 +21,9 @@ describe('renderClaimMd (CLAIMS-6, CLAIMS-5)', () => {
     expect(md).toContain('derivedFrom: ["sources/2026/05/30/01JSRC"]'); // CLAIMS-5 whole source
     expect(md).toContain('mentions: ["Steve owns the Q3 budget"]');
     expect(md).toContain('transformedBy: claims · copilot (gpt-x)');
-    expect(md.trimEnd().endsWith('Owns the Q3 budget.')).toBe(true); // statement is the body
+    expect(md).toContain('Owns the Q3 budget.'); // statement is the body
+    // VAULT-13: a navigable source citation in the claim body (click-through, not just metadata)
+    expect(md).toContain('Source: [[sources/2026/05/30/01JSRC/source.md|2026-05-30]]');
   });
 
   it('emits relatesTo only when present (CLAIMS-10 soft hint)', () => {
@@ -47,6 +49,27 @@ describe('renderClaimsBlock (CLAIMS-9)', () => {
   });
   it('uses a placeholder for an entity with zero claims (idempotent re-runs)', () => {
     expect(renderClaimsBlock([])).toContain('_No claims derived yet._');
+  });
+});
+
+describe('navigable source link (VAULT-13)', () => {
+  it('renders [[<dir>/source.md|<date>]] with the capture date as the display label', () => {
+    expect(sourceLink('sources/2026/05/30/01JSRC')).toBe('[[sources/2026/05/30/01JSRC/source.md|2026-05-30]]');
+  });
+  it('falls back to the source-dir id when the path is not date-sharded, and is empty for no source', () => {
+    expect(sourceLink('sources/flat/abc123')).toBe('[[sources/flat/abc123/source.md|abc123]]');
+    expect(sourceLink('')).toBe('');
+  });
+  it('adds a navigable source citation to each claims-block row when the backlink knows its source', () => {
+    const block = renderClaimsBlock([
+      { claimPath: 'claims/2026/05/30/01JCLAIM.md', statement: 'Owns the Q3 budget.', status: 'interpretation', confidence: 0.7, source: 'sources/2026/05/30/01JSRC' },
+    ]);
+    expect(block).toContain('- [[claims/2026/05/30/01JCLAIM.md]] — Owns the Q3 budget. *(interpretation, 0.7)* · [[sources/2026/05/30/01JSRC/source.md|2026-05-30]]');
+  });
+  it('omits the citation when a backlink has no source (back-compat for regenerators not yet wired)', () => {
+    const block = renderClaimsBlock([{ claimPath: 'claims/x/01JCLAIM.md', statement: 'S.', status: 'fact', confidence: 0.9 }]);
+    expect(block).toContain('- [[claims/x/01JCLAIM.md]] — S. *(fact, 0.9)*');
+    expect(block).not.toContain('source.md');
   });
 });
 

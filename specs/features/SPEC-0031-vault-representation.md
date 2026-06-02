@@ -104,7 +104,7 @@ The app writes/maintains `<vault>/.obsidian/`:
 | VAULT-10 | should   | The representation is **Replay-stable** — a clean/rebuild regenerates the same human view + config | none-yet | REPLAY-14 |
 | VAULT-11 | should   | The entity page is **readable, not a raw list** — claims rendered in prose/grouped + cited; and a **curated entity summary** (synthesis paragraph) tops the page. *(The summary is a new synthesis step — owner TBD: Connect/Claims enhancement vs. a Reflect/Recall job.)* | none-yet | VISION-9; CLAIMS; LIFE-8 |
 | VAULT-12 | should   | Entity↔entity links render with **display names** via the Obsidian alias form `[[path\|Name]]` — resolves by path (collision-safe), shows the **entity name**, not the raw path | none-yet | CONNECT-12,13; [#91](https://github.com/masra91/KB-App/issues/91) |
-| VAULT-13 | should   | A claim's **source is a navigable link** (`[[sources/…\|<date/title>]]`) in the claim + the entity's claims block, so a human can **click through to the source** — not just provenance metadata | none-yet | CLAIMS; ASK-7; [#92](https://github.com/masra91/KB-App/issues/92) |
+| VAULT-13 | should   | A claim's **source is a navigable link** (`[[sources/…\|<date>]]`) in the claim + the entity's claims block, so a human can **click through to the source** — not just provenance metadata | test:claimDoc.test.ts, claimsStage.test.ts | CLAIMS; ASK-7; [#92](https://github.com/masra91/KB-App/issues/92) |
 
 ## 8. User flows / surface
 
@@ -141,6 +141,15 @@ The app writes/maintains `<vault>/.obsidian/`:
 
 ## 11. Changelog
 
+- 2026-06-02 — **VAULT-13 (clickable claim→source)** implemented (#92). A claim's source is now a
+  navigable Obsidian link `[[<sourceDir>/source.md|<date>]]` (display = the capture date parsed
+  from the date-sharded path — deterministic, no I/O, Replay-stable per VAULT-10) rendered both in
+  the **claim file body** and in each row of the **entity's claims block** (`claimDoc.ts`
+  `sourceLink` + an optional `source` on `ClaimBacklink`; wired in `claimsStage`). The block path
+  is delivered for **Claims-stage**-regenerated blocks; the **merge- and dedup-regenerated** block
+  paths (`mergeNodes`/Connect + `claimDedup`) pass the source field as part of the **connectStage
+  seam PR (#91/VAULT-12)** — kept out of this PR so #92 stays off the in-flight seam. Graduated
+  VAULT-13 `none-yet → test:` (claimDoc.test.ts, claimsStage.test.ts).
 - 2026-06-02 — created (draft). The **human/Obsidian representation** layer: the pipeline makes
   correct data, VAULT makes a **good vault** — **graph = entities only** (tag-colored;
   claims/sources excluded), the **entity note as the readable page** (claims embedded + cited),

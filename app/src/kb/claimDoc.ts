@@ -31,6 +31,22 @@ export function transformedByLabel(agent?: AgentTrace): string {
   return 'claims';
 }
 
+/**
+ * A navigable Obsidian link to a claim's source (VAULT-13): `[[<dir>/source.md|<label>]]`, so a
+ * human can **click through** to the source — not just read a provenance path. The display label
+ * is the capture **date** parsed from the date-sharded provenance path (deterministic, no I/O, so
+ * Replay-stable per VAULT-10); it falls back to the source-dir id when the path isn't date-sharded.
+ * Returns '' for an empty/missing source. `derivedFrom` is the source DIRECTORY (e.g.
+ * `sources/2026/05/30/<ULID>`); the readable note inside it is `source.md`.
+ */
+export function sourceLink(derivedFrom: string): string {
+  const dir = derivedFrom.replace(/\/+$/, '');
+  if (!dir) return '';
+  const m = dir.match(/(\d{4})\/(\d{2})\/(\d{2})/);
+  const label = m ? `${m[1]}-${m[2]}-${m[3]}` : dir.split('/').pop() || dir;
+  return `[[${dir}/source.md|${label}]]`;
+}
+
 export interface ClaimNodeMeta {
   id: string; // orchestrator-minted claim ULID
   subject: string; // repo-relative path to the subject entity node (CLAIMS-6/10)
@@ -54,7 +70,11 @@ export function renderClaimMd(claim: ClaimDecision, meta: ClaimNodeMeta): string
   // relatesTo: a soft, unresolved hint for Connect — emitted only when present (CLAIMS-10).
   if (claim.relatesTo && claim.relatesTo.length > 0) fm.push(`relatesTo: ${flowSeq(claim.relatesTo)}`);
   fm.push(`createdAt: ${meta.createdAt}`);
-  return `---\n${fm.join('\n')}\n---\n\n${oneLine(claim.statement)}\n`;
+  // VAULT-13: a navigable source citation in the body, so the claim file clicks through to its
+  // source rather than only carrying the path as provenance metadata.
+  const src = sourceLink(meta.derivedFrom);
+  const body = src ? `${oneLine(claim.statement)}\n\nSource: ${src}\n` : `${oneLine(claim.statement)}\n`;
+  return `---\n${fm.join('\n')}\n---\n\n${body}`;
 }
 
 // ── The entity node's generated claims block (CLAIMS-9) ─────────────────────────────────
@@ -68,15 +88,22 @@ export interface ClaimBacklink {
   statement: string;
   status: ClaimStatus;
   confidence: number;
+  /** Source DIR for the claim's provenance (VAULT-13). When present, the row renders a navigable
+   *  source citation. Optional so block regenerators that don't (yet) supply it still compile. */
+  source?: string;
 }
 
 /** The generated block body (CLAIMS-9), regenerated WHOLE from the entity's claims. An entity
- *  with zero claims still gets a (placeholder) block so re-runs are idempotent (§3.6). */
+ *  with zero claims still gets a (placeholder) block so re-runs are idempotent (§3.6). Each row
+ *  carries a navigable source citation when the backlink knows its source (VAULT-13). */
 export function renderClaimsBlock(links: ClaimBacklink[]): string {
   const rows =
     links.length === 0
       ? ['_No claims derived yet._']
-      : links.map((l) => `- [[${l.claimPath}]] — ${oneLine(l.statement)} *(${l.status}, ${l.confidence})*`);
+      : links.map((l) => {
+          const cite = l.source ? ` · ${sourceLink(l.source)}` : '';
+          return `- [[${l.claimPath}]] — ${oneLine(l.statement)} *(${l.status}, ${l.confidence})*${cite}`;
+        });
   return [CLAIMS_BLOCK_START, ...rows, CLAIMS_BLOCK_END].join('\n');
 }
 
