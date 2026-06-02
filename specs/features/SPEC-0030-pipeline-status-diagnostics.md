@@ -86,9 +86,9 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | none-yet | ORCH-10,13 |
 | OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | none-yet | ORCH-16; OBS-1 |
 | OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | none-yet | ORCH-16 |
-| OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | none-yet | AUDIT-4; LIFE-9 |
+| OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | none-yet | OBS-5; LIFE-9 |
-| OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | none-yet | OBS-12 |
+| OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
 
 ## 6. User flows / surface
 
@@ -168,3 +168,19 @@ A sidebar view (SPEC-0017), read-only:
   main-process glue (verified by typecheck + e2e/manual, per the codebase's main-glue coverage stance).
   **SPEC-0030 slice 1 (the dev-log half: OBS-1/2/3/4) is complete**; the Status **view** (OBS-5–9/11)
   + latency tracing (OBS-12–16) remain later slices.
+- 2026-06-02 — **slice 2a (latency tracing — data layer)** — **OBS-14 + OBS-16 → test:**. Two new
+  modules: `app/src/kb/tracing.ts` — a `Tracer` of nestable timed spans
+  (`{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}`) appended to a
+  never-promoted `<vault>/.kb/cache/spans.jsonl` (never-throws, mirrored to the dev log at `debug`,
+  `noopTracer` default); and `app/src/kb/perfIndex.ts` — a rebuildable, cached (`.kb/cache/perf-index.json`,
+  freshness on the spans-file stat) aggregation: Copilot latency avg/p50/p95 (OBS-13's cost),
+  per-stage throughput (items/min), where-time-goes (Copilot vs other over the stage-run total), and
+  recent slow ops; plus `spansForItem` for per-item end-to-end hops (OBS-16). **Forks resolved
+  (open-Qs):** spans are a **parallel tracer**, NOT an extension of `AgentTrace` — `AgentTrace` stays
+  audit-side, and a stage SYNTHESIZES the `copilot.invoke` span from the `decision.agent` trace it
+  already gets, so the thin agents stay untouched and only stages carry a `Tracer` (the `DevLog`
+  pattern); spans live in the diagnostics zone (`.kb/cache/`), aggregated over a **recent window**
+  (default 5000), cache keyed on the spans-file stat (spans aren't committed → no git-HEAD poke).
+  **Deferred to slice 2b (wiring):** OBS-12/13 — threading the `Tracer` into the 5 stages + pipeline.ts
+  so real operations emit a `stage.run` span wrapping a synthesized `copilot.invoke` child (the
+  proven DevLog threading). The Status **view** (OBS-5–9/11) + latency surfacing (OBS-15) follow.
