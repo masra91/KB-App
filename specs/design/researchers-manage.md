@@ -3,15 +3,15 @@ design: DESIGN-RESEARCHERS
 implements: SPEC-0028
 title: Researchers / Manage view — Visual Design ("The Field Desk")
 type: design
-status: draft
+status: active   # both SPEC-0033 gates cleared 2026-06-02 → checked in as a living design spec
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-02
 updated: 2026-06-02
 related: [SPEC-0028, SPEC-0033, SPEC-0027, SPEC-0017]
 design-system: pipeline-visualization.md   # reuses "The Line" tokens/type/motion (DESIGN-7 coherence)
 gates:
-  ai-patterns: approved     # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02, no rejections
-  qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
+  ai-patterns: approved      # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02, no rejections
+  qa-flow-coverage: approved # GATE 2 — KB-Quality-Driver (all key flows) — 2026-06-02
 stage: Cross-cutting
 ---
 
@@ -100,6 +100,11 @@ instrument. The add-control is a row of **named template tiles**, not a dropdown
   permanent clutter.
 - **Template-specific fields** — labeled inline under the kind: Code → `repo` + `PRs (read-only)`;
   M365 → `tenant`. Clearly captioned, not loose inputs.
+- **Reach readout** — a compact, always-visible line under the clearance ladder showing **what this
+  researcher may reach**: its current **budget** (e.g. `budget 8 calls / pass`) + **MCP / tool
+  allowlist** (e.g. `tools: web.search · web.fetch`), tabular/mono. Read-only in this v1 (the
+  *editor* is deferred, §10), but the **posture is always legible** — you can see a researcher's
+  reach + spend ceiling without opening anything (KB-QD GATE-2 ask; RESEARCH-15).
 - **Add = named tiles** — the four templates as selectable tiles (glyph + label), each creating a
   **disarmed** researcher (safe; enabling later is the gated step). No `<select>`.
 
@@ -232,9 +237,11 @@ egressTier, enabled, schedule, posture, topics, `lastRun {ts, eventType, what, c
 
 - The researcher **runtime / dispatch / egress enforcement** — SPEC-0028 backend; this is the
   manage surface only.
-- **Budget/MCP-allowlist editors** beyond a simple readout — RESEARCH-15 lists budget/MCP config;
-  v1 of this redesign focuses on the painful surfaces (kind, clearance, instructions, run→report).
-  A budget/MCP panel is a follow-on within the same language.
+- **Budget/MCP-allowlist *editors*** — RESEARCH-15 lists budget/MCP config; v1 of this redesign
+  focuses on the painful surfaces (kind, clearance, instructions, run→report). The **readout** of
+  current budget + MCP allowlist **IS in v1** (§2/§6 reach readout — reach is always *visible*); only
+  the *editing* UI is the follow-on within the same language. **Tracked against RESEARCH-15** so
+  "manage view" isn't later read as fully complete (KB-QD GATE-2 note).
 - The **#160 backend fix** (cliPath + stop-swallowing) — a dev mission; this spec only requires the
   failed-state be visually distinct.
 
@@ -264,3 +271,9 @@ egressTier, enabled, schedule, posture, topics, `lastRun {ts, eventType, what, c
   component (not a restyled `<select>`); schedule/autonomy/add-tiles must be custom instrument
   components (not native/UI-kit selects); no UI-kit Card/Paper/Switch/rounded/shadow on strips.
   Awaiting GATE 2 (KB-QD, flow coverage).
+- 2026-06-02 — **GATE 2 (KB-Quality-Driver, flow-coverage) PASS** — all 5 flows covered; the
+  disarmed-default + consequence-worded confirm + failed-distinct trio rated a genuinely safe
+  egress-control surface. Folded in KB-QD's one note: added an always-visible **reach readout**
+  (current budget + MCP allowlist) to the strip (§2/§6) so a researcher's reach is legible even
+  before the editor lands; clarified §10 that the readout ships in v1 (only the editor defers),
+  tracked against RESEARCH-15. **Both gates GREEN → status `active`, checked in.**
