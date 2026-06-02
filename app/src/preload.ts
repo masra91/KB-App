@@ -22,6 +22,10 @@ const kbApi: KbApi = {
   getInstanceSettings: () => ipcRenderer.invoke('kb:getInstanceSettings'),
   setInstanceSettings: (settings) => ipcRenderer.invoke('kb:setInstanceSettings', settings),
   listAgents: () => ipcRenderer.invoke('kb:listAgents'),
+  listResearchers: () => ipcRenderer.invoke('kb:listResearchers'),
+  setResearcherConfig: (patch) => ipcRenderer.invoke('kb:setResearcherConfig', patch),
+  runResearcherNow: (id) => ipcRenderer.invoke('kb:runResearcherNow', id),
+  listResearcherRuns: (id) => ipcRenderer.invoke('kb:listResearcherRuns', id),
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

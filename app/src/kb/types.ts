@@ -222,6 +222,11 @@ export interface ResearcherConfigPatch {
   topics?: string[];
 }
 
+/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run. */
+export type RunResearcherResult =
+  | { ran: true; sourceIds: string[]; note: string }
+  | { ran: false; reason: 'not-found' | 'no-kb' };
+
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
 
 /** Editable per-Instance settings surfaced in Settings (PANEL-5 / AUTO-12). */
@@ -263,6 +268,11 @@ export interface KbApi {
   getInstanceSettings(): Promise<InstanceSettings>;
   setInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings>;
   listAgents(): Promise<AgentView[]>;
+  // SPEC-0028 Researchers (Control Panel · Manage): manage the registry + on-demand run.
+  listResearchers(): Promise<ResearcherView[]>;
+  setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
+  runResearcherNow(id: string): Promise<RunResearcherResult>;
+  listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT

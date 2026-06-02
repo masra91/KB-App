@@ -17,6 +17,10 @@ import {
   getActiveInstanceSettings,
   setActiveInstanceSettings,
   listAgentsForActive,
+  listResearchersForActive,
+  setActiveResearcherConfig,
+  runActiveResearcherNow,
+  listResearcherRunsForActive,
 } from './pipeline';
 import { recall } from '../kb/recall';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
@@ -46,6 +50,10 @@ import type {
   Lineage,
   InstanceSettings,
   AgentView,
+  ResearcherView,
+  ResearcherConfigPatch,
+  ResearcherLastRun,
+  RunResearcherResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -227,6 +235,24 @@ export function registerIpc(): void {
   ipcMain.handle('kb:setInstanceSettings', async (_e, s: InstanceSettings): Promise<InstanceSettings> => setActiveInstanceSettings(s));
 
   ipcMain.handle('kb:listAgents', async (): Promise<AgentView[]> => listAgentsForActive());
+
+  // SPEC-0028 RESEARCH-15: the Control Panel's Researchers view — list/configure researchers,
+  // on-demand "Run now" (test pass), and recent-run history. The renderer gates risky changes
+  // (enable / → autonomous / widen egress) behind a confirm; the main process owns the registry +
+  // emits the conforming `panel` audit. Run-now uses the deterministic stub in 1a (no egress).
+  ipcMain.handle('kb:listResearchers', async (): Promise<ResearcherView[]> => listResearchersForActive());
+
+  ipcMain.handle('kb:setResearcherConfig', async (_e, patch: ResearcherConfigPatch): Promise<ResearcherView[]> => setActiveResearcherConfig(patch));
+
+  ipcMain.handle('kb:runResearcherNow', async (_e, id: string): Promise<RunResearcherResult> => {
+    try {
+      return await runActiveResearcherNow(id);
+    } catch {
+      return { ran: false, reason: 'not-found' };
+    }
+  });
+
+  ipcMain.handle('kb:listResearcherRuns', async (_e, id: string): Promise<ResearcherLastRun[]> => listResearcherRunsForActive(id));
 }
 
 /** Deterministic recall result for the CI e2e happy-path (KB_ASK_E2E_STUB). Never used in prod. */

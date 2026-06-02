@@ -29,6 +29,11 @@ const state = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
   startPipeline: vi.fn(async () => undefined),
   recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
+  // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
+  listResearchers: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
+  setResearcherConfig: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: true, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
+  runResearcherNow: vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'secondary source SRC1' })),
+  listResearcherRuns: vi.fn(async () => [{ ts: '2026-06-02T00:00:00.000Z', eventType: 'researched', what: 'Atlas', sourceId: 'SRC1', citations: 1 }]),
 }));
 
 vi.mock('electron', () => ({
@@ -45,6 +50,10 @@ vi.mock('./pipeline', () => ({
   listActiveReviews: async (): Promise<unknown[]> => [],
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
+  listResearchersForActive: mocks.listResearchers,
+  setActiveResearcherConfig: mocks.setResearcherConfig,
+  runActiveResearcherNow: mocks.runResearcherNow,
+  listResearcherRunsForActive: mocks.listResearcherRuns,
 }));
 
 vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
@@ -255,5 +264,37 @@ describe('SPEC-0029 Audit & Activity — read-only IPC over the active staging w
     expect(lin.kind).toBe('entity');
     expect(lin.sources).toContain('S1');
     expect(lin.events.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('SPEC-0028 Researchers — Control Panel IPC delegates to the pipeline helpers', () => {
+  it('kb:listResearchers returns the researcher views', async () => {
+    const views = await invoke<{ id: string }[]>('kb:listResearchers');
+    expect(mocks.listResearchers).toHaveBeenCalled();
+    expect(views[0].id).toBe('web-1');
+  });
+
+  it('kb:setResearcherConfig forwards the patch + returns the refreshed list', async () => {
+    const views = await invoke<{ enabled: boolean }[]>('kb:setResearcherConfig', { id: 'web-1', enabled: true });
+    expect(mocks.setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', enabled: true });
+    expect(views[0].enabled).toBe(true);
+  });
+
+  it('kb:runResearcherNow forwards the id + returns the run result', async () => {
+    const res = await invoke<{ ran: boolean; sourceIds: string[] }>('kb:runResearcherNow', 'web-1');
+    expect(mocks.runResearcherNow).toHaveBeenCalledWith('web-1');
+    expect(res).toMatchObject({ ran: true, sourceIds: ['SRC1'] });
+  });
+
+  it('kb:runResearcherNow maps a thrown error to a not-found result (never rejects the renderer)', async () => {
+    mocks.runResearcherNow.mockRejectedValueOnce(new Error('boom'));
+    const res = await invoke<{ ran: boolean; reason?: string }>('kb:runResearcherNow', 'web-1');
+    expect(res).toEqual({ ran: false, reason: 'not-found' });
+  });
+
+  it('kb:listResearcherRuns forwards the id + returns recent runs', async () => {
+    const runs = await invoke<{ eventType: string }[]>('kb:listResearcherRuns', 'web-1');
+    expect(mocks.listResearcherRuns).toHaveBeenCalledWith('web-1');
+    expect(runs[0].eventType).toBe('researched');
   });
 });
