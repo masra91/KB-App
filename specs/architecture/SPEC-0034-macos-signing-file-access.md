@@ -32,7 +32,7 @@ one, and have ingestion → enrichment work end-to-end with no silent permission
 The failure is **invisible** (the packaged app swallows subprocess stderr — SPEC-0030 OBS exists
 because of exactly this class of silent stall), so the bar is not just "works" but "works **or** tells
 the user why not." The interim detect-and-warn (MACOS-1) already ships; this spec is mostly about the
-**real fix** (MACOS-3..6) and the **release path** (MACOS-7).
+**real fix** (MACOS-3..7) and the **release path** (MACOS-8).
 
 ## 2. Root cause (grounded, not theorized)
 
@@ -65,8 +65,10 @@ From #56's repro + DEV-2's signing analysis (#25 area):
   the grant survives a same-identity rebuild (DEV-2's macOS BYOA env).
 - **Interim warn already ships** (MACOS-1) and stays as the graceful fallback for any
   not-yet-granted / unsigned-dev case.
-- **Release-signing (Developer ID + notarization) is the only piece gated on the paid Apple cert**;
-  everything above proceeds now under the dev identity.
+- **Only notarized *distribution* is gated — on notarization *credentials*, not the cert.** DEV-2
+  verified both `Apple Development` and `Developer ID Application` certs are already in the keychain;
+  the missing piece is a `notarytool` credential profile. So all signing (dev + Developer ID) +
+  the whole fix proceed **now**; only shipping a notarized build to users waits (MACOS-8).
 
 ## 4. Requirements
 
@@ -74,27 +76,40 @@ From #56's repro + DEV-2's signing analysis (#25 area):
 | -------- | -------- | ----------------- | ------ | ------ |
 | MACOS-1  | must     | **Interim mitigation (shipped):** first-run setup **detects** a vault path at/inside a TCC-protected location (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive — `detectTccProtectedDir`, darwin-only, dot-boundary-safe) and **warns + steers** the user to an unprotected folder, so the silent break is at least visible until the signed build lands | test:app/src/kb/vault.test.ts (detectTccProtectedDir); app/src/renderer.ts (setup warning) | STACK-10; SETUP-1; #56 |
 | MACOS-2  | must     | On a **signed, entitled** build, a vault in a TCC-protected folder **ingests + enriches end-to-end** (capture → sources → entities/claims/wikilinks on `main`) with **no `Operation not permitted`** — the headline #56 acceptance | none-yet → test: packaged-app smoke + DEV-2 empirical run (§5) | STACK-10; DATA-9; #56 |
-| MACOS-3  | must     | The packaged build is **code-signed with a STABLE identity** under the **hardened runtime** — a **local dev identity** for dev/test (the TCC grant must persist across same-identity rebuilds; ad-hoc `-` is insufficient — unstable cdhash), a **Developer ID** for release. Configured in `forge.config.ts` `osxSign` | none-yet → test: `codesign --verify`/`--display` on the packaged `.app` + persistence check (§5) | STACK-10; STACK-2 |
+| MACOS-3  | must     | The packaged build is **code-signed with a STABLE identity** under the **hardened runtime** — `Apple Development` for dev/test, `Developer ID Application` for release — so the TCC grant persists across same-identity rebuilds. Ad-hoc `-` is insufficient: its designated requirement is a `cdhash` that changes every build → the grant re-prompts every rebuild (the STACK-10 root cause today — the shipped `.app` is `flags=0x2(adhoc)`). Configured in `forge.config.ts` `osxSign` (none today) | none-yet → test: `codesign -d --requirements -` yields an **identity-based DR** (not `cdhash`), **byte-identical across two consecutive packages** (DEV-2 verified §5) | STACK-10; STACK-2 |
 | MACOS-4  | must     | The app is **explicitly NON-sandboxed** (hardened runtime, not App Sandbox). Chosen-folder access **persists** via the **TCC grant (by signature) + a regular `NSURL` bookmark** to re-resolve the vault path across launches — **not** security-scoped bookmarks, **not** the App-Sandbox `files.user-selected.read-write` entitlement | none-yet → test: relaunch re-resolves the bookmarked vault without re-prompting (signed build) | STACK-10 |
-| MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed. Carried by the signature + hardened-runtime entitlements (e.g. `com.apple.security.cs.disable-library-validation`) + the spawn method (responsible-process = our app) | none-yet → test: DEV-2 empirical subprocess-write run (§5) + packaged smoke | STACK-10; ORCH-2; #56 |
+| MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed (child inherits the parent's TCC grant). Carried by the stable signature + hardened-runtime entitlements (`com.apple.security.cs.allow-jit`, `…allow-unsigned-executable-memory`, `…disable-library-validation`) + the spawn method. **DEV-2 proved the mechanism** (§5): a parent spawning `git` into `~/Documents` succeeds; hardened-runtime library-validation blocks *loading* a bad dylib, not *spawning* a signed binary — so `Operation not permitted` is specifically the ad-hoc/unpersisted-grant case, not an inherent inheritance failure | none-yet → test: packaged smoke — a pipeline run (spawns git+copilot) writes into a granted `~/Documents` vault with **zero `Operation not permitted`** | STACK-10; ORCH-2; #56 |
 | MACOS-6  | should   | The build declares **folder usage-description strings** (`NSDocumentsFolderUsageDescription`, `NSDesktopFolderUsageDescription`, `NSDownloadsFolderUsageDescription`) so the macOS TCC prompt explains *why* the app wants the folder (consent rationale) | none-yet → test: `Info.plist` inspection of the packaged build | STACK-10; PRIN-19 |
-| MACOS-7  | must     | The **distribution** build is **Developer-ID-signed + notarized** (Gatekeeper/quarantine) — **gated on the paid Apple Developer certificate**; the dev-signature path (MACOS-3..5) proceeds without it, so this gate blocks *release only*, not development/test | none-yet (cert-gated) | STACK-10; this is the only #56 piece truly blocked |
-| MACOS-8  | should   | A **documented stable local dev identity** (create-once self-signed cert in the keychain + the `osxSign` identity name) so any contributor can reproduce the TCC persistence + subprocess-propagation test without the paid cert | none-yet → test: dev-setup doc + a scripted check | STACK-10; TEST-* |
+| MACOS-7  | must     | On **first launch against a protected folder**, the app's own **TCC prompt fires** ("Allow access to Documents") — a one-time human "Allow" — and a **denial is handled gracefully** (fall back to the MACOS-1 warn/steer, never a silent stall). This is the one human-in-loop step (can't be automated headlessly) | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn path | STACK-10; SETUP-1; PRIN-19 |
+| MACOS-8  | must     | The **distribution** build is **Developer-ID-signed + notarized** (Gatekeeper/quarantine). **Reframed gate (DEV-2 verified):** NOT the cert — both `Apple Development` **and** `Developer ID Application` certs are in the keychain, so dev *and* Developer-ID signing work **now**; the only missing piece is **notarization credentials** (a `notarytool` `AC_PASSWORD`/App-Store-Connect API profile). So #56 is **signing-ungated; only notarized *distribution* is creds-gated** — release-only, not dev/test | none-yet (notarization-creds-gated) | STACK-10 |
+| MACOS-9  | should   | A **documented dev-signing setup** (the `Apple Development` identity + the entitlements plist + the `osxSign`/`osxNotarize` Forge config) so any contributor reproduces the TCC persistence + subprocess-propagation test | none-yet → test: dev-setup doc + a scripted `codesign`/DR check | STACK-10; TEST-* |
 
-## 5. Verification story (verify by running)
+## 5. Verification story (verified by running — DEV-2, macOS 26.5, real `codesign` + real `~/Documents`)
 
-The load-bearing claims (MACOS-2/5) are settled **empirically**, not asserted (KB-Eng "verify by
-running"):
+The load-bearing claims were settled **empirically before this spec locked** (KB-Eng "verify by
+running"), not asserted. DEV-2's results (#56 thread):
 
-1. Create a **stable local dev signing identity** (self-signed, in the keychain).
-2. `forge.config.ts` `osxSign` → that identity + hardened-runtime entitlements plist.
-3. Package the `.app`; place a vault in `~/Documents/<x>`; run capture → confirm the pipeline drains:
-   `git`/`copilot` subprocess **writes succeed**, sources/entities/claims/wikilinks land on `main`,
-   **zero `Operation not permitted`**.
-4. **Rebuild** with the same identity, relaunch → the TCC grant + NSURL bookmark **persist** (no
-   re-prompt, still works) — proving the stable-identity requirement (MACOS-3).
-5. (DEV-2, macOS BYOA env) runs 1–4 to de-risk the design before implementation locks; the result
-   feeds MACOS-2/5's `Verify` + the final entitlements list.
+- **Stable-identity ⟹ grant persistence (MACOS-3, PROVEN).** Signed with `Apple Development: Mason
+  Allen` + `--options runtime` + the entitlements plist → designated requirement is **identity-based**
+  (`anchor apple generic and certificate leaf[subject.CN] = "Apple Development: …"`). **Re-signing a
+  fresh package yields a byte-identical DR** → a TCC grant keyed to it persists across rebuilds. The
+  current shipped `.app` is **ad-hoc** (`flags=0x2(adhoc)`, DR = `cdhash`) → re-prompts every build:
+  the STACK-10 root cause. **Acceptance:** `codesign -d --requirements -` is identity-based + stable
+  across two packages.
+- **Subprocess propagation (MACOS-5, PROVEN).** A parent spawning `git init/add/commit` into a
+  `~/Documents` path **succeeded** — the child inherits the parent's grant; `git` (Apple-signed) and
+  `copilot` (signed, team VEKTX9H2N7) spawn fine under hardened runtime (library validation gates
+  *loading*, not *spawning*). **Acceptance:** with Documents access granted, a pipeline run writes into
+  a `~/Documents` vault with no `Operation not permitted`.
+- **Entitlements (used in the verified sign):** `com.apple.security.cs.allow-jit`,
+  `…allow-unsigned-executable-memory`, `…disable-library-validation` + the Info.plist folder
+  usage-description strings. Fix = add `osxSign` to `forge.config.ts` (none today).
+- **Gate reframe:** the keychain has BOTH `Apple Development` and `Developer ID Application` certs →
+  signing is **ungated now**; only **notarization credentials** (`notarytool` profile) are missing,
+  so only notarized *distribution* is gated (MACOS-8).
+- **Honest limit:** propagation was verified via a Full-Disk-Access session, not the packaged app's
+  *own* first-launch TCC prompt (needs a human "Allow" click — can't be automated headlessly). That's
+  expected one-time UX, captured as MACOS-7 (ensure the prompt fires + handle denial), not a blocker.
 
 The **packaged-app smoke** (SPEC-0012 e2e tier) gains a protected-folder case so this can't silently
 regress.
@@ -106,7 +121,9 @@ regress.
 - **KB-Developer-2** (#25 signing/distribution): `forge.config.ts` `osxSign`, the hardened-runtime
   entitlements plist, the dev-identity + Developer-ID/notarization mechanics (MACOS-3/6/7), and the
   empirical run (§5).
-- **KB-Lead / Principal:** the paid Apple Developer certificate (unblocks MACOS-7 / release only).
+- **KB-Lead / Principal:** **notarization credentials** (a `notarytool` / App-Store-Connect API
+  profile) — unblocks notarized *distribution* (MACOS-8) only. The signing certs are already present
+  (DEV-2 verified), so nothing else waits on the Principal.
 
 ## 7. Out of scope (for now)
 
@@ -116,6 +133,14 @@ regress.
 
 ## 8. Changelog
 
+- 2026-06-02 — **empirical verification folded in (DEV-2, macOS 26.5).** MACOS-3 + MACOS-5 are now
+  evidence-based (§5): stable-identity DR persists across rebuilds (vs the current ad-hoc `cdhash` =
+  the root cause); subprocess propagation proven (child git inherits the grant; hardened-runtime
+  library-validation gates loading not spawning). Entitlements pinned (`cs.allow-jit`,
+  `allow-unsigned-executable-memory`, `disable-library-validation`). **Gate reframed:** both certs are
+  in the keychain → signing is ungated *now*; only notarization **credentials** gate distribution
+  (was mis-scoped as "paid cert"). Added MACOS-7 (first-launch prompt fires + graceful denial — the
+  one human-in-loop step). Net: the fix proceeds now; only notarized release waits.
 - 2026-06-02 — created (draft). Splits #56 / STACK-10 into a standalone spec: MACOS-1 (interim
   detect+warn) is **already shipped + tested** (`detectTccProtectedDir` + setup warning) and is
   graduated here; the real fix (MACOS-3..6 — stable-identity hardened-runtime signing, non-sandboxed
