@@ -45,6 +45,7 @@ import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
+import { noopDevLog, type DevLog } from './devlog';
 
 /**
  * The branch Connect's worktree is based on and fast-forwards into.
@@ -404,6 +405,7 @@ export async function connectOne(
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
   collisionAttempt = 0,
+  log: DevLog = noopDevLog,
 ): Promise<ConnectOneResult> {
   root = path.resolve(root);
   const checkpoint = await canonicalHead(root); // the canonical commit this block prepares off
@@ -421,7 +423,7 @@ export async function connectOne(
     const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint));
     if (outcome === 'advanced') return onSuccess;
     if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
-      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1);
+      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1, log);
     }
     // Persist the set-aside, retrying its OWN advance against a fresh checkpoint — the marker is a
     // disjoint connect-audit append, so this converges. Never silently drop the set-aside (QA #45):
@@ -434,6 +436,7 @@ export async function connectOne(
       await wtGit.raw('add', '-A');
       await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
       if ((await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp))) === 'advanced') {
+        log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
         return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
       }
     }
@@ -473,6 +476,7 @@ export async function connectOne(
         await appendAudit(wt, audit);
         await wtGit.raw('add', '-A');
         await wtGit.commit(`connect: set aside ${key} (review cascade cap)`);
+        log.warn('connect.setaside', { runId, itemId: key, reason: 'review-cascade-cap', rounds: prior.rounds });
         return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true });
       }
       const createdAt = new Date().toISOString();
@@ -631,6 +635,8 @@ export async function connectOne(
     let audit = auditLine({ runId, blockKey: key, event: 'failed', attempt, error });
     if (setAside) audit += auditLine({ runId, blockKey: key, event: 'setaside', attempts: attempt });
     await appendAudit(wt, audit);
+    // OBS-4: verbose cause for the structured failed/setaside audit, cross-linked by runId (OBS-3).
+    log.error('connect.failed', { runId, itemId: key, attempt, setAside, err });
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: failed ${key} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
     return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside });
@@ -748,6 +754,7 @@ export class ConnectStage {
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
   private readonly afterDrain?: () => Promise<void>;
+  private readonly log: DevLog;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -765,12 +772,14 @@ export class ConnectStage {
     lock: Mutex = new Mutex(),
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     afterDrain?: () => Promise<void>,
+    log: DevLog = noopDevLog,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
     this.afterDrain = afterDrain;
+    this.log = log.child({ scope: 'connect' });
   }
 
   start(sweepMs = 30_000): void {
@@ -817,9 +826,10 @@ export class ConnectStage {
       try {
         // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
         // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
-        await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts);
+        await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log);
         worked = true;
-      } catch {
+      } catch (err) {
+        this.log.error('connect.drain-error', { itemId: key, err });
         return; // unexpected — stop this pass; a later poke/sweep retries rather than spinning
       }
       queue = await readConnectQueue(this.root, this.maxAttempts);
@@ -832,8 +842,8 @@ export class ConnectStage {
       try {
         const res = await this.lock.run(() => linkOne(this.root, nodeRel));
         if (res.changed) worked = true;
-      } catch {
-        /* best-effort link promotion for this node; the rest of the pass continues */
+      } catch (err) {
+        this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
       }
     }
     // Publish the now-resolved evergreen entities (+ repointed claims + links) staging→main

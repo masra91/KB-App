@@ -29,6 +29,7 @@ import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from '.
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
+import { noopDevLog, type DevLog } from './devlog';
 
 const STAGE = 'decompose';
 /** Default attempts before a poison source is set aside (DECOMP-6). */
@@ -143,6 +144,7 @@ export async function decomposeOne(
   decider: DecomposeDecider,
   lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
+  log: DevLog = noopDevLog,
 ): Promise<DecomposeOneResult> {
   root = path.resolve(root);
   let result: DecomposeOneResult = { sourceId: path.basename(sourceRel), ok: false, candidateIds: [], setAside: false };
@@ -202,6 +204,8 @@ export async function decomposeOne(
       let audit = auditLine({ runId, sourceId: input.sourceId, event: 'failed', attempt, error });
       if (setAside) audit += auditLine({ runId, sourceId: input.sourceId, event: 'setaside', attempts: attempt });
       await fs.appendFile(auditPath, audit, 'utf8');
+      // OBS-4: the structured audit above gets its verbose cause in the dev-log, cross-linked by runId (OBS-3).
+      log.error('decompose.failed', { runId, itemId: input.sourceId, attempt, setAside, err });
       await wtGit.raw('add', '-A');
       await wtGit.commit(`decompose: failed ${input.sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
       result = { sourceId: input.sourceId, ok: false, candidateIds: [], setAside };
@@ -224,6 +228,7 @@ export async function decomposeOne(
       await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
       await lock.run(() => advanceOrCollide(root, workBranch, base));
     });
+    log.error('decompose.setaside', { itemId: result.sourceId, reason: 'collision-exhausted' });
     result = { ...result, ok: false, setAside: true };
   };
 
@@ -241,6 +246,7 @@ export class DecomposeStage {
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
   private readonly cap: number;
+  private readonly log: DevLog;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -252,12 +258,14 @@ export class DecomposeStage {
     lock: Mutex = new Mutex(),
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     cap: number = DEFAULT_STAGE_CAP,
+    log: DevLog = noopDevLog,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
     this.cap = cap;
+    this.log = log.child({ scope: 'decompose' });
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -307,8 +315,9 @@ export class DecomposeStage {
       // an unexpected throw stops this pass for a later poke/sweep to retry.
       const batch = queue.slice(0, this.cap);
       try {
-        await Promise.all(batch.map((rel) => decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts)));
-      } catch {
+        await Promise.all(batch.map((rel) => decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts, this.log)));
+      } catch (err) {
+        this.log.error('decompose.drain-error', { err }); // unexpected — surface it, then let a later poke/sweep retry
         return;
       }
       queue = await readDecomposeQueue(this.root, this.maxAttempts);

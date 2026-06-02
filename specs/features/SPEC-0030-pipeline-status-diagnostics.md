@@ -73,10 +73,10 @@ A sidebar view (SPEC-0017), read-only:
 
 | ID     | Priority | Statement (short)                                                                   | Verify   | Traces |
 | ------ | -------- | ----------------------------------------------------------------------------------- | -------- | ------ |
-| OBS-1  | must     | A **diagnostic dev-log** subsystem — leveled (debug/info/warn/error) — captures exceptions/stack traces, **subprocess stdout+stderr**, git output, worktree lifecycle, lock waits, timings; **separate** from the audit log | none-yet | ORCH-11; PRIN-5 |
+| OBS-1  | must     | A **diagnostic dev-log** subsystem — leveled (debug/info/warn/error) — captures exceptions/stack traces, **subprocess stdout+stderr**, git output, worktree lifecycle, lock waits, timings; **separate** from the audit log | test:app/src/kb/devlog.test.ts | ORCH-11; PRIN-5 |
 | OBS-2  | must     | Dev logs live in `<vault>/.kb/cache/logs/` (gitignored, **never promoted**, rotated) **plus** a small **app-level log** in Electron userData for pre-vault/app errors | none-yet | STAGING-6; DATA-9 |
-| OBS-3  | must     | Dev-log entries **cross-reference** the audit (`runId`/`itemId`) so a structured audit failure links to its verbose diagnostic detail | none-yet | AUDIT-1; ORCH-12 |
-| OBS-4  | must     | Errors are **never silent**: every failure emits a **structured audit** event (set-aside, stage failed + attempt) **and** a dev-log entry with the cause | none-yet | ORCH-12; AUTO-8; AUDIT-2 |
+| OBS-3  | must     | Dev-log entries **cross-reference** the audit (`runId`/`itemId`) so a structured audit failure links to its verbose diagnostic detail | test:app/src/kb/obsWiring.test.ts | AUDIT-1; ORCH-12 |
+| OBS-4  | must     | Errors are **never silent**: every failure emits a **structured audit** event (set-aside, stage failed + attempt) **and** a dev-log entry with the cause | test:app/src/kb/obsWiring.test.ts | ORCH-12; AUTO-8; AUDIT-2 |
 | OBS-5  | must     | A **Pipeline Status view** shows the **live** pipeline — per-stage state (idle/running/blocked/error), **queue depth**, **current item**, progress/throughput, overall state (running/idle/**stalled**) | none-yet | ORCH-10; SHELL-1,2 |
 | OBS-6  | must     | The Status view surfaces **recent errors** and **set-aside/poison items** prominently — each with reason + drill-down to the dev-log detail | none-yet | ORCH-12; OBS-1 |
 | OBS-7  | must     | The Status view exposes **worktree & lock state** — worktrees, their branches, and who holds/awaits the canonical-writer lock — so a stalled pipeline's cause is visible | none-yet | ORCH-2,18; STAGING-1 |
@@ -142,3 +142,18 @@ A sidebar view (SPEC-0017), read-only:
   **end-to-end per-item tracing** (capture→…→link, per-hop durations). Motivated by a surprising
   ingestion→link delay measured at **~10–15s per Copilot call × dozens per rebuild** — the
   Principal wants to *see* where the time goes (and later aggregate it in the obs views).
+- 2026-06-02 — **slice 1a (dev-log subsystem)** merged (#58): `app/src/kb/devlog.ts` — in-house
+  leveled + size-rotated JSONL, `.child({scope,runId,itemId})` binding, redaction-aware `sensitive`
+  bag (full only at `debug`, OBS-10 minimal), never-throws, noop default. **OBS-1 → test:**.
+- 2026-06-02 — **slice 1b (errors-never-silent wiring)**: the dev-log is threaded into all 5 stages
+  (Orchestrator/Decompose/Claims/Connect/Job) as an optional `DevLog` ctor param (→ `noopDevLog`);
+  every failure catch (`failed`/`setaside`/drain-error) now emits a `log.error`/`warn` carrying the
+  same `runId`/itemId as its structured audit event (the OBS-3 cross-link), and the 4 CLI agent
+  runners append subprocess **stderr** to the thrown error so the stage dev-log records the real
+  cause. **OBS-3 + OBS-4 → test:** (`obsWiring.test.ts` verifies a Decompose failure end-to-end:
+  audit `failed` event + a cross-linked `decompose.failed` dev-log entry with matching runId + the
+  stderr-bearing cause; the identical catch-pattern is applied to claims/connect/archive/job).
+  **No `pipeline.ts`/boot seam** in this PR. **Deferred to slice 1c:** OBS-2 — instantiating the two
+  sinks (`<vault>/.kb/cache/logs/` + the app-level userData log) in `pipeline.ts`/`main.ts` + the
+  boot-wrap of `initPipeline` (sequenced after the link-promotion + Reflect-2 work on `pipeline.ts`).
+  The Status **view** (OBS-5/6/7/8/9/11) is a later slice (nav shell; coordinates with DEV-5 Activity).

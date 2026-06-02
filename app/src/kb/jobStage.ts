@@ -12,6 +12,7 @@ import { ulid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { Mutex } from './stageLock';
 import { withOptimisticAdvance, advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
+import { noopDevLog, type DevLog } from './devlog';
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import {
@@ -159,6 +160,7 @@ export async function runJobOnce(
   job: JobConfig,
   behavior: JobBehavior,
   lock: Mutex = new Mutex(),
+  log: DevLog = noopDevLog,
 ): Promise<JobRunResult> {
   root = path.resolve(root);
   const runId = ulid();
@@ -259,10 +261,18 @@ export async function runJobOnce(
       if ((await lock.run(() => advanceOrCollide(root, branch, base))) === 'advanced') break;
       // The set-aside advance itself collided — re-sync to the moved canonical and retry (bounded).
     }
+    log.warn('job.setaside', { runId, itemId: job.id, reason: 'collision-exhausted' });
     result = { ...result, outcome: 'setaside' };
   };
 
-  await withOptimisticAdvance({ root, lock, workBranch: branch }, prepare, onExhausted);
+  try {
+    await withOptimisticAdvance({ root, lock, workBranch: branch }, prepare, onExhausted);
+  } catch (err) {
+    // OBS-4: a job behavior/run failure (e.g. the job's agent threw) — surface the cause. The run
+    // didn't advance; the scheduler retries on its next tick. Never a silent dead job.
+    log.error('job.failed', { runId, itemId: job.id, err });
+    throw err;
+  }
   return result;
 }
 
@@ -278,14 +288,23 @@ export class JobRunner {
   private readonly behavior: JobBehavior;
   private readonly lock: Mutex;
   private readonly afterRun?: () => Promise<void>;
+  private readonly log: DevLog;
   private running = false;
 
-  constructor(root: string, job: JobConfig, behavior: JobBehavior, lock: Mutex = new Mutex(), afterRun?: () => Promise<void>) {
+  constructor(
+    root: string,
+    job: JobConfig,
+    behavior: JobBehavior,
+    lock: Mutex = new Mutex(),
+    afterRun?: () => Promise<void>,
+    log: DevLog = noopDevLog,
+  ) {
     this.root = path.resolve(root);
     this.job = job;
     this.behavior = behavior;
     this.lock = lock;
     this.afterRun = afterRun;
+    this.log = log.child({ scope: `job:${job.id}` });
   }
 
   /** True while a run is in flight (single-flight guard). */
@@ -301,7 +320,7 @@ export class JobRunner {
     if (this.running) return 'skipped';
     this.running = true;
     try {
-      const res = await runJobOnce(this.root, this.job, this.behavior, this.lock);
+      const res = await runJobOnce(this.root, this.job, this.behavior, this.lock, this.log);
       if (this.afterRun) await this.afterRun(); // promote evergreen findings → main (no-op if journal-only)
       return res;
     } finally {
