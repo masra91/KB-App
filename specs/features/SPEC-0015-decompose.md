@@ -172,6 +172,16 @@ The agent reads one source and returns **only** this JSON. It writes nothing.
     (DATA-7 evidence; the agent must not invent entities ungrounded in the text).
 - **`signals[]`** (optional, usually absent): the agent's escape hatch — see §3.3.
 
+**Granularity (DECOMP-17).** What becomes an entity is bounded by a **node-vs-attribute**
+policy stated in the instruction file: a node is a referent with **independent identity**
+(something a different source could add facts about); roles/descriptors ("first computer
+programmer"), properties (dates/quantities/statuses), relationships ("worked with"), and
+generic descriptive nouns are **not** nodes — they are the **Claims** stage's substance
+(SPEC-0016). The agent is biased toward **fewer, higher-confidence** nodes; when unsure, it
+treats the thing as an attribute and omits it. This keeps `kind` open (DECOMP-7) while
+preventing the over-extraction dogfooding surfaced (e.g. promoting a role to a `concept`
+node).
+
 ### 3.2 The entity node (what the orchestrator writes)
 
 One file per entity, deterministic template, **orchestrator-authored** (the agent
@@ -271,6 +281,7 @@ structure that keeps the log queryable even though signal content is freeform.
 | DECOMP-14  | should   | v1 mints **fresh nodes with no cross-source resolution**; dedup/merge/linking ("which Steve?") is deferred to Connect and fed by `ambiguity` signals | test:decomposeStage.test.ts | DATA-3; LIFE-6 |
 | DECOMP-15  | must     | v1 entity nodes carry **`confidence` + evidence** but **not `status`**; per-claim epistemics and `status` are deferred with the claims stage (now specced: **SPEC-0016 CLAIMS-7**) | test:entityDoc.test.ts | DATA-7 |
 | DECOMP-16  | should   | The archivist→Decompose handoff and the Decompose→next-stage **seam are queue folders** (poke on commit + periodic sweep): later Enrich stages attach with no change to this stage; the **Decompose→Claims item is a minted entity ULID** — Decompose pokes `queue/claims/` **per entity** (SPEC-0016 CLAIMS-18) | test:decomposeStage.test.ts | ORCH-9,15; INGEST-6 |
+| DECOMP-17  | must     | The instruction file states an explicit **node-vs-attribute granularity policy**: a node is a referent with **independent identity**; roles/descriptors/properties/relationships **predicated of** an entity are NOT nodes (they are Claims), and the agent is biased toward **fewer, higher-confidence** nodes (when unsure → attribute). Prevents over-extraction (e.g. `concept/first-computer-programmer`) | test:decomposeAgent.test.ts | DATA-3,6; LIFE-3 |
 
 ### DECOMP-3 — Thin agent in v1
 - **Status:** draft · **Priority:** must
@@ -319,6 +330,27 @@ structure that keeps the log queryable even though signal content is freeform.
   feedback channel toward improvement — not knowledge to be queried as ontology.
 - **Traces:** DATA-10, AUTO-8
 - **Verify:** test:decomposeStage.test.ts
+
+### DECOMP-17 — Node-vs-attribute granularity policy
+- **Status:** draft · **Priority:** must
+- **Statement:** The versioned instruction file **MUST** state an explicit boundary between
+  what is a **node** and what is not. A node is a referent with **independent identity** — a
+  nameable thing (person, organization, place, project, event, work/artifact, or a durable
+  named concept/term) about which a *different* source could add independent facts. Things
+  that are merely **predicated of** an entity — roles/titles/descriptors ("first computer
+  programmer"), properties/values (dates, quantities, statuses), relationships/predicates
+  ("worked with"), and generic common nouns used descriptively — **MUST NOT** be extracted as
+  nodes; they are the **Claims** stage's job (SPEC-0016). The agent **MUST** be biased toward
+  **fewer, higher-confidence** nodes: when unsure whether something is a node or an attribute,
+  treat it as an attribute and do not extract it.
+- **Rationale:** Dogfooding surfaced over-extraction — two sentences yielding six nodes, with
+  attributes/claims like `concept/first-computer-programmer` promoted to standalone entities.
+  That inflates the graph with non-referents, fragments a single subject across spurious
+  nodes, and degrades felt quality. The fix is a sharper **prompt-level** boundary, not a code
+  gate: `kind` stays an open, emergent vocabulary (DECOMP-7) — only the node/attribute *line*
+  is drawn. Substance about an entity is not lost; it lands as Claims, where it belongs.
+- **Traces:** DATA-3 (nodes = the index of things), DATA-6 (open kinds preserved), LIFE-3
+- **Verify:** test:decomposeAgent.test.ts
 
 ### DECOMP-13 — Idempotent, commit-to-dequeue
 - **Status:** draft · **Priority:** must
@@ -428,6 +460,15 @@ sources/ ─poke→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)        
   Ingest steps, already built; Decompose is this Enrich stage). Added **rich classify**
   (scope/sensitivity inference) to the deferred list / Enrich chain (§6) — homeless
   after Ingest deferred it; not built in v1.
+- 2026-06-02 — **DECOMP-17 (granularity).** Dogfooding surfaced Decompose over-extraction
+  (≈2 sentences → 6 nodes; attributes/roles such as `concept/first-computer-programmer`
+  promoted to standalone entities). Added a **node-vs-attribute policy** to the instruction
+  file (`decompose/v1 → v2`): a node has independent identity; roles/descriptors/properties/
+  relationships predicated of an entity are Claims, not nodes; bias toward fewer,
+  higher-confidence nodes (unsure → attribute). Prompt-level fix only — `kind` stays open
+  (DECOMP-7), schema unchanged. Graduated DECOMP-17 `none-yet → test:decomposeAgent.test.ts`.
+  (Part 1 of the enrich-quality felt-gap work; claim dedup tracked separately — its boundary
+  is specced at Connect/Reflect per SPEC-0016 CLAIMS-17/§2/§6.)
 - 2026-05-30 — **implemented.** Built on the existing SPEC-0014 harness (archivist #7/#8,
   ORCH-16 #10): extracted the canonical-writer `Mutex` into a shared `stageLock` injected
   into both the archivist and the new Decompose stage (§5 serialized writer); added the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildDecomposePrompt, makeDecomposeDecider, type SourceInput } from './decomposeAgent';
+import { buildDecomposePrompt, makeDecomposeDecider, DECOMPOSE_PROMPT_VERSION, type SourceInput } from './decomposeAgent';
 
 const input = (over: Partial<SourceInput> = {}): SourceInput => ({
   sourceId: '01JSRC',
@@ -24,6 +24,34 @@ describe('buildDecomposePrompt (DECOMP-7, DECOMP-3)', () => {
 
   it('tells the agent not to resolve identity across sources (deferred to Connect; DECOMP-14)', () => {
     expect(buildDecomposePrompt(input())).toMatch(/do not resolve identity across sources/i);
+  });
+});
+
+describe('node-vs-attribute granularity policy (DECOMP-17)', () => {
+  it('defines a node as having independent identity', () => {
+    const p = buildDecomposePrompt(input());
+    expect(p).toMatch(/independent identity/i);
+    expect(p).toMatch(/exists independently of this source/i);
+  });
+
+  it('steers roles/descriptors/attributes/relationships away from being nodes (→ Claims)', () => {
+    const p = buildDecomposePrompt(input());
+    // the over-extraction the dogfood surfaced: a role/descriptor must NOT become a node
+    expect(p).toContain('first computer programmer');
+    expect(p).toMatch(/roles \/ titles \/ descriptors/i);
+    expect(p).toMatch(/relationships or predicates/i);
+    expect(p).toMatch(/recorded later by the Claims stage, never as their own nodes/i);
+  });
+
+  it('gives a tie-breaker and biases toward FEWER nodes when unsure', () => {
+    const p = buildDecomposePrompt(input());
+    expect(p).toMatch(/could a DIFFERENT source add independent facts/i);
+    expect(p).toMatch(/PREFER FEWER, higher-confidence nodes/);
+    expect(p).toMatch(/treat it as an attribute and do NOT extract it/);
+  });
+
+  it('bumps the prompt version to reflect the tightened policy', () => {
+    expect(DECOMPOSE_PROMPT_VERSION).toBe('decompose/v2');
   });
 });
 
