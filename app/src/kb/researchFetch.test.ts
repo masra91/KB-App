@@ -1,7 +1,7 @@
 // Connect-time SSRF defense (SPEC-0028 RESEARCH-8, KB-QD #85 hard gate). Pure logic + the
 // Agent-lookup guard with an injected resolver (no real DNS/network).
-import { describe, it, expect } from 'vitest';
-import { assertPublicResolved, makeSsrfSafeLookup, type Resolver, type ResolvedAddress } from './researchFetch';
+import { describe, it, expect, vi } from 'vitest';
+import { assertPublicResolved, makeSsrfSafeLookup, makeGatedFetch, type Resolver, type ResolvedAddress } from './researchFetch';
 
 const A = (address: string, family = 4): ResolvedAddress => ({ address, family });
 
@@ -50,4 +50,24 @@ describe('makeSsrfSafeLookup — Agent lookup guard', () => {
     const { err } = await lookupOnce(fail, 'nope.invalid');
     expect(err).toBeInstanceOf(Error);
   });
+});
+
+describe('makeGatedFetch — the live researcher fetch primitive (RESEARCH-8, KB-QD enforceable egress)', () => {
+  it('Gate 1 (static allowlist) refuses a disallowed URL BEFORE any DNS/socket', async () => {
+    const resolver = vi.fn<Resolver>(async () => [A('93.184.216.34')]);
+    const fetch = makeGatedFetch({ resolver });
+    // non-http(s) scheme, non-public host, and a host outside a configured allowlist all refuse.
+    await expect(fetch('file:///etc/passwd')).rejects.toThrow(/not an allowed URL/);
+    await expect(fetch('http://localhost/admin')).rejects.toThrow(/not an allowed URL/);
+    await expect(fetch('http://169.254.169.254/latest/meta-data/')).rejects.toThrow(/not an allowed URL/);
+    await expect(makeGatedFetch({ resolver, allowedDomains: ['example.com'] })('https://evil.test/')).rejects.toThrow(/not an allowed URL/);
+    expect(resolver).not.toHaveBeenCalled(); // refused statically — the resolver/socket is never reached
+  });
+
+  it('Gate 2 (SSRF lookup) fails closed when an allowed public name resolves to a private IP', async () => {
+    // host passes isAllowedUrl (public DNS name, empty allowlist) but the injected resolver rebinds
+    // it to a private IP → the Agent's makeSsrfSafeLookup refuses the connection → fetch rejects.
+    const rebind: Resolver = async () => [A('10.0.0.1')];
+    await expect(makeGatedFetch({ resolver: rebind })('https://totally-legit.example/')).rejects.toThrow();
+  }, 10_000);
 });
