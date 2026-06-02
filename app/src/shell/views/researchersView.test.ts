@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
+const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -41,7 +41,7 @@ describe('Researchers view (RESEARCH-15)', () => {
     const c = await mount();
     expect(c.querySelectorAll('.researcher')).toHaveLength(1);
     expect(c.querySelector('.researcher-label')?.textContent).toBe('Prior art');
-    expect(c.querySelector('.researcher-template')?.textContent).toBe('web');
+    expect(c.querySelector('.researcher-template')?.textContent).toBe('Public Web'); // short label (RESEARCH-17)
     expect(c.textContent).toContain('Public web');
     expect(c.querySelector('.researcher-lastrun')?.textContent).toContain('Never run');
   });
@@ -117,6 +117,30 @@ describe('run-now + add-from-template', () => {
   });
 });
 
+describe('instructions + scope (RESEARCH-17)', () => {
+  it('renders the instructions textarea + scope prefilled from the config', async () => {
+    const c = await mount();
+    expect(c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value).toBe('find prior art');
+    expect(c.querySelector<HTMLInputElement>('.researcher-scope')!.value).toBe('global');
+  });
+
+  it('shows the template SHORT label as a badge + the long description as helper text', async () => {
+    const c = await mount();
+    expect(c.querySelector('.researcher-template')?.textContent).toBe('Public Web');
+    expect(c.querySelector('.researcher-template-desc')?.textContent).toContain('Public-web search');
+  });
+
+  it('saves instructions + scope on click — steering, so NO confirm gate', async () => {
+    const c = await mount();
+    c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value = 'look for press releases on Atlas';
+    c.querySelector<HTMLInputElement>('.researcher-scope')!.value = 'global';
+    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
+    await flush();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true); // not risky
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', prompt: 'look for press releases on Atlas', scope: 'global' });
+  });
+});
+
 describe('XSS-safety', () => {
   it('escapes hostile researcher labels', async () => {
     listResearchers = vi.fn(async () => [{ ...webRow, label: '<img src=x onerror=alert(1)>' }]);
@@ -124,5 +148,13 @@ describe('XSS-safety', () => {
     const c = await mount();
     expect(c.querySelector('img')).toBeNull();
     expect(c.querySelector('.researcher-label')?.textContent).toContain('<img');
+  });
+
+  it('escapes a hostile instructions prompt (no textarea-breakout)', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, prompt: '</textarea><img src=x onerror=alert(1)>' }]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('img')).toBeNull();
+    expect(c.querySelector<HTMLTextAreaElement>('.researcher-prompt')!.value).toContain('<img');
   });
 });

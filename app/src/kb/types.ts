@@ -205,6 +205,8 @@ export interface ResearcherView {
   id: string;
   template: ResearcherTemplate;
   label: string;
+  /** The researcher's standing instructions / prompt (RESEARCH-17) — editable in the Manage view. */
+  prompt: string;
   egressTier: EgressTier;
   scope: string;
   enabled: boolean;

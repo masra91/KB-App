@@ -20,6 +20,12 @@ import { EGRESS_TIERS } from '../../kb/researchers';
 import type { ResearcherView, ResearcherConfigPatch } from '../../kb/types';
 
 const POSTURE_LABEL: Record<string, string> = { guarded: 'Guarded', autonomous: 'Autonomous' };
+
+// Template short label + long description (RESEARCH-17): the row badge shows the short label
+// (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`); the description is helper text.
+const TEMPLATE_BY_KEY = new Map(RESEARCHER_TEMPLATE_OPTIONS.map((o) => [o.template, o]));
+const templateLabel = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.label ?? t;
+const templateDesc = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.description ?? '';
 const HEADER = `<h1>🔬 Researchers</h1><p class="muted">Configurable agents that reach outside your KB to corroborate and expand — Web, Code, your work tools. Findings come back as cited sources.</p>`;
 
 export async function mountResearchers(container: HTMLElement): Promise<void> {
@@ -68,9 +74,17 @@ function researcherItem(r: ResearcherView): string {
     <li class="researcher" data-id="${esc(r.id)}">
       <div class="researcher-head">
         <span class="researcher-label">${esc(r.label)}</span>
-        <span class="badge researcher-template">${esc(r.template)}</span>
+        <span class="badge researcher-template">${esc(templateLabel(r.template))}</span>
         <span class="badge researcher-egress">${esc(EGRESS_TIER_LABELS[r.egressTier])}</span>
         <label class="researcher-toggle"><input type="checkbox" class="researcher-enabled"${r.enabled ? ' checked' : ''}> Enabled</label>
+      </div>
+      <p class="muted researcher-template-desc">${esc(templateDesc(r.template))}</p>
+      <div class="researcher-instructions">
+        <label class="researcher-prompt-label">Instructions
+          <textarea class="researcher-prompt" rows="3" placeholder="What should this researcher look for? Which sites/sources, repo, or WorkIQ surfaces?">${esc(r.prompt)}</textarea>
+        </label>
+        <label>Scope <input type="text" class="researcher-scope" value="${esc(r.scope)}" /></label>
+        <button type="button" class="btn researcher-save">Save instructions</button>
       </div>
       <div class="researcher-controls">
         <label>Schedule <select class="researcher-schedule">${scheduleOpts}</select></label>
@@ -102,6 +116,9 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const scheduleEl = li.querySelector<HTMLSelectElement>('.researcher-schedule')!;
     const postureEl = li.querySelector<HTMLSelectElement>('.researcher-posture')!;
     const egressEl = li.querySelector<HTMLSelectElement>('.researcher-egress-sel')!;
+    const promptEl = li.querySelector<HTMLTextAreaElement>('.researcher-prompt')!;
+    const scopeEl = li.querySelector<HTMLInputElement>('.researcher-scope')!;
+    const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
     const confirmMsg = li.querySelector<HTMLElement>('.researcher-confirm-msg')!;
@@ -168,6 +185,11 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     });
 
     scheduleEl.addEventListener('change', () => void apply({ id, schedule: scheduleEl.value as ResearcherConfigPatch['schedule'] }));
+
+    // Instructions + scope (RESEARCH-17): steering, not risky → saved on an explicit button, no confirm.
+    // The backend drops an empty/whitespace prompt or scope (keeps the prior value), so a stray blank
+    // save can't wipe a researcher's instructions.
+    saveBtn.addEventListener('click', () => void apply({ id, prompt: promptEl.value, scope: scopeEl.value }));
 
     runBtn.addEventListener('click', () => {
       askConfirm(

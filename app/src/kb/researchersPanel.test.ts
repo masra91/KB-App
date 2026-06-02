@@ -29,6 +29,8 @@ describe('buildResearcherViews (RESEARCH-15)', () => {
     expect(views[0].lastRun).toMatchObject({ eventType: 'researched', what: 'Project Atlas', sourceId: 'SRC1', citations: 2 });
     expect(views[1].lastRun).toBeNull(); // never run
     expect(views[1].label).toBe('web'); // falls back to template
+    expect(views[0].prompt).toBe('p'); // instructions exposed for the Manage view (RESEARCH-17)
+    expect(views[0].scope).toBe('global');
   });
 });
 
@@ -106,5 +108,17 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
 
   it('ignores undefined (dropped-invalid) fields — only applied values are audited', () => {
     expect(researcherConfigAuditEvents(web(), { id: 'web-1' })).toEqual([]); // nothing changed
+  });
+
+  it('audits scope + prompt (instructions) changes too — RESEARCH-17 steering is never silent (AUDIT-2)', () => {
+    const prior = web({ scope: 'global', prompt: 'old instructions' });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', scope: 'project-x', prompt: 'new instructions' });
+    expect(events.map((e) => (e.payload as { field: string }).field).sort()).toEqual(['prompt', 'scope']);
+    expect(events.find((e) => (e.payload as { field: string }).field === 'scope')!.payload).toMatchObject({ from: 'global', to: 'project-x' });
+    expect(events.find((e) => (e.payload as { field: string }).field === 'prompt')!.payload).toMatchObject({ from: 'old instructions', to: 'new instructions' });
+  });
+
+  it('does not audit a prompt/scope re-assert (same value)', () => {
+    expect(researcherConfigAuditEvents(web({ prompt: 'p', scope: 'global' }), { id: 'web-1', prompt: 'p', scope: 'global' })).toEqual([]);
   });
 });
