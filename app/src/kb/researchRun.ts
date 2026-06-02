@@ -63,6 +63,7 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
     await appendAuditEvent(root, {
       actor: 'researcher',
       eventType: 'no-finding',
+      ts: now(), // stamp with the pass's (injectable) clock — keeps audit ts == the run, not wall-clock
       subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
       payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier },
     });
@@ -86,6 +87,7 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
   await appendAuditEvent(root, {
     actor: 'researcher',
     eventType: 'researched',
+    ts: fetchedAt, // == the pass clock (matches provenance.fetchedAt), not wall-clock
     subjects: { researcherId: r.id, requestId: req.id, sourceId: out.ids[0], ...(req.by.entityId ? { entityId: req.by.entityId } : {}) },
     payload: { what: req.what, why: req.why, query: findings.query, citations: findings.citations, egressTier: r.egressTier, externallySourced: true },
   });

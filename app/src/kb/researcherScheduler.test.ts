@@ -1,0 +1,99 @@
+// Scheduled-researcher tick (SPEC-0028 RESEARCH-2; Option (a)). Real FS+git temp vault (TEST-18);
+// cognition (research) injected deterministically — no network. Cadence/due/single-flight mirror
+// JobScheduler but the body is runResearcher (ingest), keeping JOBS-10 intact.
+import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+import { makeTempDir, rmTempDir } from '../../test/tempVault';
+import { createKb } from './vault';
+import { upsertResearcher } from './researcherRegistry';
+import { readEvents } from './activityIndex';
+import { ResearcherScheduler, isResearcherDue, standingRequest } from './researcherScheduler';
+import type { ResearchFn } from './researchRun';
+import type { ResearcherConfig } from './researchers';
+
+function gitInstalledSync(): boolean {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const gitAvailable = gitInstalledSync();
+
+async function withVault(fn: (root: string) => Promise<void>): Promise<void> {
+  const dir = await makeTempDir();
+  try {
+    const root = path.join(dir, 'vault');
+    await createKb({ path: root, initGitIfNeeded: true });
+    await fn(root);
+  } finally {
+    await rmTempDir(dir);
+  }
+}
+
+const web = (over: Partial<ResearcherConfig> = {}): ResearcherConfig => ({
+  id: 'web-1', template: 'web', prompt: 'p', egressTier: 'public-web', scope: 'global',
+  budget: { maxToolCalls: 8, maxDepth: 2 }, schedule: 'daily', posture: 'guarded', enabled: true, topics: ['atlas'], ...over,
+});
+const stub: ResearchFn = async (_r, req) => ({ found: true, note: `note on ${req.what}`, citations: ['https://example.com/x'], query: req.what });
+const DAY = 24 * 60 * 60 * 1000;
+
+describe('standingRequest', () => {
+  it('builds a request from the researcher topic/label, marked scheduler-originated', () => {
+    const r = standingRequest(web({ topics: ['atlas'] }), 'rid', '2026-06-02T00:00:00.000Z');
+    expect(r).toMatchObject({ what: 'atlas', by: { stage: 'scheduler' }, why: 'scheduled standing research' });
+  });
+});
+
+describe.skipIf(!gitAvailable)('isResearcherDue', () => {
+  it('enabled+scheduled never-run → due; off/disabled → not due', async () => {
+    await withVault(async (root) => {
+      expect(await isResearcherDue(root, web({ schedule: 'daily', enabled: true }), Date.now())).toBe(true);
+      expect(await isResearcherDue(root, web({ schedule: 'off' }), Date.now())).toBe(false);
+      expect(await isResearcherDue(root, web({ enabled: false }), Date.now())).toBe(false);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('ResearcherScheduler.tick (RESEARCH-2, Option a)', () => {
+  it('runs a due researcher → writes a secondary source + audit, then is not due within the interval', async () => {
+    await withVault(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1', schedule: 'daily', enabled: true }));
+      const sched = new ResearcherScheduler(root, stub);
+      const t0 = Date.parse('2026-06-02T00:00:00.000Z');
+
+      const fired1 = await sched.tick(t0);
+      expect(fired1).toEqual(['web-1']);
+      const events1 = await readEvents(root, { actors: ['researcher'], subjectId: 'web-1' });
+      expect(events1.some((e) => e.eventType === 'researched')).toBe(true);
+
+      // Within the daily interval → not due → no second run.
+      const fired2 = await sched.tick(t0 + 60_000);
+      expect(fired2).toEqual([]);
+    });
+  });
+
+  it('re-runs the same standing topic after the interval (cadence, NOT dedup-blocked)', async () => {
+    await withVault(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1', schedule: 'daily', enabled: true }));
+      const sched = new ResearcherScheduler(root, stub);
+      const t0 = Date.parse('2026-06-02T00:00:00.000Z');
+      await sched.tick(t0);
+      const after = await sched.tick(t0 + DAY + 1000); // a day later → due again
+      expect(after).toEqual(['web-1']); // standing research re-runs the same topic (no dedup ledger)
+      const researched = (await readEvents(root, { actors: ['researcher'], subjectId: 'web-1' })).filter((e) => e.eventType === 'researched');
+      expect(researched.length).toBe(2);
+    });
+  });
+
+  it('skips disabled/off researchers', async () => {
+    await withVault(async (root) => {
+      await upsertResearcher(root, web({ id: 'off', schedule: 'off', enabled: true }));
+      await upsertResearcher(root, web({ id: 'disabled', schedule: 'daily', enabled: false }));
+      const fired = await new ResearcherScheduler(root, stub).tick(Date.now());
+      expect(fired).toEqual([]);
+    });
+  });
+});
