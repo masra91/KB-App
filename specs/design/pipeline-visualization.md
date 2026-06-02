@@ -67,8 +67,8 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
 │   ▸ kb-notes.md          [█████████▣··]  Claims   ⟳                          │
 │                                                                              │
 │   ◑ NEEDS YOUR DECISION (2)                                                  │
-│   ▸ napier-bones.md   set aside · 3 attempts          [ Retry ]  [ Dismiss ] │
-│   ▸ "Mercury" → 2 entities   ambiguous link           [ Pick… ]              │
+│   ▸ napier-bones.md · Claims · set aside · 3 attempts [ Retry ]  [ Dismiss ] │
+│   ▸ "Mercury" → 2 entities · Connect · ambiguous link  [ Pick… ]             │
 └──────────────────────────────────────────────────────────────────────────────┘
         per-item ◉──○ per-stage          (pivot toggle — same data, shifted weight)
 ```
@@ -217,8 +217,12 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
   trace.
 - **"Needs your decision" queue** (#192) — a **count-led, brass, actionable** list ("3 need your
   decision"), **not** an error panel. Each row = a name + the **decision affordance** for its kind
-  (set-aside → **Retry/Dismiss**; review → **Pick…**; escalation → **Continue?/Stop**) + the *cause*
-  as quiet muted context (not the headline). Brass (`--viz-brass`, waiting-on-you), **never oxide**
+  (set-aside → **Retry/Dismiss**; review → **Pick…**; escalation → **Continue?/Stop**) + the **stage**
+  it belongs to + the *cause*, both as quiet muted context (not the headline) — e.g.
+  `napier-bones.md · Claims · set aside · 3 attempts`. The **stage label is required** so items
+  across different stages stay triageable (which stage gave up on this source), preserving the
+  OBS-17 read-side's `stage · name` locus (resolves KB-QD's GATE-2 should-fix). Brass
+  (`--viz-brass`, waiting-on-you), **never oxide**
   — oxide is the *broken* alarm only. Single-flight (affordances disable while acting); destructive
   picks (Dismiss) confirm first. Reuses the existing OBS-17 `kb:pipelineControl` + review contracts
   — no new mutation surface. **Calm-empty:** when the queue is empty it's quiet/absent (nothing
@@ -330,6 +334,9 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   escalations). Pending decisions are normal workflow, **not** errors — so they read calm + actionable
   (brass, waiting-on-*you*), distinct from the **broken alarm** (oxide; stuck lock / errored stage).
   §2/§6/§7 + color table updated; calm-empty when nothing needs you. Routing through GATE 1 + GATE 2.
+  **GATE 2 (KB-QD) PASS** — all affordances preserved; folded in their should-fix: the row keeps the
+  **stage label** (`name · stage · cause`) so items across stages stay triageable (OBS-17 locus).
+  Plus `N == list` single-source-of-truth (anti-#110 drift, per PM). Awaiting GATE 1 (KB-AI-Detector).
 - 2026-06-02 — **Stuck-lock alarm added** (§6) now that #170 (`f2ae987`) shipped
   `LockState.stuck`/`heldMs`/holder-label: a stuck canonical-writer lock (the #163 P0 class) renders
   as the primary oxide alarm — "stuck — held by `<holder>` for `<Ns>`" — paired with overall=stalled,
