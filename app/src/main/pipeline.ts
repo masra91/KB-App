@@ -26,7 +26,7 @@ import { runFullReplay } from '../kb/replay';
 import type { Review } from '../kb/reviews';
 import type { FullReplayResult } from '../kb/types';
 
-let active: {
+interface ActivePipeline {
   vaultPath: string; // the vault root — on `main`, what Obsidian sees (promotion target)
   stagingWt: string; // the staging worktree — where every stage operates
   orch: Orchestrator;
@@ -34,7 +34,27 @@ let active: {
   connect: ConnectStage;
   claims: ClaimsStage;
   lock: Mutex;
-} | null = null;
+}
+
+let active: ActivePipeline | null = null;
+
+/** Start every active stage's poke/sweep loop. The SINGLE source of truth for "which stages run"
+ *  — both `startPipeline` and `fullReplay`'s resume call this, so a replay can never diverge from
+ *  normal startup (e.g. start a stage that startup deliberately leaves dormant). */
+function startActiveStages(a: ActivePipeline): void {
+  a.orch.start();
+  a.decompose.start();
+  a.connect.start();
+  a.claims.start();
+}
+
+/** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
+function stopAllStages(a: ActivePipeline): void {
+  a.orch.stop();
+  a.decompose.stop();
+  a.connect.stop();
+  a.claims.stop();
+}
 
 /**
  * Start (or reuse) the pipeline for `vaultPath`, replacing any prior one. The stages run on the
@@ -44,10 +64,7 @@ let active: {
  */
 export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   if (active?.vaultPath === vaultPath) return active.orch;
-  active?.orch.stop();
-  active?.decompose.stop();
-  active?.connect.stop();
-  active?.claims.stop();
+  if (active) stopAllStages(active);
 
   const stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
   const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
@@ -68,11 +85,8 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen);
   const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, promoteEvergreen);
-  orch.start();
-  decompose.start();
-  connect.start();
-  claims.start();
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, lock };
+  startActiveStages(active);
   return orch;
 }
 
@@ -99,10 +113,7 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
 
 /** Stop and clear the active pipeline (used on shutdown / vault switch). */
 export function stopPipeline(): void {
-  active?.orch.stop();
-  active?.decompose.stop();
-  active?.connect.stop();
-  active?.claims.stop();
+  if (active) stopAllStages(active);
   active = null;
 }
 
@@ -122,10 +133,7 @@ export async function fullReplay(): Promise<FullReplayResult> {
   replaying = true;
   const { vaultPath, stagingWt, lock } = active;
   // Pause every sweep before the purge; the in-flight commit (if any) drains as we take the lock.
-  active.orch.stop();
-  active.decompose.stop();
-  active.connect.stop();
-  active.claims.stop();
+  stopAllStages(active);
   try {
     const counts = await runFullReplay(vaultPath, stagingWt, lock);
     return {
@@ -142,13 +150,9 @@ export async function fullReplay(): Promise<FullReplayResult> {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
   } finally {
     // Auto-resume (REPLAY-9): restart the sweeps whether the replay succeeded or failed, so the
-    // pipeline is never left paused. On success they re-derive the epoch-reset Sources from scratch.
-    if (active) {
-      active.orch.start();
-      active.decompose.start();
-      active.connect.start();
-      active.claims.start();
-    }
+    // pipeline is never left paused. Uses the SAME startActiveStages() as startPipeline, so the
+    // post-replay stage set always mirrors normal startup (no dormant-stage divergence).
+    if (active) startActiveStages(active);
     replaying = false;
   }
 }
