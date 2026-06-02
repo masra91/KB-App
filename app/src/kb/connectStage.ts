@@ -45,7 +45,7 @@ import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
 import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES } from './canonicalAdvance';
+import { advanceOrCollide, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -82,7 +82,12 @@ export const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default review rounds (parks) on one block before it is set aside (REVIEW-8 cascade cap). */
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
 
-const TERMINAL_EVENTS = new Set(['setaside']); // resolution is recorded by candidate deletion, not a marker
+// Terminal block markers (the block leaves the active queue). `setaside` is poison/recoverable
+// (CONNECT-14); `dismissed` is user-retired (OBS-17, never re-queued). Resolution itself is recorded
+// by candidate deletion, not a marker. A `reopened` marker (OBS-17 retry) supersedes a prior terminal.
+const TERMINAL_EVENTS = new Set(['setaside', 'dismissed']);
+/** Which terminal marker a block reached (OBS-17): `setaside` is recoverable, `dismissed` is not. */
+export type ConnectTerminalReason = 'setaside' | 'dismissed';
 
 async function pathExists(p: string): Promise<boolean> {
   try {
@@ -178,7 +183,8 @@ interface AuditLine {
 }
 
 export interface ConnectState {
-  terminal: boolean; // set aside — leaves the queue for good
+  terminal: boolean; // set aside / dismissed — leaves the queue for good
+  terminalReason?: ConnectTerminalReason; // which terminal marker (OBS-17: setaside is recoverable)
   failures: number;
   parked: boolean; // an open awaiting-review whose reviews aren't all answered (REVIEW-5)
   rounds: number;
@@ -192,10 +198,11 @@ async function readConnectState(root: string, key: string): Promise<ConnectState
     return { terminal: false, failures: 0, parked: false, rounds: 0 };
   }
   let terminal = false;
+  let terminalReason: ConnectTerminalReason | undefined;
   let failures = 0;
   let rounds = 0;
-  const parkRounds: string[][] = [];
-  const answered = new Set<string>();
+  let parkRounds: string[][] = [];
+  let answered = new Set<string>();
   // Scope to the current replay epoch (REPLAY-6): a replayed block's prior terminal/park markers
   // are ignored so the (re-emitted) candidates re-resolve through the unmodified pipeline (REPLAY-14).
   for (const line of epochScopedLines(raw)) {
@@ -207,15 +214,26 @@ async function readConnectState(root: string, key: string): Promise<ConnectState
       continue;
     }
     if (o.stage !== STAGE || o.blockKey !== key) continue;
-    if (o.event && TERMINAL_EVENTS.has(o.event)) terminal = true;
-    else if (o.event === 'failed') failures += 1;
+    if (o.event === 'reopened') {
+      // OBS-17 (user retry): a per-block `reopened` marker supersedes ALL prior state for THIS block
+      // (terminal/failures/park) so it re-enters the queue and re-resolves on the next sweep.
+      terminal = false;
+      terminalReason = undefined;
+      failures = 0;
+      rounds = 0;
+      parkRounds = [];
+      answered = new Set<string>();
+    } else if (o.event && TERMINAL_EVENTS.has(o.event)) {
+      terminal = true;
+      terminalReason = o.event as ConnectTerminalReason;
+    } else if (o.event === 'failed') failures += 1;
     else if (o.event === 'awaiting-review') {
       rounds += 1;
       parkRounds.push(o.reviewIds ?? []);
     } else if (o.event === 'review-answered' && o.reviewId) answered.add(o.reviewId);
   }
   const parked = !terminal && parkRounds.some((ids) => ids.some((id) => !answered.has(id)));
-  return { terminal, failures, parked, rounds };
+  return { terminal, terminalReason, failures, parked, rounds };
 }
 
 // ── Blocking (deterministic; CONNECT-4) ────────────────────────────────────────────────────
@@ -255,6 +273,98 @@ export async function readConnectQueue(root: string, maxAttempts = DEFAULT_MAX_A
     queued.push(set);
   }
   return queued.sort((a, b) => (a.blockKey < b.blockKey ? -1 : 1));
+}
+
+// ── Set-aside recovery (OBS-17, Connect half — mirrors claimsStage CLAIMS-20) ────────────────
+
+/** One recoverable set-aside Connect block for the Status-view recovery panel (OBS-17). The handle
+ *  is the **blockKey** — a set-aside block has NO entity node (it failed to resolve; its candidates
+ *  remain). `name` is a representative human label from the block's candidates/nodes. */
+export interface ConnectSetAsideItem {
+  blockKey: string;
+  kind: string;
+  name: string;
+  failures: number; // failed attempts recorded before set-aside
+  rounds: number; // review-park rounds (REVIEW-8), if set aside on the review-cascade cap
+}
+
+/**
+ * OBS-17 (Connect half) — the recoverable set-aside list: every candidate block whose CURRENT
+ * connect state is terminal via `setaside` (NOT a user-`dismissed` block, NOT a resolved one).
+ * Mirrors {@link listSetAsideItems} for claims; reads through {@link readConnectState} so it honors
+ * retries/dismisses/replay-epochs with no parallel logic. The Status view offers retry/dismiss on each.
+ */
+export async function listConnectSetAsideItems(root: string): Promise<ConnectSetAsideItem[]> {
+  root = path.resolve(root);
+  const candidates = await readCandidates(root);
+  const nodes = await readEntityNodes(root);
+  const byKey = new Map<string, { kind: string; name: string }>();
+  for (const c of candidates) {
+    const key = blockKey(c.kind, c.name);
+    if (!byKey.has(key)) byKey.set(key, { kind: c.kind, name: c.name }); // first candidate's spelling as the label
+  }
+  for (const n of nodes) {
+    const key = blockKey(n.kind, n.name);
+    if (!byKey.has(key)) byKey.set(key, { kind: n.kind, name: n.name });
+  }
+  const out: ConnectSetAsideItem[] = [];
+  for (const [key, meta] of byKey) {
+    const st = await readConnectState(root, key);
+    if (st.terminal && st.terminalReason === 'setaside') {
+      out.push({ blockKey: key, kind: meta.kind, name: meta.name, failures: st.failures, rounds: st.rounds });
+    }
+  }
+  return out.sort((a, b) => (a.blockKey < b.blockKey ? -1 : 1));
+}
+
+/**
+ * Append ONE per-block audit event to `connect/audit.jsonl` and commit it under the canonical-writer
+ * lock via the shared optimistic-advance machinery (ORCH-17/18) — shared by the OBS-17 recovery
+ * primitives. A rare same-path collision retries; exhaustion throws (a manual, one-at-a-time recovery
+ * action shouldn't exhaust — surface it rather than silently drop).
+ */
+async function appendConnectAudit(
+  root: string,
+  key: string,
+  fields: Record<string, unknown>,
+  commitMessage: (key: string) => string,
+  lock: Mutex,
+): Promise<void> {
+  root = path.resolve(root);
+  const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
+    const auditPath = path.join(wt, AUDIT_REL);
+    await fs.mkdir(path.dirname(auditPath), { recursive: true });
+    await fs.appendFile(auditPath, auditLine({ runId: ulid(), blockKey: key, ...fields }), 'utf8');
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(commitMessage(key));
+    return true;
+  };
+  const onExhausted = async (): Promise<void> => {
+    throw new Error(`connect recovery: could not advance ${String(fields.event)} for ${key} — canonical too contended`);
+  };
+  await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
+}
+
+/**
+ * OBS-17 — user-driven **retry** of a set-aside Connect block. Appends a per-block `reopened` marker
+ * that supersedes the prior `setaside`/`failed` count (see {@link readConnectState}), so the block
+ * re-enters the queue and re-resolves on the next sweep. Idempotent-safe in the read-outside/act-
+ * under-lock window: re-appending `reopened` is harmless, and a since-recovered block's marker is inert.
+ */
+export async function retryConnectItem(root: string, key: string, lock: Mutex = new Mutex(), log: DevLog = noopDevLog): Promise<void> {
+  await appendConnectAudit(root, key, { event: 'reopened' }, (k) => `connect: reopened ${k} (retry)`, lock);
+  log.info('connect.reopened', { itemId: key });
+}
+
+/**
+ * OBS-17 — user-driven **dismiss** of a set-aside Connect block. Appends a TERMINAL `dismissed`
+ * marker: the block leaves the recoverable list permanently and is never retried or re-resolved —
+ * distinct from `setaside`, which stays recoverable.
+ */
+export async function dismissConnectItem(root: string, key: string, lock: Mutex = new Mutex(), log: DevLog = noopDevLog): Promise<void> {
+  await appendConnectAudit(root, key, { event: 'dismissed' }, (k) => `connect: dismissed ${k}`, lock);
+  log.info('connect.dismissed', { itemId: key });
 }
 
 // ── Worktree + audit helpers (mirror decomposeStage/claimsStage) ───────────────────────────
