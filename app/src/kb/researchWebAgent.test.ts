@@ -87,6 +87,11 @@ describe('WEB_RESEARCH_SKILL — untrusted-content posture (RESEARCH-12)', () =>
     expect(WEB_RESEARCH_SKILL).toMatch(/ONLY the requested topic/i);
     expect(WEB_RESEARCH_SKILL).toMatch(/exfiltrate/i);
   });
+
+  it('pins findings capture to the submitFindings tool call — not a free reply (1d findings-capture fix)', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/calling the submitFindings tool/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/only way your findings are recorded/i);
+  });
 });
 
 describe('makeWebResearchFn — injected session (seam)', () => {
