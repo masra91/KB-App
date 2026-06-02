@@ -6,19 +6,22 @@
 #     - `package` — `npm run package` build-check: proves the app still PACKAGES (Vite main
 #                   bundle + asar pack + native-dep prepare). Catches the class of break that
 #                   sails past typecheck/lint/unit because it only manifests in the packaged
-#                   artifact — e.g. a dep not bundled into the main bundle (BUG #65 / the
-#                   `simple-git` asar bug). Cheap: build-only, no Playwright, no app launch.
-#                   Linux is enough — Vite-build + asar-pack is platform-agnostic, so a
-#                   bundling regression fails here regardless of the shipped OS.
+#                   artifact — e.g. a dep not bundled into the main bundle (the `simple-git`
+#                   asar bug). Cheap: build-only, no Playwright, no app launch. Linux is enough
+#                   — Vite-build + asar-pack is platform-agnostic, so a bundling regression
+#                   fails here regardless of the shipped OS.
 #   GOAL: a full matrix — every level (unit + component + e2e + packaged smoke) on BOTH
 #        macOS and Windows (the shipped targets, STACK-3). We grow toward it incrementally.
 #   The `e2e` job below is the start of that rollout: it is OPT-IN (manual dispatch or an
 #        `e2e` PR label) and NOT yet a required gate, because the Playwright/packaged-app
-#        harness is new and unverified across runners. Promote it to required once stable.
-#   NOT yet covered by a gate (no silent caps, TEST-11): packaged RUNTIME behaviour beyond
-#        boot — e.g. a packaged Recall round-trip (BUG #65's actual failure mode) — still
-#        lives only in the opt-in e2e job; promoting a packaged Recall smoke to gating is the
-#        next step.
+#        harness is new and unverified across runners. It now runs three smokes — boot-survival
+#        (TEST-4), Ask UI (stubbed recall), and the BUG #65 recall-wiring regression guard
+#        (recall.e2e.ts, TEST-21: real recall resolves + spawns the BYOA copilot, NOT the asar
+#        bundled lookup). Promote it to required once stable.
+#   NOT yet covered by a GATE (no silent caps, TEST-11): the `package` job builds but does not
+#        RUN the app, and the runtime smokes above gate nothing until the `e2e` job is promoted
+#        to required (the phased TEST-11 step). A full live-LLM grounded recall is deliberately
+#        never gating — it needs a real copilot + API key (flaky/costly); it stays opt-in/manual.
 #
 # Local vs CI: the local quick suite (/validate) is typecheck + lint + unit and excludes
 # e2e (TEST-9). e2e lives here in CI only.

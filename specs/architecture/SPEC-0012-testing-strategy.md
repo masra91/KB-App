@@ -214,6 +214,7 @@ The point of all this (SPEC-0000):
 | TEST-18  | must     | Tests that touch a vault use a throwaway temp vault, never the app's own repo     | test:app/test/tempVault.ts | STACK-8 |
 | TEST-19  | must     | Test-tooling dependencies follow ENG E1 (reputable, pinned, ≥7-day-old)           | manual:review | ENG-1..4 |
 | TEST-20  | must     | CI runs a GATING `npm run package` build-check on every PR (Linux) — catches packaged-artifact breaks (un-bundled deps / asar resolution) that unit/lint/typecheck structurally miss | test:.github/workflows/ci.yml (`package` job) | ENG-13,14; STACK-3 |
+| TEST-21  | must     | A deterministic e2e recall smoke guards BUG #65: real recall resolves + spawns the BYOA `copilot` (the `resolveExecutable`→`forStdio` path), never the asar bundled-package lookup; no live LLM | test:app/e2e/recall.e2e.ts | ENG-12,13; STACK-9 |
 
 ### TEST-1 — Three levels, defined roles
 - **Status:** draft · **Priority:** must
@@ -401,9 +402,34 @@ The point of all this (SPEC-0000):
   feeds the boot smoke), so this adds a gate without paying the matrix cost.
 - **Scope (no silent caps, TEST-11):** build-only. It catches *packaging* breaks, not packaged
   *runtime* breaks beyond what the opt-in boot-survival smoke covers. BUG #65's actual failure
-  mode — a packaged **Recall** round-trip returning ungrounded — needs a packaged Recall smoke;
-  that is the documented next step, not yet gating.
+  mode — a packaged **Recall** round-trip returning ungrounded — is caught by the recall-wiring
+  smoke (TEST-21) in the opt-in e2e job, not by this build-check.
 - **Traces:** ENG-13, ENG-14, STACK-3 · **Verify:** test:.github/workflows/ci.yml (`package` job)
+
+### TEST-21 — Recall-wiring regression guard (BUG #65)
+- **Status:** active · **Priority:** must
+- **Statement:** A deterministic e2e smoke **MUST** guard the BUG #65 fix: with the real recall
+  path (no `KB_ASK_E2E_STUB`), the app resolves the user's BYOA `copilot` and connects to it
+  (`resolveExecutable('copilot')` → `RuntimeConnection.forStdio({ path })`), and **MUST NOT** fall
+  back to the bare-`CopilotClient()` search for a *bundled* `@github/copilot` package (the #65 bug).
+- **Mechanism (deterministic, CI-safe, no live LLM):** a **fake `copilot`** is planted on PATH that
+  touches a marker file when invoked then exits non-zero, so the SDK connection fails fast. A fake
+  login shell makes `ensurePath` (STACK-9) prepend the fake's dir first, so it wins resolution even
+  on a host that has a real `copilot` installed. Asserts: (1) POSITIVE — the marker exists (the
+  resolved BYOA CLI was actually spawned — the `forStdio` path ran); (2) the result is an honest
+  ungrounded, structured `AskResult` (no crash, no fabrication); (3) NEGATIVE/regression — the
+  result never contains the bundled-package-search signature (`@github/copilot` / "could not find …
+  copilot … package").
+- **Rationale:** BUG #65 was invisible to typecheck/lint/unit **and** to the boot-survival smoke
+  (recall fails ungrounded, the app does not crash). It is also distinct from the `package`
+  build-check (TEST-20), which builds but never runs recall. Only exercising the real recall wiring
+  catches a regression to the bundled lookup.
+- **Scope (no silent caps, TEST-11):** e2e, so it lives in the **opt-in** e2e job (CI-only,
+  TEST-9) and gates nothing until that job is promoted to required. A full **live-LLM grounded**
+  recall is deliberately out of scope (real copilot + API key → flaky/costly); it stays
+  opt-in/manual. On Windows the spawn-marker positive check is skipped (the `.cmd` stub's exec
+  contract differs); the regression-guard negative assertion still runs on all platforms.
+- **Traces:** ENG-12, ENG-13, STACK-9 · **Verify:** test:app/e2e/recall.e2e.ts
 
 ## 4. Open questions
 
@@ -427,6 +453,14 @@ The point of all this (SPEC-0000):
 
 ## 5. Changelog
 
+- 2026-06-02 — **TEST-21 added + green** (recall-wiring regression guard, BUG #65). New
+  `app/e2e/recall.e2e.ts`: drives REAL recall (no `KB_ASK_E2E_STUB`) with a fake `copilot` on
+  PATH (+ a fake login shell so `ensurePath` prepends it first, beating a real install) and
+  asserts the app spawned the resolved BYOA CLI (the `resolveExecutable`→`forStdio` path) and
+  never fell back to the bundled `@github/copilot` lookup #65 produced. Deterministic, no live
+  LLM. Opt-in e2e job (CI-only); not gating until that job is promoted (TEST-11). TEST-20 detail
+  + ci.yml header corrected (BUG #65 is a runtime recall break caught here, not a build/bundling
+  break caught by the `package` job).
 - 2026-06-02 — **TEST-20 added + green** (gating package build-check). New `package` job in
   `.github/workflows/ci.yml` runs `npm run package` (build-only, Linux) on every PR + push and
   asserts a runnable artifact under `out/` — a cheap gate for the packaged-artifact break class
