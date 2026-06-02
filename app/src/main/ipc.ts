@@ -19,6 +19,7 @@ import { recall } from '../kb/recall';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
 import { buildFeed } from '../kb/activityDigest';
 import { traceLineage } from '../kb/lineage';
+import { resolveExecutable } from './resolvePath';
 import type { CapturePayload } from '../kb/ingest';
 import type {
   AppState,
@@ -164,7 +165,10 @@ export function registerIpc(): void {
     if (!cfg.activeVaultPath) {
       return { question: req.question, answer: 'No active knowledge base — set one up first.', citations: [], grounded: false, toolCalls: 0, truncated: false };
     }
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history });
+    // BUG #65: hand recall the resolved BYOA `copilot` path so the SDK spawns it in the packaged
+    // app (PATH was ensured at boot, STACK-9). Null → SDK default search (dev fallback).
+    const cliPath = resolveExecutable('copilot') ?? undefined;
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath });
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config
