@@ -142,6 +142,14 @@ named by role so dark/light and future surfaces stay coherent (DESIGN-7).
 | Text primary | `--viz-ink` | `#E6E3DC` | `#1C1B18` | Labels, body |
 | Text muted | `--viz-ink-muted` | `#9298A0` | `#6A6557` | Secondary, units |
 
+- **Brass carries two meanings — disambiguate by context, not hue** (resolves KB-QD's GATE-2
+  brass-overload note). `--viz-brass` marks both **system-waiting** (a stage queued on the lock/sweep
+  — resolves itself, *no* user action) and **human-waiting** (the "needs your decision" queue — *act
+  now*). They are told apart by **location + label + affordance**, never by hue alone: human-waiting
+  lives in the `◑ NEEDS YOUR DECISION (N)` block with a **decision affordance** (Retry/Pick/Continue)
+  on each row; system-waiting is inline at a station with **no** affordance. **Never render a bare
+  brass dot where the two could be confused** — a brass item that demands action must sit in the
+  needs-you queue with its button + the block's header glyph/label.
 - **Contrast (measured on dark, vs `--viz-field` `#15171A`):** ink `14.0:1`, brass `7.4:1`,
   patina `6.1:1`, ember `6.0:1`, **oxide `3.96:1`**. Rule that follows from this:
   - **State hues color fills, glyphs, borders, and large/display elements only** — all clear the
