@@ -18,7 +18,24 @@
 // The live SDK session (like recallAgent) is exercised in CI/e2e, not unit tests; the pure security
 // helpers below (egress allowlist, skill prompt, citation extraction) ARE unit-tested.
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
+import { makeGatedFetch } from './researchFetch';
+import { acquireCopilotSlot } from './copilotConcurrency';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
+// Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
+// VALUE import of the SDK is a dynamic `import()` inside liveSdkSession, keeping that lazy property.
+import type { SessionConfig, SystemMessageConfig } from '@github/copilot-sdk';
+
+/**
+ * The two tool names the live session allow-lists (KB-QD's enforceable egress, PM steer (A)):
+ * - WEB_FETCH_TOOL_NAME — OUR SSRF-gated fetch, declared with `overridesBuiltInTool` so it replaces
+ *   the CLI's built-in fetch; combined with the allow-list it is the agent's ONLY page-retrieval path.
+ * - WEB_SEARCH_TOOL_NAME — the CLI's BUILT-IN web search, allow-listed for discovery only (the query
+ *   is request-only via buildOutboundQuery). Its exact runtime name is BYOA-CLI-specific and confirmed
+ *   in the live e2e; isolated here as a constant so swapping search to a dedicated provider (option B)
+ *   is a one-line change, per the PM steer.
+ */
+export const WEB_FETCH_TOOL_NAME = 'fetch';
+export const WEB_SEARCH_TOOL_NAME = 'web_search';
 
 /**
  * The Web research SKILL (RESEARCH-12) — injected as the SDK session system message. It frames
@@ -141,6 +158,9 @@ export function filterCitations(citations: readonly string[], allowedDomains: re
 /** Config for the live Web research client (model override, injectable SDK session factory for tests). */
 export interface WebResearchOptions {
   model?: string;
+  /** Absolute path to the BYOA `copilot` CLI (ORCH-21 / BUG #65) — the SDK spawns THIS binary so it
+   *  works inside the packaged app's asar. Resolved by the main tier; absent → SDK default search (dev). */
+  cliPath?: string;
   /** Injected session runner — production uses the SDK; tests/Slice-1a inject a fake. Returns the
    *  agent's note + raw cited URLs for one bounded research pass over `query`. */
   session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
@@ -154,7 +174,7 @@ export interface WebResearchOptions {
  * (audited as a no-op by researchRun), never a crash of the dispatch.
  */
 export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
-  const runSession = opts.session ?? liveSdkSession(opts.model);
+  const runSession = opts.session ?? liveSdkSession(opts);
   return async (r: ResearcherConfig, req: ResearchRequest): Promise<ResearchFindings> => {
     const query = buildOutboundQuery(req);
     if (r.egressTier !== 'public-web') {
@@ -174,16 +194,79 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
   };
 }
 
-/** The live SDK-backed session. Lazily imported so unit tests (which inject `opts.session`) never
- *  load the SDK. Defined as a thunk; the actual SDK wiring mirrors recallAgent (Session + read-only
- *  web tools gated by `isAllowedUrl` + the untrusted-content skill). */
-function liveSdkSession(_model?: string): NonNullable<WebResearchOptions['session']> {
-  return async () => {
-    // The real implementation opens a @github/copilot-sdk Session with web search/fetch tools whose
-    // handlers enforce isAllowedUrl, the WEB_RESEARCH_SKILL system message, and a submitFindings tool
-    // — exercised in CI/e2e, not unit tests (the SDK is BYOA + network). Until that lands in this
-    // slice's SDK-wiring commit, the default session yields no finding rather than make an
-    // ungated/unsafe call. Tests + Slice-1a inject `opts.session`.
-    throw new Error('web research SDK session not wired in this build — inject opts.session');
+/**
+ * The live `@github/copilot-sdk` session (RESEARCH-8/12/16; PM steer (A), KB-QD enforceable gate).
+ * The SDK is **dynamically** imported so unit tests (which inject `opts.session`) never load it; the
+ * live network path is exercised in CI/e2e, not unit tests (BYOA + network).
+ *
+ * Enforceable egress (the whole point of the gate — NOT the soft prompt):
+ *  - tools = our SSRF-gated `fetch` (`makeGatedFetch` → isAllowedUrl + the makeSsrfSafeLookup Agent),
+ *    declared `overridesBuiltInTool` so it REPLACES the CLI's built-in fetch (KB-QD option a), plus a
+ *    `submitFindings` sink;
+ *  - `availableTools` allow-lists ONLY [built-in search, our fetch, submitFindings] — every other
+ *    built-in egress tool is DENIED (KB-QD option b). So the agent's only page-retrieval path is ours.
+ *  - `approveAll` only ever sees that restricted set (recall's read-only posture).
+ *  - one global copilot slot is held for the session's lifetime (ORCH-23; released on disconnect).
+ * The system message is the untrusted-content skill (RESEARCH-12); the outbound query is request-only.
+ */
+function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOptions['session']> {
+  return async ({ skill, prompt, query, maxToolCalls, allowedDomains }) => {
+    const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
+    const gatedFetch = makeGatedFetch({ allowedDomains });
+    let submitted: { note: string; citations: string[] } | null = null;
+
+    // Hold ONE process-global copilot slot for the whole session (ORCH-23): researchers are background +
+    // fan-out-capable, the multiplicative-concurrency vector the semaphore guards. Released in finally.
+    const release = await acquireCopilotSlot();
+    const client = new CopilotClient(opts.cliPath ? { connection: RuntimeConnection.forStdio({ path: opts.cliPath }) } : {});
+    try {
+      const systemMessage: SystemMessageConfig = { mode: 'replace', content: skill };
+      const tools = [
+        defineTool(WEB_FETCH_TOOL_NAME, {
+          description: 'Fetch the readable text of a PUBLIC web page by URL, for the requested topic only.',
+          parameters: { type: 'object', properties: { url: { type: 'string', description: 'Absolute http(s) URL' } }, required: ['url'], additionalProperties: false },
+          overridesBuiltInTool: true, // our gated fetch IS the agent's fetch
+          handler: async (args: unknown) => {
+            const url = String((args as { url?: unknown }).url ?? '');
+            try {
+              const res = await gatedFetch(url); // isAllowedUrl + SSRF-Agent; throws on a blocked/SSRF URL
+              return { url: res.url, status: res.status, text: res.text, truncated: res.truncated };
+            } catch (e) {
+              // Surface the refusal to the agent as DATA (not a thrown tool error) so it can move on.
+              return { error: e instanceof Error ? e.message : 'fetch refused', url };
+            }
+          },
+        }),
+        defineTool('submitFindings', {
+          description: 'Submit the final findings note (markdown) and the source URLs it cites. Call exactly once.',
+          parameters: { type: 'object', properties: { note: { type: 'string' }, citations: { type: 'array', items: { type: 'string' } } }, required: ['note', 'citations'], additionalProperties: false },
+          handler: async (args: unknown) => {
+            const a = args as { note?: unknown; citations?: unknown };
+            submitted = { note: typeof a.note === 'string' ? a.note : '', citations: Array.isArray(a.citations) ? a.citations.map(String) : [] };
+            return { ok: true };
+          },
+        }),
+      ];
+      const sessionConfig: SessionConfig = {
+        clientName: 'kb-app-researcher-web',
+        model: opts.model,
+        systemMessage,
+        tools,
+        availableTools: [WEB_SEARCH_TOOL_NAME, WEB_FETCH_TOOL_NAME, 'submitFindings'],
+        onPermissionRequest: approveAll,
+      };
+      const session = await client.createSession(sessionConfig);
+      try {
+        await session.sendAndWait(
+          `${prompt}\n\nResearch this and then call submitFindings exactly once:\n${query}\n\nUse at most ${maxToolCalls} tool calls. Cite only pages you actually fetched.`,
+        );
+      } finally {
+        await session.disconnect();
+      }
+      return submitted ?? { note: '', citations: [] };
+    } finally {
+      await client.stop();
+      release();
+    }
   };
 }
