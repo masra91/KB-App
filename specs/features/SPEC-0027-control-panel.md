@@ -81,6 +81,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts + settingsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | test:app/src/shell/reviewBadge.test.ts, app/src/shell/shell.test.ts | REVIEW-?; AUTO-10 |
 | PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/views/agentsView.test.ts (degrade) | ORCH-10 |
+| PANEL-10| should   | Action buttons (e.g. **Run now**) reflect a clear **state machine** — idle → confirm → **running** (disabled + status text) → back to idle on completion — never leaving the user unsure whether something is running | none-yet | OBS-5; [#108](https://github.com/masra91/KB-App/issues/108) |
 
 ## 5. User flows / surface
 
