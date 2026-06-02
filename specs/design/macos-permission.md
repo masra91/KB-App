@@ -23,8 +23,8 @@ stage: First-run
 > around it**: a pre-prompt that explains *why* before the OS asks, and a non-dead-end **recovery**
 > when access is denied. Built on the shared `_design-system` ("The Line") for one coherent app.
 > Implements the **ruled behavior** (KB-Lead, relayed via PM): *on deny → warn + steer to System
-> Settings → Privacy; iCloud → detect-warn-only (v1)*. (SPEC-0034 is the parent, finalizing under
-> #159; this expresses the locked behavior.)
+> Settings → Privacy; iCloud → detect-warn-only (v1)*. (SPEC-0034 is the parent — now **locked on
+> main** via #159 `5d435fc`; this design matches the ruled behavior.)
 
 ## 1. The constraint (what we can and can't style)
 
@@ -70,13 +70,25 @@ iCloud vault detected (any time) → a quiet inline note, non-blocking:
 ```
 
 - **Pre-prompt** — a single calm panel in the app's voice: *what* it needs, *which exact folder*
-  (the resolved path, mono), and *that macOS will ask next*. One primary action **Continue** that
-  triggers the OS dialog. No scare language; this is routine setup.
+  (the resolved path, mono), and *that macOS will ask next*. The primary action **Continue**
+  performs a **deliberate probe access** — a benign no-op read/write into the vault — so the OS TCC
+  dialog fires **then and there**, while the pre-prompt is on screen. (Load-bearing: TCC fires on the
+  first protected-folder access (MACOS-5); if Continue didn't *perform* that access, the system
+  dialog would surface later, mid-pipeline, **decoupled** from the explanation — the cold surprise
+  the pre-prompt exists to prevent.) No scare language; routine setup.
 - **Blocked / denied** — **brass, actionable** (waiting on *you*, not a crash): names the blocked
-  folder, states the consequence plainly, and gives the **exact Settings path** + a primary
-  **Open System Settings** button that deep-links straight to the Privacy pane
-  (`x-apple.systempreferences:com.apple.preference.security?Privacy_Files...`), plus **Retry**
-  (re-attempts after the user grants, so they don't relaunch). Actionable recovery, never a dead end.
+  folder, states the consequence plainly, gives the **exact Settings path** + an **Open System
+  Settings** button + **Retry**. Three rules:
+  - **Blocked is the general recovery surface for ANY `Operation not permitted` at write time
+    (MACOS-5)** — not only first-run's deny branch. It must also appear when access is **revoked
+    later** in Settings, or a **pipeline run hits a never-granted vault** (first-run skipped). This
+    is the #56 "never silently stall" guarantee — any denied write routes here, loudly.
+  - **Deep-link + graceful fallback.** The button targets the exact anchor
+    `x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders`; sub-pane
+    anchors are **historically flaky across macOS versions**, so if it doesn't resolve it **falls
+    back to opening System Settings → Privacy & Security generally — never a no-op click**.
+  - **Retry** re-attempts the access; **while still denied it returns to Blocked** (loop stays
+    closed — not an error, not a dead end), so the user grants-then-Retry without relaunching.
 - **iCloud detect-warn (v1)** — a quiet, **non-blocking** inline note when the vault is under iCloud
   Drive (sync/eviction nuance). Detect + warn only — no gating in v1.
 
@@ -107,10 +119,12 @@ permission modal:
 
 | # | Flow (MACOS-2/6/7) | How the design serves it |
 | --- | --- | --- |
-| 1 | First-run, protected vault → user understands + grants | **Pre-prompt** explains why + which folder before the OS dialog; **Continue** triggers it |
+| 1 | First-run, protected vault → user understands + grants | **Pre-prompt** explains why + which folder; **Continue** does a **probe access** so the OS dialog fires then-and-there (coupled to context) |
 | 2 | User **allows** | Proceeds silently — no needless confirmation UI |
-| 3 | User **denies / dismisses** → can recover | **Blocked** state: exact Settings path + **Open System Settings** deep-link + **Retry** (the ruled deny→steer-to-Settings behavior) |
-| 4 | Vault in **iCloud Drive** | Non-blocking **detect-warn** note (v1 scope) |
+| 3 | User **denies / dismisses** → can recover | **Blocked**: exact Settings path + **Open System Settings** deep-link (`Privacy_FilesAndFolders`, with general-pane fallback) + **Retry** |
+| 4 | Access **revoked later** in Settings, **or** a pipeline run on a **never-granted** vault | Same **Blocked** surface — it's the **general** write-time-denial recovery (MACOS-5), not just first-run; #56 never-silently-stall |
+| 5 | **Retry** while still denied | Returns to **Blocked** (loop closed — grant-then-Retry, no relaunch); never an error/dead-end |
+| 6 | Vault in **iCloud Drive** | Non-blocking **detect-warn** note (v1 scope) |
 
 ## 5. Out of scope (v1)
 - Restyling the macOS TCC dialog (impossible — system-owned).
@@ -132,3 +146,9 @@ permission modal:
   path + Open-System-Settings deep-link + Retry) + a non-blocking **iCloud detect-warn** (v1). Reuses
   "The Line" `_design-system` (DESIGN-7); blocked = brass (needs-you), not oxide (broken). Expresses
   KB-Lead's ruled behavior; SPEC-0034 parent finalizing under #159. Pending GATE 1 + GATE 2.
+- 2026-06-02 — **GATE 2 (KB-QD) PASS** (matches the now-locked SPEC-0034 #159 `5d435fc`); folded in
+  3 completeness should-fixes: **Continue does a probe access** (OS dialog fires coupled to the
+  pre-prompt, not decoupled mid-pipeline); **Blocked is the general recovery for any write-time
+  `Operation not permitted`** (revoked-later / never-granted-pipeline-run, not just first-run deny);
+  **exact deep-link anchor `Privacy_FilesAndFolders` + graceful fallback** to the general Privacy
+  pane (never a no-op), and **Retry-while-denied returns to Blocked**. Awaiting GATE 1 (KB-AI-Detector).
