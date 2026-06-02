@@ -213,6 +213,7 @@ The point of all this (SPEC-0000):
 | TEST-17  | should   | Tests are laid out as `*.test.ts` colocated; e2e under `app/e2e/`; fixtures under `app/test/` | manual:review | — |
 | TEST-18  | must     | Tests that touch a vault use a throwaway temp vault, never the app's own repo     | test:app/test/tempVault.ts | STACK-8 |
 | TEST-19  | must     | Test-tooling dependencies follow ENG E1 (reputable, pinned, ≥7-day-old)           | manual:review | ENG-1..4 |
+| TEST-20  | must     | CI runs a GATING `npm run package` build-check on every PR (Linux) — catches packaged-artifact breaks (un-bundled deps / asar resolution) that unit/lint/typecheck structurally miss | test:.github/workflows/ci.yml (`package` job) | ENG-13,14; STACK-3 |
 
 ### TEST-1 — Three levels, defined roles
 - **Status:** draft · **Priority:** must
@@ -383,6 +384,27 @@ The point of all this (SPEC-0000):
   machines.
 - **Traces:** ENG-1, ENG-2, ENG-4 · **Verify:** manual:review
 
+### TEST-20 — Gating package build-check
+- **Status:** active · **Priority:** must
+- **Statement:** CI **MUST** run a **gating** `npm run package` build-check on every PR and push
+  to `main`. It builds the production artifact (Vite main bundle + asar pack + native-dep
+  prepare) and asserts a runnable artifact was produced — but does **not** launch the app
+  (that's the e2e smoke). It runs on **Linux only**.
+- **Rationale:** A whole class of break is invisible to `quick` (typecheck + lint + unit):
+  a dependency that resolves in dev but **isn't bundled into the packaged `app.asar`**. It
+  compiles, lints, and unit-tests clean, then fails only in the packaged app — the `simple-git`
+  asar bug, and **BUG #65** (`new CopilotClient()` couldn't resolve `@github/copilot` inside the
+  asar). The packaging step itself is the cheapest gate that exercises the real bundler+asar
+  path, so it belongs on every PR, not just the opt-in e2e matrix. Linux suffices because the
+  Vite-build + asar-pack pipeline is platform-agnostic — a bundling regression fails there
+  regardless of the shipped OS; the mac/Windows package step stays in the e2e job (where it also
+  feeds the boot smoke), so this adds a gate without paying the matrix cost.
+- **Scope (no silent caps, TEST-11):** build-only. It catches *packaging* breaks, not packaged
+  *runtime* breaks beyond what the opt-in boot-survival smoke covers. BUG #65's actual failure
+  mode — a packaged **Recall** round-trip returning ungrounded — needs a packaged Recall smoke;
+  that is the documented next step, not yet gating.
+- **Traces:** ENG-13, ENG-14, STACK-3 · **Verify:** test:.github/workflows/ci.yml (`package` job)
+
 ## 4. Open questions
 
 - [ ] **Formatter** — adopt Prettier (consistency, but a new dep + ESLint integration) or stay
@@ -404,6 +426,13 @@ The point of all this (SPEC-0000):
       (STACK open questions / future PANEL/Setup UI work).
 
 ## 5. Changelog
+
+- 2026-06-02 — **TEST-20 added + green** (gating package build-check). New `package` job in
+  `.github/workflows/ci.yml` runs `npm run package` (build-only, Linux) on every PR + push and
+  asserts a runnable artifact under `out/` — a cheap gate for the packaged-artifact break class
+  (un-bundled dep / asar resolution) that `quick` structurally can't see (the `simple-git` asar
+  bug; **BUG #65**). Header doc updated (two gating jobs now; no silent caps — packaged *runtime*
+  beyond boot, e.g. a Recall round-trip, is still e2e-only and called out as the next step).
 
 - 2026-05-30 — **TEST-4 green** (`none-yet → test:`). `app/e2e/smoke.e2e.ts` now: (1) Playwright
   drives the production-built bundle and asserts the first-run Setup UI (SETUP-1 → `test:`);
