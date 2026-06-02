@@ -8,11 +8,12 @@
 // Egress + untrusted-content gates live in the modules this composes (researchWebAgent), enforced
 // regardless of how dispatch is triggered.
 import { readResearcherRegistry } from './researcherRegistry';
+import { readEvents } from './activityIndex';
 import { dispatchResearch, type DispatchDeps, type DispatchResult } from './researchDispatcher';
 import { makeCliSelfNominate, type NominateRunner } from './researchNominate';
 import { makeWebResearchFn, type WebResearchOptions } from './researchWebAgent';
 import { runResearcher, type ResearchFn } from './researchRun';
-import type { ResearchRequest } from './researchers';
+import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearchRequest } from './researchers';
 
 export interface ResearchDepsOptions {
   /** Thin-CLI relevance runtime for self-nomination (omit → deterministic heuristic only). */
@@ -50,4 +51,49 @@ export function makeResearchDeps(root: string, opts: ResearchDepsOptions = {}): 
 export async function runInlineResearch(root: string, requests: readonly ResearchRequest[], opts: ResearchDepsOptions = {}): Promise<DispatchResult> {
   const researchers = (await readResearcherRegistry(root)).filter((r) => r.enabled);
   return dispatchResearch(root, requests, researchers, makeResearchDeps(root, opts));
+}
+
+/**
+ * Collect the `research-request` signals a producer emitted (RESEARCH-3, D1) from the audit into
+ * `ResearchRequest`s ready for dispatch. A producer (a pipeline stage that hit an unknown term, or
+ * Reflect) emits `signals: [{ type: 'research-request', what, why, context?, refs? }]`, which lands
+ * as a `signal` audit event whose payload carries those fields. We read them back here; the
+ * dispatcher's persistent dedup ledger then ensures the same request isn't fanned out twice across
+ * sweeps, so re-collecting old signals is safe + idempotent.
+ */
+export async function collectResearchRequests(root: string): Promise<ResearchRequest[]> {
+  const events = await readEvents(root, {}); // newest-first
+  const out: ResearchRequest[] = [];
+  for (const e of events) {
+    if (e.eventType !== 'signal') continue;
+    const p = e.payload;
+    if (p.type !== RESEARCH_REQUEST_SIGNAL || typeof p.what !== 'string' || p.what.length === 0) continue;
+    const by = {
+      stage: e.actor,
+      ...(e.subjects.sourceId ? { sourceId: e.subjects.sourceId } : {}),
+      ...(e.subjects.entityId ? { entityId: e.subjects.entityId } : {}),
+    };
+    out.push({
+      // Stable id from provenance so re-collecting the same signal yields the same request.
+      id: `${e.provenance.file}:${e.provenance.line}`,
+      ts: e.ts,
+      by,
+      what: p.what,
+      why: typeof p.why === 'string' ? p.why : '',
+      context: typeof p.context === 'string' ? p.context : '',
+      ...(typeof p.egressHint === 'string' ? { egressHint: p.egressHint as ResearchRequest['egressHint'] } : {}),
+      dedupKey: dedupKeyFor({ what: p.what, by }),
+    });
+  }
+  return out;
+}
+
+/**
+ * One inline-research sweep (RESEARCH-2/3): collect the pending `research-request` signals + route
+ * them through the dispatcher. Intended to be poked after a stage drain (where unknown-term signals
+ * arise) or on the researcher tick; the dedup ledger makes repeated sweeps cheap. Inert until a
+ * producer actually emits `research-request` signals.
+ */
+export async function runInlineResearchSweep(root: string, opts: ResearchDepsOptions = {}): Promise<DispatchResult> {
+  return runInlineResearch(root, await collectResearchRequests(root), opts);
 }

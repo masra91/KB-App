@@ -7,7 +7,8 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { upsertResearcher } from './researcherRegistry';
 import { readCapturedMeta } from './ingest';
-import { runInlineResearch, makeResearchDeps } from './researchInline';
+import { promises as fs } from 'node:fs';
+import { runInlineResearch, makeResearchDeps, collectResearchRequests, runInlineResearchSweep } from './researchInline';
 import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
 function gitInstalledSync(): boolean {
@@ -81,6 +82,38 @@ describe.skipIf(!gitAvailable)('runInlineResearch (RESEARCH-2/3/4)', () => {
       expect(first.fresh).toBe(1);
       const second = await runInlineResearch(root, [req('Atlas')], { web: fakeWeb });
       expect(second.fresh).toBe(0); // already researched — coalesced
+    });
+  });
+});
+
+/** Append a `research-request` signal audit line as a producer stage would emit it. */
+async function emitRequestSignal(root: string, what: string, by: { stage: string; sourceId?: string }): Promise<void> {
+  const line = JSON.stringify({ ts: '2026-06-02T00:00:00.000Z', stage: by.stage, event: 'signal', type: 'research-request', what, why: 'unknown term', context: `ctx ${what}`, ...(by.sourceId ? { sourceId: by.sourceId } : {}) }) + '\n';
+  await fs.appendFile(path.join(root, '.kb', 'audit.jsonl'), line, 'utf8');
+}
+
+describe.skipIf(!gitAvailable)('collectResearchRequests + runInlineResearchSweep (RESEARCH-3, D1)', () => {
+  it('reads research-request signals from the audit into requests (ignoring other signals)', async () => {
+    await withVault(async (root) => {
+      await fs.mkdir(path.join(root, '.kb'), { recursive: true });
+      await emitRequestSignal(root, 'Project Atlas', { stage: 'decompose', sourceId: 'S1' });
+      // a non-research signal must be ignored
+      await fs.appendFile(path.join(root, '.kb', 'audit.jsonl'), JSON.stringify({ ts: 't', stage: 'claims', event: 'signal', type: 'tension', note: 'x' }) + '\n');
+      const reqs = await collectResearchRequests(root);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0]).toMatchObject({ what: 'Project Atlas', why: 'unknown term', by: { stage: 'decompose', sourceId: 'S1' } });
+      expect(reqs[0].dedupKey).toBe(dedupKeyFor({ what: 'Project Atlas', by: { sourceId: 'S1' } }));
+    });
+  });
+
+  it('sweep collects + dispatches to enabled researchers (inline trigger end-to-end, faked cognition)', async () => {
+    await withVault(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1', enabled: true, topics: [] }));
+      await fs.mkdir(path.join(root, '.kb'), { recursive: true });
+      await emitRequestSignal(root, 'Atlas', { stage: 'decompose', sourceId: 'S1' });
+      const res = await runInlineResearchSweep(root, { web: fakeWeb });
+      expect(res.fresh).toBe(1);
+      expect(res.outcomes.some((o) => o.ran && o.researcherId === 'web-1')).toBe(true);
     });
   });
 });
