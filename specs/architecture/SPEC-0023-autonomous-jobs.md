@@ -112,8 +112,9 @@ A job run **may do nothing** — finding no actionable work is a normal, common 
       concurrency rules as a scheduled run (JOBS-11).
 - [ ] **Event-driven v2** — which signals (KB-change, on-idle, post-replay) become triggers,
       and how they compose with schedules.
-- [ ] **Autonomy-posture scope** — is Guarded-vs-Autonomous (JOBS-15) set per-job,
-      per-Instance, or both? (AUTO-12.)
+- [x] **Autonomy-posture scope** — RESOLVED for v1: **per-job** (JOBS-15 is part of per-job
+      config). A per-Instance default/override is **additive later** (routed to KB-Lead for the
+      safety/product model) and the registry shape doesn't preclude it.
 
 ## 6. Changelog
 
@@ -130,3 +131,27 @@ A job run **may do nothing** — finding no actionable work is a normal, common 
   idle-deferred; journal at **`.kb/jobs/<job>/journal.jsonl`** versioned on `staging` (JOBS-7);
   "run now" respects single-flight (JOBS-11); added **JOBS-15** configurable **autonomy
   posture** (Guarded default / Autonomous opt-in).
+- 2026-06-02 — **implementation design finalized (PM-greenlit; impl gated on ORCH slice-1).**
+  The v1 build (mostly NEW files, to minimize collision with the in-flight ORCH `*One` refactor):
+  - **`jobRegistry.ts`** — `{id, type, schedule, enabled, config}` (JOBS-1) persisted per-vault at
+    **`.kb/jobs/registry.json`** (tracked on `staging`, Settings-editable via IPC, JOBS-14). NOT
+    app-global config — jobs are per-vault.
+  - **`jobScheduler.ts`** (main process) — a tick loop mapping **named presets** → cadence
+    (few-times/day · hourly · daily · off, JOBS-2) + enable toggle; fires each enabled+due job
+    with a per-job **single-flight** guard (JOBS-6). Started from `pipeline.ts` `startPipeline`
+    (the one file shared with the ORCH work — sequenced after it).
+  - **`JobStage`** — reuses the SPEC-0014 harness (like the Enrich stages): wakes an agent in the
+    job's worktree on `staging`, runs one **bounded pass** (JOBS-4; the job-type's pluggable
+    behavior), commits findings, and ff-advances under the shared canonical-writer lock using the
+    **optimistic re-sync+retry** path (JOBS-3,5 → ORCH-17/18/19 — the gate this impl waits on),
+    then the **deletion-aware promotion hook** (SPEC-0021 STAGING-10) publishes `staging`→`main`
+    (JOBS-12). Per-job **journal** at `.kb/jobs/<job>/journal.jsonl`, read for continuity (JOBS-7).
+  - **Disposition** (JOBS-9): additive high-confidence → auto on `staging` (audited); destructive
+    or low-confidence → Review queue (SPEC-0018). **Autonomy posture per-job** (JOBS-15;
+    per-Instance deferred — see §5). **Run-now** (JOBS-11) via IPC = one bounded pass, single-flight.
+  - **Engine vs. behavior:** this ships the *mechanism* + a deterministic **example/test job** so
+    the harness is testable without Reflect; the first real job (Reflect) lands with SPEC-0024.
+  - **Constraint check:** `.kb/jobs/` needs **no `.gitignore` change** — the vault gitignore
+    ignores only `.kb/cache/` (vault.ts), so `.kb/jobs/` is tracked on `staging` by default, and
+    `EVERGREEN_PATHS` (`sources`/`entities`/`claims`) excludes it → never promoted, hidden from
+    Obsidian on `main` (JOBS-7).
