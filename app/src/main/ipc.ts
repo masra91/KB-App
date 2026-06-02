@@ -38,7 +38,7 @@ const NO_PIPELINE: CaptureResult = {
 export async function initPipeline(): Promise<void> {
   const cfg = await readAppConfig();
   if (cfg.activeVaultPath && (await loadVaultConfig(cfg.activeVaultPath))) {
-    startPipeline(path.resolve(cfg.activeVaultPath));
+    await startPipeline(path.resolve(cfg.activeVaultPath));
   }
 }
 
@@ -66,7 +66,7 @@ export function registerIpc(): void {
     if (result.ok) {
       const vaultPath = path.resolve(opts.path);
       await writeAppConfig({ activeVaultPath: vaultPath });
-      startPipeline(vaultPath); // the KB is live — start draining captures immediately
+      await startPipeline(vaultPath); // the KB is live — start draining captures immediately
     }
     return result;
   });
