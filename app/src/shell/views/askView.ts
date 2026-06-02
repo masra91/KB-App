@@ -13,6 +13,8 @@ interface Turn {
   question: string;
   result: AskResult | null; // null while in flight
   error?: string;
+  savedRel?: string; // set once saved as an Output (ASK-6) — its repo path
+  saveError?: string; // a failed save, surfaced inline
 }
 
 // View-local, ephemeral session state (F5). The shell mounts once + toggles visibility.
@@ -37,6 +39,33 @@ export function mountAsk(container: HTMLElement): void {
     e.preventDefault();
     void onAsk(container);
   });
+  // ASK-6: delegated "Save as report" — the transcript <ul> persists across re-renders, so one
+  // listener handles every turn's button (keyed by data-turn index).
+  container.querySelector<HTMLElement>('#askTranscript')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('.ask-save');
+    if (!btn) return;
+    void saveTurn(container, Number(btn.dataset.turn));
+  });
+  renderTranscript(container);
+}
+
+/** Save a completed turn's answer as a KB Output (ASK-6) — once; updates the turn + re-renders. */
+async function saveTurn(container: HTMLElement, index: number): Promise<void> {
+  const t = turns[index];
+  if (!t || !t.result || t.savedRel) return;
+  t.saveError = undefined;
+  const btn = container.querySelector<HTMLButtonElement>(`.ask-save[data-turn="${index}"]`);
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+  }
+  try {
+    const res = await window.kbApi.saveRecallOutput(t.result);
+    if (res.ok && res.rel) t.savedRel = res.rel;
+    else t.saveError = res.message;
+  } catch (err) {
+    t.saveError = err instanceof Error ? err.message : String(err);
+  }
   renderTranscript(container);
 }
 
@@ -96,16 +125,29 @@ function renderAnswer(r: AskResult): string {
   return `<div class="ask-answer">${esc(r.answer)}</div>${renderCitations(r.citations)}${flagHtml}`;
 }
 
-function renderTurn(t: Turn): string {
+/** The save-as-Output affordance for a completed turn (ASK-6): a button, or the saved confirmation. */
+function renderSaveRow(t: Turn, index: number): string {
+  if (t.savedRel) {
+    return `<div class="ask-save-row muted">✓ Saved as Output — <code>${esc(t.savedRel)}</code></div>`;
+  }
+  const err = t.saveError ? `<span class="ask-save-status error"> ${esc(t.saveError)}</span>` : '';
+  return `<div class="ask-save-row"><button type="button" class="ask-save" data-turn="${index}">Save as report</button>${err}</div>`;
+}
+
+function renderTurn(t: Turn, index: number): string {
   let body: string;
+  let saveRow = '';
   if (t.error) body = `<div class="ask-answer error">Sorry — recall failed: ${esc(t.error)}</div>`;
   else if (t.result === null) body = `<div class="ask-answer muted">Thinking…</div>`;
-  else body = renderAnswer(t.result);
-  return `<li class="ask-turn"><div class="ask-q"><span class="muted">You</span> ${esc(t.question)}</div><div class="ask-a">${body}</div></li>`;
+  else {
+    body = renderAnswer(t.result);
+    saveRow = renderSaveRow(t, index); // grounded OR ungrounded — saving an ungrounded answer is allowed (F4)
+  }
+  return `<li class="ask-turn"><div class="ask-q"><span class="muted">You</span> ${esc(t.question)}</div><div class="ask-a">${body}${saveRow}</div></li>`;
 }
 
 function renderTranscript(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#askTranscript');
   if (!el) return;
-  el.innerHTML = turns.map(renderTurn).join('');
+  el.innerHTML = turns.map((t, i) => renderTurn(t, i)).join('');
 }

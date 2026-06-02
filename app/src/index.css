@@ -363,6 +363,12 @@ button:disabled {
 .ask-flags { margin-top: 0.4rem; font-size: 0.85em; }
 .ask-form { display: flex; gap: 0.5rem; }
 .ask-input { flex: 1; }
+/* Save-as-Output (ASK-6) */
+.ask-save-row { margin-top: 0.5rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
+.ask-save { appearance: none; font: inherit; font-size: 0.85em; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.25rem 0.6rem; cursor: pointer; }
+.ask-save:hover { background: rgba(255, 255, 255, 0.06); }
+.ask-save:disabled { opacity: 0.5; cursor: default; }
+.ask-save-status.error { color: var(--error); }
 
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {

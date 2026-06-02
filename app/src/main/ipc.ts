@@ -10,6 +10,7 @@ import {
   activeStagingRoot,
   listActiveReviews,
   answerActiveReview,
+  saveRecallOutput,
   fullReplay,
   listJobsForActive,
   setActiveJobConfig,
@@ -41,6 +42,7 @@ import type {
   FullReplayResult,
   AskRequest,
   AskResult,
+  SaveRecallOutputResult,
   JobView,
   JobConfigPatch,
   RunJobResult,
@@ -182,6 +184,16 @@ export function registerIpc(): void {
     // app (PATH was ensured at boot, STACK-9). Null → SDK default search (dev fallback).
     const cliPath = resolveExecutable('copilot') ?? undefined;
     return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath });
+  });
+
+  // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,
+  // promoted to main, conforming `output` audit). The renderer passes the AskResult it rendered.
+  ipcMain.handle('kb:saveRecallOutput', async (_e, result: AskResult): Promise<SaveRecallOutputResult> => {
+    try {
+      return await saveRecallOutput(result);
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config

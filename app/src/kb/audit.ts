@@ -31,6 +31,7 @@ export const AUDIT_ACTORS = [
   'replay',
   'panel',
   'researcher',
+  'output',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
 
@@ -363,6 +364,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // reaches outside the KB + produces immutable secondary sources
     carriesWhy: true, // records the request (what + why) + citations behind each finding
     traces: ['AUDIT-1', 'AUDIT-2', 'RESEARCH-6'],
+  },
+  {
+    actor: 'output',
+    what: 'Recall save-as-Output (SPEC-0026 ASK-6): the Principal saved a grounded recall answer as a KB Output — records the question, whether it was grounded, and the cited evidence behind it — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
+    emitters: [], // emitted via the canonical writer by SPEC-0026 slice 3 (no literal emitter file in src/kb)
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true, // writes an Output note to outputs/ (promoted to main)
+    carriesWhy: true, // payload records the question + citations + "Principal saved a recall answer"
+    traces: ['AUDIT-1', 'AUDIT-2', 'ASK-6'],
   },
 ] as const;
 
