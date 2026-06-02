@@ -48,9 +48,11 @@ From #56's repro + DEV-2's signing analysis (#25 area):
   is the crux** — bookmark persistence is the easy half.
 - **Not an App Sandbox problem.** Security-scoped bookmarks + `com.apple.security.files.user-selected.read-write`
   are *App Sandbox* APIs. We are **non-sandboxed** (we spawn arbitrary subprocesses and touch
-  user-chosen folders — sandboxing those is impractical). The persistence primitive is therefore the
-  **TCC grant (by signature)** plus a **regular `NSURL` bookmark** to re-resolve the path across
-  launches — explicitly *not* security-scoped bookmarks.
+  user-chosen folders — sandboxing those is impractical). The persistence primitive is therefore just
+  the **TCC grant (by stable signature)**: the stored `activeVaultPath` re-opens directly across
+  launches — **no NSURL bookmark needed** (a moved vault is the only re-resolution case, and that's
+  the MACOS-1 re-pick; iCloud eviction keeps the path valid). So MACOS-4/5 need **no new runtime code**
+  beyond DEV-2's signing — they're *verified*, not *built*.
 
 ## 3. Approach
 
@@ -58,8 +60,9 @@ From #56's repro + DEV-2's signing analysis (#25 area):
   **local dev identity** for development/test (so the TCC grant persists across same-identity
   rebuilds — the testable path, no paid cert), swapped to a **Developer ID** for release. Hardened
   runtime on, with the entitlements that let our spawned tools keep file access.
-- **Non-sandboxed.** Pinned explicitly. Persistence = TCC-grant-by-signature + a regular NSURL
-  bookmark of the chosen vault path.
+- **Non-sandboxed.** Pinned explicitly. Persistence = TCC-grant-by-signature; the stored vault path
+  re-opens directly (no bookmark). The signing config is **gated/opt-in** (unsigned by default →
+  CI's package build-check + non-cert devs unaffected; signs when an identity/env flag is present).
 - **Verify subprocess propagation by running** (not by theory): a dev-signed hardened-runtime package,
   a vault in `~/Documents`, the pipeline run end-to-end, confirming `git`/`copilot` writes succeed and
   the grant survives a same-identity rebuild (DEV-2's macOS BYOA env).
@@ -77,8 +80,8 @@ From #56's repro + DEV-2's signing analysis (#25 area):
 | MACOS-1  | must     | **Interim mitigation (shipped):** first-run setup **detects** a vault path at/inside a TCC-protected location (`~/Documents`, `~/Desktop`, `~/Downloads`, iCloud Drive — `detectTccProtectedDir`, darwin-only, dot-boundary-safe) and **warns + steers** the user to an unprotected folder, so the silent break is at least visible until the signed build lands | test:app/src/kb/vault.test.ts (detectTccProtectedDir); app/src/renderer.ts (setup warning) | STACK-10; SETUP-1; #56 |
 | MACOS-2  | must     | On a **signed, entitled** build, a vault in a TCC-protected folder **ingests + enriches end-to-end** (capture → sources → entities/claims/wikilinks on `main`) with **no `Operation not permitted`** — the headline #56 acceptance | none-yet → test: packaged-app smoke + DEV-2 empirical run (§5) | STACK-10; DATA-9; #56 |
 | MACOS-3  | must     | The packaged build is **code-signed with a STABLE identity** under the **hardened runtime** — `Apple Development` for dev/test, `Developer ID Application` for release — so the TCC grant persists across same-identity rebuilds. Ad-hoc `-` is insufficient: its designated requirement is a `cdhash` that changes every build → the grant re-prompts every rebuild (the STACK-10 root cause today — the shipped `.app` is `flags=0x2(adhoc)`). Configured in `forge.config.ts` `osxSign` (none today) | none-yet → test: `codesign -d --requirements -` yields an **identity-based DR** (not `cdhash`), **byte-identical across two consecutive packages** (DEV-2 verified §5) | STACK-10; STACK-2 |
-| MACOS-4  | must     | The app is **explicitly NON-sandboxed** (hardened runtime, not App Sandbox). Chosen-folder access **persists** via the **TCC grant (by signature) + a regular `NSURL` bookmark** to re-resolve the vault path across launches — **not** security-scoped bookmarks, **not** the App-Sandbox `files.user-selected.read-write` entitlement | none-yet → test: relaunch re-resolves the bookmarked vault without re-prompting (signed build) | STACK-10 |
-| MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed (child inherits the parent's TCC grant). Carried by the stable signature + hardened-runtime entitlements (`com.apple.security.cs.allow-jit`, `…allow-unsigned-executable-memory`, `…disable-library-validation`) + the spawn method. **DEV-2 proved the mechanism** (§5): a parent spawning `git` into `~/Documents` succeeds; hardened-runtime library-validation blocks *loading* a bad dylib, not *spawning* a signed binary — so `Operation not permitted` is specifically the ad-hoc/unpersisted-grant case, not an inherent inheritance failure | none-yet → test: packaged smoke — a pipeline run (spawns git+copilot) writes into a granted `~/Documents` vault with **zero `Operation not permitted`** | STACK-10; ORCH-2; #56 |
+| MACOS-4  | must     | The app is **explicitly NON-sandboxed** (hardened runtime, not App Sandbox). Chosen-folder access **persists via the TCC grant (by stable signature)** — the stored `activeVaultPath` (appConfig) **re-opens directly across launches**, with **no NSURL bookmark / security-scoped-resource dance** (those are App-Sandbox APIs; Electron exposes no regular NSURL bookmark without native code, and it buys nothing here). A **moved/renamed** vault is handled by the **MACOS-1 detect-and-warn re-pick**, not a bookmark; **iCloud eviction is not a re-resolution case** (eviction offloads file *content* to a dataless placeholder — the path stays valid and opening it triggers re-download). **No new runtime code** beyond the signing | none-yet → test: relaunch re-opens the stored vault without re-prompting (signed build, §5) + a path-re-resolution-from-config unit test | STACK-10 |
+| MACOS-5  | must     | The folder grant **propagates to spawned `git`/`copilot` subprocesses** (the crux): a child tool's writes under the protected vault succeed (child inherits the parent's TCC grant). Satisfied **by the MACOS-3 stable signature + hardened-runtime entitlements** (`com.apple.security.cs.allow-jit`, `…allow-unsigned-executable-memory`, `…disable-library-validation`) — **no spawn-code change** (`simpleGit(dir)` + the copilot SDK `forStdio({path})` are unchanged). **DEV-2 proved the mechanism** (§5): a parent spawning `git` into `~/Documents` succeeds; hardened-runtime library-validation gates *loading* a bad dylib, not *spawning* a signed binary — so `Operation not permitted` is specifically the ad-hoc/unpersisted-grant case, not an inherent inheritance failure. **No new runtime code** | none-yet → test: packaged smoke — a pipeline run (spawns git+copilot) writes into a granted `~/Documents` vault with **zero `Operation not permitted`** | STACK-10; ORCH-2; #56 |
 | MACOS-6  | should   | The build declares **folder usage-description strings** (`NSDocumentsFolderUsageDescription`, `NSDesktopFolderUsageDescription`, `NSDownloadsFolderUsageDescription`) so the macOS TCC prompt explains *why* the app wants the folder (consent rationale) | none-yet → test: `Info.plist` inspection of the packaged build | STACK-10; PRIN-19 |
 | MACOS-7  | must     | **First-launch permission-grant UX + denial fallback** (the #56 permission flow — **DEV-4's lane**). On first pipeline use against a protected folder the app's own **TCC prompt fires** once ("Allow access to Documents" — the one human-in-loop step, can't be headless); the surrounding UX makes clear *why* (ties to MACOS-6 rationale) and confirms when granted. **On denial** the app must **degrade visibly, never silently stall**: fall back to the MACOS-1 warn + **guide the user to System Settings → Privacy & Security → Files and Folders** (or to relocate the vault). *The exact denial-fallback posture (warn-and-steer vs deep-link to System Settings vs block-with-explainer) is a **product call routed to KB-Lead** (§8).* | none-yet → test: packaged manual check (prompt appears) + a unit test of the denial → warn/guide path | STACK-10; SETUP-1; PRIN-19; [#56](https://github.com/masra91/KB-App/issues/56) |
 | MACOS-8  | must     | The **distribution** build is **Developer-ID-signed + notarized** (Gatekeeper/quarantine). **Reframed gate (DEV-2 verified):** NOT the cert — both `Apple Development` **and** `Developer ID Application` certs are in the keychain, so dev *and* Developer-ID signing work **now**; the only missing piece is **notarization credentials** (a `notarytool` `AC_PASSWORD`/App-Store-Connect API profile). So #56 is **signing-ungated; only notarized *distribution* is creds-gated** — release-only, not dev/test | none-yet (notarization-creds-gated) | STACK-10 |
@@ -116,8 +119,10 @@ regress.
 
 ## 6. Scope split / ownership
 
-- **KB-Developer-3** (author): this spec; the **subprocess-propagation + bookmark-resolve**
-  requirements (MACOS-4/5) and their verification.
+- **KB-Developer-3** (author): this spec; **MACOS-4/5 verification** — the packaged protected-folder
+  **e2e smoke** (the load-bearing proof: vault in `~/Documents` → ingest+enrich → zero `Operation not
+  permitted`) + a path-re-resolution-from-config unit test. MACOS-4/5 need **no new runtime code**
+  beyond DEV-2's signing (the non-sandboxed reality — confirmed with DEV-2).
 - **KB-Developer-2** (#25 signing/distribution): `forge.config.ts` `osxSign`, the hardened-runtime
   entitlements plist, the folder usage-description strings, and the dev-identity + Developer-ID +
   notarization mechanics (MACOS-3/6/8), and the empirical run (§5). MACOS-6 (usage strings) is DEV-2's
@@ -148,6 +153,16 @@ regress.
 
 ## 9. Changelog
 
+- 2026-06-02 — **MACOS-4/5 reworded to the non-sandboxed reality (DEV-2-confirmed; honest
+  built-vs-deferred before lock).** Dropped MACOS-4's "regular NSURL bookmark" — for non-sandboxed,
+  the stored `activeVaultPath` re-opens directly once TCC-granted-by-signature (no bookmark; a
+  moved vault is the MACOS-1 re-pick, iCloud eviction keeps the path valid). MACOS-5 reworded to "no
+  spawn-code change" (the `simpleGit`/copilot-SDK spawns already inherit the grant — satisfied by
+  MACOS-3 signing). **Net: MACOS-4/5 are *verified, not built* — my deliverable is the packaged
+  protected-folder e2e smoke + a path-re-resolution unit test, stacked on DEV-2's MACOS-3 signing**
+  (which is gated/opt-in: unsigned by default so CI + non-cert devs are unaffected). The settled
+  product-independent core (MACOS-3/4/5) is in build now (PM greenlit); MACOS-2/6 await KB-Lead's
+  iCloud + denial calls (§8).
 - 2026-06-02 — **PM review additions.** Expanded **MACOS-7** into the full first-launch
   permission-grant UX + denial-fallback (DEV-4's lane); added **§8 open questions** routed to KB-Lead
   (iCloud-Drive in/out of MACOS-2 acceptance; the denial-fallback posture). PM scope ✓; awaiting
