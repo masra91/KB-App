@@ -1,6 +1,6 @@
 // Integration: the evergreen staging pipeline (SPEC-0021). The working pipeline runs on the
-// `staging` worktree; the archivist's afterDrain promotes sources → main; Decompose's entities
-// stay on `staging` only. Proves `main` = evergreen (sources), working state hidden on staging.
+// `staging` worktree; the archivist's afterDrain promotes sources → main; Decompose's CANDIDATES
+// stay on `staging` only (STAGING-5). Proves `main` = evergreen (sources), working state hidden.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -14,6 +14,7 @@ import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
 import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeStage';
 import { findEntityFiles } from './claimsStage';
+import { readCandidates } from './connectStage';
 import type { DecomposeDecider } from './decomposeAgent';
 
 function gitInstalledSync(): boolean {
@@ -33,7 +34,7 @@ const decompDecider: DecomposeDecider = async (i) => ({
 });
 
 describe.skipIf(!gitAvailable)('staging pipeline — main is evergreen, working state on staging (SPEC-0021)', () => {
-  it('capture+archive promote sources to main; entities (decompose) stay on staging only', async () => {
+  it('capture+archive promote sources to main; candidates (decompose) stay on staging only', async () => {
     const dir = await makeTempDir();
     try {
       const root = path.join(dir, 'vault');
@@ -58,12 +59,16 @@ describe.skipIf(!gitAvailable)('staging pipeline — main is evergreen, working 
       const srcRel = (await readDecomposeQueue(stagingWt))[0]; // repo-relative, un-decomposed
       expect(srcRel).toBeTruthy();
 
-      // Decompose on staging → an entity node lands on STAGING, and is NOT evergreen.
+      // Decompose on staging → CANDIDATE files land on STAGING (working state), and NO entities
+      // node is written — resolution into evergreen entities is Connect's job (STAGING-5/CANON-4,10).
       await decomposeOne(stagingWt, srcRel, decompDecider);
-      expect((await findEntityFiles(stagingWt)).length).toBe(1); // on staging
-      expect((await findEntityFiles(root)).length).toBe(0); // NEVER on main (CANON-4)
-      // Even an explicit promotion brings no entities — they're not in the evergreen set.
+      expect((await readCandidates(stagingWt)).length).toBe(1); // candidate on staging
+      expect((await findEntityFiles(stagingWt)).length).toBe(0); // entities empty until Connect
+      // Promotion publishes only evergreen sources — never the working `candidates/` (STAGING-6),
+      // and never entities (none exist yet). main stays clean and free of working state.
       await promote(root);
+      expect((await readCandidates(root)).length).toBe(0); // working path NEVER on main
+      expect(await pathExists(path.join(root, 'candidates'))).toBe(false);
       expect((await findEntityFiles(root)).length).toBe(0);
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {

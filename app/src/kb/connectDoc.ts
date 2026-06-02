@@ -1,6 +1,6 @@
 // Render a born-resolved entity node (SPEC-0020 §3.4, CONNECT-7/8) and the helpers Connect
 // uses to place + fold + parse nodes. Hand-rolled YAML (flat + one nested `provenance`
-// block) — no yaml dependency (ENG-5), matching entityDoc.ts / claimDoc.ts.
+// block) — no yaml dependency (ENG-5), matching sourceDoc.ts / claimDoc.ts.
 //
 // CANON-6: evergreen knowledge is for humans. The FILENAME is the human name
 // (`entities/<kind>/<slug>.md`); identity is the stable `id:` in frontmatter, with the ULID
