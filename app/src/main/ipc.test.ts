@@ -176,7 +176,8 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
   it('runs recall on the active vault root and returns its result', async () => {
     await configureVault(vaultDir);
     const res = await invoke<{ answer: string }>('kb:ask', { question: 'Who?', history: [] });
-    expect(mocks.recall).toHaveBeenCalledWith(path.resolve(vaultDir), { question: 'Who?', history: [] });
+    // 3rd arg carries the resolved BYOA cliPath (BUG #65); its value is env-dependent, so match loosely.
+    expect(mocks.recall).toHaveBeenCalledWith(path.resolve(vaultDir), { question: 'Who?', history: [] }, expect.any(Object));
     expect(res.answer).toBe('mock recall');
   });
 

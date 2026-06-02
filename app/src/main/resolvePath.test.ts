@@ -1,7 +1,10 @@
 // SPEC-0010 STACK-9 — resolve the user's real PATH for GUI-launched apps.
 // Pure, node-tier tests; the shell invocation is injected so nothing is spawned.
 import { describe, it, expect, vi } from 'vitest';
-import { mergePath, loginShellPath, ensurePath, defaultFallbackDirs } from './resolvePath';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import { mergePath, loginShellPath, ensurePath, defaultFallbackDirs, resolveExecutable } from './resolvePath';
 
 const MINIMAL = '/usr/bin:/bin:/usr/sbin:/sbin'; // what a Finder/Dock launch gives
 
@@ -81,5 +84,33 @@ describe('ensurePath (STACK-9)', () => {
     expect(out).toBe('C:\\Windows\\System32');
     expect(env.PATH).toBe('C:\\Windows\\System32');
     expect(runner).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolveExecutable (STACK-9 / BUG #65 — find the BYOA copilot for the SDK cliPath)', () => {
+  it('returns the absolute path of the first match on PATH; null when absent', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'kb-bin-'));
+    try {
+      const exe = path.join(dir, 'copilot');
+      await fs.writeFile(exe, '#!/bin/sh\n');
+      const env = { PATH: `/nonexistent-dir:${dir}` } as NodeJS.ProcessEnv;
+      expect(resolveExecutable('copilot', env, 'linux')).toBe(exe);
+      expect(resolveExecutable('does-not-exist', env, 'linux')).toBeNull();
+      expect(resolveExecutable('copilot', { PATH: '' } as NodeJS.ProcessEnv, 'linux')).toBeNull();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('tries Windows executable suffixes', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'kb-bin-win-'));
+    try {
+      const exe = path.join(dir, 'copilot.cmd');
+      await fs.writeFile(exe, '@echo off\n');
+      const env = { PATH: dir } as NodeJS.ProcessEnv;
+      expect(resolveExecutable('copilot', env, 'win32')).toBe(exe);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 });
