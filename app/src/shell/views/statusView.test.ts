@@ -13,6 +13,7 @@ import {
   lockHtml,
   errorsHtml,
   latencyHtml,
+  setAsideHtml,
 } from './statusView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { PipelineStatusView, KbApi } from '../../kb/types';
@@ -41,6 +42,7 @@ const STALLED: PipelineStatusView = {
   ],
   worktrees: [{ path: '.kb/cache/worktrees/staging', branch: 'staging' }],
   perf: PERF,
+  setAsideItems: [{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }],
   builtAt: '2026-06-02T00:03:00.000Z',
 };
 
@@ -87,6 +89,36 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     expect(h).toContain('decompose: 30/min');
     expect(h).toContain('Slowest ops:'); // OBS-15 recent slow operations
     expect(h).toContain('87000ms');
+  });
+
+  it('setAsideHtml lists poison items with stage · name + reason, name preferred over id (OBS-17)', () => {
+    const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }]);
+    expect(h).toContain('Set aside — needs attention (1)');
+    expect(h).toContain('claims · Ada Lovelace');
+    expect(h).not.toContain('01ADAID'); // the friendly name replaces the ULID
+    expect(h).toContain('set aside after 3 failed attempts');
+  });
+
+  it('setAsideHtml falls back to the item id when no name is known', () => {
+    const h = setAsideHtml([{ stage: 'claims', itemId: '01NONAME' }]);
+    expect(h).toContain('claims · 01NONAME');
+  });
+
+  it('setAsideHtml is empty when nothing is set aside (clean → no panel)', () => {
+    expect(setAsideHtml([])).toBe('');
+  });
+
+  it('setAsideHtml escapes interpolated values (XSS-safe)', () => {
+    const h = setAsideHtml([{ stage: 'claims', itemId: 'x', name: '<img src=x onerror=alert(1)>', reason: '<b>x</b>' }]);
+    expect(h).not.toContain('<img src=x');
+    expect(h).not.toContain('<b>x</b>');
+    expect(h).toContain('&lt;img');
+  });
+
+  it('bodyHtml includes the set-aside panel for the STALLED fixture (OBS-17)', () => {
+    const h = bodyHtml({ view: STALLED, loading: false, errorMsg: '', expanded: new Set() });
+    expect(h).toContain('Set aside — needs attention');
+    expect(h).toContain('claims · Ada Lovelace');
   });
 
   it('bodyHtml renders empty/loading/no-KB states', () => {

@@ -17,7 +17,7 @@ import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
-import { ClaimsStage, readClaimsQueue } from '../kb/claimsStage';
+import { ClaimsStage, readClaimsQueue, listSetAsideItems } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
 import { ConnectStage, readConnectQueue } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
@@ -25,7 +25,7 @@ import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
-import { assemblePipelineStatus, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { assemblePipelineStatus, toSetAsideViews, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
@@ -255,7 +255,7 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
 export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
   if (!active) return null;
   const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
-  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees] = await Promise.all([
+  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside] = await Promise.all([
     readQueue(stagingWt),
     readDecomposeQueue(stagingWt),
     readConnectQueue(stagingWt),
@@ -264,7 +264,9 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     readRecentDevLogEntries(vaultPath, { limit: 25 }),
     loadPerfIndex(stagingWt),
     listWorktrees(vaultPath),
+    listSetAsideItems(stagingWt), // OBS-17: claims poison items, the canonical claims-path reader (CLAIMS-20)
   ]);
+  const setAsideItems = toSetAsideViews(claimsSetAside); // → Status-view shape (stage·name + reason)
 
   const recentErrors: RecentError[] = recentRaw.map((e) => ({
     ts: e.ts,
@@ -292,7 +294,7 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
-  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, ...(lastActivity ? { lastActivity } : {}) });
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /** The open "needs you" queue (SPEC-0018) — read from `staging`, where review state lives. */
