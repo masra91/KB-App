@@ -28,6 +28,7 @@ import { renderCandidate, candidateFileRel } from './candidateDoc';
 import type { Candidate } from './connect';
 import { makeDecomposeDecider, type DecomposeDecider, type SourceInput } from './decomposeAgent';
 import { Mutex } from './stageLock';
+import { epochScopedLines } from './replayEpoch';
 
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'decompose');
 const WORK_BRANCH = 'kb/decompose-work';
@@ -63,7 +64,9 @@ async function readDecomposeState(sourceDir: string): Promise<{ terminal: boolea
   }
   let terminal = false;
   let failures = 0;
-  for (const line of raw.split('\n')) {
+  // Scope to the current replay epoch (REPLAY-6): markers from a superseded generation are
+  // ignored, so a replayed source re-enters the decompose queue — without rewriting history.
+  for (const line of epochScopedLines(raw)) {
     if (line.trim().length === 0) continue;
     let obj: AuditLine;
     try {
