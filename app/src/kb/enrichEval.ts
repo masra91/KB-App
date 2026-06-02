@@ -36,8 +36,8 @@ export interface GranularityCheck {
   nodeCount: number;
   missingMustBe: string[]; // expected entities NOT extracted (recall failures)
   presentMustNot: string[]; // descriptors that DID become nodes (precision failures)
-  overMax: boolean; // nodeCount > maxNodes (over-extraction)
-  pass: boolean; // all HARD checks held (recall + precision + bound)
+  overMax: boolean; // nodeCount > maxNodes — LOOSE/reported, NOT part of `pass` (see below)
+  pass: boolean; // the HARD checks held: recall + precision only (the count bound is loose — `overMax`)
 }
 
 function norm(s: string): string {
@@ -48,8 +48,10 @@ function norm(s: string): string {
  * Score ONE decompose decision against a fixture. Recall: every `mustBeNodes` name must match some
  * extracted node (normalized equality). Precision: no `mustNotBeNodes` descriptor may appear as a
  * node — matched by normalized equality OR substring (so "first computer programmer" is caught
- * whether the agent names the node exactly that or "the first computer programmer"). Bound:
- * `nodeCount ≤ maxNodes`. All three are HARD (KB-QD bar item 2).
+ * whether the agent names the node exactly that or "the first computer programmer"). Recall +
+ * precision are **HARD** (part of `pass`); the count bound `nodeCount ≤ maxNodes` is **LOOSE** —
+ * surfaced as `overMax` and reported (median/range), but NOT part of `pass`, per the pass-bar's
+ * "±tolerance only on raw totals" (KB-QD bar item 2). The aggregate verdict mirrors this.
  */
 export function evaluateGranularity(decision: DecomposeDecision, fixture: GranularityFixture): GranularityCheck {
   const nodeNames = decision.entities.map((e) => norm(e.name));
@@ -67,7 +69,8 @@ export function evaluateGranularity(decision: DecomposeDecision, fixture: Granul
     missingMustBe,
     presentMustNot,
     overMax,
-    pass: missingMustBe.length === 0 && presentMustNot.length === 0 && !overMax,
+    // HARD = recall + precision only; the count bound is loose (`overMax`), never fails `pass`.
+    pass: missingMustBe.length === 0 && presentMustNot.length === 0,
   };
 }
 
