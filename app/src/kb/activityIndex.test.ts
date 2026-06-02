@@ -73,7 +73,7 @@ async function seedAudit(root: string): Promise<void> {
   await writeAudit(root, path.join('.kb', 'jobs', 'reflect', 'journal.jsonl'), [
     { ts: '2026-01-01T00:04:00.000Z', runId: 'J1', inspected: 5, applied: 1, deferred: 0 },
   ]);
-  await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [
+  await writeAudit(root, path.join('.kb', 'cache', 'ask', 'audit.jsonl'), [
     { ts: '2026-01-01T00:05:00.000Z', event: 'recall', question: 'who is Atlas?', grounded: true },
   ]);
 }
@@ -153,20 +153,23 @@ describe.skipIf(!gitAvailable)('loadActivityIndex — cache + HEAD-poke freshnes
   it('serves the cache while HEAD is unchanged, rebuilds when HEAD moves', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
-      await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q1' }]);
+      await writeAudit(root, path.join('.kb', 'cache', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q1' }]);
       await commitAll(root, 'audit a');
 
       const idx1 = await loadActivityIndex(root);
       expect(idx1.total).toBe(1);
       expect(await readActivityIndexCache(root)).not.toBeNull(); // cache was written
 
-      // Append more audit but DON'T commit — HEAD unchanged → the poke returns the cache as-is.
-      await fs.appendFile(path.join(root, '.kb', 'ask', 'audit.jsonl'), JSON.stringify({ ts: '2026-01-02T00:00:00.000Z', event: 'recall', question: 'q2' }) + '\n');
+      // Append more recall audit (working-zone, gitignored) but move nothing — HEAD unchanged →
+      // the poke returns the cache as-is (the new working-tree event isn't picked up yet).
+      await fs.appendFile(path.join(root, '.kb', 'cache', 'ask', 'audit.jsonl'), JSON.stringify({ ts: '2026-01-02T00:00:00.000Z', event: 'recall', question: 'q2' }) + '\n');
       const idx2 = await loadActivityIndex(root);
       expect(idx2.total).toBe(1); // still cached
 
-      // Commit → HEAD moves → rebuild picks up the new event.
-      await commitAll(root, 'audit b');
+      // A tracked change moves HEAD → rebuild folds in the working-tree recall events (the ask
+      // audit is gitignored, so it never moves HEAD itself; it's read fresh on the next rebuild).
+      await fs.appendFile(path.join(root, 'README.md'), '\nmarker\n');
+      await commitAll(root, 'tracked change');
       const idx3 = await loadActivityIndex(root);
       expect(idx3.total).toBe(2);
     });
@@ -183,7 +186,7 @@ describe.skipIf(!gitAvailable)('loadActivityIndex — cache + HEAD-poke freshnes
   it('writes the cache under the gitignored .kb/cache (never promoted)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
-      await writeAudit(root, path.join('.kb', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q' }]);
+      await writeAudit(root, path.join('.kb', 'cache', 'ask', 'audit.jsonl'), [{ ts: '2026-01-01T00:00:00.000Z', event: 'recall', question: 'q' }]);
       await commitAll(root, 'a');
       await loadActivityIndex(root);
       expect(ACTIVITY_INDEX_REL.startsWith(path.join('.kb', 'cache'))).toBe(true);

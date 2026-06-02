@@ -163,7 +163,7 @@ export function activePipeline(): Orchestrator | null {
 }
 
 /** The active vault's `staging` worktree — where the full working-zone audit lives (per-item
- *  audit.jsonl, connect/, .kb/jobs, .kb/ask, .kb/audit.jsonl), a superset of the evergreen archive
+ *  audit.jsonl, connect/, .kb/jobs, .kb/cache/ask, .kb/audit.jsonl), a superset of the evergreen archive
  *  promoted to `main`. The read root for the Audit & Activity views (SPEC-0029). Null if no active KB. */
 export function activeStagingRoot(): string | null {
   return active?.stagingWt ?? null;

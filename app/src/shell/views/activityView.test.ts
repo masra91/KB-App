@@ -156,7 +156,7 @@ describe('Read-only + XSS-safety (AUDIT-8)', () => {
         actor: 'recall',
         summary: 'Answered a question: "<img src=x onerror=alert(1)>"',
         eventCount: 1,
-        events: [{ ts: '2026-01-01T00:00:00.000Z', actor: 'recall', eventType: 'recall', subjects: {}, payload: { question: '<script>alert(1)</script>' }, provenance: { file: '.kb/ask/audit.jsonl', line: 0 } }],
+        events: [{ ts: '2026-01-01T00:00:00.000Z', actor: 'recall', eventType: 'recall', subjects: {}, payload: { question: '<script>alert(1)</script>' }, provenance: { file: '.kb/cache/ask/audit.jsonl', line: 0 } }],
       },
     ];
     activityFeed = vi.fn(async () => feed(hostile));

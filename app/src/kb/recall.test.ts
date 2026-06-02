@@ -4,9 +4,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import simpleGit from 'simple-git';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
-import { rmTempDir, pathExists } from '../../test/tempVault';
+import { rmTempDir, pathExists, makeTempDir } from '../../test/tempVault';
 import { recall, makeReadOnlyTools, buildRecallToolDefs, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
+import { createKb } from './vault';
 
 interface ScriptStep {
   tool: string;
@@ -70,7 +72,7 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     expect(cfg?.allowedTools).toEqual(['entityLookup', 'claimsForEntity', 'linkTraversal', 'readNode', 'readSource', 'grep', 'submitAnswer']);
     expect(cfg?.systemMessage?.content).toContain('KB-App Recall agent');
 
-    const auditPath = path.join(v.root, '.kb', 'ask', 'audit.jsonl');
+    const auditPath = path.join(v.root, '.kb', 'cache', 'ask', 'audit.jsonl');
     const audit = JSON.parse((await fs.readFile(auditPath, 'utf8')).trim());
     expect(audit).toMatchObject({ event: 'recall', runtime: 'copilot-sdk', grounded: true, toolCalls: 2, ts: fixedNow() });
     expect(audit.citations).toContain(`claim:${v.claimRel}`);
@@ -144,7 +146,7 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     const res = await recall(v.root, 'q', { client }); // no tools, no now → defaults
     expect(res.grounded).toBe(true);
     expect(res.toolCalls).toBe(1);
-    const audit = JSON.parse((await fs.readFile(path.join(v.root, '.kb', 'ask', 'audit.jsonl'), 'utf8')).trim());
+    const audit = JSON.parse((await fs.readFile(path.join(v.root, '.kb', 'cache', 'ask', 'audit.jsonl'), 'utf8')).trim());
     expect(typeof audit.ts).toBe('string');
   });
 
@@ -152,7 +154,7 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     v = await buildRecallVault();
     const { client } = fakeClient([{ tool: 'submitAnswer', args: { answer: 'x', citations: [] } }]);
     await recall(v.root, 'q', { client, now: fixedNow, audit: false });
-    expect(await pathExists(path.join(v.root, '.kb', 'ask', 'audit.jsonl'))).toBe(false);
+    expect(await pathExists(path.join(v.root, '.kb', 'cache', 'ask', 'audit.jsonl'))).toBe(false);
   });
 
   it('buildRecallToolDefs: retrieval wrappers count + serialize, degrade past cap; submitAnswer captures', async () => {
@@ -178,6 +180,34 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     expect(captured.answered).toBe(true);
     expect(captured.answer).toBe('hi');
     expect(captured.citations).toHaveLength(1);
+  });
+
+  // Regression (CANON-8/9): recall runs against the vault ROOT — the `main` checkout Obsidian
+  // browses. Its transparency audit is workflow machinery, not evergreen knowledge, so it must
+  // land in the gitignored working zone and leave the tree clean (it previously wrote an
+  // untracked `.kb/ask/audit.jsonl`, leaving the user's vault perpetually git-dirty).
+  it('a recall run leaves the evergreen working tree clean (CANON-8/9)', async () => {
+    const root = await makeTempDir('kb-recall-clean-');
+    try {
+      // A REAL git-backed vault with the production .gitignore (couples this test to the real
+      // ignore template — if `.kb/cache/` ever stops being ignored, this fails).
+      const created = await createKb({ path: root, name: 'clean', initGitIfNeeded: true });
+      expect(created.ok).toBe(true);
+      const git = simpleGit(root);
+      expect((await git.status()).isClean()).toBe(true); // baseline: createKb committed everything
+
+      const { client } = fakeClient([{ tool: 'submitAnswer', args: { answer: 'x', citations: [], grounded: false } }]);
+      await recall(root, 'who is Atlas?', { client, now: fixedNow });
+
+      // The audit was written to the gitignored working zone…
+      expect(await pathExists(path.join(root, '.kb', 'cache', 'ask', 'audit.jsonl'))).toBe(true);
+      // …and NOT to the tracked evergreen root.
+      expect(await pathExists(path.join(root, '.kb', 'ask', 'audit.jsonl'))).toBe(false);
+      // …so the `main` checkout the Principal browses stays clean (no untracked machinery state).
+      expect((await git.status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(root);
+    }
   });
 });
 

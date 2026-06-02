@@ -332,7 +332,7 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     actor: 'recall',
     what: 'A grounded recall: the question, retrieval, citations, and answer summary (ASK-11).',
     emitters: ['recall'],
-    auditPath: '.kb/ask/audit.jsonl',
+    auditPath: '.kb/cache/ask/audit.jsonl',
     mutating: false, // read-only; recorded for transparency, not because it mutates
     carriesWhy: true, // records the question + grounding behind the answer
     traces: ['AUDIT-1', 'AUDIT-2', 'ASK-11'],
