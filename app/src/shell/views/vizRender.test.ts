@@ -2,8 +2,9 @@
 // SPEC-0032 VIZ render helpers — pure HTML from the view-model. We assert the structural output
 // (stepper fill, active-breathe, virtualization, directional funnel captions) + XSS-safety.
 import { describe, it, expect } from 'vitest';
-import { carriagesHtml, funnelHtml } from './vizRender';
+import { carriagesHtml, funnelHtml, stuckLockAlarmHtml, formatHeldMs } from './vizRender';
 import type { InFlightItem, Conversion } from './vizModel';
+import type { LockState } from '../../kb/stageLock';
 
 const mk = (over: Partial<InFlightItem> & Pick<InFlightItem, 'itemId' | 'stage'>): InFlightItem => ({
   name: over.itemId,
@@ -58,5 +59,34 @@ describe('funnelHtml (VIZ-3 directional deltas)', () => {
     expect(root.querySelector('.viz-delta-reduce')).toBeTruthy();
     expect(root.querySelector('.viz-delta-expand')).toBeTruthy();
     expect(root.querySelector('.viz-delta-flat')).toBeTruthy(); // captured→candidates
+  });
+});
+
+describe('stuckLockAlarmHtml + formatHeldMs (§6 — silent stall made loud)', () => {
+  it('formats the held duration (tabular)', () => {
+    expect(formatHeldMs(45000)).toBe('45s');
+    expect(formatHeldMs(90000)).toBe('1m 30s');
+    expect(formatHeldMs(0)).toBe('0s');
+  });
+
+  it('raises an oxide alarm naming the real holder + elapsed when the lock is stuck', () => {
+    const lock: LockState = { held: true, waiters: 1, holder: 'connect:afterDrain', heldMs: 45000, stuck: true };
+    const a = frag(stuckLockAlarmHtml(lock)).querySelector('.viz-stuck-alarm')!;
+    expect(a).toBeTruthy();
+    expect(a.getAttribute('role')).toBe('alert'); // surfaced, not silent
+    expect(a.textContent).toContain('stuck');
+    expect(a.textContent).toContain('connect:afterDrain'); // the real holder label, not "a stage"
+    expect(a.textContent).toContain('45s');
+  });
+
+  it('stays silent for a healthy held-but-moving lock or idle (only stuck escalates)', () => {
+    expect(stuckLockAlarmHtml({ held: true, waiters: 0, holder: 'claims:advance', heldMs: 1200 })).toBe('');
+    expect(stuckLockAlarmHtml({ held: false, waiters: 0 })).toBe('');
+  });
+
+  it('falls back to "a stage" with no holder label, and escapes a hostile one', () => {
+    expect(frag(stuckLockAlarmHtml({ held: true, waiters: 0, stuck: true })).textContent).toContain('a stage');
+    const evil = frag(stuckLockAlarmHtml({ held: true, waiters: 0, holder: '<img src=x onerror=alert(1)>', stuck: true }));
+    expect(evil.querySelector('img')).toBeNull();
   });
 });

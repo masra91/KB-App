@@ -16,6 +16,7 @@ import {
   type Conversion,
   type CellState,
 } from './vizModel';
+import type { LockState } from '../../kb/stageLock';
 
 /** Glyph per station state (§6) — also the color-blind-safe channel alongside the hue. */
 const STATE_GLYPH: Record<string, string> = { running: '◐', blocked: '▣', idle: '○', settled: '✓', error: '✕' };
@@ -76,4 +77,25 @@ export function stationGlyph(state: string): string {
 /** Display-only: the six station labels in Line order (UPPERCASE signage is a CSS `text-transform`). */
 export function stationOrder(): readonly StageId[] {
   return STAGE_ORDER;
+}
+
+/** A held duration for the stuck-lock alarm: `Ns` under a minute, else `Mm Ss` (tabular mono in CSS). */
+export function formatHeldMs(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/**
+ * The stuck-lock alarm (§6, "silent stall made loud" — OBS-11/VIZ-1). When the canonical-writer lock
+ * is held past the watchdog threshold (`lock.stuck`, #170), The Line raises the **primary alarm**:
+ * oxide, prominent, naming the real holder + elapsed (e.g. "stuck — held by connect:afterDrain for
+ * 45s"). Quiet otherwise — a healthy held-but-moving lock and calm idle render nothing here. Oxide
+ * is on display-size text only (§3 contrast rule); the elapsed is tabular mono. Returns '' when not stuck.
+ */
+export function stuckLockAlarmHtml(lock: LockState): string {
+  if (!lock.stuck) return '';
+  const holder = lock.holder ? esc(lock.holder) : 'a stage';
+  const elapsed = typeof lock.heldMs === 'number' ? ` for <span class="viz-num">${esc(formatHeldMs(lock.heldMs))}</span>` : '';
+  return `<div class="viz-stuck-alarm" role="alert">⚠ stuck — held by <strong>${holder}</strong>${elapsed}</div>`;
 }

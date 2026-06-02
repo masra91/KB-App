@@ -619,6 +619,10 @@ option { background: var(--card); color: var(--fg); }
 .viz-delta-expand .viz-delta-caption { color: var(--viz-patina); }
 .viz-delta-flat .viz-delta-caption { color: var(--viz-ink-muted); }
 .viz-delta-complete .viz-delta-caption { color: var(--viz-patina); } /* terminal completion ratio (#171) */
+/* Stuck-lock alarm (§6 / #172) — the primary "silent stall made loud" signal. Oxide on display-size
+   text (≥3:1, §3 contrast rule — oxide never on small text), flat (left rule, no card/shadow). */
+.viz-stuck-alarm { color: var(--viz-oxide); font-size: 1.125rem; font-weight: 600; border-left: 3px solid var(--viz-oxide); padding: 0.4rem 0.7rem; margin: 0.5rem 0; }
+.viz-num { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; }
 /* Ember breathe — the single active carriage/step pulses (VIZ-6). Animate opacity only (VIZ-9). */
 .viz-breathe .viz-cell-current { animation: viz-breathe 1.8s ease-in-out infinite; }
 @keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
