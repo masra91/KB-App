@@ -9,7 +9,7 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce } from './connectStage';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -643,6 +643,64 @@ describe.skipIf(!gitAvailable)('Connect within-source claim dedup (CLAIMS-19)', 
       expect(second.committed).toBe(false);
       expect(second.dropped).toBe(0);
       expect((await simpleGit(root).revparse(['HEAD'])).trim()).toBe(headAfter);
+    });
+  });
+});
+
+// ── Set-aside recovery (OBS-17, Connect half — mirrors claims CLAIMS-20) ─────────────────────
+describe.skipIf(!gitAvailable)('Connect set-aside recovery (OBS-17)', () => {
+  const KEY = 'person|steve jobs';
+  // Induce a poison set-aside block: a throwing decider, K attempts → set aside (CONNECT-14).
+  async function seedSetAside(root: string, lock: Mutex): Promise<void> {
+    await seedCandidate(root, 'person', 'Steve Jobs', '01S1');
+    await commitAll(root, 'seed');
+    const failing: ConnectDecider = async () => {
+      throw new Error('boom');
+    };
+    for (let n = 0; n < DEFAULT_MAX_ATTEMPTS; n++) await connectOne(root, KEY, failing, lock, DEFAULT_MAX_ATTEMPTS);
+  }
+
+  it('lists a set-aside block (keyed by blockKey, with a human name), off the active queue', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      expect(await readConnectQueue(root)).toHaveLength(0); // set aside → not in the active queue
+      const items = await listConnectSetAsideItems(root);
+      expect(items).toHaveLength(1);
+      expect(items[0].blockKey).toBe(KEY);
+      expect(items[0].name).toBe('Steve Jobs'); // the candidate's spelling, not the normalized key
+      expect(items[0].failures).toBe(DEFAULT_MAX_ATTEMPTS);
+    });
+  });
+
+  it('retry re-enqueues the block and clears it from the set-aside list (idempotent)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      await retryConnectItem(root, KEY, lock);
+      expect(await listConnectSetAsideItems(root)).toHaveLength(0); // reopened → no longer set aside
+      expect((await readConnectQueue(root)).map((s) => s.blockKey)).toContain(KEY); // back in the queue
+      // Idempotent in the read-outside/act-under-lock window: a second retry is harmless.
+      await retryConnectItem(root, KEY, lock);
+      expect((await readConnectQueue(root)).map((s) => s.blockKey)).toContain(KEY);
+    });
+  });
+
+  it('dismiss retires the block permanently — off BOTH the queue and the set-aside list (idempotent)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      await dismissConnectItem(root, KEY, lock);
+      expect(await listConnectSetAsideItems(root)).toHaveLength(0); // dismissed ≠ recoverable
+      expect(await readConnectQueue(root)).toHaveLength(0); // never re-queued
+      await dismissConnectItem(root, KEY, lock); // idempotent
+      expect(await readConnectQueue(root)).toHaveLength(0);
     });
   });
 });
