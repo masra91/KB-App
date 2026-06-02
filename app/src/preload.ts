@@ -19,6 +19,9 @@ const kbApi: KbApi = {
   activityFeed: (filter) => ipcRenderer.invoke('kb:activityFeed', filter),
   activityEvents: (filter) => ipcRenderer.invoke('kb:activityEvents', filter),
   activityLineage: (id) => ipcRenderer.invoke('kb:activityLineage', id),
+  getInstanceSettings: () => ipcRenderer.invoke('kb:getInstanceSettings'),
+  setInstanceSettings: (settings) => ipcRenderer.invoke('kb:setInstanceSettings', settings),
+  listAgents: () => ipcRenderer.invoke('kb:listAgents'),
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

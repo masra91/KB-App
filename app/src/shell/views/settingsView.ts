@@ -31,6 +31,16 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       }
     }
 
+    // PANEL-5: the editable per-Instance autonomy default. Never errors the shell — falls back to Guarded.
+    let autonomyDefault: 'guarded' | 'autonomous' = 'guarded';
+    try {
+      autonomyDefault = (await window.kbApi.getInstanceSettings()).autonomyDefault;
+    } catch {
+      // Leave the safe default.
+    }
+    const opt = (v: 'guarded' | 'autonomous', label: string): string =>
+      `<option value="${v}"${v === autonomyDefault ? ' selected' : ''}>${label}</option>`;
+
     container.innerHTML = `
       <div class="card">
         <h1>⚙️ Settings</h1>
@@ -45,6 +55,19 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         </ul>
       </div>
       <div class="card">
+        <h2>Autonomy</h2>
+        <p class="muted">Default posture for autonomous jobs in this Knowledge Base. Each job inherits this unless it sets its own. <strong>Guarded</strong> routes risky or low-confidence changes to Reviews; <strong>Autonomous</strong> lets the agent apply them directly.</p>
+        <label class="autonomy-row">Default posture
+          <select id="autonomy-default">${opt('guarded', 'Guarded')}${opt('autonomous', 'Autonomous')}</select>
+        </label>
+        <div id="autonomy-confirm" class="confirm" hidden>
+          <p class="warn">Set the default to <strong>Autonomous</strong>? Jobs without their own posture will let the agent apply changes — including destructive ones — without routing to Reviews first.</p>
+          <button id="autonomy-cancel" class="btn">Cancel</button>
+          <button id="autonomy-go" class="btn-danger">Set Autonomous</button>
+        </div>
+        <p id="autonomy-status" class="muted" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="muted">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
         <button id="replay-btn" class="btn-danger"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild KB…</button>
@@ -56,6 +79,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="replay-status" class="muted" role="status" aria-live="polite"></p>
       </div>`;
 
+    wireAutonomy(container, autonomyDefault);
     wireReplay(container);
   } catch {
     container.innerHTML = `
@@ -64,6 +88,50 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p class="error">Could not load settings right now.</p>
       </div>`;
   }
+}
+
+/** Wire the per-Instance autonomy default (PANEL-5/7): changing the default to Autonomous is risky and
+ *  reveals a confirm before it applies + is audited; relaxing to Guarded applies directly. */
+function wireAutonomy(container: HTMLElement, initial: 'guarded' | 'autonomous'): void {
+  const select = container.querySelector<HTMLSelectElement>('#autonomy-default');
+  const confirm = container.querySelector<HTMLElement>('#autonomy-confirm');
+  const cancel = container.querySelector<HTMLButtonElement>('#autonomy-cancel');
+  const go = container.querySelector<HTMLButtonElement>('#autonomy-go');
+  const status = container.querySelector<HTMLElement>('#autonomy-status');
+  if (!select || !confirm || !cancel || !go || !status) return;
+
+  let current = initial;
+
+  const apply = async (value: 'guarded' | 'autonomous'): Promise<void> => {
+    status.textContent = 'Saving…';
+    try {
+      const saved = await window.kbApi.setInstanceSettings({ autonomyDefault: value });
+      current = saved.autonomyDefault;
+      select.value = current;
+      status.textContent = `Default posture: ${current === 'autonomous' ? 'Autonomous' : 'Guarded'}.`;
+    } catch {
+      select.value = current; // revert on failure
+      status.textContent = 'Could not save the change.';
+    }
+  };
+
+  select.addEventListener('change', () => {
+    const value = select.value === 'autonomous' ? 'autonomous' : 'guarded';
+    if (value === 'autonomous' && current !== 'autonomous') {
+      status.textContent = '';
+      confirm.hidden = false; // risky → confirm before applying (PANEL-7)
+    } else {
+      void apply(value);
+    }
+  });
+  cancel.addEventListener('click', () => {
+    confirm.hidden = true;
+    select.value = current; // revert the pending selection
+  });
+  go.addEventListener('click', () => {
+    confirm.hidden = true;
+    void apply('autonomous');
+  });
 }
 
 /** Wire the Clean & Rebuild flow: reveal a confirm panel (REPLAY-2), then run the replay and

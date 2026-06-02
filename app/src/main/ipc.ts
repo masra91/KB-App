@@ -14,6 +14,9 @@ import {
   listJobsForActive,
   setActiveJobConfig,
   runActiveJobNow,
+  getActiveInstanceSettings,
+  setActiveInstanceSettings,
+  listAgentsForActive,
 } from './pipeline';
 import { recall } from '../kb/recall';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
@@ -40,6 +43,8 @@ import type {
   ActivityFeedResult,
   AuditEvent,
   Lineage,
+  InstanceSettings,
+  AgentView,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -209,6 +214,15 @@ export function registerIpc(): void {
     if (!root) return { subjectId: id, kind: 'unknown', sources: [], events: [], decisions: [] };
     return traceLineage(root, id);
   });
+
+  // SPEC-0027 PANEL-3/5: the Control Panel's Settings (per-Instance autonomy default) + Agents
+  // (observe-only). The renderer gates a → Autonomous default behind a confirm; the main process
+  // owns the per-vault `.kb/instance.json` + emits the conforming audit.
+  ipcMain.handle('kb:getInstanceSettings', async (): Promise<InstanceSettings> => getActiveInstanceSettings());
+
+  ipcMain.handle('kb:setInstanceSettings', async (_e, s: InstanceSettings): Promise<InstanceSettings> => setActiveInstanceSettings(s));
+
+  ipcMain.handle('kb:listAgents', async (): Promise<AgentView[]> => listAgentsForActive());
 }
 
 /** Deterministic recall result for the CI e2e happy-path (KB_ASK_E2E_STUB). Never used in prod. */
