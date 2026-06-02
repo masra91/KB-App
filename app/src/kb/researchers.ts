@@ -133,6 +133,15 @@ export interface ResearchRequest {
   egressHint?: EgressTier;
   /** Coalescing key so the same request doesn't fan out repeatedly (D2). */
   dedupKey: string;
+  /**
+   * Chain depth of this request (RESEARCH-11 depth limit). A request born from a PRIMARY source is
+   * depth 1; one born from a research-produced (`origin:'secondary'`) finding is one deeper than that
+   * finding's own chain, and so on (research→finding→`research-request`→research…). Stamped at
+   * creation — by `collectResearchRequests` (from audit lineage) for inline requests, `1` for a
+   * scheduler standing pass — and ENFORCED by the dispatcher against the running researcher's
+   * `budget.maxDepth` (over-depth → escalate-to-Review, no egress). Absent ⇒ treated as `1`.
+   */
+  depth?: number;
 }
 
 /** Normalize a string for dedup/topic matching: lowercase, collapse whitespace, trim. */
