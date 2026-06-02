@@ -53,4 +53,58 @@ describe('mergeNodes (CONNECT-10/11)', () => {
       await rmTempDir(dir);
     }
   });
+
+  // Path-injection containment (REFLECT-5/7 / JOBS-10 class): `canonicalRel`/`loserRels` are
+  // LLM-emitted (the Reflect agent's plan), so a `../` / absolute / non-entities / symlink-escape
+  // path must be REFUSED before the destructive fs.writeFile/fs.rm — the approval covers the prose,
+  // not the paths. mergeNodes throws and mutates NOTHING (validate-first). QA finder: KB-Quality-Driver.
+  it('refuses a `..`-traversal loser path and deletes nothing outside the worktree', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'wt');
+      const canonical = 'entities/person/steve-jobs.md';
+      await write(root, canonical, node('Steve Jobs'));
+      await fs.writeFile(path.join(dir, 'victim.md'), 'precious', 'utf8'); // OUTSIDE the worktree
+      await expect(mergeNodes(root, canonical, ['../victim.md'])).rejects.toThrow(/refusing unsafe path/);
+      expect(await pathExists(path.join(dir, 'victim.md'))).toBe(true); // never followed out / deleted
+      expect(await pathExists(path.join(root, canonical))).toBe(true); // canonical untouched
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('refuses a `..`-traversal canonical path, an absolute path, and a non-entities/ path', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'wt');
+      const canonical = 'entities/person/steve-jobs.md';
+      const loser = 'entities/person/steven-jobs.md';
+      await write(root, canonical, node('Steve Jobs'));
+      await write(root, loser, node('Steven Jobs'));
+      await expect(mergeNodes(root, '../escape.md', [loser])).rejects.toThrow(/refusing unsafe path/); // canonical escapes
+      await expect(mergeNodes(root, canonical, ['/etc/passwd'])).rejects.toThrow(/refusing unsafe path/); // absolute
+      await expect(mergeNodes(root, canonical, ['claims/2026/x.md'])).rejects.toThrow(/outside entities/); // in-wt but wrong root
+      expect(await pathExists(path.join(root, loser))).toBe(true); // nothing deleted
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('refuses a loser that escapes via a committed symlink (symlink-safe containment)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'wt');
+      const canonical = 'entities/person/steve-jobs.md';
+      await write(root, canonical, node('Steve Jobs'));
+      const outside = path.join(dir, 'outside');
+      await fs.mkdir(outside, { recursive: true });
+      await fs.writeFile(path.join(outside, 'node.md'), 'precious', 'utf8');
+      await fs.mkdir(path.join(root, 'entities'), { recursive: true });
+      await fs.symlink(outside, path.join(root, 'entities', 'escape')); // entities/escape -> <outside>
+      await expect(mergeNodes(root, canonical, ['entities/escape/node.md'])).rejects.toThrow(/refusing unsafe path/);
+      expect(await pathExists(path.join(outside, 'node.md'))).toBe(true); // never followed out
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
 });
