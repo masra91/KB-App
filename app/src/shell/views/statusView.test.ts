@@ -14,6 +14,7 @@ import {
   errorsHtml,
   latencyHtml,
 } from './statusView';
+import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { PipelineStatusView, KbApi } from '../../kb/types';
 
 const PERF: PipelineStatusView['perf'] = {
@@ -140,5 +141,31 @@ describe('mountStatus (OBS-8/9 — live + read-only)', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(root.textContent).toContain('No knowledge base open');
+  });
+});
+
+describe('mountStatus · #145 hang resilience', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+  afterEach(() => {
+    stopStatusPolling();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    root.remove();
+  });
+
+  it('shows an error instead of an infinite "Loading…" when pipelineStatusView hangs (#145)', async () => {
+    setApi(vi.fn(() => new Promise<PipelineStatusView>(() => {}))); // hangs
+    mountStatus(root);
+    await vi.advanceTimersByTimeAsync(0); // initial paint
+    expect(root.textContent).toContain('Loading…');
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
+    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.status-error')).not.toBeNull(); // surfaced; the poll auto-retries (no button — read-only)
   });
 });

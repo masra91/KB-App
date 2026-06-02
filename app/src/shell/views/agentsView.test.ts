@@ -47,7 +47,8 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
     }));
     await mountAgents(root);
     await tick();
-    expect(root.querySelector('.error')?.textContent).toContain('Could not load agents');
+    expect(root.querySelector('.load-error')?.textContent).toContain('Couldn’t load'); // retryable fallback (#145)
+    expect(root.querySelector('.load-retry')).toBeTruthy();
   });
 
   it('shows a friendly empty state when there are no agents', async () => {

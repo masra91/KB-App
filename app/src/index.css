@@ -400,6 +400,9 @@ button:disabled {
 
 .badge { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; }
 
+/* Retryable load-failure fallback (#145) — the Retry button reuses .btn; just space it from the text. */
+.load-error .load-retry { margin-left: 0.5rem; font-size: 0.85em; padding: 0.2rem 0.6rem; }
+
 /* Shared confirm/button styling (also used by the Settings replay flow). */
 .confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }

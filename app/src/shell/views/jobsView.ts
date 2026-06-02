@@ -7,6 +7,7 @@
 // they apply + audit; read-only viewing needs none. PANEL-9: the view degrades to a friendly message
 // when no KB is active or IPC fails.
 import { esc } from '../html';
+import { withTimeout, renderLoadError } from '../loadGuard';
 import { schedulePresetLabel, SCHEDULE_OPTIONS, isRiskyJobChange } from '../../kb/jobsPanel';
 import type { JobView, JobConfigPatch } from '../../kb/types';
 
@@ -20,9 +21,10 @@ export async function mountJobs(container: HTMLElement): Promise<void> {
 async function render(container: HTMLElement): Promise<void> {
   let jobs: JobView[];
   try {
-    jobs = await window.kbApi.listJobs();
+    // #145: bound the wait — a hung `listJobs` (degraded staging) must never leave an infinite spinner.
+    jobs = await withTimeout(window.kbApi.listJobs());
   } catch {
-    container.innerHTML = `<div class="card"><h1>🛠️ Jobs</h1><p class="error">Could not load jobs right now.</p></div>`;
+    renderLoadError(container, '<h1>🛠️ Jobs</h1>', () => void render(container));
     return;
   }
 

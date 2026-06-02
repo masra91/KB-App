@@ -175,3 +175,13 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   `researchersView.test.ts` + `jobsView.test.ts` cover the run-now state machine + the short option
   labels/titles. The pure visual tuning (spacing/caret/contrast) is best confirmed by KB-Lead on a
   running build.
+- 2026-06-02 — **#145: Manage views never infinite-spin (hardens PANEL-9).** PANEL-9 covered "IPC
+  *fails* → friendly message", but a *hung* load IPC (e.g. `kb:listJobs` reading degraded staging and
+  never returning) left the view on a perpetual "Loading…" — a `catch` can't help a promise that never
+  settles. Added a shared `shell/loadGuard.ts`: `withTimeout(ipcCall, ms=8000)` bounds the wait (a hang
+  rejects with a `TimeoutError` the existing `catch` handles), and `renderLoadError(container, header,
+  onRetry)` shows a **retryable** fallback instead of a spinner. Wired into **Jobs / Researchers /
+  Agents** (load via `withTimeout` → `renderLoadError` with a Retry button on timeout/failure) and
+  **Status** (load via `withTimeout`; its existing live poll auto-retries, so no button — stays
+  read-only per OBS-9). UI-only — ships independent of the backend `kb:listJobs` fix (#135 cascade).
+  Tests: `loadGuard.test.ts` (timeout/passthrough/retry-render) + per-view hang→retry coverage.
