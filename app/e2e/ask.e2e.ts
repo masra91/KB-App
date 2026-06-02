@@ -77,7 +77,10 @@ test.describe('ASK-1 — ask → grounded cited answer (stubbed recall)', () => 
     // A grounded answer with its citation renders.
     const transcript = window.locator('.ask-transcript');
     await expect(transcript).toContainText('first computer programmer', { timeout: 15_000 });
-    await expect(window.locator('.ask-citations')).toContainText('claims/person/ada-lovelace.md');
+    // #2 de-jargon: the reference shows the human label + kind inline; the raw vault path moved to the
+    // cite-ref tooltip (canonical ref preserved there + on the deep-link), not shown inline.
+    await expect(window.locator('.ask-citations')).toContainText('first computer programmer');
+    await expect(window.locator('.ask-citations .cite-ref').first()).toHaveAttribute('title', /claims\/person\/ada-lovelace\.md/);
     await expect(transcript).toContainText('Who was Ada Lovelace?'); // the question echoes back
   });
 });

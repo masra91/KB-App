@@ -120,9 +120,9 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
       { stage: 'connect', itemId: 'block:engine', name: 'Analytical Engine' },
     ]);
     expect(h).toContain('Set aside — needs attention (2)');
-    expect(h).toContain('claims · Ada Lovelace');
-    expect(h).toContain('connect · Analytical Engine');
-    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect
+    expect(h).toContain('Claim extraction · Ada Lovelace'); // display name (#4); raw stage stays in data-stage
+    expect(h).toContain('Linking · Analytical Engine');
+    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect (raw id intact)
     expect(h).toContain('data-id="block:engine"');
   });
 
