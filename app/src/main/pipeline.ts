@@ -32,8 +32,9 @@ import { makeReflectDecider } from '../kb/reflectAgent';
 import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/jobRegistry';
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
-import { buildJobViews } from '../kb/jobsPanel';
-import { DEFAULT_POSTURE, type JobBehavior, type JournalEntry } from '../kb/jobs';
+import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
+import { appendAuditEvent } from '../kb/audit';
+import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
 import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult } from '../kb/types';
 
@@ -169,34 +170,61 @@ export async function listJobsForActive(): Promise<JobView[]> {
 
 /**
  * Apply a Jobs-view config change (PANEL-2/6) and return the refreshed list. A catalog-only job is
- * seeded into the registry on first edit. The write + commit run under the shared canonical-writer
- * lock so they never race a stage's ff-advance; the commit is the v1 git-auditable record of the
- * change (PANEL-7 interim, until SPEC-0029's audit envelope lands). The scheduler reads the registry
- * fresh each tick and rebuilds a job's runner when its config signature changes, so the edit takes
- * effect with no restart (PANEL-6).
+ * seeded into the registry on first edit. The registry write + git commit run under the shared
+ * canonical-writer lock so they never race a stage's ff-advance — the commit is the durable record
+ * that survives a staging reset. After the write, a **conforming `panel` audit event** is emitted per
+ * changed field (PANEL-7 / AUDIT-2/11 — carries field/from/to + the why, via the SPEC-0029 writer
+ * which enforces actor registration at emit). The scheduler reads the registry fresh each tick and
+ * rebuilds a job's runner when its config signature changes, so the edit takes effect with no
+ * restart (PANEL-6).
+ *
+ * Untrusted IPC input is validated at this trust boundary: id/type required, `schedule`/`posture`
+ * are dropped unless they are known enum values (the existing `isSchedulePreset`/`isAutonomyPosture`
+ * validators), and an unknown job (not in the catalog and not already registered) is refused — never
+ * create a job for an arbitrary/unresolvable type.
  */
 export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView[]> {
   if (!active) return [];
   const root = active.stagingWt;
+  if (typeof patch.id !== 'string' || patch.id.length === 0 || typeof patch.type !== 'string' || patch.type.length === 0) {
+    return listJobsForActive();
+  }
+  // Sanitize: keep only valid enum fields (fail-safe — drop anything unrecognized).
+  const clean: JobConfigPatch = { id: patch.id, type: patch.type };
+  if (typeof patch.enabled === 'boolean') clean.enabled = patch.enabled;
+  if (isSchedulePreset(patch.schedule)) clean.schedule = patch.schedule;
+  if (isAutonomyPosture(patch.posture)) clean.posture = patch.posture;
+
+  let prior: JobConfig | undefined;
+  let applied = false;
   await active.lock.run(async () => {
     const registry = await readJobRegistry(root);
-    if (registry.some((j) => j.id === patch.id)) {
-      await patchJob(root, patch.id, {
-        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
-        ...(patch.schedule !== undefined ? { schedule: patch.schedule } : {}),
-        ...(patch.posture !== undefined ? { posture: patch.posture } : {}),
+    prior = registry.find((j) => j.id === clean.id);
+    // Refuse an unknown job (not in the catalog and not already registered) from untrusted input.
+    if (!prior && catalogEntry(clean.type) === undefined) return;
+    applied = true;
+    if (prior) {
+      await patchJob(root, clean.id, {
+        ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}),
+        ...(clean.schedule !== undefined ? { schedule: clean.schedule } : {}),
+        ...(clean.posture !== undefined ? { posture: clean.posture } : {}),
       });
     } else {
       await upsertJob(root, {
-        id: patch.id,
-        type: patch.type,
-        enabled: patch.enabled ?? false,
-        schedule: patch.schedule ?? 'off',
-        posture: patch.posture ?? DEFAULT_POSTURE,
+        id: clean.id,
+        type: clean.type,
+        enabled: clean.enabled ?? false,
+        schedule: clean.schedule ?? 'off',
+        posture: clean.posture ?? DEFAULT_POSTURE,
       });
     }
-    await commitRegistryChange(root, `job ${patch.id} config change`);
+    await commitRegistryChange(root, summarizeJobChange(clean));
   });
+  if (applied) {
+    // Conforming audit (PANEL-7 / AUDIT-2/11): one `panel` event per changed field, carrying the why.
+    // Appends to the gitignored `.kb/audit.jsonl` (not canonical) — fine outside the lock.
+    for (const event of jobConfigAuditEvents(prior, clean)) await appendAuditEvent(root, event);
+  }
   return listJobsForActive();
 }
 
@@ -204,6 +232,8 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
  * Manual "Run now" for one job (PANEL-2; JOBS-11) — one bounded pass on demand, respecting
  * single-flight. Run-now is independent of enable/schedule, so a catalog-only job is seeded
  * (off/guarded) and committed before running, letting the Principal test a job without turning it on.
+ * The Principal's trigger is itself audited as a `panel` event (PANEL-7); the run's own work is
+ * audited by the job journal (actor `job`).
  */
 export async function runActiveJobNow(id: string): Promise<RunJobResult> {
   if (!active) return { ran: false, reason: 'no-kb' };
@@ -218,16 +248,34 @@ export async function runActiveJobNow(id: string): Promise<RunJobResult> {
     });
   }
   const res = await active.jobs.runNow(id);
+  const outcome = res === 'skipped' || res === 'not-found' || res === 'unknown-type' ? res : res.outcome;
+  // Audit the Principal-initiated trigger (PANEL-7) — the trigger happened regardless of outcome.
+  await appendAuditEvent(root, {
+    actor: 'panel',
+    eventType: 'job-run-now',
+    subjects: { jobId: id },
+    payload: { outcome, why: 'Principal manual run via Control Panel' },
+  });
   if (res === 'skipped' || res === 'not-found' || res === 'unknown-type') return { ran: false, reason: res };
   return { ran: true, outcome: res.outcome, applied: res.applied, deferred: res.deferred };
 }
 
+/** A short, human commit summary of a job-config change (the conforming audit event carries from/to). */
+function summarizeJobChange(patch: JobConfigPatch): string {
+  const parts: string[] = [];
+  if (patch.enabled !== undefined) parts.push(`enabled=${patch.enabled}`);
+  if (patch.schedule !== undefined) parts.push(`schedule=${patch.schedule}`);
+  if (patch.posture !== undefined) parts.push(`posture=${patch.posture}`);
+  return `job ${patch.id}${parts.length ? ` set ${parts.join(', ')}` : ' config change'}`;
+}
+
 /**
- * Commit a job-registry change on the `staging` root (the v1 audit substrate, PANEL-7): the registry
- * lives under `.kb/jobs/`, tracked on `staging` and never promoted, so a commit is durable + git
- * -auditable and protects the file from a stray staging reset. MUST be called inside `lock.run` (it
- * advances the canonical branch directly; under the lock it is just another linear advance that
- * stages cherry-pick their disjoint work onto). A no-op write (identical bytes) commits nothing.
+ * Commit a job-registry change on the `staging` root — the **durability record**: the registry lives
+ * under `.kb/jobs/`, tracked on `staging` and never promoted, so a commit is durable and protects the
+ * file from a stray staging reset (the *conforming* audit is the separate `panel` event emitted by
+ * the caller). MUST be called inside `lock.run` (it advances the canonical branch directly; under the
+ * lock it is just another linear advance that stages cherry-pick their disjoint work onto). A no-op
+ * write (identical bytes) commits nothing.
  */
 async function commitRegistryChange(root: string, message: string): Promise<void> {
   const git = simpleGit(root);

@@ -78,7 +78,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | PANEL-4 | should   | The **Sources** view shows the vault + watched folders and **placeholder** slots for future connected sources (Proactive Intake); thin in v1, grows as integrations land | none-yet | VISION-11 |
 | PANEL-5 | must     | The **Settings** view (elevating the display-only stub) holds vault config, **Copilot status**, and editable **autonomy defaults** (per-Instance posture) | none-yet | SETUP-8; AUTO-12 |
 | PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | none-yet | SETUP-6; SCOPE-1 |
-| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate), app/src/shell/views/jobsView.test.ts (confirm UI) | AUTO-1,8 |
+| PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | none-yet | REVIEW-?; AUTO-10 |
 | PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | none-yet | ORCH-10 |
 
@@ -126,10 +126,12 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   / autonomy posture / **run-now** / **last-run** from the job journal — with a known-job **catalog**
   (Reflect + the `example` reference job) merged with the per-vault registry so a known job is
   manageable before it's persisted (first edit persists via `upsertJob`). Risky changes (enable,
-  → Autonomous, run-now) **confirm** before applying (PANEL-7); config writes are **git-committed on
-  `staging` under the canonical lock** as the v1 **audit substrate** (interim until SPEC-0029's
-  `kb/audit.ts` envelope lands, then a conforming event is emitted) and take effect **without a
-  restart** (the scheduler re-reads the registry each tick — PANEL-6). Graduated **PANEL-1/2/7**
+  → Autonomous, run-now) **confirm** before applying (PANEL-7); each config change emits a
+  **conforming `panel` audit event** (field/from/to + the why) via SPEC-0029's `appendAuditEvent`
+  (which enforces actor registration at emit — AUDIT-2/11), with the `staging` git commit retained
+  as the durability record; changes take effect **without a restart** (the scheduler re-reads the
+  registry each tick — PANEL-6). Untrusted IPC input is validated at the main-side boundary
+  (`isSchedulePreset`/`isAutonomyPosture`; unknown job types refused). Graduated **PANEL-1/2/7**
   `Verify: none-yet → test:` (node-tier `jobsPanel.test.ts` for the merge + risk logic; happy-dom
   `jobsView.test.ts` for the view; `navModel.test.ts` for the Manage rail order; `jobs.e2e.ts`
   packaged-app smoke, CI-only). **Deferred to slice 2:** Agents observe content (PANEL-3),

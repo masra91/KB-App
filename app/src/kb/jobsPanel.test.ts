@@ -1,6 +1,14 @@
 // SPEC-0027 PANEL-2/7 — pure Jobs view-model logic. Node tier (no DOM), per SHELL-6 / TEST-5.
 import { describe, it, expect } from 'vitest';
-import { buildJobViews, isRiskyJobChange, schedulePresetLabel, isSchedulePreset, SCHEDULE_OPTIONS } from './jobsPanel';
+import {
+  buildJobViews,
+  isRiskyJobChange,
+  schedulePresetLabel,
+  isSchedulePreset,
+  isAutonomyPosture,
+  jobConfigAuditEvents,
+  SCHEDULE_OPTIONS,
+} from './jobsPanel';
 import type { JobCatalogEntry } from './jobCatalog';
 import type { JobConfig, JournalEntry } from './jobs';
 import type { JobView, JobConfigPatch } from './types';
@@ -104,5 +112,44 @@ describe('schedule preset helpers', () => {
     expect(isSchedulePreset('hourly')).toBe(true);
     expect(isSchedulePreset('weekly')).toBe(false);
     expect(isSchedulePreset(42)).toBe(false);
+  });
+  it('validates posture strings from untrusted IPC input', () => {
+    expect(isAutonomyPosture('guarded')).toBe(true);
+    expect(isAutonomyPosture('autonomous')).toBe(true);
+    expect(isAutonomyPosture('reckless')).toBe(false);
+    expect(isAutonomyPosture(undefined)).toBe(false);
+  });
+});
+
+describe('jobConfigAuditEvents — conforming panel audit (PANEL-7 / AUDIT-2/11)', () => {
+  const patch = (over: Partial<JobConfigPatch>): JobConfigPatch => ({ id: 'reflect', type: 'reflect', ...over });
+
+  it('emits one panel event per changed field, each carrying field/from/to + the why', () => {
+    const prior = cfg({ id: 'reflect', type: 'reflect', enabled: false, schedule: 'off', posture: 'guarded' });
+    const events = jobConfigAuditEvents(prior, patch({ enabled: true, posture: 'autonomous' }));
+    expect(events).toHaveLength(2);
+    for (const e of events) {
+      expect(e.actor).toBe('panel');
+      expect(e.eventType).toBe('job-config-change');
+      expect(e.subjects).toEqual({ jobId: 'reflect' });
+      expect(e.payload.why).toBe('Principal change via Control Panel'); // AUDIT-2: carries the why
+    }
+    expect(events.map((e) => e.payload)).toEqual([
+      { field: 'enabled', from: false, to: true, why: 'Principal change via Control Panel' },
+      { field: 'posture', from: 'guarded', to: 'autonomous', why: 'Principal change via Control Panel' },
+    ]);
+  });
+
+  it('emits nothing for a field re-asserting its current value', () => {
+    const prior = cfg({ id: 'reflect', type: 'reflect', schedule: 'daily' });
+    expect(jobConfigAuditEvents(prior, patch({ schedule: 'daily' }))).toEqual([]);
+  });
+
+  it('for a never-registered (catalog-only) job, `from` is the safe default', () => {
+    const events = jobConfigAuditEvents(undefined, patch({ enabled: true, schedule: 'hourly' }));
+    expect(events.map((e) => e.payload)).toEqual([
+      { field: 'enabled', from: false, to: true, why: 'Principal change via Control Panel' },
+      { field: 'schedule', from: 'off', to: 'hourly', why: 'Principal change via Control Panel' },
+    ]);
   });
 });

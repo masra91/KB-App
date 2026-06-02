@@ -8,8 +8,17 @@
 //     overlaying each job's last-run summary from its journal (PANEL-2);
 //   - schedulePresetLabel: the human label for a cadence preset;
 //   - isRiskyJobChange: which config changes must confirm + audit (PANEL-7).
-import { SCHEDULE_PRESETS, DEFAULT_POSTURE, type JobConfig, type JournalEntry, type SchedulePreset } from './jobs';
+import {
+  SCHEDULE_PRESETS,
+  AUTONOMY_POSTURES,
+  DEFAULT_POSTURE,
+  type JobConfig,
+  type JournalEntry,
+  type SchedulePreset,
+  type AutonomyPosture,
+} from './jobs';
 import type { JobCatalogEntry } from './jobCatalog';
+import type { AuditEventInput } from './audit';
 import type { JobView, JobLastRun, JobConfigPatch } from './types';
 
 /** Human labels for the named schedule presets (JOBS-2), in cadence order. */
@@ -114,4 +123,42 @@ export function isRiskyJobChange(current: Pick<JobView, 'enabled' | 'posture'>, 
 /** Validate a schedule string against the known presets (defensive: IPC input may be untrusted). */
 export function isSchedulePreset(v: unknown): v is SchedulePreset {
   return typeof v === 'string' && (SCHEDULE_PRESETS as readonly string[]).includes(v);
+}
+
+/** Validate an autonomy-posture string (defensive: IPC input may be untrusted). */
+export function isAutonomyPosture(v: unknown): v is AutonomyPosture {
+  return typeof v === 'string' && (AUTONOMY_POSTURES as readonly string[]).includes(v);
+}
+
+/** The why every Control-Panel config change records (AUDIT-2 — mutating actors carry the why). */
+const PANEL_AUDIT_WHY = 'Principal change via Control Panel';
+
+/**
+ * Build the conforming `panel` audit events for a job-config change (PANEL-7 / AUDIT-2/11) — one
+ * event per field the patch actually changes, each carrying **field / from / to + the why**. `prior`
+ * is the job's config before the change (undefined = a catalog-only job persisted for the first
+ * time, so unset fields fall back to their safe defaults). Pure: the caller (`setActiveJobConfig`)
+ * writes them via `appendAuditEvent`, which enforces actor registration at emit (AUDIT-2/11).
+ */
+export function jobConfigAuditEvents(
+  prior: Pick<JobConfig, 'enabled' | 'schedule' | 'posture'> | undefined,
+  patch: JobConfigPatch,
+): AuditEventInput[] {
+  const base = {
+    enabled: prior?.enabled ?? false,
+    schedule: prior?.schedule ?? 'off',
+    posture: prior?.posture ?? DEFAULT_POSTURE,
+  };
+  const events: AuditEventInput[] = [];
+  for (const field of ['enabled', 'schedule', 'posture'] as const) {
+    const to = patch[field];
+    if (to === undefined || to === base[field]) continue;
+    events.push({
+      actor: 'panel',
+      eventType: 'job-config-change',
+      subjects: { jobId: patch.id },
+      payload: { field, from: base[field], to, why: PANEL_AUDIT_WHY },
+    });
+  }
+  return events;
 }
