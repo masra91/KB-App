@@ -219,10 +219,13 @@ export type RunJobResult =
 /** Last-run summary for a researcher, derived from its newest `researcher` audit event, for display. */
 export interface ResearcherLastRun {
   ts: string; // ISO timestamp of the last pass
-  eventType: string; // 'researched' | 'no-finding'
+  eventType: string; // 'researched' | 'no-finding' | 'research-failed' | 'ceiling-reached' | 'escalated'
   what: string; // the request term it answered
   sourceId?: string; // the secondary source produced (when it found something)
   citations: number; // external citations on the finding
+  /** The depth-limit escalation Review this pass raised (RESEARCH-11) — present on an `escalated`
+   *  event, so the Field Desk can deep-link "needs your review" to the open Review (no dead affordance). */
+  reviewId?: string;
 }
 
 /** One manageable researcher as the Researchers view needs it (RESEARCH-15): config + last run. */

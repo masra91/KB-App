@@ -62,3 +62,33 @@ describe('shell review-count badge (SPEC-0027 PANEL-8)', () => {
     expect(reviewsBtn(root).querySelector('.nav-badge')).toBeNull();
   });
 });
+
+describe('shell kb:navigate view→view nav primitive (SHELL — Field Desk escalation deep-link)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    setApi(vi.fn(async () => []));
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('a kb:navigate event switches the active view (so a view can deep-link to another, e.g. → Reviews)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    expect(reviewsBtn(root).getAttribute('aria-current')).not.toBe('page'); // starts on Capture
+    document.dispatchEvent(new CustomEvent('kb:navigate', { detail: { view: VIEW_REVIEWS } }));
+    await tick();
+    expect(reviewsBtn(root).getAttribute('aria-current')).toBe('page'); // navigated to Reviews
+  });
+
+  it('ignores a kb:navigate to an unknown view (no throw, no change)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    expect(() => document.dispatchEvent(new CustomEvent('kb:navigate', { detail: { view: 'not-a-view' } }))).not.toThrow();
+    await tick();
+    expect(reviewsBtn(root).getAttribute('aria-current')).not.toBe('page');
+  });
+});

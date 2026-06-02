@@ -43,6 +43,13 @@ describe('lastRunFromEvent', () => {
     expect(noFind?.sourceId).toBeUndefined();
     expect(lastRunFromEvent(undefined)).toBeNull();
   });
+
+  it('surfaces the escalation reviewId so the Field Desk can deep-link "needs your review" (RESEARCH-11)', () => {
+    const esc = lastRunFromEvent(ev({ eventType: 'escalated', subjects: { researcherId: 'web-1', requestId: 'r', reviewId: 'REV123' }, payload: { what: 'Atlas' } }));
+    expect(esc).toMatchObject({ eventType: 'escalated', reviewId: 'REV123' });
+    // a normal pass carries no reviewId (so no dangling deep-link)
+    expect(lastRunFromEvent(ev())?.reviewId).toBeUndefined();
+  });
 });
 
 describe('researcherOutcomeLabel — no dev slugs in the UI (KB product principle)', () => {

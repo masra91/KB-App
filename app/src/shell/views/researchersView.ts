@@ -26,6 +26,8 @@ import {
   researcherOutcomeLabel,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS } from '../../kb/researchers';
+import { navigateTo } from '../nav';
+import { VIEW_REVIEWS } from '../views';
 import type { EgressTier } from '../../kb/researchers';
 import type { ResearcherView, ResearcherConfigPatch } from '../../kb/types';
 
@@ -105,7 +107,13 @@ function reportLine(r: ResearcherView): string {
     lr.eventType === 'researched'
       ? ` — brought back <span class="viz-numeric">${lr.citations}</span> cited source${lr.citations === 1 ? '' : 's'} on “${esc(lr.what)}”`
       : '';
-  return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>`;
+  // A depth-limit escalation is ACTIONABLE — deep-link "needs your review" to the open Review so the
+  // affordance isn't a dead status line (RESEARCH-11; resume-on-confirm closes the loop on confirm).
+  const open =
+    lr.eventType === 'escalated' && lr.reviewId
+      ? ` <button type="button" class="rdesk-review-link viz-signage viz-focusable" data-review-id="${esc(lr.reviewId)}">open review →</button>`
+      : '';
+  return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>${open}`;
 }
 
 /** The always-visible reach readout (§2/§6) — budget + tool allowlist, mono/tabular, read-only in v1. */
@@ -213,6 +221,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const tenantEl = li.querySelector<HTMLInputElement>('.researcher-tenant'); // m365 only
     const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
+    const reviewLink = li.querySelector<HTMLButtonElement>('.rdesk-review-link'); // only on an escalated last-run
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
     const confirmMsg = li.querySelector<HTMLElement>('.researcher-confirm-msg')!;
     const confirmGo = li.querySelector<HTMLButtonElement>('.researcher-confirm-go')!;
@@ -332,6 +341,10 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       hideConfirm();
       undo?.();
     });
+
+    // Escalation deep-link — "open review →" navigates to the Reviews queue where this researcher's
+    // depth-limit Review awaits the Principal's confirm/reject (RESEARCH-11; no dead affordance).
+    reviewLink?.addEventListener('click', () => navigateTo(VIEW_REVIEWS));
   }
 }
 

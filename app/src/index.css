@@ -527,6 +527,9 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-report[data-state='found'] .rdesk-report-flag { color: var(--viz-patina); }
 .rdesk-report[data-state='failed'] .rdesk-report-flag { color: var(--viz-oxide); }
 .rdesk-report[data-state='paused'] .rdesk-report-flag { color: var(--viz-brass); }
+/* Escalation deep-link — actionable "open review →" (brass = needs-your-review, ember on hover/focus). */
+.rdesk-review-link { background: transparent; border: 0; padding: 0 0 0 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--viz-brass); cursor: pointer; text-transform: none; }
+.rdesk-review-link:hover { color: var(--viz-ember); text-decoration: underline; }
 .rdesk-run { margin-left: auto; }
 .rdesk-dispatching .rdesk-run { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
 
