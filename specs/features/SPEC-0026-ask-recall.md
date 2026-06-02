@@ -81,6 +81,7 @@ a larger budget than a stage) equipped with:
 | ASK-9   | should   | **Obsidian CLI acceleration** is capability-detected and **never required** — core recall stays **headless** and works with Obsidian absent (optional viewer) | none-yet | STACK; PRIN-5 |
 | ASK-10  | should   | Recall honors **scope/sensitivity + surfacing** — answers respect the surfacing policy and scope partitions | none-yet | SCOPE-11; SCOPE-1 |
 | ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | none-yet | AUTO-8; LIFE-9 |
+| ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | none-yet | ORCH-21,22; ENG-7 |
 
 ## 5. User flows / surface
 

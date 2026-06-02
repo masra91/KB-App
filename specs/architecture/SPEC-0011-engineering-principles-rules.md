@@ -41,6 +41,7 @@ dependency as attack surface and adopt conservatively.
 | ENG-4  | must     | Dependency versions MUST be pinned (exact / lockfile) so a caret can't pull an unreviewed or <7-day release | manual:review |
 | ENG-5  | should   | Prefer fewer dependencies; each addition MUST be justified vs. writing it ourselves (ties PRIN-5) | manual:review |
 | ENG-6  | should   | Adding/upgrading a dep SHOULD check peer-dependency compatibility before committing | manual:review |
+| ENG-7  | may      | A **fast-moving / preview** package MAY be a critical dependency when justified (e.g. the **Copilot SDK**) — being preview/young-as-a-project is **not** itself disqualifying; ENG-1/2/4 still bind (vet, **≥7-day**, **pin**). The guard is supply-chain: **never adopt a release hot off the presses** | manual:review |
 
 > Already applied: the Electron/TS toolchain was pinned to stable, ≥7-day-old versions;
 > `@electron/fuses` held at v1 for peer compat; `eslint-plugin-import` dropped to reduce

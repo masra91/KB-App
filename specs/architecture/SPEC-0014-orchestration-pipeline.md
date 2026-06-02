@@ -101,7 +101,7 @@ Three layers; only one has a brain.
 | ORCH-5   | must     | Each work item is handled in a **fresh, isolated agent session** (empty context) — no cross-item contamination | test:src/kb/copilotAgent.test.ts | AUTO-2 |
 | ORCH-6   | should   | Conflict-freedom comes from **globally-unique item ids** (disjoint write paths); v1 shipped a **serial** drain, **generalized to concurrent** execution by ORCH-17/18/19 on that same guarantee | test:src/kb/orchestrator.test.ts | DATA-9 |
 | ORCH-7   | must     | The orchestrator (deterministic) owns all git/file **effects**; in v1 the agent session is **cognition-only** (thin agent) | test:src/kb/sourceDoc.test.ts | AUTO-3,4 |
-| ORCH-8   | must     | Agent sessions use the **BYOA Copilot CLI non-interactively**, reusing the user's existing credentials (no separate auth in our flow) | test:src/kb/copilotAgent.test.ts | AUTO-11 |
+| ORCH-8   | must     | Agent sessions use **BYOA GitHub Copilot**, reusing the user's existing credentials (no separate auth) — **CLI single-shot** for thin stages today; the **SDK** is the option for thick/interactive agents (ORCH-21/22) | test:src/kb/copilotAgent.test.ts | AUTO-11 |
 | ORCH-9   | must     | The engine is **stage-agnostic**: the same harness drives later stages via a different instruction file + queue folder | none-yet | LIFE-1,3,8 |
 | ORCH-10  | must     | The engine exposes **observable status** (queue depth, current item, processing state) for the app UI | test:src/kb/orchestrator.test.ts | VISION-11 |
 | ORCH-11  | must     | Every pipeline action **emits an append-only audit event** (start, commit, failure), colocated with the item | test:src/kb/orchestrator.test.ts | DATA-10; LIFE-9 |
@@ -114,6 +114,8 @@ Three layers; only one has a brain.
 | ORCH-18  | must     | The shared canonical-writer lock guards **only the ff-advance**. On advance: unchanged base → fast-forward; base moved but item paths **disjoint** (unique-ULID keying, ORCH-6) → replay/rebase the item commit and advance; **same-path collision** → re-sync to new canonical and **retry** the item | none-yet | ORCH-3,6; DATA-9 |
 | ORCH-19  | must     | **Optimistic-concurrency safety**: collisions retry up to a bounded K; on exhaustion the item is **set aside for review** (ORCH-12), never dropped or half-applied; canonical history stays linear and clean (ORCH-3) | none-yet | ORCH-3,12,13 |
 | ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | none-yet | PRIN-16 |
+| ORCH-21  | must     | The **agent runtime is pluggable** behind the decider/agent interface: an agent runs via the **CLI single-shot** (`copilot -p`) OR the **Copilot SDK** (Sessions/tools/streaming), chosen **per-agent where it makes sense**; a **deterministic fallback** is always retained (ORCH-7) | none-yet | ORCH-7,8; AUTO-11 |
+| ORCH-22  | should   | Adopt the **Copilot SDK where its capabilities are load-bearing** (multi-turn sessions, agent-invoked tools/MCP, streaming) — Ask/Recall first, Research next, Connect/Reflect opportunistically; **thin single-shot stages stay on the CLI** until the SDK is **GA** and/or **concurrency-overhead evidence** (ORCH-20) justifies the server model. **Pin + age** the SDK per E1 (ENG-2,4,7) | none-yet | ORCH-20; ENG-2,4,7 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -249,3 +251,12 @@ Three layers; only one has a brain.
   no epoch marker exists), so the post-replay rebuild runs the unmodified pipeline (SPEC-0022
   REPLAY-14) — it is *not* a replay-only code path. Any future stage's state-reader MUST route
   its audit scan through `epochScopedLines` to stay replay-correct.
+- 2026-06-02 — **agent runtime: CLI + SDK, pluggable (ORCH-21/22).** The agent runtime is
+  pluggable behind the decider/agent interface: **CLI single-shot** (`copilot -p`) for thin
+  deterministic stages (today), and the **Copilot SDK** (Sessions / agent-invoked tools+MCP /
+  streaming; public preview Apr 2026) for **thick/interactive agents where it makes sense** —
+  **Ask/Recall is the first pilot** (ASK-12), then Research, Connect/Reflect opportunistically.
+  Thin stages stay on the CLI until the SDK is **GA** and/or concurrency-overhead evidence
+  (ORCH-20) justifies the server model; the deterministic fallback is always retained. Recorded
+  alongside SPEC-0010 (stack), SPEC-0026 (ASK pilot), and a new **ENG-7** (E1): preview/fast-
+  moving packages may be critical deps, but pin + age (≥7-day) — no hot-off-the-presses releases.
