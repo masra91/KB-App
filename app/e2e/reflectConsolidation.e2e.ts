@@ -78,6 +78,16 @@ async function seedConsolidationVault(): Promise<{ vault: string; reviewId: stri
   }
   await promote(vault); // MAIN now carries both entities + the claim (so the loser can later be removed FROM main)
 
+  // The reflect job's journal must exist on staging: answerReview appends an answer marker to the
+  // review's `auditRel` (the job journal) with fs.appendFile, which does NOT create the parent dir.
+  // Mirror a reflect pass having journaled before it raised the consolidation Review.
+  await fs.promises.mkdir(path.join(stagingWt, '.kb', 'jobs', 'reflect'), { recursive: true });
+  await fs.promises.writeFile(
+    path.join(stagingWt, '.kb', 'jobs', 'reflect', 'journal.jsonl'),
+    JSON.stringify({ ts: '2026-06-02T00:00:00Z', runId: '01R', inspected: 'reflect pass', applied: 0, deferred: 1 }) + '\n',
+    'utf8',
+  );
+
   const reviewId = ulid();
   await writeReviewFile(path.join(stagingWt, reviewRel(reviewId)), openConsolidationReview(reviewId));
   {
