@@ -99,7 +99,7 @@ Three layers; only one has a brain.
 | ORCH-3   | must     | The canonical vault (root) tree advances **only** by completed, committed work; it is never left dirty for the user | test:src/kb/orchestrator.test.ts | VISION-4; DATA-9 |
 | ORCH-4   | must     | A known queue **folder is the durable work list**; an item leaves it only once its processed result is committed | test:src/kb/orchestrator.test.ts | INGEST-8; PRIN-1 |
 | ORCH-5   | must     | Each work item is handled in a **fresh, isolated agent session** (empty context) — no cross-item contamination | test:src/kb/copilotAgent.test.ts | AUTO-2 |
-| ORCH-6   | should   | v1 drains each stage **serially** (one item at a time); conflict-freedom comes from globally-unique item ids | test:src/kb/orchestrator.test.ts | DATA-9 |
+| ORCH-6   | should   | Conflict-freedom comes from **globally-unique item ids** (disjoint write paths); v1 shipped a **serial** drain, **generalized to concurrent** execution by ORCH-17/18/19 on that same guarantee | test:src/kb/orchestrator.test.ts | DATA-9 |
 | ORCH-7   | must     | The orchestrator (deterministic) owns all git/file **effects**; in v1 the agent session is **cognition-only** (thin agent) | test:src/kb/sourceDoc.test.ts | AUTO-3,4 |
 | ORCH-8   | must     | Agent sessions use the **BYOA Copilot CLI non-interactively**, reusing the user's existing credentials (no separate auth in our flow) | test:src/kb/copilotAgent.test.ts | AUTO-11 |
 | ORCH-9   | must     | The engine is **stage-agnostic**: the same harness drives later stages via a different instruction file + queue folder | none-yet | LIFE-1,3,8 |
@@ -110,6 +110,10 @@ Three layers; only one has a brain.
 | ORCH-14  | should   | A stage queue is a **contract** accepting a canonical `<ULID>/` unit **or** a foreign drop; the archivist **`normalize()`s** non-canonical entries (mint ULID, `origin: external`) — v1 builds the canonical path only | test:src/kb/ingest.test.ts | VISION-3; INGEST-7 |
 | ORCH-15  | should   | The orchestrator is triggered by an **event poke** on capture-commit *and* a **periodic sweep** of the queue (recovers missed pokes, picks up foreign drops) | test:src/kb/orchestrator.test.ts | VISION-10 |
 | ORCH-16  | must     | **Every model invocation is recorded for posterity**: which decision was used (model vs fallback), the runtime, the **requested** model, launch params, outcome (ok/error), and timing — colocated with the item. Tokens/cost are out of scope | test:src/kb/copilotAgent.test.ts | DATA-10; LIFE-9 |
+| ORCH-17  | must     | **Stages run concurrently**: a stage's cognition + worktree writes happen **off a synced checkpoint, outside the lock**; multiple items/stages may run their agents at once | none-yet | DATA-9; PRIN-16 |
+| ORCH-18  | must     | The shared canonical-writer lock guards **only the ff-advance**. On advance: unchanged base → fast-forward; base moved but item paths **disjoint** (unique-ULID keying, ORCH-6) → replay/rebase the item commit and advance; **same-path collision** → re-sync to new canonical and **retry** the item | none-yet | ORCH-3,6; DATA-9 |
+| ORCH-19  | must     | **Optimistic-concurrency safety**: collisions retry up to a bounded K; on exhaustion the item is **set aside for review** (ORCH-12), never dropped or half-applied; canonical history stays linear and clean (ORCH-3) | none-yet | ORCH-3,12,13 |
+| ORCH-20  | should   | The number of **concurrently in-flight** stage agents is **bounded** (a configurable cap) to control resource/cost; a cap of 1 degenerates to the v1 serial drain | none-yet | PRIN-16 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -179,10 +183,14 @@ Three layers; only one has a brain.
       shipped with the app (role + rules + JSON output schema), composed by the
       orchestrator and passed via `-p`. Per-stage file; an `AGENTS.md` layer may be added
       later. The reusable expression of "per-role instruction files".
-- [ ] **Parallelism & serialization** *(deferred)* — when do we run items/stages
-      concurrently, and what's the merge/serialize-writer policy then? (DATA open Q.)
-- [ ] **Recurring/scheduled triggers** *(deferred)* — Proactive Intake / Reflect run
-      on a schedule; the trigger model beyond poke+sweep is future.
+- [x] **Parallelism & serialization** — RESOLVED (ORCH-17/18/19/20): **optimistic
+      concurrency**. Stages run cognition concurrently off a synced checkpoint; the lock
+      guards only the canonical ff-advance; disjoint-path items rebase cleanly (unique ids),
+      same-path collisions re-sync + retry (bounded → set-aside). Impl sequences after the
+      Visible Enrich epic.
+- [x] **Recurring/scheduled triggers** — RESOLVED → **SPEC-0023 (Autonomous Jobs &
+      Scheduler)**: a job registry + scheduler wakes agents (this harness) on a cadence;
+      Reflect/Rumination (SPEC-0024) is the first job.
 - [ ] **Audit global index** *(deferred)* — per-item `audit.jsonl` is contention-free;
       a derived "recent activity" index across items is a later optimization.
 
@@ -222,6 +230,14 @@ Three layers; only one has a brain.
   `source.md`'s `archivedBy` (e.g. `copilot (default)` vs `deterministic (copilot failed:
   …)`). No tokens/cost. Resolved-model limitation noted (unpinned → recorded as `default`).
   `Verify:` → `test:`.
+- 2026-06-01 — **concurrency model resolved (ORCH-17/18/19/20).** Narrowed the canonical-
+  writer lock from the whole per-item cycle to **only the ff-advance**: stages run cognition
+  concurrently off a synced checkpoint, and the advance is **optimistic** — disjoint-path
+  items (unique-ULID keying, ORCH-6) rebase cleanly; same-path collisions re-sync + retry
+  (bounded → set-aside, ORCH-12). Resolves the long-deferred *Parallelism & serialization*
+  question and points *Recurring/scheduled triggers* at the new SPEC-0023 (Autonomous Jobs).
+  **Impl sequences after the Visible Enrich epic (#30)** to avoid destabilizing the in-flight
+  serial pipeline. Drove by the Principal's call to let stages "run 1 in parallel."
 - 2026-06-02 — **Replay-epoch coupling (SPEC-0022 REPLAY-6) resolved.** The stage queue-readers
   derive "is this unit done?" by scanning each unit's append-only `audit.jsonl` for terminal
   stage markers (ORCH-4/13). Full Replay (SPEC-0022) resets that status **append-only** by
