@@ -271,9 +271,11 @@ export interface ResearcherConfigPatch {
   topics?: string[];
 }
 
-/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run. */
+/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;
+ *  `ran:true` + `failed` means the pass ERRORED (e.g. packaged-app can't spawn copilot, #160) — a
+ *  failure the UI surfaces distinctly from a legit "no new finding" (failed ≠ empty). */
 export type RunResearcherResult =
-  | { ran: true; sourceIds: string[]; note: string }
+  | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string }
   | { ran: false; reason: 'not-found' | 'no-kb' };
 
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---

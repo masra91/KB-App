@@ -22,7 +22,9 @@ import { makeClaimsDecider } from '../kb/claimsAgent';
 import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
-import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
+import { createVaultDevLog, readRecentDevLogEntries, type DevLog } from '../kb/devlog';
+import { researchDepsOptions } from './researchWiring';
+import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, toSetAsideViews, deriveStageError, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
@@ -51,7 +53,6 @@ import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRe
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
-import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
@@ -82,6 +83,7 @@ interface ActivePipeline {
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
   lock: Mutex;
+  log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
 }
 
 let active: ActivePipeline | null = null;
@@ -193,12 +195,14 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // pending `research-request` signals a stage emitted through the dedup dispatcher), then a standing
   // pass for every due scheduled researcher. Both execute via runResearcher — output is a cited
   // secondary source via the ingest path (NOT the JobBehavior write-sink — Option (a), JOBS-10
-  // intact). The default cognition is the Web SDK adapter behind the seam (egress-gated + SSRF-safe);
-  // passing no `researchFn`/`session` leaves the live web fetch gated (piece-1, throws → no-finding)
-  // so the inline trigger is wired + audited without making a live call yet. Reaching outside the KB
-  // is read-only-world (AUTO-6).
-  const researchers = new ResearcherScheduler(stagingWt, {}, lock, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock };
+  // intact). The cognition is the Web SDK adapter behind the seam (egress-gated + SSRF-safe), wired
+  // with the resolved BYOA copilot cliPath so it runs in the packaged app, and the dev-log so a
+  // session failure is logged + surfaced as `research-failed` (#160), not a silent no-finding.
+  // Reaching outside the KB is read-only-world (AUTO-6).
+  // Wire the resolved BYOA copilot cliPath + the dev-log into BOTH researcher entry points via the one
+  // shared seam (#160 / BUG #65): without cliPath the packaged app can't spawn copilot → the SDK throws.
+  const researchers = new ResearcherScheduler(stagingWt, researchDepsOptions(log), lock, log);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock, log };
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;
 }
@@ -740,14 +744,17 @@ export async function runActiveResearcherNow(id: string): Promise<RunResearcherR
     context: '',
     dedupKey: dedupKeyFor({ what, by: {} }),
   };
-  const res = await runResearcher(root, r, req, { research: makeWebResearchFn() });
+  // Same cliPath+dev-log wiring + per-template cognition as the scheduler (one seam, #160) — so Run-now
+  // can't silently no-op in the packaged app, and a code/m365 researcher tests its OWN adapter.
+  const opts = researchDepsOptions(active.log);
+  const res = await runResearcher(root, r, req, { research: selectResearchFn(root, r, opts) });
   await appendAuditEvent(root, {
     actor: 'panel',
     eventType: 'researcher-run-now',
     subjects: { researcherId: id },
-    payload: { outcome: res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
+    payload: { outcome: res.failed ? 'failed' : res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
   });
-  return { ran: true, sourceIds: res.sourceIds, note: res.note };
+  return { ran: true, sourceIds: res.sourceIds, note: res.note, ...(res.failed ? { failed: true, ...(res.error ? { error: res.error } : {}) } : {}) };
 }
 
 /** Recent runs for a researcher (RESEARCH-15) — its `researcher` audit events, newest-first. */

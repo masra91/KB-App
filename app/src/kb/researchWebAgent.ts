@@ -20,6 +20,7 @@
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
 import { makeGatedFetch } from './researchFetch';
 import { acquireCopilotSlot } from './copilotConcurrency';
+import { noopDevLog, type DevLog } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
 // VALUE import of the SDK is a dynamic `import()` inside liveSdkSession, keeping that lazy property.
@@ -180,6 +181,9 @@ export interface WebResearchOptions {
   /** Absolute path to the BYOA `copilot` CLI (ORCH-21 / BUG #65) — the SDK spawns THIS binary so it
    *  works inside the packaged app's asar. Resolved by the main tier; absent → SDK default search (dev). */
   cliPath?: string;
+  /** Diagnostic dev-log (OBS-1) for the research scope — the CAUSE behind a failed session is logged
+   *  here so a packaged-app SDK failure is never silent (#160 no-silent-swallow). Default: no-op. */
+  log?: DevLog;
   /** Injected session runner — production uses the SDK; tests/Slice-1a inject a fake. Returns the
    *  agent's note + raw cited URLs for one bounded research pass over `query`. */
   session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
@@ -207,8 +211,14 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
       const citations = filterCitations(out.citations, allowedDomains);
       const note = out.note.trim();
       return { found: note.length > 0, note, citations, query };
-    } catch {
-      return { found: false, note: '', citations: [], query };
+    } catch (err) {
+      // DO NOT swallow as a silent no-finding (#160 / BUG #65): a packaged-app that can't spawn the
+      // BYOA copilot throws HERE, and a bare `catch {}` made it indistinguishable from "found nothing".
+      // Log the cause to the research dev-log (OBS-1) + return `failed` so runResearcher audits it as
+      // `research-failed` (failed ≠ empty, OBS-4). The cause is the cliPath/SDK error, not the KB.
+      const message = err instanceof Error ? err.message : String(err);
+      (opts.log ?? noopDevLog).child({ scope: 'research' }).error('research.session-failed', { itemId: r.id, err, query });
+      return { found: false, note: '', citations: [], query, failed: true, error: message };
     }
   };
 }
