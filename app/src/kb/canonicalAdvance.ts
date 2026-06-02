@@ -28,6 +28,19 @@ export const DEFAULT_STAGE_CAP = 1;
  * of clobbering a single shared one. The teardown is best-effort + prune-guarded so a crash mid-item
  * can't leak a worktree (a `worktree prune` on the next call reaps any orphan).
  */
+/**
+ * Reap stale ephemeral work branches (`kb/*-work-<ulid>`) left behind by a failed teardown (a rare
+ * `branch -D` that was swallowed). Runs AFTER `worktree prune`, so an orphan branch whose worktree
+ * dir is already gone is now deletable; a branch still checked out in a LIVE worktree (a concurrent
+ * in-flight item) refuses `-D` and is skipped — so this is safe to run on every call (QA #59 note).
+ */
+async function pruneStaleWorktreeBranches(git: ReturnType<typeof simpleGit>): Promise<void> {
+  const out = await git.raw('for-each-ref', '--format=%(refname:short)', 'refs/heads/kb/').catch(() => '');
+  for (const branch of out.split('\n').map((s) => s.trim()).filter((b) => /-work-[^/]+$/.test(b))) {
+    await git.raw('branch', '-D', branch).catch(() => {}); // skips branches still checked out in a live worktree
+  }
+}
+
 export async function withEphemeralWorktree<T>(
   root: string,
   stage: string,
@@ -40,7 +53,8 @@ export async function withEphemeralWorktree<T>(
   const wt = path.join(root, '.kb', 'cache', 'worktrees', `${stage}-${id}`);
   const git = simpleGit(root);
   await ensureGitIdentity(git);
-  await git.raw('worktree', 'prune'); // reap any orphan from a prior crash before adding
+  await git.raw('worktree', 'prune'); // reap any orphan worktree dir from a prior crash before adding
+  await pruneStaleWorktreeBranches(git); // …then reap orphan work branches a failed teardown left
   await fs.mkdir(path.dirname(wt), { recursive: true });
   await git.raw('worktree', 'add', '--force', '-B', workBranch, wt, checkpoint);
   try {

@@ -299,6 +299,25 @@ describe.skipIf(!gitAvailable)('withEphemeralWorktree — per-item isolation for
       await rmTempDir(dir);
     }
   });
+
+  it('reaps a stale kb/<stage>-work-* branch left by a failed teardown (QA #59 sweep)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = await makeCanonicalRepo(dir);
+      const base = await canonicalHead(root);
+      // Simulate an orphan branch from a rare failed teardown (worktree gone, branch -D swallowed).
+      await simpleGit(root).raw('branch', 'kb/decompose-work-STALEULID', base);
+      expect((await simpleGit(root).branchLocal()).all).toContain('kb/decompose-work-STALEULID');
+      // A normal ephemeral run sweeps the orphan (and tears down its own branch after).
+      const r = await withEphemeralWorktree(root, 'decompose', base, async () => 'ok');
+      expect(r).toBe('ok');
+      const branches = (await simpleGit(root).branchLocal()).all;
+      expect(branches).not.toContain('kb/decompose-work-STALEULID');
+      expect(branches.filter((b) => /^kb\/decompose-work-/.test(b))).toEqual([]); // none left behind
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
 });
 
 describe.skipIf(!gitAvailable)('withConcurrentAdvance — ephemeral-worktree wrapper for cap>1 (ORCH-20)', () => {
