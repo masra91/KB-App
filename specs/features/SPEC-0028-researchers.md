@@ -105,6 +105,7 @@ Review like any source.
 | RESEARCH-14| should   | Researchers are a **prime Copilot SDK adopter** (tools/MCP, sessions, ORCH-21/22) — behind the agent interface, deterministic fallback retained | none-yet | ORCH-21,22 |
 | RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/budget/MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations | none-yet | PANEL-1; VISION-11 |
 | RESEARCH-16| must     | **v1 ships** the framework + three built-in templates — **Web** (public-web), **Code** (local-only, read-only), **M365/WorkIQ** (internal-tenant, OAuth) — plus **custom** | none-yet | VISION-6 |
+| RESEARCH-17| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
 
 ## 6. User flows / surface
 
