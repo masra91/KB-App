@@ -77,17 +77,17 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-2  | must     | Dev logs live in `<vault>/.kb/cache/logs/` (gitignored, **never promoted**, rotated) **plus** a small **app-level log** in Electron userData for pre-vault/app errors | test:app/src/kb/devlog.test.ts | STAGING-6; DATA-9 |
 | OBS-3  | must     | Dev-log entries **cross-reference** the audit (`runId`/`itemId`) so a structured audit failure links to its verbose diagnostic detail | test:app/src/kb/obsWiring.test.ts | AUDIT-1; ORCH-12 |
 | OBS-4  | must     | Errors are **never silent**: every failure emits a **structured audit** event (set-aside, stage failed + attempt) **and** a dev-log entry with the cause | test:app/src/kb/obsWiring.test.ts | ORCH-12; AUTO-8; AUDIT-2 |
-| OBS-5  | must     | A **Pipeline Status view** shows the **live** pipeline — per-stage state (idle/running/blocked/error), **queue depth**, **current item**, progress/throughput, overall state (running/idle/**stalled**) | none-yet | ORCH-10; SHELL-1,2 |
-| OBS-6  | must     | The Status view surfaces **recent errors** and **set-aside/poison items** prominently — each with reason + drill-down to the dev-log detail | none-yet | ORCH-12; OBS-1 |
-| OBS-7  | must     | The Status view exposes **worktree & lock state** — worktrees, their branches, and who holds/awaits the canonical-writer lock — so a stalled pipeline's cause is visible | none-yet | ORCH-2,18; STAGING-1 |
-| OBS-8  | should   | The view **live-updates** (poll ORCH-10 status + dev-log tail, or push) so progress/stall shows in near-real-time | none-yet | ORCH-10 |
-| OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | none-yet | AUDIT-8 |
+| OBS-5  | must     | A **Pipeline Status view** shows the **live** pipeline — per-stage state (idle/running/blocked/error), **queue depth**, **current item**, progress/throughput, overall state (running/idle/**stalled**) | test:app/src/shell/views/statusView.test.ts | ORCH-10; SHELL-1,2 |
+| OBS-6  | must     | The Status view surfaces **recent errors** and **set-aside/poison items** prominently — each with reason + drill-down to the dev-log detail | test:app/src/shell/views/statusView.test.ts | ORCH-12; OBS-1 |
+| OBS-7  | must     | The Status view exposes **worktree & lock state** — worktrees, their branches, and who holds/awaits the canonical-writer lock — so a stalled pipeline's cause is visible | test:app/src/shell/views/statusView.test.ts | ORCH-2,18; STAGING-1 |
+| OBS-8  | should   | The view **live-updates** (poll ORCH-10 status + dev-log tail, or push) so progress/stall shows in near-real-time | test:app/src/shell/views/statusView.test.ts | ORCH-10 |
+| OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | test:app/src/shell/views/statusView.test.ts | AUDIT-8 |
 | OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | none-yet | AUTO-12; PRIN-19 |
-| OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | none-yet | ORCH-10,13 |
+| OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | test:app/src/shell/views/statusView.test.ts | ORCH-10,13 |
 | OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | test:app/src/kb/obsTracing.test.ts | ORCH-16; OBS-1 |
 | OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | test:app/src/kb/obsTracing.test.ts | ORCH-16 |
 | OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
-| OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | none-yet | OBS-5; LIFE-9 |
+| OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | test:app/src/shell/views/statusView.test.ts | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
 
 ## 6. User flows / surface
@@ -126,6 +126,21 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **Status view (the UI half)** — **OBS-5/6/7/8/9/11/15 → test:**. A new read-only
+  `statusView.ts` sidebar view (`VIEW_STATUS`, registered in views.ts/shell.ts), fed by a
+  `kb:pipelineStatusView` IPC over `pipelineStatusForActive()` (pipeline.ts) which gathers per-stage
+  queue depths + `busy()` flags, the canonical-writer `lock.state()` (new OBS-7 introspection on the
+  Mutex), recent dev-log errors (`readRecentDevLogEntries`, OBS-6), the perf index (OBS-15), and the
+  worktrees, handed to the pure `pipelineStatusView.ts` assembler (per-stage state + overall
+  running/idle/**stalled** with a 5-min stall threshold, OBS-11). The view shows the stage flow,
+  prominent stall banner, lock holder/waiters, recent errors with drill-down to the cause
+  (runId/itemId cross-link), the Copilot-latency/throughput/where-time-goes/slow-ops breakdown, and
+  the worktrees; it **live-updates** by polling (gated on visibility, OBS-8) and is **read-only**
+  (OBS-9 — the only controls are error-drilldown toggles, asserted in the test). Unit-tested via the
+  pure assembler/lock/devlog-reader tests + a happy-dom `statusView.test.ts` (render of every panel +
+  the drill-down interaction + read-only + XSS-escaping). **SPEC-0030 is now complete end-to-end**
+  except **OBS-10** (a Settings verbosity toggle — redaction already lands in the dev log; the toggle
+  is a small separate Settings piece, left `none-yet`).
 - 2026-06-02 — created (draft). Operational observability, split from knowledge audit: a
   **diagnostic dev-log** (leveled/rotated, subprocess stderr + git/worktree/lock detail, in
   `.kb/cache/logs/` + an app-level log, never promoted, cross-linked to audit by runId/itemId)

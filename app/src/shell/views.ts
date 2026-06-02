@@ -9,6 +9,7 @@ import type { NavView } from './navModel';
 export const VIEW_CAPTURE = 'capture';
 export const VIEW_REVIEWS = 'reviews';
 export const VIEW_ACTIVITY = 'activity';
+export const VIEW_STATUS = 'status';
 export const VIEW_ASK = 'ask';
 // Control Panel — the "Manage" section of sibling views (SPEC-0027 PANEL-1).
 export const VIEW_JOBS = 'jobs';
@@ -37,6 +38,7 @@ export const NAV_VIEWS: NavView[] = [
   { id: VIEW_CAPTURE, label: 'Capture', icon: '📥' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: '🔍' },
   { id: VIEW_ACTIVITY, label: 'Activity', icon: '📜' },
+  { id: VIEW_STATUS, label: 'Status', icon: '📊' },
   { id: VIEW_ASK, label: 'Ask', icon: '💬' },
   { id: VIEW_JOBS, label: 'Jobs', icon: '🛠️', group: GROUP_MANAGE },
   { id: VIEW_AGENTS, label: 'Agents', icon: '🤖', group: GROUP_MANAGE },
