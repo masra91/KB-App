@@ -37,6 +37,7 @@ and a unique `key` here.
 | SPEC-0022 | REPLAY  | Replay & Reprocessing (full rebuild v1)     | feature | draft | `features/` |
 | SPEC-0023 | JOBS    | Autonomous Jobs & Scheduler                 | architecture | draft | `architecture/` |
 | SPEC-0024 | REFLECT | Reflect & Rumination (self-maintenance v1)  | feature | draft | `features/` |
+| SPEC-0025 | META    | Rich Metadata, Tags & Properties            | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
