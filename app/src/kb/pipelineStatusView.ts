@@ -7,6 +7,50 @@
 import type { LockState } from './stageLock';
 import type { PerfIndex } from './perfIndex';
 
+/**
+ * One set-aside (poison) item as the Status view renders it (OBS-17) — a thin PRESENTATION shape,
+ * distinct from the claims-path domain type (`claimsStage.SetAsideItem`, which carries the full
+ * entity ref). `stage` is carried so the panel is stage-parameterized (claims-only v1, but
+ * decompose/connect are additive — PM ruling); `reason` is the human cause derived from the
+ * domain item's failure/round counts via {@link setAsideReason}.
+ */
+export interface SetAsideView {
+  stage: string;
+  itemId: string;
+  name?: string;
+  reason?: string;
+}
+
+/** The fields {@link toSetAsideViews} needs from a claims-path set-aside item (structural — the
+ *  domain `claimsStage.SetAsideItem` is assignable). Kept local so this view-model stays free of a
+ *  stage dependency. */
+export interface SetAsideSource {
+  entityId: string;
+  name: string;
+  failures: number;
+  rounds: number;
+}
+
+/** Derive the human "why was this set aside" line (OBS-17). Set-aside happens either after K failed
+ *  attempts (ORCH-12) or on the review-cascade round cap (REVIEW-8); prefer the failure count when
+ *  present, else the round count, else a generic fallback. */
+export function setAsideReason(failures: number, rounds: number): string {
+  if (failures > 0) return `set aside after ${failures} failed attempt${failures === 1 ? '' : 's'}`;
+  if (rounds > 0) return `set aside after ${rounds} review round${rounds === 1 ? '' : 's'} (cascade cap)`;
+  return 'set aside after repeated failures';
+}
+
+/** Map claims-path set-aside items (`claimsStage.listSetAsideItems`) to the Status-view presentation
+ *  shape (OBS-17, claims-only v1). Tags `stage:'claims'`; derives the reason. */
+export function toSetAsideViews(items: SetAsideSource[]): SetAsideView[] {
+  return items.map((it) => ({
+    stage: 'claims',
+    itemId: it.entityId,
+    name: it.name,
+    reason: setAsideReason(it.failures, it.rounds),
+  }));
+}
+
 /** Per-stage liveness (OBS-5). */
 export type StageState = 'idle' | 'running' | 'blocked' | 'error';
 
@@ -60,6 +104,8 @@ export interface PipelineStatusView {
   worktrees: WorktreeInfo[];
   /** Latency/throughput aggregation (OBS-15). */
   perf: PerfIndex;
+  /** Set-aside / poison items with reason (OBS-17) — the actionable recovery list (claims-only v1). */
+  setAsideItems: SetAsideView[];
   /** When this snapshot was assembled (ISO). */
   builtAt: string;
 }
@@ -98,6 +144,7 @@ export interface AssembleParts {
   recentErrors: RecentError[];
   worktrees: WorktreeInfo[];
   perf: PerfIndex;
+  setAsideItems: SetAsideView[];
   /** Most-recent activity timestamp (ISO) from any source (status, spans, dev log). */
   lastActivity?: string;
 }
@@ -152,6 +199,7 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     recentErrors: parts.recentErrors,
     worktrees: parts.worktrees,
     perf: parts.perf,
+    setAsideItems: parts.setAsideItems,
     builtAt,
   };
 }

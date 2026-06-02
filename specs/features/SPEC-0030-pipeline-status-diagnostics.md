@@ -89,7 +89,7 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | test:app/src/kb/perfIndex.test.ts | AUDIT-4; LIFE-9 |
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | test:app/src/shell/views/statusView.test.ts | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
-| OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app. The view calls the stage-owned recovery primitives (claims: CLAIMS-20 `retryClaimsItem`/`dismissClaimsItem`/`listSetAsideItems`) — no parallel reader/epoch logic in the view | none-yet | ORCH-12; CLAIMS-20; [#137](https://github.com/masra91/KB-App/issues/137) |
+| OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app. The view calls the stage-owned recovery primitives (claims: CLAIMS-20 `retryClaimsItem`/`dismissClaimsItem`/`listSetAsideItems`) — no parallel reader/epoch logic in the view | none-yet (read-side surface landed: app/src/kb/pipelineStatusView.test.ts, app/src/shell/views/statusView.test.ts — reads `listSetAsideItems`; retry/dismiss actions pending the pipeline-control IPC binding `retryClaimsItem`/`dismissClaimsItem` #146) | ORCH-12; CLAIMS-20; [#137](https://github.com/masra91/KB-App/issues/137) |
 
 ## 6. User flows / surface
 
@@ -127,6 +127,27 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **OBS-17 read-side (set-aside recovery surface).** The first, independent half of
+  the interactive-unblock requirement: surface the **claims poison items** (entities whose current
+  claims state is terminal via `setaside` — not `claimed`/`dismissed`) so the Principal can see WHAT
+  the pipeline gave up on + WHY. Reads through the **canonical claims-path reader**
+  `claimsStage.listSetAsideItems(root)` (CLAIMS-20, owned by the set-aside path owner — no parallel
+  reader to drift; it honors retries/dismisses/replay-epochs via `readClaimsState`). A small pure
+  view-mapper `toSetAsideViews` (in `pipelineStatusView.ts`) maps the domain items to the Status-view
+  presentation shape `SetAsideView { stage, itemId, name?, reason? }` — tagging `stage:'claims'` and
+  deriving the reason from the failure/round counts (`setAsideReason`: K failed attempts ORCH-12, or
+  the review-cascade cap REVIEW-8). Feeds a new `setAsideItems: SetAsideView[]` on the
+  `PipelineStatusView` (gathered in `main/pipeline.ts`), rendered as a **"Set aside — needs attention
+  (N)"** panel in `statusView.ts` (`setAsideHtml` — `stage · name` (friendly, falls back to the id) +
+  reason, XSS-escaped, display-only). **Scope (PM ruling):** claims-only for v1 (claims is where the
+  #135 poison-loop wedged us), but the view carries its `stage` so decompose/connect are additive.
+  Tested: `pipelineStatusView.test` (`setAsideReason` failure/round/fallback branches; `toSetAsideViews`
+  mapping; assembler passthrough), `statusView.test` (panel renders name-over-id + reason, id fallback,
+  empty → no panel, XSS-safe, present in `bodyHtml`). **Deferred — the action half (OBS-17 not yet
+  fully `test:`):** the `kb:pipelineControl` IPC (`{action, stage, itemId}`, stage-parameterized) +
+  retry/dismiss buttons, coupling to DEV-2's now-merged claims primitives
+  (`retryClaimsItem`/`dismissClaimsItem`, #146). The error-message + offending-item drill-down already
+  shipped with the Status view (OBS-6 `errorsHtml`); this adds the dedicated poison-recovery list.
 - 2026-06-02 — **OBS-10 (configurable dev-log verbosity) → test:. SPEC-0030 now COMPLETE end-to-end.**
   Added `devLogLevel` (`info` default / `debug`) to the per-Instance config (`.kb/instance.json`,
   read/write/validate + safe-default), surfaced as a **Diagnostics** verbosity selector in the

@@ -3,6 +3,8 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveStageState,
   assemblePipelineStatus,
+  setAsideReason,
+  toSetAsideViews,
   DEFAULT_STALL_MS,
   type AssembleParts,
   type StageInput,
@@ -18,7 +20,7 @@ const PERF: PerfIndex = {
 const UNHELD: LockState = { held: false, waiters: 0 };
 
 function parts(over: Partial<AssembleParts> = {}): AssembleParts {
-  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, ...over };
+  return { stages: [], lock: UNHELD, recentErrors: [], worktrees: [], perf: PERF, setAsideItems: [], ...over };
 }
 const stage = (o: Partial<StageInput> & { stage: string }): StageInput => ({
   queueDepth: 0, setAside: 0, busy: false, hasError: false, ...o,
@@ -88,16 +90,46 @@ describe('assemblePipelineStatus (OBS-5/11)', () => {
       parts({
         recentErrors: [{ ts: 'T', level: 'error', event: 'decompose.failed', stage: 'decompose', itemId: 'SRC1' }],
         worktrees: [{ path: '/v/.kb/cache/worktrees/staging', branch: 'staging' }],
+        setAsideItems: [{ stage: 'claims', itemId: 'E9', reason: 'set aside after 3 attempts' }],
       }),
       { now: () => 'BUILT' },
     );
     expect(v.recentErrors[0].itemId).toBe('SRC1');
     expect(v.worktrees[0].branch).toBe('staging');
     expect(v.perf).toBe(PERF);
+    expect(v.setAsideItems[0]).toMatchObject({ stage: 'claims', itemId: 'E9' }); // OBS-17 passthrough
     expect(v.builtAt).toBe('BUILT');
   });
 
   it('exposes the default stall threshold', () => {
     expect(DEFAULT_STALL_MS).toBe(300000);
+  });
+});
+
+describe('set-aside view mapping (OBS-17 / CLAIMS-20)', () => {
+  it('setAsideReason prefers the failure count, pluralizing correctly', () => {
+    expect(setAsideReason(3, 0)).toBe('set aside after 3 failed attempts');
+    expect(setAsideReason(1, 0)).toBe('set aside after 1 failed attempt');
+  });
+
+  it('setAsideReason falls back to review rounds (cascade cap), then a generic line', () => {
+    expect(setAsideReason(0, 2)).toBe('set aside after 2 review rounds (cascade cap)');
+    expect(setAsideReason(0, 1)).toBe('set aside after 1 review round (cascade cap)');
+    expect(setAsideReason(0, 0)).toBe('set aside after repeated failures');
+  });
+
+  it('toSetAsideViews maps claims-path items to the view shape (stage·name·reason)', () => {
+    const views = toSetAsideViews([
+      { entityId: '01ABCID', name: 'Ada Lovelace', failures: 3, rounds: 0 },
+      { entityId: '01XYZID', name: 'Grace Hopper', failures: 0, rounds: 2 },
+    ]);
+    expect(views).toEqual([
+      { stage: 'claims', itemId: '01ABCID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' },
+      { stage: 'claims', itemId: '01XYZID', name: 'Grace Hopper', reason: 'set aside after 2 review rounds (cascade cap)' },
+    ]);
+  });
+
+  it('toSetAsideViews is empty for no items', () => {
+    expect(toSetAsideViews([])).toEqual([]);
   });
 });

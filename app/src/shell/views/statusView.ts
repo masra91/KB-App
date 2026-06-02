@@ -12,7 +12,7 @@
 // render helpers are pure (data → HTML string) so they unit-test without a DOM.
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo } from '../../kb/types';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView } from '../../kb/types';
 
 const POLL_MS = 2500;
 
@@ -109,6 +109,7 @@ export function bodyHtml(s: BodyState): string {
   return [
     overallHtml(s.view),
     stagesHtml(s.view.stages),
+    setAsideHtml(s.view.setAsideItems),
     lockHtml(s.view.lock),
     errorsHtml(s.view.recentErrors, s.expanded),
     latencyHtml(s.view),
@@ -143,6 +144,25 @@ export function stagesHtml(stages: StageStatus[]): string {
     })
     .join('');
   return `<h2 class="status-h2">Stages</h2><ul class="status-stages">${rows}</ul>`;
+}
+
+/** OBS-17: set-aside / poison items — what the pipeline gave up on + why, the recovery list. The
+ *  per-item retry/dismiss actions wire to the pipeline-control IPC in the action-half (claims-only
+ *  v1; the item carries its stage so the action targets the right primitive). Shows the entity's
+ *  name when known (friendlier than the ULID id), falling back to the id. */
+export function setAsideHtml(items: SetAsideView[]): string {
+  if (items.length === 0) return '';
+  const rows = items
+    .map(
+      (it) => `
+        <li class="status-setaside-item">
+          <span class="status-badge status-setaside">set aside</span>
+          <span class="status-setaside-id">${esc(it.stage)} · ${esc(it.name ?? it.itemId)}</span>
+          ${it.reason ? `<span class="muted">${esc(it.reason)}</span>` : ''}
+        </li>`,
+    )
+    .join('');
+  return `<h2 class="status-h2">Set aside — needs attention (${items.length})</h2><ul class="status-setaside-items">${rows}</ul>`;
 }
 
 /** OBS-7: the canonical-writer lock — held/holder/waiters (so a stall's cause is visible). */
