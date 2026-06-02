@@ -78,6 +78,7 @@ export interface AuditedFinding {
   confidence: number;
   disposition: Disposition; // the disposition the runner actually applied (post-posture)
   reviewId?: string; // set when routed to Review
+  rejection?: string; // set when an auto write was rejected by the sink guard → forced to Review (JOBS-10)
 }
 
 /** A persisted run-state journal line (JOBS-7) — operational memory, NOT KB content. One line per
