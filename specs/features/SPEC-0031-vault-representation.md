@@ -103,7 +103,7 @@ The app writes/maintains `<vault>/.obsidian/`:
 | VAULT-9  | should   | Folder layout is **browsable/legible** in the Obsidian file explorer (entities grouped, sources date-sharded, claims/outputs as provenance/synthesis) | none-yet | DATA-9 |
 | VAULT-10 | should   | The representation is **Replay-stable** — a clean/rebuild regenerates the same human view + config | none-yet | REPLAY-14 |
 | VAULT-11 | should   | The entity page is **readable, not a raw list** — claims rendered in prose/grouped + cited; and a **curated entity summary** (synthesis paragraph) tops the page. *(The summary is a new synthesis step — owner TBD: Connect/Claims enhancement vs. a Reflect/Recall job.)* | none-yet | VISION-9; CLAIMS; LIFE-8 |
-| VAULT-12 | should   | Entity↔entity links render with **display names** via the Obsidian alias form `[[path\|Name]]` — resolves by path (collision-safe), shows the **entity name**, not the raw path | none-yet | CONNECT-12,13; [#91](https://github.com/masra91/KB-App/issues/91) |
+| VAULT-12 | should   | Entity↔entity links render with **display names** via the Obsidian alias form `[[path\|Name]]` — resolves by path (collision-safe), shows the **entity name**, not the raw path | test:connectDoc.test.ts, connectStage.test.ts | CONNECT-12,13; [#91](https://github.com/masra91/KB-App/issues/91) |
 | VAULT-13 | should   | A claim's **source is a navigable link** (`[[sources/…\|<date>]]`) in the claim + the entity's claims block, so a human can **click through to the source** — not just provenance metadata | test:claimDoc.test.ts, claimsStage.test.ts | CLAIMS; ASK-7; [#92](https://github.com/masra91/KB-App/issues/92) |
 
 ## 8. User flows / surface
@@ -141,6 +141,12 @@ The app writes/maintains `<vault>/.obsidian/`:
 
 ## 11. Changelog
 
+- 2026-06-02 — **VAULT-12 (entity-link display names)** implemented (#91). Connect's
+  link-promotion now renders entity↔entity links as the Obsidian alias form `[[path|Name]]`
+  (`connectDoc.ts` `renderLinksBlock` + an optional `name` on `NodeLink`; `linkOne` passes the
+  target's name from its `nameByRel` index). Resolves by path (collision-safe) but shows the entity
+  name, not the raw ULID/path — the graph reads as named things. Back-compat: a name-less link still
+  renders bare. Graduated VAULT-12 `none-yet → test:` (connectDoc.test.ts, connectStage.test.ts).
 - 2026-06-02 — **VAULT-13 (clickable claim→source)** implemented (#92). A claim's source is now a
   navigable Obsidian link `[[<sourceDir>/source.md|<date>]]` (display = the capture date parsed
   from the date-sharded path — deterministic, no I/O, Replay-stable per VAULT-10) rendered both in
