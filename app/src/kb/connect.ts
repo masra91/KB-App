@@ -130,15 +130,27 @@ function validCluster(v: unknown, i: number): ClusterDecision {
     memberCandidateIds: validStringArray(o.memberCandidateIds, `clusters[${i}].memberCandidateIds`),
     confidence: validConfidence(o.confidence, `clusters[${i}]`),
   };
-  if (o.existingNodeId !== undefined) {
-    if (!isNonEmptyString(o.existingNodeId)) throw new Error(`connect: clusters[${i}].existingNodeId must be a non-empty string when present`);
-    cluster.existingNodeId = o.existingNodeId;
+  // Coerce a BLANK existingNodeId to ABSENT (#136): the agent emitting "" / "  " to mean "no
+  // existing node to fold into" is benign — the cluster is simply born fresh — NOT a parse error
+  // that should fail+set-aside the whole block. A present, non-blank value must still be a real
+  // string id (a number/object is genuinely malformed → throw, → connectOne sets aside per ORCH-12).
+  const existing = typeof o.existingNodeId === 'string' ? o.existingNodeId.trim() : o.existingNodeId;
+  if (existing !== undefined && existing !== null && existing !== '') {
+    if (!isNonEmptyString(existing)) throw new Error(`connect: clusters[${i}].existingNodeId must be a non-empty string when present`);
+    cluster.existingNodeId = existing;
   }
   if (o.mergeExistingNodeIds !== undefined) {
-    if (!Array.isArray(o.mergeExistingNodeIds) || !o.mergeExistingNodeIds.every(isNonEmptyString)) {
+    if (!Array.isArray(o.mergeExistingNodeIds)) {
       throw new Error(`connect: clusters[${i}].mergeExistingNodeIds must be an array of non-empty strings when present`);
     }
-    if (o.mergeExistingNodeIds.length > 0) cluster.mergeExistingNodeIds = o.mergeExistingNodeIds as string[];
+    // Same #136 robustness: drop blank entries; a non-string survivor is genuinely malformed → throw.
+    const merge = o.mergeExistingNodeIds
+      .map((x) => (typeof x === 'string' ? x.trim() : x))
+      .filter((x) => x !== '' && x !== null && x !== undefined);
+    if (!merge.every(isNonEmptyString)) {
+      throw new Error(`connect: clusters[${i}].mergeExistingNodeIds must be an array of non-empty strings when present`);
+    }
+    if (merge.length > 0) cluster.mergeExistingNodeIds = merge as string[];
   }
   if (o.tags !== undefined) {
     if (!Array.isArray(o.tags) || !o.tags.every(isNonEmptyString)) {

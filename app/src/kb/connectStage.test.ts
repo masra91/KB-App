@@ -13,6 +13,7 @@ import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkO
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
+import { parseConnectDecision } from './connect';
 import type { Candidate, ConnectDecision } from './connect';
 import { Mutex } from './stageLock';
 
@@ -304,6 +305,32 @@ describe.skipIf(!gitAvailable)('connectOne — failure never loses candidates; s
       // candidate file still present (never lost)
       const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
       expect(audit).toContain('"event":"setaside"');
+    });
+  });
+
+  it('resolves (does NOT wedge/set-aside) when the agent returns existingNodeId:"" (#136)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedCandidate(root, 'person', 'Grace Hopper', '01S1');
+      await commitAll(root, 'seed');
+
+      // The real agent output #136 came from: existingNodeId "" ("no existing node to fold into").
+      // Goes through the REAL parse path (was throwing → block failed+set-aside); now coerced to absent.
+      const decider: ConnectDecider = async (set) =>
+        parseConnectDecision(
+          JSON.stringify({
+            blockKey: set.blockKey,
+            clusters: [{ canonicalName: 'Grace Hopper', memberCandidateIds: set.candidates.map((c) => c.id), existingNodeId: '', confidence: 0.95 }],
+          }),
+          set.blockKey,
+          set.candidates.map((c) => c.id),
+        );
+
+      const res = await connectOne(root, 'person|grace hopper', decider);
+      expect(res.ok).toBe(true);
+      expect(res.setAside).toBe(false); // resolved, not wedged
+      expect(res.nodeRels).toEqual(['entities/person/grace-hopper.md']); // born fresh
+      expect(await readConnectQueue(root)).toHaveLength(0); // candidate consumed
     });
   });
 });
