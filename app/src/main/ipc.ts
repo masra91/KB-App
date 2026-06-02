@@ -1,5 +1,5 @@
 // IPC handlers — the main-process side of the KbApi contract (preload mirrors it).
-import { ipcMain, dialog, BrowserWindow, type OpenDialogOptions } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow, type OpenDialogOptions } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
@@ -25,6 +25,8 @@ import {
   listResearcherRunsForActive,
 } from './pipeline';
 import { recall } from '../kb/recall';
+import { resolveContainedRel } from '../kb/pathContainment';
+import { obsidianOpenUri } from '../kb/citationLink';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
 import { buildFeed } from '../kb/activityDigest';
 import { traceLineage } from '../kb/lineage';
@@ -45,6 +47,7 @@ import type {
   AskRequest,
   AskResult,
   SaveRecallOutputResult,
+  OpenCitationResult,
   JobView,
   JobConfigPatch,
   RunJobResult,
@@ -203,6 +206,26 @@ export function registerIpc(): void {
       return await saveRecallOutput(result);
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian. The renderer hands us the
+  // citation's vault-relative `ref`; we resolve it to an ABSOLUTE path under the active vault — with
+  // containment (#30: `resolveContainedRel` rejects any `..`/symlink escape; null → no open) so a
+  // crafted ref can't deep-link outside the vault — then hand the percent-encoded `obsidian://open`
+  // URI to the OS. We never build the URI in the renderer, so the `obsidian:` scheme never touches
+  // the DOM (DOMPurify's default allowlist stays intact, ASK-15/#93).
+  ipcMain.handle('kb:openCitation', async (_e, ref: unknown): Promise<OpenCitationResult> => {
+    if (typeof ref !== 'string' || ref.trim().length === 0) return { ok: false, reason: 'invalid-ref' };
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) return { ok: false, reason: 'no-vault' };
+    const abs = await resolveContainedRel(path.resolve(cfg.activeVaultPath), ref);
+    if (abs === null) return { ok: false, reason: 'invalid-ref' }; // escaped containment or missing
+    try {
+      await shell.openExternal(obsidianOpenUri(abs));
+      return { ok: true };
+    } catch {
+      return { ok: false, reason: 'open-failed' };
     }
   });
 

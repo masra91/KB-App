@@ -15,6 +15,7 @@ const kbApi: KbApi = {
   fullReplay: () => ipcRenderer.invoke('kb:fullReplay'),
   ask: (req) => ipcRenderer.invoke('kb:ask', req),
   saveRecallOutput: (result) => ipcRenderer.invoke('kb:saveRecallOutput', result),
+  openCitation: (ref) => ipcRenderer.invoke('kb:openCitation', ref),
   listJobs: () => ipcRenderer.invoke('kb:listJobs'),
   setJobConfig: (patch) => ipcRenderer.invoke('kb:setJobConfig', patch),
   runJobNow: (id) => ipcRenderer.invoke('kb:runJobNow', id),

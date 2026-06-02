@@ -4,7 +4,7 @@
 // happy-dom via per-file env; the node tier stays the default). The IPC is mocked
 // (`window.kbApi.ask`); we assert the rendered DOM and the request shape (incl. multi-turn history).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { mountAsk } from './askView';
+import { mountAsk, linkifyCitationMarkers } from './askView';
 import type { AskResult, KbApi } from '../../kb/types';
 
 const GROUNDED: AskResult = {
@@ -213,5 +213,113 @@ describe('Ask view · sanitized markdown rendering (#93)', () => {
     const hrefs = Array.from(root.querySelectorAll('.ask-answer a')).map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('https://example.com');
     expect(hrefs.some((h) => h?.startsWith('javascript:'))).toBe(false);
+  });
+});
+
+describe('linkifyCitationMarkers (ASK-14, pure)', () => {
+  it('wraps each [n] in a class-tagged, href-less anchor carrying the 1-based index', () => {
+    const out = linkifyCitationMarkers('Ada [1] and Grace [2].', 3);
+    expect(out).toContain('<a class="cite-link" role="button" tabindex="0" data-turn="3" data-cite="1">[1]</a>');
+    expect(out).toContain('data-cite="2">[2]</a>');
+    expect(out).not.toContain('href'); // the obsidian:// scheme never enters the DOM (built in main)
+  });
+  it('leaves non-citation text untouched', () => {
+    expect(linkifyCitationMarkers('no markers here', 0)).toBe('no markers here');
+  });
+});
+
+describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+
+  const CITED: AskResult = {
+    question: 'q',
+    answer: 'Ada [1] pioneered computing; Grace [2] coined "bug".',
+    citations: [
+      { kind: 'entity', ref: 'entities/person/ada-lovelace.md', label: 'Ada Lovelace' },
+      { kind: 'claim', ref: 'claims/person/grace/bug.md', label: 'coined bug' },
+    ],
+    grounded: true,
+    toolCalls: 2,
+    truncated: false,
+  };
+
+  function setApi(open: KbApi['openCitation']): void {
+    (window as unknown as { kbApi: Pick<KbApi, 'ask' | 'openCitation'> }).kbApi = {
+      ask: vi.fn(async () => CITED),
+      openCitation: open,
+    };
+  }
+  async function askOnce(): Promise<void> {
+    type(root, 'q');
+    submit(root);
+    await tick();
+  }
+
+  it('renders each inline [n] as a clickable, href-less .cite-link (ASK-14)', async () => {
+    setApi(vi.fn(async () => ({ ok: true })));
+    mountAsk(root);
+    await askOnce();
+    const links = root.querySelectorAll('.ask-answer .cite-link');
+    expect(links).toHaveLength(2);
+    expect(links[0].getAttribute('href')).toBeNull(); // protocol stays out of the DOM
+    expect((links[0] as HTMLElement).dataset.cite).toBe('1');
+    expect(links[0].textContent).toBe('[1]');
+  });
+
+  it('renders a numbered References list from citations[] (ASK-13/14)', async () => {
+    setApi(vi.fn(async () => ({ ok: true })));
+    mountAsk(root);
+    await askOnce();
+    const refs = root.querySelectorAll('.ask-citations .cite-ref');
+    expect(refs).toHaveLength(2);
+    expect(root.querySelector('.ask-citations')?.textContent).toContain('References');
+    expect(refs[0].textContent).toContain('[1]');
+    expect(refs[0].textContent).toContain('entities/person/ada-lovelace.md');
+    expect(refs[1].textContent).toContain('coined bug');
+  });
+
+  it('clicking an inline [n] opens its citation via the canonical ref (index-mapped, ASK-14)', async () => {
+    const open = vi.fn(async () => ({ ok: true }));
+    setApi(open);
+    mountAsk(root);
+    await askOnce();
+    (root.querySelectorAll('.cite-link')[1] as HTMLElement).click(); // [2]
+    await tick();
+    expect(open).toHaveBeenCalledWith('claims/person/grace/bug.md'); // citations[1].ref
+  });
+
+  it('clicking a References entry opens the same canonical target', async () => {
+    const open = vi.fn(async () => ({ ok: true }));
+    setApi(open);
+    mountAsk(root);
+    await askOnce();
+    (root.querySelectorAll('.cite-ref')[0] as HTMLElement).click(); // [1]
+    await tick();
+    expect(open).toHaveBeenCalledWith('entities/person/ada-lovelace.md'); // citations[0].ref
+  });
+
+  it('opens on keyboard (Enter) for a11y — anchors are role=button/tabindex=0', async () => {
+    const open = vi.fn(async () => ({ ok: true }));
+    setApi(open);
+    mountAsk(root);
+    await askOnce();
+    root
+      .querySelectorAll('.cite-link')[0]
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await tick();
+    expect(open).toHaveBeenCalledWith('entities/person/ada-lovelace.md');
+  });
+
+  it('surfaces a failed open inline (never throws to the user)', async () => {
+    setApi(vi.fn(async () => ({ ok: false, reason: 'open-failed' as const })));
+    mountAsk(root);
+    await askOnce();
+    (root.querySelector('.cite-link') as HTMLElement).click();
+    await tick();
+    expect(root.querySelector('.ask-cite-status.error')?.textContent).toContain('Obsidian');
   });
 });
