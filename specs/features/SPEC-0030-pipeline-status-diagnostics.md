@@ -127,6 +127,18 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **OBS-17 extended to Connect (the stage-agnostic seam, additive — no rewrite).** The
+  recovery surface now covers **connect** set-aside (poison) blocks alongside claims, exactly as the
+  seam was designed. Refactored the pure layer to be stage-agnostic: `planSetAsideAction(targets, req)`
+  takes a pre-resolved `{id, handle, label}[]` (the `handle` is **server-derived** — entityRel for
+  claims, blockKey for connect — never the renderer's `itemId`, the #153/#157 trust boundary) and
+  `toSetAsideViews(items, stage)` tags any stage; `pipeline.ts` dispatches per stage (claims →
+  `listSetAsideItems`/`retryClaimsItem`/`dismissClaimsItem`; connect → DEV-1's #157
+  `listConnectSetAsideItems`/`retryConnectItem`/`dismissConnectItem`) and the assembler unions both
+  stages' views. Adding decompose later is one more dispatch branch + a list mapper — the planner,
+  view, and IPC contract are unchanged. Tests: stage-agnostic `planSetAsideAction` (claims + connect
+  targets + trust-boundary no-op), `toSetAsideViews(items, stage)`, mixed-stage panel render. DEV-1
+  verifies the connect e2e (poison block → Status view → Retry/Dismiss).
 - 2026-06-02 — **OBS-17 action-half → test:. Interactive unblock complete.** The Status view's
   set-aside panel now carries **Retry** + **Dismiss** per item, wired to a new **`kb:pipelineControl`**
   IPC (`{action, stage, itemId}`, stage-parameterized) → `pipelineControlForActive` (main/pipeline.ts).

@@ -118,18 +118,23 @@ describe('set-aside view mapping (OBS-17 / CLAIMS-20)', () => {
     expect(setAsideReason(0, 0)).toBe('set aside after repeated failures');
   });
 
-  it('toSetAsideViews maps claims-path items to the view shape (stage·name·reason)', () => {
+  it('toSetAsideViews maps a stage’s items to the view shape (stage·name·reason)', () => {
     const views = toSetAsideViews([
-      { entityId: '01ABCID', name: 'Ada Lovelace', failures: 3, rounds: 0 },
-      { entityId: '01XYZID', name: 'Grace Hopper', failures: 0, rounds: 2 },
-    ]);
+      { itemId: '01ABCID', name: 'Ada Lovelace', failures: 3, rounds: 0 },
+      { itemId: '01XYZID', name: 'Grace Hopper', failures: 0, rounds: 2 },
+    ], 'claims');
     expect(views).toEqual([
       { stage: 'claims', itemId: '01ABCID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' },
       { stage: 'claims', itemId: '01XYZID', name: 'Grace Hopper', reason: 'set aside after 2 review rounds (cascade cap)' },
     ]);
   });
 
+  it('toSetAsideViews tags the passed stage (e.g. connect) — stage-agnostic', () => {
+    const views = toSetAsideViews([{ itemId: 'block:engine', name: 'Analytical Engine', failures: 2, rounds: 0 }], 'connect');
+    expect(views).toEqual([{ stage: 'connect', itemId: 'block:engine', name: 'Analytical Engine', reason: 'set aside after 2 failed attempts' }]);
+  });
+
   it('toSetAsideViews is empty for no items', () => {
-    expect(toSetAsideViews([])).toEqual([]);
+    expect(toSetAsideViews([], 'claims')).toEqual([]);
   });
 });

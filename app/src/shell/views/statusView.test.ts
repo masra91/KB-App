@@ -114,6 +114,18 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     expect(h).toContain('data-id="01ADAID"');
   });
 
+  it('setAsideHtml renders mixed-stage items, each button carrying its own stage (claims + connect)', () => {
+    const h = setAsideHtml([
+      { stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' },
+      { stage: 'connect', itemId: 'block:engine', name: 'Analytical Engine' },
+    ]);
+    expect(h).toContain('Set aside — needs attention (2)');
+    expect(h).toContain('claims · Ada Lovelace');
+    expect(h).toContain('connect · Analytical Engine');
+    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect
+    expect(h).toContain('data-id="block:engine"');
+  });
+
   it('setAsideHtml disables the buttons + shows the outcome banner while/after acting', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' }], { acting: true, actionMsg: 'Retrying Ada Lovelace.' });
     expect(h).toContain('disabled');
