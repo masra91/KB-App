@@ -8,6 +8,7 @@ import type { NavView } from './navModel';
 /** Stable view ids — referenced by the shell's mount map and by tests. */
 export const VIEW_CAPTURE = 'capture';
 export const VIEW_REVIEWS = 'reviews';
+export const VIEW_ASK = 'ask';
 export const VIEW_PLACEHOLDER = 'placeholder';
 export const VIEW_SETTINGS = 'settings';
 
@@ -19,6 +20,7 @@ export const VIEW_SETTINGS = 'settings';
 export const NAV_VIEWS: NavView[] = [
   { id: VIEW_CAPTURE, label: 'Capture', icon: '📥' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: '🔍' },
+  { id: VIEW_ASK, label: 'Ask', icon: '💬' },
   { id: VIEW_PLACEHOLDER, label: 'Coming soon', icon: '✨' },
   { id: VIEW_SETTINGS, label: 'Settings', icon: '⚙️' },
 ];

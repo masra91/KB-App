@@ -111,6 +111,19 @@ export interface FullReplayResult {
   message: string;
 }
 
+// --- Ask & Recall (SPEC-0026 ASK) ---
+
+// The recall engine owns these shapes; re-exported here so the renderer/IPC contract has one
+// import surface. (types.ts stays electron/obsidian-free, STACK-6 — recall.ts is pure kb domain.)
+export type { AskResult, Citation, RecallTurn } from './recall';
+import type { AskResult, RecallTurn } from './recall';
+
+/** A recall request from the Ask view: an NL question + the in-session history (ASK-8). */
+export interface AskRequest {
+  question: string;
+  history?: RecallTurn[];
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -122,4 +135,5 @@ export interface KbApi {
   listReviews(): Promise<ReviewSummary[]>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   fullReplay(): Promise<FullReplayResult>;
+  ask(req: AskRequest): Promise<AskResult>;
 }

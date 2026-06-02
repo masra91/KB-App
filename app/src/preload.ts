@@ -12,6 +12,7 @@ const kbApi: KbApi = {
   listReviews: () => ipcRenderer.invoke('kb:listReviews'),
   answerReview: (req) => ipcRenderer.invoke('kb:answerReview', req),
   fullReplay: () => ipcRenderer.invoke('kb:fullReplay'),
+  ask: (req) => ipcRenderer.invoke('kb:ask', req),
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

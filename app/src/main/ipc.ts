@@ -5,6 +5,7 @@ import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
 import { readAppConfig, writeAppConfig } from './appConfig';
 import { startPipeline, activePipeline, listActiveReviews, answerActiveReview, fullReplay } from './pipeline';
+import { recall } from '../kb/recall';
 import type { CapturePayload } from '../kb/ingest';
 import type {
   AppState,
@@ -17,6 +18,8 @@ import type {
   AnswerReviewRequest,
   AnswerReviewResult,
   FullReplayResult,
+  AskRequest,
+  AskResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -130,4 +133,29 @@ export function registerIpc(): void {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // SPEC-0026 ASK-1/2/8: grounded NL recall (pull-only — only on the Principal's ask). Runs the
+  // recall engine on the active vault root (the evergreen `main` checkout). Multi-turn history is
+  // supplied by the Ask view (ephemeral session, F5). KB_ASK_E2E_STUB short-circuits to a
+  // deterministic answer so the UI→IPC→render path is e2e-testable without a live SDK/CLI.
+  ipcMain.handle('kb:ask', async (_e, req: AskRequest): Promise<AskResult> => {
+    if (process.env.KB_ASK_E2E_STUB) return stubbedAsk(req);
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) {
+      return { question: req.question, answer: 'No active knowledge base — set one up first.', citations: [], grounded: false, toolCalls: 0, truncated: false };
+    }
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history });
+  });
+}
+
+/** Deterministic recall result for the CI e2e happy-path (KB_ASK_E2E_STUB). Never used in prod. */
+function stubbedAsk(req: AskRequest): AskResult {
+  return {
+    question: req.question,
+    answer: '**Ada Lovelace** is regarded as the first computer programmer. [1]',
+    citations: [{ kind: 'claim', ref: 'claims/person/ada-lovelace.md', label: 'first computer programmer' }],
+    grounded: true,
+    toolCalls: 2,
+    truncated: false,
+  };
 }
