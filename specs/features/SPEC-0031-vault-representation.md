@@ -141,6 +141,15 @@ The app writes/maintains `<vault>/.obsidian/`:
 
 ## 11. Changelog
 
+- 2026-06-02 — **VAULT-13 residual closed (#92 follow-up).** The merge- and dedup-regenerated claims
+  blocks now also carry the navigable source citation: `mergeNodes` and `claimDedup` thread the
+  claim's `derivedFrom` into `ClaimBacklink.source`, so a claim's click-through survives a node merge
+  or a within-source dedup — VAULT-13 is now consistent across all three block-regen paths
+  (Claims-stage, merge, dedup), not just the Claims-stage path. Also fixed `mergeNodes`'s own
+  `parseClaim` to take `statement = first body line` (the **third** claim-body parser; #116 fixed the
+  other two — this one was latently affected by the same VAULT-13 `Source:` trailer, surfacing only on
+  merge-regeneration). Tests: mergeNodes.test.ts (clean statement + citation on the regenerated row),
+  claimDedup.test.ts (citation on the dedup-regenerated row).
 - 2026-06-02 — **VAULT-12 (entity-link display names)** implemented (#91). Connect's
   link-promotion now renders entity↔entity links as the Obsidian alias form `[[path|Name]]`
   (`connectDoc.ts` `renderLinksBlock` + an optional `name` on `NodeLink`; `linkOne` passes the
