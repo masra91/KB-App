@@ -65,6 +65,9 @@ A sidebar view (SPEC-0017), read-only:
   + drill-down to the dev-log detail.
 - **Worktree & lock state** — which worktrees exist, the branch each is on, who **holds/awaits**
   the canonical-writer lock — so a stall's cause is visible.
+- **Latency & throughput** — per-stage throughput, **Copilot-call latency** (avg/p50/p95),
+  recent **slow operations**, and a **where-time-goes** breakdown (most of it is Copilot
+  invocations) — so the minutes-long ingestion→link delay is explained, not mysterious.
 
 ## 5. Requirements
 
@@ -81,6 +84,11 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-9  | must     | The Status view is **read-only observation** — no mutating actions (retries/config live in Reviews / Control Panel) | none-yet | AUDIT-8 |
 | OBS-10 | should   | Dev-log **verbosity is configurable** (Settings; default info, debug to troubleshoot); logs are **redaction-aware** for captured text / egress payloads | none-yet | AUTO-12; PRIN-19 |
 | OBS-11 | should   | On a **stall** (no progress past a threshold with a non-empty queue), the view flags it clearly (optionally notifies) — turning silent "2 in queue" into a visible, explained state | none-yet | ORCH-10,13 |
+| OBS-12 | should   | Operations emit **timed spans** to the dev log — `{spanId, parentSpanId, op, itemId, stage, startTs, endTs, durationMs, outcome}` — that **nest** (a stage run wraps its Copilot-invocation + git/worktree spans), so elapsed time is **attributable to where it's spent** | none-yet | ORCH-16; OBS-1 |
+| OBS-13 | should   | **Copilot invocations are timed as first-class spans** (the dominant cost): each `copilot -p`/SDK call records duration + outcome, attributable per item/stage | none-yet | ORCH-16 |
+| OBS-14 | should   | A **derived perf index** aggregates spans (rebuildable, cached like the activity index): per-stage **throughput** (items/min), **Copilot latency** (avg/p50/p95), and a **where-time-goes** breakdown (% Copilot vs git vs other) | none-yet | AUDIT-4; LIFE-9 |
+| OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | none-yet | OBS-5; LIFE-9 |
+| OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | none-yet | OBS-12 |
 
 ## 6. User flows / surface
 
@@ -95,7 +103,8 @@ A sidebar view (SPEC-0017), read-only:
 - **Interactive recovery** (retry/skip/unstick from the view) — read-only v1; retries live in the
   pipeline / Reviews. (A natural follow-up.)
 - **Remote/centralized log shipping** — local on-disk only.
-- **Metrics/analytics dashboards** (trends, percentiles) beyond live status.
+- **Long-horizon trend dashboards / historical analytics** — v1 covers **current + recent**
+  latency/throughput (OBS-14/15); cross-week trends, charts, and SLA tracking are later.
 - **Replacing audit** — audit keeps structured events; this adds the verbose diagnostic layer.
 
 ## 8. Open questions
@@ -110,6 +119,10 @@ A sidebar view (SPEC-0017), read-only:
       to the UI (needs a small status hook).
 - [ ] **Redaction policy** — exactly what's redacted at which level (captured text, file paths,
       egress payloads).
+- [ ] **Span volume / retention** — tracing every op can be high-volume; sampling vs full, and
+      how long the **perf index** keeps spans (recent window vs full) (OBS-12/14).
+- [ ] **Span model reuse** — extend the existing `AgentTrace` (ORCH-16, already times model
+      invocations) into the general span shape, vs a parallel tracer.
 
 ## 9. Changelog
 
@@ -122,3 +135,10 @@ A sidebar view (SPEC-0017), read-only:
   **separate views in one obs spec**, **dev logs in vault `.kb/cache/logs/` + app log**, **full
   dashboard v1**. Motivated directly by a stuck-pipeline test session where the cause was
   invisible.
+- 2026-06-02 — **latency/throughput tracing (OBS-12..16).** Added **span-based timing** (nested,
+  attributable; **Copilot invocations as first-class spans** — the dominant cost, building on
+  ORCH-16's model-invocation timing), a **derived perf index** (per-stage throughput, Copilot
+  latency p50/p95, where-time-goes %), **latency/throughput in the status surface**, and
+  **end-to-end per-item tracing** (capture→…→link, per-hop durations). Motivated by a surprising
+  ingestion→link delay measured at **~10–15s per Copilot call × dozens per rebuild** — the
+  Principal wants to *see* where the time goes (and later aggregate it in the obs views).
