@@ -15,11 +15,12 @@ export const STAGING_BRANCH = 'staging';
  * `main` (STAGING-3/11). It **grows with its producers**: `sources/` is evergreen the moment it
  * exists (immutable ground truth, DATA-2); `entities/` + `claims/` join now that CONNECT
  * (SPEC-0020) resolves candidates into born-resolved nodes on `staging` and Claims attaches to
- * them — evergreen once resolved (CANON-10). `outputs/` joins when the Research/Query stage that
- * writes it lands. Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`) are never listed,
- * so `main` can never hold them (STAGING-6).
+ * them — evergreen once resolved (CANON-10). `outputs/` is **synthesis** (DATA-4) — it joins now
+ * that autonomous Jobs (SPEC-0023) produce it (the first `outputs/` producer; STAGING-11 grows
+ * with producers). Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`, `.kb/…` incl. the
+ * per-job `.kb/jobs/` journals) are never listed, so `main` can never hold them (STAGING-6).
  */
-export const EVERGREEN_PATHS = ['sources', 'entities', 'claims'] as const;
+export const EVERGREEN_PATHS = ['sources', 'entities', 'claims', 'outputs'] as const;
 
 /** Ensure a long-lived `staging` branch exists, created off the vault's current branch (HEAD)
  *  if absent (STAGING-1). Created off HEAD — never a hardcoded `main`, so vaults whose default
