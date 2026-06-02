@@ -10,10 +10,12 @@ import {
   SCHEDULE_PRESETS,
   AUTONOMY_POSTURES,
   DEFAULT_POSTURE,
+  isSafeJobId,
   type JobConfig,
   type SchedulePreset,
   type AutonomyPosture,
 } from './jobs';
+import { noopDevLog, type DevLog } from './devlog';
 
 const REGISTRY_REL = path.join('.kb', 'jobs', 'registry.json');
 
@@ -49,8 +51,17 @@ function validJob(v: unknown): JobConfig | null {
   return job;
 }
 
-/** Read the vault's job registry (JOBS-1). Missing/malformed file → empty registry (no jobs). */
-export async function readJobRegistry(root: string): Promise<JobConfig[]> {
+/**
+ * Read the vault's job registry (JOBS-1). Missing/malformed file → empty registry (no jobs).
+ *
+ * #29 sink-side hardening: `.kb/jobs/registry.json` is per-vault and hand-/foreign-editable, so a
+ * stored `id` is untrusted. A row whose `id` is not a bare slug (`isSafeJobId`) is DROPPED here —
+ * the read boundary — so a traversal id (`../x`) can never reach `journalRel(id)`/the per-job
+ * worktree downstream. Dropping is NOT silent: each rejected id is surfaced on `devlog` (best-effort,
+ * never-throws — injectable, noop by default) so a tampered/corrupt registry is observable, not
+ * mysteriously short a job. Other (valid) rows still load.
+ */
+export async function readJobRegistry(root: string, devlog: DevLog = noopDevLog): Promise<JobConfig[]> {
   let raw: string;
   try {
     raw = await fs.readFile(jobRegistryPath(root), 'utf8');
@@ -64,7 +75,17 @@ export async function readJobRegistry(root: string): Promise<JobConfig[]> {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
-  return parsed.map(validJob).filter((j): j is JobConfig => j !== null);
+  const out: JobConfig[] = [];
+  for (const row of parsed) {
+    const job = validJob(row);
+    if (!job) continue;
+    if (!isSafeJobId(job.id)) {
+      devlog.warn('job-id-rejected', { jobId: job.id, source: 'registry-read', reason: 'job id is not a bare slug (path-traversal guard, #29)' });
+      continue;
+    }
+    out.push(job);
+  }
+  return out;
 }
 
 /** Write the registry (deterministic, stable key order via JobConfig shape) under `.kb/jobs/`. */
@@ -74,22 +95,39 @@ export async function writeJobRegistry(root: string, jobs: JobConfig[]): Promise
   await fs.writeFile(p, JSON.stringify(jobs, null, 2) + '\n', 'utf8');
 }
 
-/** Insert or replace a job by `id` (Settings edit; JOBS-14), returning the updated registry. */
+/**
+ * Insert or replace a job by `id` (Settings edit; JOBS-14), returning the updated registry.
+ *
+ * #29 write boundary: reject an unsafe `id` (throw — never persist), so a traversal id can't be
+ * written into `registry.json` in the first place. For a NEW (not-yet-registered) job, also assert
+ * `id === type`: v1 is one-instance-per-type and the catalog mints `id === type`, so a *new* id that
+ * isn't its own type has no legitimate source (belt-and-suspenders over the slug check). Replacing an
+ * existing job keeps its already-validated id. Throwing (vs a result type) keeps the signature stable
+ * so the IPC/Settings caller surfaces the rejection without a wider refactor; legitimate ids (catalog
+ * slugs) never trip it. The `Mutex` releases on throw (`.finally`), so a rejection can't deadlock.
+ */
 export async function upsertJob(root: string, job: JobConfig): Promise<JobConfig[]> {
+  if (!isSafeJobId(job.id)) throw new Error(`refusing to register job with unsafe id: ${JSON.stringify(job.id)}`);
   const jobs = await readJobRegistry(root);
   const idx = jobs.findIndex((j) => j.id === job.id);
-  if (idx === -1) jobs.push(job);
-  else jobs[idx] = job;
+  if (idx === -1) {
+    if (job.id !== job.type) {
+      throw new Error(`refusing to register a new job whose id !== type (id=${JSON.stringify(job.id)}, type=${JSON.stringify(job.type)})`);
+    }
+    jobs.push(job);
+  } else jobs[idx] = job;
   await writeJobRegistry(root, jobs);
   return jobs;
 }
 
-/** Patch one job's mutable config fields (enable/disable, cadence, posture); no-op if absent. */
+/** Patch one job's mutable config fields (enable/disable, cadence, posture); no-op if absent.
+ *  #29: reject an unsafe `id` at the boundary (throw — never persist) before it can index anything. */
 export async function patchJob(
   root: string,
   id: string,
   patch: Partial<Pick<JobConfig, 'enabled' | 'schedule' | 'posture' | 'config'>>,
 ): Promise<JobConfig[]> {
+  if (!isSafeJobId(id)) throw new Error(`refusing to patch job with unsafe id: ${JSON.stringify(id)}`);
   const jobs = await readJobRegistry(root);
   const job = jobs.find((j) => j.id === id);
   if (job) {

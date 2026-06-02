@@ -34,6 +34,19 @@ export interface JobConfig {
   config?: Record<string, unknown>;
 }
 
+/**
+ * A job `id` MUST be a bare slug — a letter/digit then letters/digits/hyphens — because it is
+ * consumed DIRECTLY into filesystem paths: the per-job journal `journalRel(id)` (`.kb/jobs/<id>/…`),
+ * the disposable worktree (`.kb/cache/worktrees/job-<id>`), and the work branch (`kb/job-<id>-work`).
+ * An `id` containing path separators or `..` (`../x`, `../../../tmp/x`) would escape `.kb/jobs` and
+ * turn a hand-/foreign-edited `registry.json` into an arbitrary-write vector — same class as JOBS-10's
+ * write-sink, different vector. Validate at EVERY boundary an id enters (registry read + write + the
+ * run sink) so no single bypass reaches a path (SPEC-0023 JOBS-10 / #29).
+ */
+export function isSafeJobId(v: unknown): v is string {
+  return typeof v === 'string' && /^[a-z0-9][a-z0-9-]*$/i.test(v);
+}
+
 /** Disposition of a single finding (JOBS-9): auto-apply on `staging`, or route to the Review queue. */
 export type Disposition = 'auto' | 'review';
 

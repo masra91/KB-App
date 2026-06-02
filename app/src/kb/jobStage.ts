@@ -16,6 +16,7 @@ import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
 import {
   effectiveDisposition,
+  isSafeJobId,
   type JobConfig,
   type JobBehavior,
   type JournalEntry,
@@ -160,6 +161,12 @@ export async function runJobOnce(
   behavior: JobBehavior,
   lock: Mutex = new Mutex(),
 ): Promise<JobRunResult> {
+  // #29 sink guard (last line of defense): `job.id` is composed DIRECTLY into the journal path,
+  // the per-job worktree, and the work branch below — assert it's a bare slug before ANY of that,
+  // so even a future caller that bypasses the registry read/write guards can never drive a
+  // traversal id (`../x`) into a filesystem path. Throws (never half-runs) — caller treats as a
+  // failed pass; the registry read already drops such ids, so this only fires on a direct misuse.
+  if (!isSafeJobId(job.id)) throw new Error(`refusing to run job with unsafe id: ${JSON.stringify(job.id)}`);
   root = path.resolve(root);
   const runId = ulid();
   const branch = workBranch(job.id);

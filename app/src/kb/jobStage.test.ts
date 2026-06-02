@@ -238,3 +238,32 @@ describe.skipIf(!gitAvailable)('runJobOnce — write-sink containment (JOBS-10 s
     });
   });
 });
+
+// #29 — runJobOnce's last-line sink guard: the registry read/write guards drop unsafe ids upstream,
+// but the run sink ALSO asserts `isSafeJobId(job.id)` before composing journalRel(id)/the per-job
+// worktree/the work branch — so even a direct caller that bypassed the registry can never drive a
+// traversal id into a filesystem path. QA finder: KB-Quality-Driver-2.
+describe.skipIf(!gitAvailable)('runJobOnce — job-id sink guard (#29 / JOBS-10)', () => {
+  const neverRuns: JobBehavior = async () => {
+    throw new Error('behavior must not run for an unsafe job id (guard fires first)');
+  };
+
+  it('throws on an unsafe job id and creates NO journal / worktree path for it', async () => {
+    await withVault(async (root, stagingWt, lock) => {
+      const evil: JobConfig = { id: '../../../tmp/evil', type: 'reflect', schedule: 'daily', enabled: true, posture: 'guarded' };
+      await expect(runJobOnce(stagingWt, evil, neverRuns, lock)).rejects.toThrow(/unsafe id/);
+      // The traversal target outside `.kb/jobs` was never written (journalRel would have escaped there).
+      expect(await pathExists(path.join(stagingWt, '..', '..', '..', 'tmp', 'evil'))).toBe(false);
+      // No per-job worktree was minted for the bad id either.
+      expect(await pathExists(path.join(stagingWt, '.kb', 'cache', 'worktrees', 'job-../../../tmp/evil'))).toBe(false);
+    });
+  });
+
+  it('a safe id still runs (regression — the guard only rejects unsafe ids)', async () => {
+    await withVault(async (root, stagingWt, lock) => {
+      await commitOnStaging(stagingWt, { 'entities/person/steve.md': '---\nid: 01E\nname: Steve\n---\n# Steve\n' });
+      const res = await runJobOnce(stagingWt, exampleJob, exampleJobBehavior, lock);
+      expect(res.outcome).toBe('advanced');
+    });
+  });
+});
