@@ -6,7 +6,7 @@ type: feature
 status: draft
 owners: [KB-Lead, Principal]
 created: 2026-06-01
-updated: 2026-06-01
+updated: 2026-06-02
 related: [SPEC-0003, SPEC-0004, SPEC-0005, SPEC-0006, SPEC-0007, SPEC-0014, SPEC-0020, SPEC-0025]
 stage: Query
 supersedes: null
@@ -70,18 +70,63 @@ a larger budget than a stage) equipped with:
 
 | ID      | Priority | Statement (short)                                                                  | Verify   | Traces |
 | ------- | -------- | ---------------------------------------------------------------------------------- | -------- | ------ |
-| ASK-1   | must     | The Principal can ask an **NL question** and receive a **grounded answer traceable to evidence** (links to the sources/claims/entities it rests on) | none-yet | VISION-9; LIFE-4; PRIN-2 |
+| ASK-1   | must     | The Principal can ask an **NL question** and receive a **grounded answer traceable to evidence** (links to the sources/claims/entities it rests on) | test:app/src/kb/recall.test.ts | VISION-9; LIFE-4; PRIN-2 |
 | ASK-2   | must     | Recall is **pull-only** — Principal-initiated; the KB never auto-pushes answers/reports | none-yet | AUTO-5 |
-| ASK-3   | must     | Recall is **read-only w.r.t. sources/entities/claims** — it MUST NOT mutate the ontology; its only write is an optional **Output** | none-yet | DATA-1; AUTO-6 |
-| ASK-4   | must     | Answers are produced by a **structure-aware agent** with a recall **skill** (KB layout + metadata/tags/properties + wikilink/provenance) and **tools** (structured KB queries, grep, optional Obsidian CLI), choosing among them per question — **not blind text-search** | none-yet | ORCH-5,7,9; META-1 |
-| ASK-5   | must     | Retrieval is **multi-hop, entity/metadata-aware** — traverses entities → claims → `[[wikilinks]]`, filters by tags/properties, exploiting KB structure | none-yet | CONNECT-3; META-1,3 |
+| ASK-3   | must     | Recall is **read-only w.r.t. sources/entities/claims** — it MUST NOT mutate the ontology; its only write is an optional **Output** | test:app/src/kb/recall.test.ts | DATA-1; AUTO-6 |
+| ASK-4   | must     | Answers are produced by a **structure-aware agent** with a recall **skill** (KB layout + metadata/tags/properties + wikilink/provenance) and **tools** (structured KB queries, grep, optional Obsidian CLI), choosing among them per question — **not blind text-search** | test:app/src/kb/recallAgent.test.ts | ORCH-5,7,9; META-1 |
+| ASK-5   | must     | Retrieval is **multi-hop, entity/metadata-aware** — traverses entities → claims → `[[wikilinks]]`, filters by tags/properties, exploiting KB structure | test:app/src/kb/recallTools.test.ts | CONNECT-3; META-1,3 |
 | ASK-6   | must     | The Principal can **save an answer as an Output** — persisted under `outputs/`, **tagged as synthesis** with provenance to its evidence, promoted to `main` | none-yet | DATA-4; STAGING-3 |
-| ASK-7   | must     | Every substantive assertion **cites its evidence**; the agent MUST NOT present ungrounded claims as fact, and **distinguishes KB-grounded from inferred** | none-yet | PRIN-2; VISION-9 |
+| ASK-7   | must     | Every substantive assertion **cites its evidence**; the agent MUST NOT present ungrounded claims as fact, and **distinguishes KB-grounded from inferred** | test:app/src/kb/recall.test.ts | PRIN-2; VISION-9 |
 | ASK-8   | should   | Recall is **conversational / multi-turn** — follow-ups refine within a session (the Ask/Chat surface) | none-yet | VISION-9; SHELL |
 | ASK-9   | should   | **Obsidian CLI acceleration** is capability-detected and **never required** — core recall stays **headless** and works with Obsidian absent (optional viewer) | none-yet | STACK; PRIN-5 |
 | ASK-10  | should   | Recall honors **scope/sensitivity + surfacing** — answers respect the surfacing policy and scope partitions | none-yet | SCOPE-11; SCOPE-1 |
-| ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | none-yet | AUTO-8; LIFE-9 |
-| ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | none-yet | ORCH-21,22; ENG-7 |
+| ASK-11  | must     | A recall run **emits an audit event** (question, what it retrieved, what it answered/saved) for transparency | test:app/src/kb/recall.test.ts | AUTO-8; LIFE-9 |
+| ASK-12  | should   | Ask/Recall is the **first Copilot SDK pilot** (ORCH-21/22): it runs on the **SDK** (Sessions/tools/streaming) behind the agent interface — because tools (ASK-4), multi-turn (ASK-8), and streaming are load-bearing here — with the **deterministic/CLI fallback** retained; the SDK is **pinned + version-aged** (E1, not the SDK's sole user — adopt elsewhere where it makes sense) | test:app/src/kb/recallAgent.test.ts | ORCH-21,22; ENG-7 |
+
+## 4a. Design decisions (slice 1 — greenlit by KB-PM 2026-06-02)
+
+Recall is **synchronous, pull-only, ephemeral** → a request/response **orchestrator loop**, NOT a
+queue-drained stage (Decompose/Connect are autonomous + write evergreen; recall is not). The
+existing stage agents are *thin* (one-shot, no tools); recall needs a *thick, multi-hop, tool-using*
+agent, so:
+
+- **F1 + ASK-12 — runs on the Copilot SDK (`@github/copilot-sdk`), with our control retained.**
+  The agent is a real SDK **Session** (multi-turn, streaming) that invokes our tools as native
+  **typed-tools** (`defineTool`) — the SDK owns the turn loop (ORCH-21,22; Recall is the SDK pilot).
+  We keep the parts that make recall trustworthy: read-only enforcement, grounding/citation capture,
+  and budget. The SDK is reached behind a thin injectable `RecallClient` seam so the engine stays
+  unit-testable (tests drive a fake session; no CLI spawned). SDK pinned **exact `1.0.0-beta.7`**,
+  ≥7-day-old (ENG-7). BYOA — the SDK drives the `copilot` CLI over JSON-RPC using its credentials.
+  Deterministic fallback retained: SDK/CLI unavailable → honest ungrounded result (never fabricate).
+- **Read-only tool surface (ASK-3 by construction):** `entityLookup`, `claimsForEntity`,
+  `linkTraversal` (outgoing `[[links]]` + incoming backlinks), `readNode`, `readSource`, `grep`,
+  registered as the session's **only** tools via the `availableTools` allow-list (+ `approveAll` over
+  just those) — so the SDK's built-in shell/write tools are never exposed. **No mutation method
+  exists.** Tag/property filters (SPEC-0025 META) and the Obsidian CLI accelerator (ASK-9) are
+  **capability-gated** — not registered until those land; they slot in without changing the loop.
+- **Grounding (ASK-7):** the agent finishes by calling a structured **`submitAnswer`** tool
+  (answer + citations); the orchestrator **verifies every citation resolves on disk** before calling
+  an answer grounded; no verifiable evidence → `grounded:false` (honest, never fabricated).
+- **F3 — retrieval budget:** a configurable cap on retrieval tool calls per question (default
+  `DEFAULT_MAX_TOOL_CALLS = 12`), enforced in the tool-handler wrappers: past the cap, retrieval
+  returns an "exhausted — answer now" nudge and the result is flagged `truncated`.
+- **F5 — session state:** ephemeral; conversational `history` (ASK-8) is passed in by the caller,
+  nothing persisted by the engine.
+- **F2 — Outputs inert in v1 (accepted as working scope; KB-Lead confirming):** a saved Output lives
+  in `outputs/` (not `sources/`), so the autonomous stages — which queue off `sources/` — won't
+  re-enrich it. Re-enrichment deferred.
+- **F4 (grounded-vs-inferred labeling convention) + F6 (Output template / citation rendering):**
+  routed to KB-Lead; both are slice-3 concerns and don't gate the headless engine.
+
+**Slicing:** (1) headless engine — tool surface + loop + grounded cited answer + audit ✅ *this
+slice*; (2) Ask view + `kb:ask` IPC + multi-turn; (3) save-as-Output + `outputs/` promotion;
+(4) Obsidian accelerator + scope/sensitivity.
+
+**Slice-1 modules:** `app/src/kb/recall.ts` (types + read-only tool interface + SDK seam + the
+orchestrator: tool-def building w/ budget+citation capture + grounding verification + ASK-11 audit),
+`recallTools.ts` (read-only impl), `recallAgent.ts` (the recall skill + the `@github/copilot-sdk`
+client adapter — the only module that imports the SDK). The `RecallClient` seam keeps everything
+behind it substrate-agnostic and unit-testable.
 
 ## 5. User flows / surface
 
@@ -104,11 +149,14 @@ a larger budget than a stage) equipped with:
       render (`[[wikilinks]]` / block-quotes / footnotes).
 - [ ] **Grounding vs. reasoning** — how far the agent may reason beyond the KB, and how it
       **labels** inferred-vs-grounded content (ASK-7).
-- [ ] **Retrieval budget** — the cost bound on the thick agent per question (breadth/hops).
-- [ ] **Does a saved Output get re-enriched?** — is an Output a source-like input that
-      Decompose/Connect process, or inert synthesis? (DATA-4; the loop.)
-- [ ] **Structured-tool surface** — the exact KB query tools we build for the agent.
-- [ ] **Session state** — where conversational context lives (ephemeral vs saved).
+- [x] **Retrieval budget** — resolved (F3, slice 1): a configurable tool-call cap (default 12) +
+      step bound (10); exhaustion → answer-now + `truncated` flag.
+- [~] **Does a saved Output get re-enriched?** — slice-1 stance: **inert** (F2; in `outputs/`, not
+      `sources/`, so stages skip it). KB-Lead confirming; revisit at slice 3.
+- [x] **Structured-tool surface** — resolved (slice 1): `entityLookup`, `claimsForEntity`,
+      `linkTraversal`, `readNode`, `readSource`, `grep` (all read-only); tag/property + Obsidian
+      capability-gated until SPEC-0025/ASK-9 land.
+- [x] **Session state** — resolved (F5, slice 1): ephemeral; `history` passed in, nothing persisted.
 
 ## 8. Changelog
 
@@ -123,3 +171,23 @@ a larger budget than a stage) equipped with:
   timeline); **agentic structure-aware retrieval — agents, not plain search.** Researched the
   Obsidian CLI (shipped v1.12.4, Feb 2026 — remote-controls a running app) and headless
   alternatives.
+- 2026-06-02 — **slice 1 (headless recall engine) built + graduated.** In-house tool-loop
+  (`recall.ts`) + read-only tool surface (`recallTools.ts`) + thick structure-aware agent with a
+  recall skill (`recallAgent.ts`), producing a grounded, citation-verified answer with an ASK-11
+  audit event. Forks resolved by KB-PM: F1 in-house loop, F3 configurable budget cap, F5 ephemeral
+  session; F2 inert-Output accepted as working scope (KB-Lead confirming); F4/F6 → KB-Lead (slice 3).
+  Graduated `none-yet → test:` for **ASK-1, ASK-3, ASK-4, ASK-5, ASK-7, ASK-11** (requirement-traced
+  tests: `recall.test.ts`, `recallTools.test.ts`, `recallAgent.test.ts`). ASK-1 is met at the engine
+  level (NL question → grounded cited answer); its end-to-end UI surface lands in slice 2 (Ask view +
+  `kb:ask` IPC), which is also where ASK-2/ASK-8 graduate. ASK-6 (save-as-Output) is slice 3; ASK-9/10
+  are slice 4.
+- 2026-06-02 — **slice 1 reworked onto the Copilot SDK (ASK-12 / ORCH-21,22; KB-Lead/PM mandate).**
+  Per #43 (Recall = the first Copilot SDK pilot), the runtime substrate is now `@github/copilot-sdk`
+  (pinned exact **`1.0.0-beta.7`**, ≥7-day-old, ENG-7): the agent is a real SDK Session that invokes
+  our read-only tools as native typed-tools and finishes via a structured `submitAnswer` tool;
+  read-only is enforced by the `availableTools` allow-list + `approveAll`. The in-house *control*
+  (grounding/disk-verified citations, budget, skill, tool surface) is retained behind a thin
+  injectable `RecallClient` seam (unit tests drive a fake session — no CLI). Deterministic fallback
+  retained (SDK/CLI unavailable → honest ungrounded result). ASK-12 graduated `none-yet → test:`
+  (seam + fallback + skill unit-tested; the **live SDK/CLI round-trip is e2e/manual** — the CLI isn't
+  in the unit env, mirroring ORCH-8's CLI convention). 321 tests green; coverage gate passes.
