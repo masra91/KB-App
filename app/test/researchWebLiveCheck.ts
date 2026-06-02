@@ -5,6 +5,12 @@
 //
 //   cd app && node_modules/.bin/vite-node test/researchWebLiveCheck.ts "your query here"
 //
+// For KB-QD's web_search self-fetch check, run with KB_RESEARCH_FETCH_LOG=1 — makeGatedFetch then
+// emits a `[gated-fetch] <url>` line per ACTUAL page retrieval. Every page-body URL in the findings
+// must have a matching marker; any page-body content with NO marker = the built-in web_search
+// self-fetched (un-gated egress) → pivot to option-B via WEB_SEARCH_TOOL_NAME:
+//   cd app && KB_RESEARCH_FETCH_LOG=1 node_modules/.bin/vite-node test/researchWebLiveCheck.ts "query"
+//
 // It invokes the production `makeWebResearchFn()` (live SDK, no injected session) against a seeded
 // public-web request and prints the outcome. Interpretation:
 //   - found:true + real https citations  → copilot exposes search/fetch → OPTION A works (1d live-OK).

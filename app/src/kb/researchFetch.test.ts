@@ -70,4 +70,32 @@ describe('makeGatedFetch — the live researcher fetch primitive (RESEARCH-8, KB
     const rebind: Resolver = async () => [A('10.0.0.1')];
     await expect(makeGatedFetch({ resolver: rebind })('https://totally-legit.example/')).rejects.toThrow();
   }, 10_000);
+
+  it('emits a [gated-fetch] marker per real retrieval ONLY when KB_RESEARCH_FETCH_LOG is set (1d self-fetch check)', async () => {
+    const rebind: Resolver = async () => [A('10.0.0.1')]; // passes isAllowedUrl, then SSRF-rejects after the marker
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
+      writes.push(typeof c === 'string' ? c : Buffer.from(c).toString());
+      return true;
+    });
+    const prev = process.env.KB_RESEARCH_FETCH_LOG;
+    try {
+      // off (default): no marker even though the URL passes the static gate + reaches the request point
+      delete process.env.KB_RESEARCH_FETCH_LOG;
+      await makeGatedFetch({ resolver: rebind })('https://example.com/a').catch(() => {});
+      expect(writes.some((w) => w.includes('[gated-fetch]'))).toBe(false);
+      // on: exactly one marker for the retrieved URL (proves the page body went through this chokepoint)
+      process.env.KB_RESEARCH_FETCH_LOG = '1';
+      await makeGatedFetch({ resolver: rebind })('https://example.com/b').catch(() => {});
+      expect(writes).toContain('[gated-fetch] https://example.com/b\n');
+      // a statically-refused URL never reaches the marker (refused before the request point)
+      writes.length = 0;
+      await makeGatedFetch({ resolver: rebind })('file:///etc/passwd').catch(() => {});
+      expect(writes.some((w) => w.includes('[gated-fetch]'))).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.KB_RESEARCH_FETCH_LOG;
+      else process.env.KB_RESEARCH_FETCH_LOG = prev;
+      spy.mockRestore();
+    }
+  }, 10_000);
 });

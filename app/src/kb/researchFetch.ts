@@ -120,6 +120,12 @@ export function makeGatedFetch(opts: GatedFetchOptions = {}): (url: string) => P
       const lib = parsed.protocol === 'https:' ? https : http;
       const agent = parsed.protocol === 'https:' ? httpsAgent : httpAgent;
 
+      // Diagnostic marker (env-gated; silent in prod): emits one line per ACTUAL page retrieval through
+      // this gate. Lets a live run prove every fetched page BODY passed the isAllowedUrl + SSRF-Agent
+      // chokepoint — so KB-QD can confirm the CLI's built-in web_search returns query→results only and
+      // never self-fetches page content un-gated (SPEC-0028 1d / RESEARCH-8 self-fetch check).
+      if (process.env.KB_RESEARCH_FETCH_LOG) process.stderr.write(`[gated-fetch] ${url}\n`);
+
       let settled = false;
       const fail = (e: Error): void => {
         if (settled) return;
