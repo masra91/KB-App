@@ -97,6 +97,28 @@ describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
     });
   });
 
+  it('the global per-Instance ceiling refuses a pass past the cap — NO egress + a ceiling-reached no-op (RESEARCH-11)', async () => {
+    await withVault(async (root) => {
+      let calls = 0;
+      const research: ResearchFn = async () => {
+        calls++;
+        return { found: true, note: 'a finding', citations: [], query: 'q' };
+      };
+      // ceiling=1: the first pass egresses + is recorded; the second is refused BEFORE the cognition runs.
+      const r1 = await runResearcher(root, web, request, { research, instanceCeiling: 1, now: () => '2026-06-02T01:00:00.000Z' });
+      const r2 = await runResearcher(root, web, { ...request, id: 'req-2' }, { research, instanceCeiling: 1, now: () => '2026-06-02T01:05:00.000Z' });
+      expect(calls).toBe(1); // the 2nd pass never reached egress — the hard backstop, not advisory
+      expect(r1.sourceIds).toHaveLength(1);
+      expect(r2.sourceIds).toEqual([]);
+      expect(r2.note).toMatch(/ceiling reached/i);
+      const audit = await readAudit(root);
+      const ceiling = audit.find((a) => a.eventType === 'ceiling-reached');
+      expect(ceiling, 'a refused pass must audit ceiling-reached (no silent action)').toBeDefined();
+      expect(ceiling!.actor).toBe('researcher');
+      expect((ceiling!.payload as Record<string, unknown>).ceiling).toBe(1);
+    });
+  });
+
   it('a FAILED pass audits `research-failed` (not the silent `no-finding`) so failed≠empty (#160)', async () => {
     await withVault(async (root) => {
       // The cognition reports failure (e.g. packaged-app can't spawn copilot) — distinct from a no-finding.

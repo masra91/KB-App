@@ -358,8 +358,8 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
   },
   {
     actor: 'researcher',
-    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op); a `research-failed` event when the cognition errors (e.g. packaged-app cannot spawn the BYOA copilot — #160) so a failure is never a silent no-finding (OBS-4); and an `escalated` event when a research→finding→request chain hits its depth limit and is routed to Review instead of run (RESEARCH-11) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
-    emitters: ['researchRun', 'researchEscalate'], // researchRun emits per pass (researched / no-finding / research-failed); researchEscalate emits the depth-limit escalation
+    what: 'Researcher pass (SPEC-0028): what was researched + why, the request answered, external origin/citations, and the secondary source(s) produced (or a no-op); a `research-failed` event when the cognition errors (e.g. packaged-app cannot spawn the BYOA copilot — #160) so a failure is never a silent no-finding (OBS-4); a `ceiling-reached` no-op when the global per-Instance egress ceiling is hit; and an `escalated` event when a research→finding→request chain hits its depth limit and is routed to Review instead of run (RESEARCH-11) — emitted via appendAuditEvent into the cross-cutting control log (so it surfaces in the Activity feed).',
+    emitters: ['researchRun', 'researchEscalate'], // researchRun emits per pass (researched / no-finding / research-failed / ceiling-reached); researchEscalate emits the depth-limit escalation
     auditPath: CONTROL_AUDIT_REL,
     mutating: true, // reaches outside the KB + produces immutable secondary sources
     carriesWhy: true, // records the request (what + why) + citations behind each finding

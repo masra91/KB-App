@@ -99,7 +99,7 @@ Review like any source.
 | RESEARCH-8 | must     | **Egress is gated per-researcher by tier** (`public-web`/`internal-tenant`/`local-only`): the dispatcher only feeds a researcher KB content **at-or-below** the matching sensitivity, and outbound queries are built from allowed content only | none-yet | AUTO-4; SCOPE-11 |
 | RESEARCH-9 | must     | Researchers **authenticate via BYOA** — the M365 MCP's own OAuth, `gh`, `az` — **KB-App stores no secrets** | none-yet | AUTO-11 |
 | RESEARCH-10| must     | **Read-only world** (AUTO-6): no side-effecting external actions. The **Code researcher** is strictly read-only — clone/worktree/fetch/pull/read-files/read-PRs (GET) only; **never** commit, push, comment, open PRs, or touch the user's working tree; its worktree is an **isolated, gitignored** read workspace kept current by fetch/pull | none-yet | AUTO-6 |
-| RESEARCH-11| must     | Research is **bounded**: per-researcher **budget** (cost/calls/rate) + a **depth limit** on research→finding→`research-request` chains; the researcher is **prompted to self-moderate** (runaway/drift awareness); on hitting the depth limit it **escalates to Review** ("continue?"); a **global per-Instance ceiling** is the hard backstop | none-yet | VISION-8; REVIEW; AUTO-12 |
+| RESEARCH-11| must     | Research is **bounded**: per-researcher **budget** (cost/calls/rate) + a **depth limit** on research→finding→`research-request` chains; the researcher is **prompted to self-moderate** (runaway/drift awareness); on hitting the depth limit it **escalates to Review** ("continue?"); a **global per-Instance ceiling** is the hard backstop. *Each bound is ENFORCED, not advisory (D7).* | test: per-pass calls cap `researchWebAgent.test`(#154); depth→Review-escalation `researchDispatcher.test`+`researchEscalate.test`+`researchInline.test`(chain-depth walk); per-Instance ceiling `researchCeiling.test`+`researchRun.test` | VISION-8; REVIEW; AUTO-12 |
 | RESEARCH-12| must     | **Untrusted-content defense**: fetched external content is treated as **data, never instructions**; researchers are prompted/structured accordingly and constrained by egress tier (limits exfiltration), read-only world (limits action), a **per-researcher tool/MCP allowlist**, and budget; findings are **marked externally-sourced** | none-yet | PRIN-19,20; AUTO-6 |
 | RESEARCH-13| must     | MCP servers / external tools are **third-party deps** — **vetted, pinned, version-aged** | none-yet | ENG-1,2,4,7 |
 | RESEARCH-14| should   | Researchers are a **prime Copilot SDK adopter** (tools/MCP, sessions, ORCH-21/22) — behind the agent interface, deterministic fallback retained | none-yet | ORCH-21,22 |
@@ -171,9 +171,41 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
   `internal-tenant → up to internal/confidential`, `local-only → any`) **and whether to prioritize
   SPEC-0005 classification** so public-web researchers can later be fed KB content: **Principal
   call.** Governs relaxation in Slices 2/3, not Slice 1.
+- **D7 — RESEARCH-11 bounds: enforcement model** (KB-PM-ratified, forks brought by KB-Developer-5):
+  every bound is **deterministically ENFORCED at a chokepoint, never prompt-advisory** (the
+  self-moderation prompt is a hint *on top of*, not instead of, the hard gate).
+  - **Per-pass calls budget** — the live SDK session counts `fetch` tool calls and refuses past
+    `budget.maxToolCalls`, forcing convergence to `submitFindings` (shipped #154/#165; mirrors recall #113).
+    *cost/rate*: **rate** is satisfied by the scheduler cadence + the dedup ledger (D2); **cost** is
+    subsumed by the calls cap in v1 — **no token meter** is built (a deliberate non-goal until a real
+    need; revisit if cost diverges from calls).
+  - **Depth limit** — each `research-request` carries a `depth` computed centrally from the audit
+    lineage (research→finding→`research-request` hops) in `collectResearchRequests`; the **dispatcher**
+    (sole router) refuses to run a pass when `depth > budget.maxDepth` (no egress).
+  - **Escalate-to-Review** — at the depth limit the dispatcher raises a single gated yes/no Review
+    ("Continue researching X?"), idempotent per request, audited `escalated`. **Raising + gating the
+    chain IS the RESEARCH-11 bound;** *resume-on-confirm* (a consumer of the `review-answered` marker
+    that re-dispatches one level deeper) is a **fast-follow**, not part of this requirement.
+  - **Global per-Instance ceiling** — a **persistent rolling-window** cap (default **100 passes / 24h**,
+    **tunable**) on total passes (egress) across all researchers, layered on the per-dispatch burst cap
+    (24). Enforced at `runResearcher` so it bounds inline dispatch **and** scheduled standing passes; a
+    **safety backstop, not a normal-use limit**, and **self-healing** (passes age out of the window).
+    Purely a runaway/volume backstop — *not* the egress↔sensitivity policy (that stays D6, escalated).
 
 ## 9. Changelog
 
+- 2026-06-02 — **RESEARCH-11 fully discharged — all bounds enforced** (KB-PM-greenlit; KB-Developer-5).
+  Completed the residual clauses after the per-pass calls cap (#154/#165): a **depth limit** on
+  research→finding→`research-request` chains (computed from audit lineage, enforced at the dispatcher),
+  **escalate-to-Review** at the limit (a gated "continue?" Review, idempotent per request), and the
+  **global per-Instance egress ceiling** (a persistent rolling-window backstop, 100 passes/24h tunable,
+  enforced at `runResearcher` so it bounds inline + standing passes alike, self-healing). All bounds are
+  deterministically enforced, never prompt-advisory (decision **D7**). Forks (ceiling semantics =
+  persistent rolling-window; escalation = raise+gate, resume-on-confirm deferred; cost/rate = cadence +
+  calls, no token meter) were brought to + ratified by KB-PM. `Verify` graduates `none-yet → test:`
+  (researchDispatcher / researchEscalate / researchCeiling / researchInline / researchRun /
+  researchWebAgent). New `escalated` + `ceiling-reached` researcher audit events (AUDIT-11). Resume-on-
+  confirm of a depth-escalation Review is a tracked **fast-follow**.
 - 2026-06-02 — **Slice 3 (M365/WorkIQ researcher) design locked** (KB-PM-signed-off; KB-Developer-3).
   The M365 researcher is an adapter behind the existing `ResearchFn` seam (registered into
   `selectResearchFn`'s per-template switch, alongside Web/Code — no `makeResearchDeps` change),
