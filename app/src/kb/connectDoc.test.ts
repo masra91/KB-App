@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderEntityNode, parseEntityNode, slugify, entityFileRel, unionOrdered, type EntityNode } from './connectDoc';
+import { renderEntityNode, parseEntityNode, slugify, entityFileRel, unionOrdered, renderLinksBlock, LINKS_BLOCK_START, LINKS_BLOCK_END, type EntityNode } from './connectDoc';
 
 const node = (over: Partial<EntityNode> = {}): EntityNode => ({
   id: '01JENT',
@@ -72,5 +72,25 @@ describe('human filenames (CONNECT-7, CANON-6/7)', () => {
 describe('unionOrdered (fold-in helper)', () => {
   it('preserves order and de-duplicates', () => {
     expect(unionOrdered(['a', 'b'], ['b', 'c'])).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('renderLinksBlock — entity-link display names (VAULT-12)', () => {
+  it('renders the Obsidian alias form [[path|Name]] when the target name is known', () => {
+    const block = renderLinksBlock([{ targetRel: 'entities/person/ada-lovelace.md', name: 'Ada Lovelace' }]);
+    expect(block).toContain('- [[entities/person/ada-lovelace.md|Ada Lovelace]]');
+    expect(block).toContain(LINKS_BLOCK_START);
+    expect(block).toContain(LINKS_BLOCK_END);
+  });
+  it('falls back to a bare wikilink when no name is known (back-compat)', () => {
+    expect(renderLinksBlock([{ targetRel: 'entities/person/x.md' }])).toContain('- [[entities/person/x.md]]');
+  });
+  it('keeps the predicate prefix in front of the alias link', () => {
+    expect(renderLinksBlock([{ targetRel: 'entities/org/apple.md', name: 'Apple', predicate: 'works at' }])).toContain(
+      '- works at [[entities/org/apple.md|Apple]]',
+    );
+  });
+  it('placeholder when there are no resolved links (idempotent re-runs)', () => {
+    expect(renderLinksBlock([])).toContain('_No resolved links yet._');
   });
 });

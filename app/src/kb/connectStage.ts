@@ -719,7 +719,9 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
   const linkedTargets = new Set<string>();
   const addLink = (rel: string): void => {
     if (!linkedTargets.has(rel)) {
-      links.push({ targetRel: rel });
+      // VAULT-12: carry the target's display name so the block renders `[[path|Name]]` (the path
+      // resolves collision-safe; the human sees the entity name, not the raw path).
+      links.push({ targetRel: rel, name: nameByRel.get(rel) });
       linkedTargets.add(rel);
     }
   };

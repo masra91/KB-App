@@ -366,7 +366,8 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
 
       const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
       expect(md).toContain(LINKS_BLOCK_START);
-      expect(md).toContain(`[[${apple.rel}]]`); // real Obsidian wikilink to the canonical node
+      expect(md).toContain(`[[${apple.rel}|`); // VAULT-12: alias form `[[path|Name]]` to the canonical node
+      expect(md).toContain(`[[${apple.rel}|Apple]]`); // shows the entity name, not the raw path
       expect((await simpleGit(root).status()).isClean()).toBe(true); // ORCH-3
     });
   });
@@ -457,7 +458,7 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       expect(res.links).toBe(1);
       const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
       expect(md).toContain(LINKS_BLOCK_START);
-      expect(md).toContain(`[[${target}]]`); // exactly the confirmed target — not the other same-name node
+      expect(md).toContain(`[[${target}|`); // exactly the confirmed target (alias form, VAULT-12) — not the other same-name node
     });
   });
 

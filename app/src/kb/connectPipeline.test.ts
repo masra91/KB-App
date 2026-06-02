@@ -284,7 +284,7 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
       expect(appleRel).toBeTruthy();
       const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
       expect(steveMd).toContain(LINKS_BLOCK_START);
-      expect(steveMd).toContain(`[[${appleRel}]]`); // native Obsidian wikilink between canonical nodes
+      expect(steveMd).toContain(`[[${appleRel}|`); // native Obsidian wikilink (alias form, VAULT-12) between canonical nodes
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);
@@ -338,7 +338,7 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
       expect(appleRel).toBeTruthy();
       const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
       expect(steveMd).toContain(LINKS_BLOCK_START);
-      expect(steveMd).toContain(`[[${appleRel}]]`); // wikilink rendered on main via the auto-poke alone
+      expect(steveMd).toContain(`[[${appleRel}|`); // wikilink (alias form, VAULT-12) rendered on main via the auto-poke alone
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);

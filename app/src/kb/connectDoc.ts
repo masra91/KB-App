@@ -198,15 +198,21 @@ export const LINKS_BLOCK_END = '<!-- kb:links:end -->';
 export interface NodeLink {
   targetRel: string; // repo-relative path of the resolved canonical node (the [[wikilink]] target)
   predicate?: string; // optional link text prefix (relatesTo hints are bare names in v1 → usually absent)
+  name?: string; // display name for the Obsidian alias form `[[path|Name]]` (VAULT-12)
 }
 
 /** The generated links block (CONNECT-12), regenerated WHOLE. A node with hints but no resolved
- *  target still gets a (placeholder) block so re-runs are idempotent (mirrors the claims block). */
+ *  target still gets a (placeholder) block so re-runs are idempotent (mirrors the claims block).
+ *  VAULT-12: a link with a known display name renders as the Obsidian alias form `[[path|Name]]`
+ *  — resolves by path (collision-safe) but shows the entity name, not the raw ULID/path. */
 export function renderLinksBlock(links: readonly NodeLink[]): string {
   const rows =
     links.length === 0
       ? ['_No resolved links yet._']
-      : links.map((l) => (l.predicate ? `- ${l.predicate} [[${l.targetRel}]]` : `- [[${l.targetRel}]]`));
+      : links.map((l) => {
+          const link = l.name ? `[[${l.targetRel}|${l.name}]]` : `[[${l.targetRel}]]`;
+          return l.predicate ? `- ${l.predicate} ${link}` : `- ${link}`;
+        });
   return [LINKS_BLOCK_START, ...rows, LINKS_BLOCK_END].join('\n');
 }
 
