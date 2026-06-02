@@ -43,6 +43,55 @@ async function pathExists(p: string): Promise<boolean> {
   }
 }
 
+/**
+ * Knowledge roots a job's auto-applied writes may target (SPEC-0023 JOBS-10 sink guard). DERIVED
+ * knowledge only — entities/claims/outputs — never `sources/` (immutable ground truth, the forward
+ * pipeline's domain; DECOMP-8/DATA-2) and never config/engine/repo paths. A DISTINCT constant from
+ * `EVERGREEN_PATHS` (which includes `sources`): jobs READ evergreen but must never WRITE ground truth.
+ */
+export const JOB_WRITE_PATHS = ['entities', 'claims', 'outputs'] as const;
+
+/** Realpath the deepest EXISTING ancestor of `target` and re-append the non-existent tail, so a
+ *  symlink anywhere in the existing portion is resolved (the target file itself may not exist yet).
+ *  This is what makes containment symlink-safe — lexical `path.resolve` alone would let a committed
+ *  symlink (`entities/x -> ../../sources`) appear contained while the write follows it out. */
+async function resolveSymlinkSafe(target: string): Promise<string> {
+  let existing = target;
+  const tail: string[] = [];
+  while (!(await pathExists(existing))) {
+    tail.unshift(path.basename(existing));
+    const parent = path.dirname(existing);
+    if (parent === existing) return target; // hit the fs root without an existing ancestor
+    existing = parent;
+  }
+  const realBase = await fs.realpath(existing);
+  return tail.length > 0 ? path.join(realBase, ...tail) : realBase;
+}
+
+/**
+ * Sink-side containment for an agent-emitted write set (JOBS-10) — defense-in-depth, independent of
+ * disposition/posture, because `rel` is LLM output (a prompt-injection surface via node excerpts).
+ * Returns a rejection reason for the FIRST offending write, or null if every write is safe. Both
+ * checks run on the **symlink-resolved** path (not the raw string), so `..` traversal, absolute
+ * paths, `entities/../sources/x`, and symlink escapes are all caught:
+ *  - **containment:** the resolved real path must stay strictly within the worktree's real path;
+ *  - **allowlist:** its top-level dir must be a JOB_WRITE_PATHS root (blocks `.git/`, `.kb/`, `app/`,
+ *    repo-root files, AND `sources/`).
+ * The caller treats any rejection as atomic over the whole finding (no partial writes).
+ */
+export async function validateWrites(wt: string, writes: readonly { rel: string; content: string }[]): Promise<string | null> {
+  const wtReal = await fs.realpath(wt);
+  for (const w of writes) {
+    const resolved = await resolveSymlinkSafe(path.resolve(wt, w.rel));
+    if (resolved === wtReal || !resolved.startsWith(wtReal + path.sep)) return `write escapes the worktree: ${w.rel}`;
+    const top = path.relative(wtReal, resolved).split(path.sep)[0];
+    if (!(JOB_WRITE_PATHS as readonly string[]).includes(top)) {
+      return `write outside the knowledge roots (${JOB_WRITE_PATHS.join('/')}): ${w.rel}`;
+    }
+  }
+  return null;
+}
+
 /** Read a job's journal (JOBS-7) from `root` (a worktree or vault root), oldest→newest. Missing → []. */
 export async function readJournal(root: string, jobId: string): Promise<JournalEntry[]> {
   let raw: string;
@@ -129,24 +178,30 @@ export async function runJobOnce(
     let deferred = 0;
     const now = new Date().toISOString();
     for (const finding of pass.findings) {
-      const disposition = effectiveDisposition(finding, job.posture);
+      const posed = effectiveDisposition(finding, job.posture);
+      const writes = finding.writes ?? [];
+      // Sink guard (JOBS-10): even an auto disposition only applies if EVERY write is contained +
+      // allowlisted. A rejection forces the WHOLE finding to Review (atomic — no partial writes).
+      const rejection = posed === 'auto' ? await validateWrites(wt, writes) : null;
+      const disposition: typeof posed = rejection ? 'review' : posed;
       const rec: AuditedFinding = { summary: finding.summary, kind: finding.kind, confidence: finding.confidence, disposition };
       if (disposition === 'auto') {
-        // Additive, high-confidence (or autonomous) → apply the writes on `staging`, audited.
-        for (const w of finding.writes ?? []) {
+        // Additive, high-confidence, contained → apply the writes on `staging`, audited.
+        for (const w of writes) {
           const dest = path.join(wt, w.rel);
           await fs.mkdir(path.dirname(dest), { recursive: true });
           await fs.writeFile(dest, w.content, 'utf8');
         }
         applied += 1;
       } else {
-        // Destructive / low-confidence → raise a Review (SPEC-0018), apply NO effect (JOBS-9).
+        // Destructive / low-confidence / sink-rejected → raise a Review (SPEC-0018), apply NO
+        // effect (JOBS-9/10). A sink rejection records the reason in the audit (no silent drop).
         const id = ulid();
         const review: Review = {
           id,
           status: 'open',
-          question: finding.review?.question ?? finding.summary,
-          detail: finding.review?.detail ?? finding.summary,
+          question: rejection ? `Job write rejected — needs review: ${finding.summary}` : finding.review?.question ?? finding.summary,
+          detail: rejection ? `${finding.summary} — rejected: ${rejection}` : finding.review?.detail ?? finding.summary,
           raisedBy: {
             stage: `job:${job.id}`,
             runId,
@@ -159,6 +214,7 @@ export async function runJobOnce(
         };
         await writeReviewFile(path.join(wt, reviewRel(id)), review);
         rec.reviewId = id;
+        if (rejection) rec.rejection = rejection;
         deferred += 1;
       }
       audited.push(rec);

@@ -138,3 +138,103 @@ describe.skipIf(!gitAvailable)('JobRunner — single-flight (JOBS-6/11)', () => 
     });
   });
 });
+
+describe.skipIf(!gitAvailable)('runJobOnce — write-sink containment (JOBS-10 security: agent rel is injection surface)', () => {
+  const sinkJob: JobConfig = { id: 'sink', type: 'sink', schedule: 'daily', enabled: true, posture: 'guarded' };
+  const additiveWrites = (writes: { rel: string; content: string }[]): JobBehavior => async () => ({
+    inspected: 'crafted',
+    findings: [{ summary: 'crafted write', kind: 'additive', confidence: 1, proposed: 'auto', writes }],
+  });
+
+  // A rejected finding: nothing applied, routed to Review, the journal records the rejection reason.
+  async function expectRejected(stagingWt: string, lock: Mutex, rel: string): Promise<void> {
+    const res = await runJobOnce(stagingWt, sinkJob, additiveWrites([{ rel, content: 'EVIL' }]), lock);
+    expect(res.applied).toBe(0); // guard blocks the auto-apply (JOBS-10)
+    expect(res.deferred).toBe(1); // routed to Review, not silently dropped (guard 4)
+    expect(await pathExists(path.join(stagingWt, 'reviews'))).toBe(true);
+    const journal = await readJournal(stagingWt, 'sink');
+    expect(journal[journal.length - 1].findings?.[0].rejection).toBeTruthy(); // reason audited
+  }
+
+  it('T1/T2: blocks `..` traversal and absolute paths (containment)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      await expectRejected(stagingWt, lock, '../escape.md');
+      await expectRejected(stagingWt, lock, '../../escape.md');
+      await expectRejected(stagingWt, lock, '/etc/evil');
+      // nothing escaped the worktree into the cache/worktrees parent:
+      expect(await pathExists(path.join(stagingWt, '..', 'escape.md'))).toBe(false);
+    });
+  });
+
+  it('T3/T4/T5: blocks paths outside the knowledge roots (.git/, .kb/ journal, app/)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      await expectRejected(stagingWt, lock, '.git/hooks/post-checkout');
+      await expectRejected(stagingWt, lock, '.kb/jobs/sink/journal.jsonl'); // engine-owned, not a knowledge root
+      await expectRejected(stagingWt, lock, 'app/src/kb/staging.ts');
+      await expectRejected(stagingWt, lock, 'sources/2026/forged/source.md'); // jobs never write ground truth
+    });
+  });
+
+  it('T7: a new, contained, allowlisted additive write still auto-applies (happy-path regression)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      const res = await runJobOnce(stagingWt, sinkJob, additiveWrites([{ rel: 'entities/person/new.md', content: '# New\n' }]), lock);
+      expect(res.applied).toBe(1);
+      expect(res.deferred).toBe(0);
+      expect(await pathExists(path.join(stagingWt, 'entities/person/new.md'))).toBe(true);
+    });
+  });
+
+  it('T8: a finding with one bad write rejects the WHOLE finding — the valid write does NOT partially land (atomic)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      const res = await runJobOnce(
+        stagingWt,
+        sinkJob,
+        additiveWrites([
+          { rel: 'outputs/ok.md', content: 'ok' },
+          { rel: '../bad.md', content: 'bad' },
+        ]),
+        lock,
+      );
+      expect(res.applied).toBe(0);
+      expect(res.deferred).toBe(1);
+      expect(await pathExists(path.join(stagingWt, 'outputs/ok.md'))).toBe(false); // no partial write
+    });
+  });
+
+  it('T5c: classifies on the RESOLVED path — `entities/../sources/x` is rejected (not the raw string)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      await expectRejected(stagingWt, lock, 'entities/../sources/steve.md');
+      await expectRejected(stagingWt, lock, './'); // degenerate
+    });
+  });
+
+  it('T6: an additive OVERWRITE within the knowledge roots is allowed (REFLECT-4 refresh / regen)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      // Seed an existing entity on staging, then have the job rewrite it (a refresh).
+      await fs.mkdir(path.join(stagingWt, 'entities', 'person'), { recursive: true });
+      await fs.writeFile(path.join(stagingWt, 'entities/person/steve.md'), '# Steve (old)\n', 'utf8');
+      { const g = simpleGit(stagingWt); await g.add('-A'); await g.commit('seed entity'); }
+
+      const res = await runJobOnce(stagingWt, sinkJob, additiveWrites([{ rel: 'entities/person/steve.md', content: '# Steve (refreshed)\n' }]), lock);
+      expect(res.applied).toBe(1); // overwrite within entities/ is legitimate, not blocked
+      expect(await fs.readFile(path.join(stagingWt, 'entities/person/steve.md'), 'utf8')).toContain('refreshed');
+    });
+  });
+
+  it('T9 (REQUIRED): a write through a committed symlink that escapes the worktree is blocked (symlink-safe containment)', async () => {
+    await withVault(async (_root, stagingWt, lock) => {
+      // A symlink committed inside the knowledge tree pointing OUT of the worktree (the classic
+      // lexical-containment bypass): `entities/escape -> <outside>`.
+      const outside = path.join(stagingWt, '..', '..', '..', 'escape-target'); // well outside the worktree
+      await fs.mkdir(outside, { recursive: true });
+      await fs.mkdir(path.join(stagingWt, 'entities'), { recursive: true });
+      await fs.symlink(path.resolve(outside), path.join(stagingWt, 'entities', 'escape'));
+      { const g = simpleGit(stagingWt); await g.add('-A'); await g.commit('seed escaping symlink'); }
+
+      const res = await runJobOnce(stagingWt, sinkJob, additiveWrites([{ rel: 'entities/escape/pwned.md', content: 'PWNED' }]), lock);
+      expect(res.applied).toBe(0); // resolveSymlinkSafe realpaths the symlink → outside wt → rejected
+      expect(res.deferred).toBe(1);
+      expect(await pathExists(path.join(path.resolve(outside), 'pwned.md'))).toBe(false); // never followed out
+    });
+  });
+});
