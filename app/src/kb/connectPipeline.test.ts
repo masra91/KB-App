@@ -53,6 +53,20 @@ const connectDecider: ConnectDecider = async (set) => ({
   agent: { via: 'copilot', model: 'test' },
 });
 
+// Connect resolves the block AND coins an emergent topic tag (SPEC-0025 META-2).
+const connectDeciderTagged: ConnectDecider = async (set) => ({
+  blockKey: set.blockKey,
+  clusters: [
+    {
+      canonicalName: 'Steve',
+      memberCandidateIds: set.candidates.map((c) => c.id),
+      confidence: 0.95,
+      tags: ['Topic/Tech'], // un-normalized — Connect normalizes to topic/tech
+    },
+  ],
+  agent: { via: 'copilot', model: 'test' },
+});
+
 // Claims attaches one grounded assertion to the resolved node.
 const claimsDecider: ClaimsDecider = async (input) => ({
   entityId: input.entityId,
@@ -193,6 +207,38 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
 
       // Working state never on main; main clean.
       expect(await pathExists(path.join(root, 'candidates'))).toBe(false);
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('metadata: the resolved node carries type/<kind> + an emergent topic tag, visible on main (SPEC-0025 META-1/9)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const promoteEvergreen = async (): Promise<void> => {
+        await promote(root);
+      };
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, promoteEvergreen);
+
+      await orch.capture('s1', [{ kind: 'text', text: 'call Steve re: Q3 budget' }]);
+      await orch.poke();
+      for (const srcRel of await readDecomposeQueue(stagingWt)) {
+        await decomposeOne(stagingWt, srcRel, decompDecider);
+      }
+      const connect = new ConnectStage(stagingWt, connectDeciderTagged, lock, undefined, promoteEvergreen);
+      await connect.poke();
+
+      const nodeRel = (await findEntityFiles(root))[0]; // promoted to main by Connect's hook
+      expect(nodeRel).toBeTruthy();
+      const md = await fs.readFile(path.join(root, nodeRel), 'utf8');
+      expect(md).toContain('type: person'); // curated Property visible on main
+      expect(md).toContain('"type/person"'); // deterministic curated tag
+      expect(md).toContain('"topic/tech"'); // emergent agent tag, normalized
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);

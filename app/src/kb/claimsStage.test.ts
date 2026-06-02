@@ -92,6 +92,7 @@ async function seedEntities(root: string, srcRel: string, names: string[]): Prom
         aliases: [id],
         derivedFrom: [srcRel],
         resolvedFrom: [],
+        tags: [],
         createdAt: now,
         updatedAt: now,
         agent: { via: 'copilot', model: 'test' },

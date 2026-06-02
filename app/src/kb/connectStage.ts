@@ -38,6 +38,7 @@ import {
   type ParsedNode,
 } from './connectDoc';
 import { applyClaimsBlock, type ClaimBacklink } from './claimDoc';
+import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
 import { reviewRel, writeReviewFile } from './reviewStore';
 import type { Review } from './reviews';
@@ -508,6 +509,16 @@ export async function connectOne(
           canonical?.resolvedFrom ?? [],
           unionOrdered(losers.flatMap((l) => l.resolvedFrom), members.map((m) => m.id)),
         ),
+        // SPEC-0025 META-2/4: the node's `tags:` = the deterministic curated core (`type/<kind>`)
+        // + emergent topic tags the agent coined (normalized; META-3), folded over any prior/merged
+        // tags. Regenerated WHOLE here so re-resolves/merges converge (idempotent).
+        tags: unionOrdered(
+          canonical?.tags ?? [],
+          unionOrdered(
+            losers.flatMap((l) => l.tags),
+            [typeTag(kind), ...(cluster.tags ?? []).map(normalizeTag)].filter((t) => t.length > 0),
+          ),
+        ),
         createdAt: canonical?.createdAt || now,
         updatedAt: now,
         agent: decision.agent,
@@ -552,6 +563,7 @@ export async function connectOne(
         node: rel,
         candidates: members.length,
         merged: losers.length,
+        tags: node.tags, // SPEC-0025 META-10: provenance — which tags this resolve set on the node
       });
     }
 
