@@ -23,8 +23,19 @@ import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { runFullReplay } from '../kb/replay';
+import { JobScheduler } from '../kb/jobScheduler';
+import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
+import type { JobBehavior } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
 import type { FullReplayResult } from '../kb/types';
+
+/** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
+ *  example job; `reflect` (SPEC-0024) and later job types register here as they land. An unknown
+ *  type returns null and the scheduler skips it. */
+function resolveJobBehavior(type: string): JobBehavior | null {
+  if (type === EXAMPLE_JOB_TYPE) return exampleJobBehavior;
+  return null;
+}
 
 interface ActivePipeline {
   vaultPath: string; // the vault root — on `main`, what Obsidian sees (promotion target)
@@ -33,6 +44,7 @@ interface ActivePipeline {
   decompose: DecomposeStage;
   connect: ConnectStage;
   claims: ClaimsStage;
+  jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   lock: Mutex;
 }
 
@@ -46,6 +58,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.decompose.start();
   a.connect.start();
   a.claims.start();
+  a.jobs.start(); // SPEC-0023: the autonomous-job scheduler tick (named-preset cadence)
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -54,6 +67,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.decompose.stop();
   a.connect.stop();
   a.claims.stop();
+  a.jobs.stop();
 }
 
 /**
@@ -91,8 +105,14 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     await promoteEvergreen();
     void connect.poke();
   });
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, lock };
-  startActiveStages(active); // single source of truth for which stages run (shared with fullReplay)
+  // The autonomous-job scheduler (SPEC-0023): wakes registered jobs on their named-preset cadence,
+  // each a bounded, single-flight pass in its own worktree sharing the canonical-writer lock (a
+  // job's ff-advance never races a stage's; ORCH-18) and the promotion gate (evergreen job outputs
+  // reach `main`). Jobs run concurrently with the live pipeline (ORCH-17) — never blocking
+  // capture/Enrich. Inert until the Principal enables a job in the registry.
+  const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, lock };
+  startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;
 }
 
