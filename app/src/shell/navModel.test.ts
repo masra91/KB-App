@@ -8,6 +8,7 @@ import {
   GROUP_MANAGE,
   VIEW_CAPTURE,
   VIEW_REVIEWS,
+  VIEW_ACTIVITY,
   VIEW_ASK,
   VIEW_PLACEHOLDER,
   VIEW_JOBS,
@@ -28,6 +29,7 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
     expect(NAV_VIEWS.map((v) => v.id)).toEqual([
       VIEW_CAPTURE,
       VIEW_REVIEWS,
+      VIEW_ACTIVITY,
       VIEW_ASK,
       VIEW_PLACEHOLDER,
       VIEW_JOBS,
@@ -45,8 +47,9 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
   it('the Control Panel views form a contiguous "Manage" group; Settings sits under it (PANEL-1)', () => {
     const manage = NAV_VIEWS.filter((v) => v.group === GROUP_MANAGE).map((v) => v.id);
     expect(manage).toEqual([VIEW_JOBS, VIEW_AGENTS, VIEW_RESEARCHERS, VIEW_SOURCES, VIEW_SETTINGS]);
-    // Top-level views (Capture/Reviews/Ask) carry no group.
+    // Top-level views (Capture/Reviews/Activity/Ask) carry no group.
     expect(NAV_VIEWS.find((v) => v.id === VIEW_CAPTURE)?.group).toBeUndefined();
+    expect(NAV_VIEWS.find((v) => v.id === VIEW_ACTIVITY)?.group).toBeUndefined();
     // The grouped views are contiguous and at the tail of the rail (one heading, no interleaving).
     const firstManageIdx = NAV_VIEWS.findIndex((v) => v.group === GROUP_MANAGE);
     expect(NAV_VIEWS.slice(firstManageIdx).every((v) => v.group === GROUP_MANAGE)).toBe(true);
