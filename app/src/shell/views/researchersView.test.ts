@@ -6,8 +6,9 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
-const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
+const webRow: ResearcherView = { id: 'web-1', template: 'web', label: 'Prior art', prompt: 'find prior art', repoPath: '', tenantId: '', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], lastRun: null };
+const codeRow: ResearcherView = { id: 'code-1', template: 'code', label: 'Repo', prompt: 'read the repo', repoPath: '/repos/app', tenantId: '', egressTier: 'local-only', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
+const m365Row: ResearcherView = { id: 'm365-1', template: 'm365', label: 'WorkIQ', prompt: 'summarize project mail', repoPath: '', tenantId: 'contoso.onmicrosoft.com', egressTier: 'internal-tenant', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -226,6 +227,42 @@ describe('Code researcher repoPath config (Slice 2a)', () => {
     const c = await mount();
     expect(c.querySelector('img')).toBeNull();
     expect(c.querySelector<HTMLInputElement>('.researcher-repopath')!.value).toContain('<img');
+  });
+});
+
+describe('M365 researcher tenant config (Slice 3)', () => {
+  it('shows a tenant input ONLY for m365 researchers, prefilled from config', async () => {
+    listResearchers = vi.fn(async () => [m365Row]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector<HTMLInputElement>('.researcher-tenant')!.value).toBe('contoso.onmicrosoft.com');
+    expect(c.querySelector('.researcher-repopath')).toBeNull(); // not a code field
+  });
+
+  it('a web/code researcher has no tenant field (template-specific)', async () => {
+    listResearchers = vi.fn(async () => [codeRow]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.researcher-tenant')).toBeNull();
+  });
+
+  it('saves tenantId alongside instructions/scope for an m365 researcher (no confirm — steering)', async () => {
+    listResearchers = vi.fn(async () => [m365Row]);
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLInputElement>('.researcher-tenant')!.value = 'fabrikam.onmicrosoft.com';
+    c.querySelector<HTMLButtonElement>('.researcher-save')!.click();
+    await flush();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(true);
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'm365-1', prompt: 'summarize project mail', scope: 'global', tenantId: 'fabrikam.onmicrosoft.com' });
+  });
+
+  it('escapes a hostile tenant value', async () => {
+    listResearchers = vi.fn(async () => [{ ...m365Row, tenantId: '"><img src=x onerror=alert(1)>' }]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('img')).toBeNull();
+    expect(c.querySelector<HTMLInputElement>('.researcher-tenant')!.value).toContain('<img');
   });
 });
 

@@ -87,6 +87,7 @@ function researcherItem(r: ResearcherView): string {
         </label>
         <label>Scope <input type="text" class="researcher-scope" value="${esc(r.scope)}" /></label>
         ${r.template === 'code' ? `<label>Repository path <input type="text" class="researcher-repopath" value="${esc(r.repoPath)}" placeholder="/absolute/path/to/local/repo" /></label>` : ''}
+        ${r.template === 'm365' ? `<label>M365 tenant <input type="text" class="researcher-tenant" value="${esc(r.tenantId)}" placeholder="your-org.onmicrosoft.com" /></label>` : ''}
         <button type="button" class="btn researcher-save">Save instructions</button>
       </div>
       <div class="researcher-controls">
@@ -122,6 +123,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const promptEl = li.querySelector<HTMLTextAreaElement>('.researcher-prompt')!;
     const scopeEl = li.querySelector<HTMLInputElement>('.researcher-scope')!;
     const repoPathEl = li.querySelector<HTMLInputElement>('.researcher-repopath'); // present only for code
+    const tenantEl = li.querySelector<HTMLInputElement>('.researcher-tenant'); // present only for m365
     const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
@@ -193,7 +195,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     // Instructions + scope (RESEARCH-17): steering, not risky → saved on an explicit button, no confirm.
     // The backend drops an empty/whitespace prompt or scope (keeps the prior value), so a stray blank
     // save can't wipe a researcher's instructions.
-    saveBtn.addEventListener('click', () => void apply({ id, prompt: promptEl.value, scope: scopeEl.value, ...(repoPathEl ? { repoPath: repoPathEl.value } : {}) }));
+    saveBtn.addEventListener('click', () => void apply({ id, prompt: promptEl.value, scope: scopeEl.value, ...(repoPathEl ? { repoPath: repoPathEl.value } : {}), ...(tenantEl ? { tenantId: tenantEl.value } : {}) }));
 
     runBtn.addEventListener('click', () => {
       askConfirm(
