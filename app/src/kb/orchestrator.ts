@@ -162,6 +162,7 @@ export class Orchestrator {
   private readonly root: string;
   private readonly decider: ArchivistDecider;
   private readonly lock: Mutex;
+  private readonly afterDrain?: () => Promise<void>;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -172,11 +173,19 @@ export class Orchestrator {
    * @param lock the shared per-vault canonical-writer lock (SPEC-0014 §5). Pass the SAME
    *   instance to every stage of a vault so their canonical-ref advances serialize. Defaults
    *   to a private lock for standalone use (e.g. tests with only the archivist).
+   * @param afterDrain optional hook run (serialized under the lock) after a drain settles —
+   *   used by the staging pipeline to promote freshly-archived sources to `main` (SPEC-0021).
    */
-  constructor(root: string, decider: ArchivistDecider = deterministicDecider, lock: Mutex = new Mutex()) {
+  constructor(
+    root: string,
+    decider: ArchivistDecider = deterministicDecider,
+    lock: Mutex = new Mutex(),
+    afterDrain?: () => Promise<void>,
+  ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
+    this.afterDrain = afterDrain;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -252,6 +261,9 @@ export class Orchestrator {
       queue = await readQueue(this.root);
     }
     await this.updateStatus(0, null);
+    // SPEC-0021: publish freshly-archived evergreen sources from `staging` to `main`,
+    // serialized under the shared lock so it never races a stage's ref advance.
+    if (this.afterDrain) await this.lock.run(() => this.afterDrain!());
   }
 
   private async updateStatus(queueDepth: number, processing: string | null): Promise<void> {

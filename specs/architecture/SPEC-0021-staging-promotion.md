@@ -109,14 +109,14 @@ more moving parts). Copy-paths is dumb, deterministic, and easy to test.
 
 | ID         | Priority | Statement (short)                                                  | Verify   | Traces |
 | ---------- | -------- | ------------------------------------------------------------------ | -------- | ------ |
-| STAGING-1  | must     | A vault carries two long-lived branches: **`staging`** (work surface) and **`main`** (evergreen); `staging` is created at setup off `main` | none-yet | CANON-8; ORCH-2 |
-| STAGING-2  | must     | **Every stage targets `staging`** — syncs its worktree to `staging` and `ff-only`-advances `staging`; **no stage writes `main`** | none-yet | CANON-8; ORCH-3 |
-| STAGING-3  | must     | The **promotion gate** is the *only* writer of `main`; it advances `main` to hold exactly the **evergreen path set** (`sources/`, `entities/`, `claims/`, `outputs/`), never the working set | none-yet | CANON-1,2 |
-| STAGING-4  | must     | Promotion is **copy-the-evergreen-paths** from `staging`, serialized through the shared writer lock, and **idempotent** (no-op when nothing evergreen changed) | none-yet | CANON-2; ORCH-3 |
+| STAGING-1  | must     | A vault carries two long-lived branches: **`staging`** (work surface) and **`main`** (evergreen); `staging` is created at setup off `main` | test:staging.test.ts, stagingPipeline.test.ts | CANON-8; ORCH-2 |
+| STAGING-2  | must     | **Every stage targets `staging`** — syncs its worktree to `staging` and `ff-only`-advances `staging`; **no stage writes `main`** | test:stagingPipeline.test.ts | CANON-8; ORCH-3 |
+| STAGING-3  | must     | The **promotion gate** is the *only* writer of `main`; it advances `main` to hold exactly the **evergreen path set** (`sources/`, … ), never the working set | test:staging.test.ts, stagingPipeline.test.ts | CANON-1,2 |
+| STAGING-4  | must     | Promotion is **copy-the-evergreen-paths** from `staging`, serialized through the shared writer lock, and **idempotent** (no-op when nothing evergreen changed) | test:staging.test.ts | CANON-2; ORCH-3 |
 | STAGING-5  | must     | **Decompose emits candidates** into the working `candidates/` path on `staging` and **writes no `entities/`** (CANON-4 / issue #21); `entities/` stays empty until CONNECT | none-yet | CANON-4,10; DECOMP-1 |
-| STAGING-6  | must     | `main` **never contains working paths** (`inbox/`, `candidates/`, `queue/`, `reviews/`) — by construction (never checked out), so Obsidian/`grep`/Query on `main` see only evergreen state | none-yet | CANON-1,2,8 |
+| STAGING-6  | must     | `main` **never contains working paths** (`inbox/`, `candidates/`, `queue/`, `reviews/`) — by construction (never checked out), so Obsidian/`grep`/Query on `main` see only evergreen state | test:stagingPipeline.test.ts | CANON-1,2,8 |
 | STAGING-7  | must     | App **working-state reads** (the Review queue, candidates) come from **`staging`**; **evergreen reads** (Obsidian/Query) from **`main`** | none-yet | CANON-9; REVIEW-11 |
-| STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | none-yet | ORCH-13 |
+| STAGING-8  | must     | Promotion + stage advances are **restartable / crash-safe**: branch state is the source of truth; a re-run re-promotes idempotently without duplicating `main` history divergently | test:staging.test.ts | ORCH-13 |
 | STAGING-9  | should   | A **periodic sweep** re-runs promotion as a backstop (recovers a missed post-drain promotion), mirroring ORCH-15 | none-yet | ORCH-15 |
 
 ## 7. Sequencing (honest — this is multi-step)
@@ -153,3 +153,16 @@ The full conformance is large; this spec is built in slices, each green + shippa
   guardrail (no `entities/` writes) and that the app reads working state from `staging`,
   evergreen from `main`. Sequenced into slices (infra+archivist → Decompose guardrail →
   Claims+app-reads → CONNECT). Leaves resolution (SPEC-0020) untouched.
+- 2026-06-01 — **staging infra implemented** (PR pending). The whole pipeline now runs on a
+  persistent `staging` worktree (`app/src/kb/stagingWorktree.ts`); the stages are root-agnostic,
+  so handing them that worktree makes their existing queue/marker/ff-advance logic operate on
+  `staging` with **no per-stage change**. The archivist's new `afterDrain` hook runs the
+  promotion gate (`promote`) to publish `sources/` → `main`; `pipeline.ts` wires all stages +
+  reviews onto `staging`. Integration test (`stagingPipeline.test.ts`) proves it end-to-end:
+  capture+archive promote sources to `main`, Decompose's entities stay on `staging` only,
+  `main` never holds working state. Graduated STAGING-1/2/3/4/6/8 → `test:`. **Deferred to
+  follow-ups:** STAGING-5 (Decompose→candidates guardrail — entities still ULID-named on
+  `staging`, just no longer on `main`; the candidate refactor is Connect's input, next slice),
+  STAGING-7 (review reads ARE wired to `staging` in `pipeline.ts` but e2e-verified, not
+  unit-tested — DOM/IPC glue, per TEST-9), STAGING-9 (sweep). All existing stage tests stayed
+  green unchanged (root-agnostic), confirming the localized blast radius.
