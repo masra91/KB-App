@@ -575,16 +575,30 @@ export class ConnectStage {
   private readonly decider: ConnectDecider;
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
+  private readonly afterDrain?: () => Promise<void>;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
 
-  constructor(root: string, decider: ConnectDecider = makeConnectDecider(), lock: Mutex = new Mutex(), maxAttempts: number = DEFAULT_MAX_ATTEMPTS) {
+  /**
+   * @param afterDrain optional hook run (serialized under the shared lock) after a drain that
+   *   resolved ≥1 block. The pipeline passes the promotion gate here so newly-resolved evergreen
+   *   `entities/` are published `staging`→`main` (STAGING-3/11) — otherwise resolved nodes would
+   *   sit on `staging`, invisible to Obsidian/`main`. Mirrors the Orchestrator's `afterDrain`.
+   */
+  constructor(
+    root: string,
+    decider: ConnectDecider = makeConnectDecider(),
+    lock: Mutex = new Mutex(),
+    maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
+    afterDrain?: () => Promise<void>,
+  ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
+    this.afterDrain = afterDrain;
   }
 
   start(sweepMs = 30_000): void {
@@ -625,14 +639,20 @@ export class ConnectStage {
 
   private async drainOnce(): Promise<void> {
     let queue = await readConnectQueue(this.root, this.maxAttempts);
+    let worked = false;
     while (queue.length > 0) {
       const key = queue[0].blockKey;
       try {
         await this.lock.run(() => connectOne(this.root, key, this.decider, this.maxAttempts));
+        worked = true;
       } catch {
         return; // unexpected — stop this pass; a later poke/sweep retries rather than spinning
       }
       queue = await readConnectQueue(this.root, this.maxAttempts);
     }
+    // Publish the now-resolved evergreen entities (+ repointed claims) staging→main (STAGING-3/11),
+    // serialized under the shared lock so promotion never races a stage ref advance. Gated on
+    // `worked` so idle sweeps don't churn the gate; promotion is idempotent regardless.
+    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!());
   }
 }

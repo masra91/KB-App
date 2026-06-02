@@ -49,17 +49,24 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
 
   const stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
   const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
-  // After each archive drain, promote freshly-archived sources staging→main (SPEC-0021).
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, async () => {
+  // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
+  // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
+  // (archive→sources; connect→entities), so `main` tracks the resolved graph.
+  const promoteEvergreen = async (): Promise<void> => {
     await promote(vaultPath);
-  });
+  };
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen);
   // The four stages all run on the staging worktree (root-agnostic) and serialize their
   // canonical advances through the one shared lock (§5). Pipeline order is
   // Decompose→Connect→Claims (SPEC-0020 reorder): Decompose emits candidates, Connect resolves
   // them into evergreen `entities/`, Claims attaches to the resolved graph. They drain
-  // independently; the lock keeps their staging ff-advances from racing.
+  // independently; the lock keeps their staging ff-advances from racing. Connect carries the
+  // promotion gate as its afterDrain so resolved entities become visible on `main` (the
+  // archivist already promotes sources/). Claims' promote-after-drain lands with the
+  // Connect→Claims provenance fix (claims-after-Connect slice) — until then Claims has no
+  // resolvable work on Connect-produced nodes.
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock);
-  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock);
+  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen);
   const claims = new ClaimsStage(stagingWt, makeClaimsDecider(), lock);
   orch.start();
   decompose.start();
