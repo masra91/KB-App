@@ -327,7 +327,13 @@ export async function claimsOne(
           'utf8',
         );
         claimIds.push(id);
-        backlinks.push({ claimPath: rel, statement: claim.statement, status: claim.status, confidence: claim.confidence });
+        backlinks.push({
+          claimPath: rel,
+          statement: claim.statement,
+          status: claim.status,
+          confidence: claim.confidence,
+          source: ref.derivedFrom, // VAULT-13: navigable source citation in the entity's claims block
+        });
       }
 
       // Regenerate the entity node's delimited claims block (CLAIMS-9): canonical data lives in
