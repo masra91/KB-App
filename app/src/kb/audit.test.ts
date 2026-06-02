@@ -165,7 +165,10 @@ describe('AUDIT_COVERAGE — the coverage gate (AUDIT-2/11)', () => {
       const mod = f.replace(/\.ts$/, '');
       if (MODEL_MODULES.has(mod)) continue;
       const src = await fs.readFile(path.join(kbDir, f), 'utf8');
-      const appends = /append(File|Audit)\s*\(/.test(src);
+      // Detect appends broadly (QA-2 follow-up): appendFile/appendAudit, an append-flagged
+      // writeFile (`{flag:'a'}`), OR a createWriteStream — so an emitter can't evade the gate by
+      // switching write API. Paired with an audit/journal path literal to stay specific.
+      const appends = /append(File|Audit)\s*\(/.test(src) || /flags?\s*:\s*['"]a/.test(src) || /createWriteStream\s*\(/.test(src);
       const auditPath = /(audit|journal)\.jsonl/.test(src);
       if (appends && auditPath) emitters.push(mod);
     }
