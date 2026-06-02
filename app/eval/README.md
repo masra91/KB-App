@@ -40,16 +40,46 @@ The headline is the dogfood case: a 2-sentence bio that pre-DECOMP-17 yielded ~6
 computer programmer" promoted to its own `concept` node) should now yield ≤3 nodes, with the
 descriptor recorded as a *claim*, not a node.
 
+## Output-quality dogfood (end-to-end) — `enrichE2eDogfood.eval.ts`
+
+A full **live** `capture→archive→decompose→connect→claims(→recall)` pass that judges the
+*user-facing output* (not plumbing), complementing the deterministic granularity eval above. It
+**logs** the actual entities + claims + link blocks + recall answer so a human judges quality; the
+assertions are gross-failure floors only (it's LLM-judged + non-deterministic).
+
+```sh
+cd app
+KB_EVAL=1 npx vitest run --config eval/vitest.config.ts eval/enrichE2eDogfood.eval.ts
+# one case at a time (each is a slow live run):
+KB_EVAL=1 npx vitest run --config eval/vitest.config.ts eval/enrichE2eDogfood.eval.ts -t "recall"
+```
+
+Cases + what to eyeball in the log:
+- **e2e quality** — entity granularity (DECOMP-17: people/orgs are nodes, descriptors are claims),
+  wikilinks (CONNECT-12: `relatesTo` → `[[links]]`), per-claim `Source:` citation (VAULT-13).
+- **CLAIMS-19 dedup** — a single source whose relational fact is restated per-entity; the log prints
+  any exact within-source restatement dupes remaining (the LLM usually phrases each subject
+  distinctly, so this mostly observes the *relational-residual* pattern — distinct-subject claims
+  the dedup intentionally keeps).
+- **recall** — a grounded, cited answer over the built KB (`grounded:true` + citations resolve).
+
+Findings of record (first run, 2026-06-02): granularity/wikilinks/citations/recall all **good**;
+one real gap — **multi-source claims** (a Connect-merged entity gets claims from `derivedFrom[0]`
+only → other sources' facts dropped), filed as an issue + mapped to SPEC-0016 §7. `resolveCopilotCliPath()`
+supplies the recall SDK's `cliPath` so it works on a stripped PATH (#160/#165).
+
 ## Files
 
 - `granularityFixtures.ts` — the golden set (reviewed by KB-QD; add precision-trap cases here).
-- `enrichQuality.eval.ts` — the opt-in runner (real decider × N runs → `enrichEval` scoring).
+- `enrichQuality.eval.ts` — the opt-in granularity runner (real decider × N runs → `enrichEval` scoring).
+- `enrichE2eDogfood.eval.ts` — the opt-in end-to-end output-quality dogfood (above).
 - `vitest.config.ts` — opts these files in (the main config excludes them).
 - Scoring logic + its unit tests live in `src/kb/enrichEval.ts` / `enrichEval.test.ts`.
 
 ## Follow-up
 
-This covers **DECOMP-17** granularity. A **CLAIMS-19** dedup eval (assert the LLM's restated-per-
-entity claims collapse to the expected within-source count end-to-end) is a tracked follow-up;
-CLAIMS-19 already has a deterministic unit + Connect-drain integration test, so its behavioral gap
-is smaller than granularity's.
+Granularity (**DECOMP-17**) + the e2e dogfood now cover the headline axes. **CLAIMS-19** within-source
+dedup is hard to stress behaviorally (the LLM rarely emits verbatim within-source dupes) — its
+deterministic unit (`claimDedup.test.ts`) + Connect-drain integration test remain the real gate. The
+**multi-source-claims** gap (SPEC-0016 §7 "Entity-driven unit after Connect") is the open correctness
+item the dogfood surfaced; its fix is gated on the Principal's per-(entity×source) decision.
