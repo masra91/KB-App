@@ -14,7 +14,7 @@ const STAGE_LABELS: Record<string, string> = {
   decompose: 'Decompose',
   connect: 'Linking',
   claims: 'Claim extraction',
-  panel: 'Review', // per KB-PM ruling (the Control-Panel config actor)
+  panel: 'Control Panel', // the Control-Panel config actor — NOT "Review" (would collide with the Reviews needs-you queue; QA-2 + DEV-4 flagged)
   output: 'Saved answer',
   reflect: 'Reflect',
   recall: 'Recall',

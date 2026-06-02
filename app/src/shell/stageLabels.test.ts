@@ -9,7 +9,7 @@ describe('stageDisplayName (#4, display-only)', () => {
     expect(stageDisplayName('connect')).toBe('Linking');
     expect(stageDisplayName('archivist')).toBe('Archiving');
     expect(stageDisplayName('decompose')).toBe('Decompose');
-    expect(stageDisplayName('panel')).toBe('Review');
+    expect(stageDisplayName('panel')).toBe('Control Panel'); // not "Review" — avoids the Reviews-queue collision
   });
 
   it('falls back to a Title-cased label for an unknown id (acceptable until added)', () => {

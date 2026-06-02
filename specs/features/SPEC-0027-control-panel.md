@@ -202,7 +202,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   friendly/relative "2 min ago" / short date, replacing raw ISO everywhere it showed — Status, Activity,
   Researchers last-run) and `shell/stageLabels.ts` (`stageDisplayName` → readable stage/actor names:
   claims→"Claim extraction", connect→"Linking", archivist→"Archiving", decompose→"Decompose",
-  panel→"Review"; raw id kept in a `title`). Plus: Settings dropped the `(SPEC-0030)` id + "Dev-log"→
+  panel→"Control Panel"; raw id kept in a `title`). Plus: Settings dropped the `(SPEC-0030)` id + "Dev-log"→
   "Diagnostic detail" + "egress payloads"→"data sent to external services"; **Recall References**
   (SPEC-0026) lead with the human label + capitalized kind, raw vault path demoted to a tooltip (the
   deep-link still uses the canonical `ref` via the index); Researchers "Egress"→"Data reach" (config
