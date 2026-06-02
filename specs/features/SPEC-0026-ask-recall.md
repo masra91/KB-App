@@ -75,7 +75,7 @@ a larger budget than a stage) equipped with:
 | ASK-3   | must     | Recall is **read-only w.r.t. sources/entities/claims** — it MUST NOT mutate the ontology; its only write is an optional **Output** | test:app/src/kb/recall.test.ts | DATA-1; AUTO-6 |
 | ASK-4   | must     | Answers are produced by a **structure-aware agent** with a recall **skill** (KB layout + metadata/tags/properties + wikilink/provenance) and **tools** (structured KB queries, grep, optional Obsidian CLI), choosing among them per question — **not blind text-search** | test:app/src/kb/recallAgent.test.ts | ORCH-5,7,9; META-1 |
 | ASK-5   | must     | Retrieval is **multi-hop, entity/metadata-aware** — traverses entities → claims → `[[wikilinks]]`, filters by tags/properties, exploiting KB structure | test:app/src/kb/recallTools.test.ts | CONNECT-3; META-1,3 |
-| ASK-6   | must     | The Principal can **save an answer as an Output** — persisted under `outputs/`, **tagged as synthesis** with provenance to its evidence, promoted to `main` | none-yet | DATA-4; STAGING-3 |
+| ASK-6   | must     | The Principal can **save an answer as an Output** — persisted under `outputs/`, **tagged as synthesis** with provenance to its evidence, promoted to `main` | test:app/src/kb/outputDoc.test.ts, app/src/shell/views/askView.test.ts | DATA-4; STAGING-3 |
 | ASK-7   | must     | Every substantive assertion **cites its evidence**; the agent MUST NOT present ungrounded claims as fact, and **distinguishes KB-grounded from inferred** | test:app/src/kb/recall.test.ts | PRIN-2; VISION-9 |
 | ASK-8   | should   | Recall is **conversational / multi-turn** — follow-ups refine within a session (the Ask/Chat surface) | test:app/src/shell/views/askView.test.ts | VISION-9; SHELL |
 | ASK-9   | should   | **Obsidian CLI acceleration** is capability-detected and **never required** — core recall stays **headless** and works with Obsidian absent (optional viewer) | none-yet | STACK; PRIN-5 |
@@ -145,14 +145,21 @@ behind it substrate-agnostic and unit-testable.
 
 ## 7. Open questions
 
-- [ ] **Output template** — the saved report's markdown structure, sections, and how citations
-      render (`[[wikilinks]]` / block-quotes / footnotes).
-- [ ] **Grounding vs. reasoning** — how far the agent may reason beyond the KB, and how it
-      **labels** inferred-vs-grounded content (ASK-7).
+- [x] **Output template (F6)** — resolved (KB-PM, slice 3): `outputs/recall/<ulid>.md` with
+      frontmatter (`type:output`, `kind:recall-answer`, `id`, `created`, `question`, `grounded`,
+      `generated:recall`) + title + grounded banner + the answer (inline `[n]` markers kept) + an
+      **Evidence** section rendering **cited entities as `[[wikilinks]]`** (threading the report back
+      into the graph) and claims/sources as path refs. No footnotes/over-spec.
+- [x] **Grounding vs. reasoning labeling (F4)** — resolved (KB-PM, slice 3): **whole-answer** label
+      (`grounded:true|false` frontmatter + a header banner) is enough for v1; the answer's inline
+      `[n]` markers already show grounded claims. Finer inline inferred-vs-grounded marking **deferred**
+      (bigger convention). Saving an **ungrounded** answer is **allowed**, with a prominent
+      "⚠️ Not grounded — inferred" banner (honesty preserved by the label; blocking it would be paternalistic).
 - [x] **Retrieval budget** — resolved (F3, slice 1): a configurable tool-call cap (default 12) +
       step bound (10); exhaustion → answer-now + `truncated` flag.
-- [~] **Does a saved Output get re-enriched?** — slice-1 stance: **inert** (F2; in `outputs/`, not
-      `sources/`, so stages skip it). KB-Lead confirming; revisit at slice 3.
+- [x] **Does a saved Output get re-enriched? (F2)** — resolved: **inert.** It lives in `outputs/`
+      (not `sources/`) and carries `generated:recall`, so the autonomous stages (which queue off
+      `sources/`) never re-enrich it. Re-enrichment remains deferred (no consumer needs it).
 - [x] **Structured-tool surface** — resolved (slice 1): `entityLookup`, `claimsForEntity`,
       `linkTraversal`, `readNode`, `readSource`, `grep` (all read-only); tag/property + Obsidian
       capability-gated until SPEC-0025/ASK-9 land.
@@ -204,3 +211,14 @@ behind it substrate-agnostic and unit-testable.
   Graduated **ASK-1** (end-to-end surface), **ASK-2**, **ASK-8** `none-yet → test:`. Streaming deferred
   (request/response; tracked follow-up). 349 tests green; src/kb coverage gate passes. Broadening the
   unit-coverage gate to the now-open component tier is a follow-up once more views carry tests.
+- 2026-06-02 — **slice 3 (save-as-Output) landed.** A "Save as report" action on a recall answer
+  persists it as an inert KB Output: `outputDoc.ts` builds `outputs/recall/<ulid>.md` (F6 template —
+  frontmatter + grounded banner + answer + an Evidence section rendering cited **entities as
+  `[[wikilinks]]`**, claims/sources as refs); `pipeline.saveRecallOutput` writes it on `staging`,
+  commits + `promote()`s to `main` under the canonical-writer lock (evergreen gate), and emits a
+  conforming **`output`** audit event (AUDIT-2/11 — new actor in `kb/audit.ts`); `kb:saveRecallOutput`
+  IPC + the askView "Save as report" button (saved state sticks per turn). **F2 inert** (in `outputs/`
+  + `generated:recall` → stages skip it), **F4** whole-answer grounded label + ungrounded saves
+  allowed with a banner, **F6** template — all resolved by KB-PM. Graduated **ASK-6** `none-yet →
+  test:` (`outputDoc.test.ts` doc builder; `askView.test.ts` save flow incl. failure + ungrounded).
+  ASK-9/10 remain slice 4.

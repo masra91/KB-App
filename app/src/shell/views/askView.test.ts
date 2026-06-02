@@ -114,3 +114,56 @@ describe('Ask view (SPEC-0026 ASK-1/2/8)', () => {
     expect(ask).not.toHaveBeenCalled();
   });
 });
+
+describe('Ask view · save-as-Output (SPEC-0026 ASK-6)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+
+  function setApi(ask: KbApi['ask'], saveRecallOutput: KbApi['saveRecallOutput']): void {
+    (window as unknown as { kbApi: Pick<KbApi, 'ask' | 'saveRecallOutput'> }).kbApi = { ask, saveRecallOutput };
+  }
+  async function askOnce(): Promise<void> {
+    type(root, 'Who was Ada Lovelace?');
+    submit(root);
+    await tick();
+  }
+  const saveBtn = (): HTMLButtonElement | null => root.querySelector('.ask-save');
+
+  it('offers "Save as report" on an answered turn and persists it on click (ASK-6)', async () => {
+    const save = vi.fn(async () => ({ ok: true, rel: 'outputs/recall/OUT1.md', message: 'Saved to outputs/recall/OUT1.md' }));
+    setApi(vi.fn(async () => GROUNDED), save);
+    mountAsk(root);
+    await askOnce();
+
+    expect(saveBtn()).toBeTruthy();
+    saveBtn()!.click();
+    await tick();
+
+    expect(save).toHaveBeenCalledWith(GROUNDED); // the rendered AskResult is what gets saved
+    expect(root.querySelector('.ask-save-row')?.textContent).toContain('Saved as Output');
+    expect(root.querySelector('.ask-save-row code')?.textContent).toBe('outputs/recall/OUT1.md');
+    expect(saveBtn()).toBeNull(); // button replaced by the saved confirmation
+  });
+
+  it('surfaces a save failure inline and keeps the button (retryable)', async () => {
+    const save = vi.fn(async () => ({ ok: false, message: 'No active knowledge base.' }));
+    setApi(vi.fn(async () => GROUNDED), save);
+    mountAsk(root);
+    await askOnce();
+    saveBtn()!.click();
+    await tick();
+    expect(root.querySelector('.ask-save-status')?.textContent).toContain('No active knowledge base.');
+    expect(saveBtn()).toBeTruthy(); // still offered
+  });
+
+  it('allows saving an UNGROUNDED answer too (F4 — honesty preserved by the banner)', async () => {
+    const ungrounded: AskResult = { ...GROUNDED, grounded: false, citations: [] };
+    setApi(vi.fn(async () => ungrounded), vi.fn(async () => ({ ok: true, rel: 'outputs/recall/U.md', message: 'ok' })));
+    mountAsk(root);
+    await askOnce();
+    expect(saveBtn()).toBeTruthy(); // save offered even when not grounded
+  });
+});

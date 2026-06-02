@@ -142,6 +142,13 @@ export interface AskRequest {
   history?: RecallTurn[];
 }
 
+/** Result of saving a recall answer as a KB Output (ASK-6). `rel` is the Output's repo path on success. */
+export interface SaveRecallOutputResult {
+  ok: boolean;
+  rel?: string;
+  message: string;
+}
+
 // --- Control Panel · Jobs (SPEC-0027 PANEL-2; over the SPEC-0023 registry) ---
 
 /** Last-run summary for a job, derived from its run-state journal (JOBS-7/8) for display. */
@@ -256,6 +263,8 @@ export interface KbApi {
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   fullReplay(): Promise<FullReplayResult>;
   ask(req: AskRequest): Promise<AskResult>;
+  // SPEC-0026 ASK-6: save a grounded recall answer as a KB Output.
+  saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult>;
   // Control Panel · Jobs (SPEC-0027 PANEL-2)
   listJobs(): Promise<JobView[]>;
   setJobConfig(patch: JobConfigPatch): Promise<JobView[]>;

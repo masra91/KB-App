@@ -10,6 +10,7 @@
 //
 // All stages share ONE canonical-writer lock per vault (SPEC-0014 §5): promotion + every stage
 // ref-advance serialize through it.
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import simpleGit from 'simple-git';
 import { Orchestrator } from '../kb/orchestrator';
@@ -47,10 +48,12 @@ import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
+import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
 import type { AuditEvent } from '../kb/audit';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult } from '../kb/types';
+import type { AskResult } from '../kb/recall';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
@@ -204,6 +207,42 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
     if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath));
   }
   return result;
+}
+
+/**
+ * Save a grounded recall answer as a KB Output (SPEC-0026 ASK-6). Writes `outputs/recall/<ulid>.md`
+ * on the `staging` worktree, commits + promotes to `main` under the canonical-writer lock (the
+ * evergreen gate — never the vault root directly), then emits a conforming `output` audit event
+ * (AUDIT-2/11 — a Principal-initiated mutation). The Output is **inert** (F2): it lives in `outputs/`
+ * with `generated: recall`, so the autonomous stages (which queue off `sources/`) never re-enrich it.
+ * An ungrounded answer is allowed (F4) — the doc carries `grounded:false` + a prominent banner.
+ */
+export async function saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult> {
+  const a = active;
+  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  if (typeof result?.answer !== 'string' || result.answer.trim().length === 0) {
+    return { ok: false, message: 'Nothing to save — the answer is empty.' };
+  }
+  const root = a.stagingWt;
+  const id = ulid();
+  const built = buildRecallOutput(result, id, new Date().toISOString());
+  await a.lock.run(async () => {
+    const abs = path.join(root, built.rel);
+    await fs.mkdir(path.dirname(abs), { recursive: true });
+    await fs.writeFile(abs, built.markdown, 'utf8');
+    const git = simpleGit(root);
+    await git.add(built.rel);
+    await git.commit(`recall: save output ${id}`);
+    await promote(a.vaultPath); // mirror the new outputs/ note to main (evergreen, deletion-aware gate)
+  });
+  // Conforming audit — appends to the gitignored cross-cutting control log (not canonical); fine off-lock.
+  await appendAuditEvent(root, {
+    actor: 'output',
+    eventType: 'recall-output-saved',
+    subjects: {},
+    payload: { rel: built.rel, question: result.question, grounded: result.grounded, citations: result.citations.length, why: 'Principal saved a recall answer' },
+  });
+  return { ok: true, rel: built.rel, message: `Saved to ${built.rel}` };
 }
 
 // --- Control Panel · Jobs (SPEC-0027 PANEL-2/6/7) — read/manage the per-vault job registry ---

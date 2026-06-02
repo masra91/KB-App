@@ -13,6 +13,7 @@ const kbApi: KbApi = {
   answerReview: (req) => ipcRenderer.invoke('kb:answerReview', req),
   fullReplay: () => ipcRenderer.invoke('kb:fullReplay'),
   ask: (req) => ipcRenderer.invoke('kb:ask', req),
+  saveRecallOutput: (result) => ipcRenderer.invoke('kb:saveRecallOutput', result),
   listJobs: () => ipcRenderer.invoke('kb:listJobs'),
   setJobConfig: (patch) => ipcRenderer.invoke('kb:setJobConfig', patch),
   runJobNow: (id) => ipcRenderer.invoke('kb:runJobNow', id),
