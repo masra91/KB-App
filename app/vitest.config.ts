@@ -9,6 +9,11 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
     exclude: ['e2e/**', 'node_modules/**', '.vite/**', 'dist/**', 'out/**'],
+    // The domain suite is heavy on real FS + git + worktrees (TEST-18). Individual ops are fast,
+    // but under full-suite parallelism they can spike past Vitest's 5s default → flaky timeouts.
+    // Give the integration tests headroom (they still run in ~1–4s normally).
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
     coverage: {
       provider: 'v8',
       // TEST-12 / ENG-10: gate coverage on the shell-agnostic domain/core only.
