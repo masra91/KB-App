@@ -25,15 +25,18 @@ import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReview
 import { runFullReplay } from '../kb/replay';
 import { JobScheduler } from '../kb/jobScheduler';
 import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
+import { makeReflectJobBehavior, REFLECT_JOB_TYPE } from '../kb/reflectJob';
+import { makeReflectDecider } from '../kb/reflectAgent';
 import type { JobBehavior } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
 import type { FullReplayResult } from '../kb/types';
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
- *  example job; `reflect` (SPEC-0024) and later job types register here as they land. An unknown
- *  type returns null and the scheduler skips it. */
+ *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
+ *  they land. An unknown type returns null and the scheduler skips it. */
 function resolveJobBehavior(type: string): JobBehavior | null {
   if (type === EXAMPLE_JOB_TYPE) return exampleJobBehavior;
+  if (type === REFLECT_JOB_TYPE) return makeReflectJobBehavior(makeReflectDecider());
   return null;
 }
 
