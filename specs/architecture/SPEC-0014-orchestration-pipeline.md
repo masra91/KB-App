@@ -118,6 +118,7 @@ Three layers; only one has a brain.
 | ORCH-22  | should   | Adopt the **Copilot SDK where its capabilities are load-bearing** (multi-turn sessions, agent-invoked tools/MCP, streaming) — Ask/Recall first, Research next, Connect/Reflect opportunistically; **thin single-shot stages stay on the CLI** until the SDK is **GA** and/or **concurrency-overhead evidence** (ORCH-20) justifies the server model. **Pin + age** the SDK per E1 (ENG-2,4,7) | none-yet | ORCH-20; ENG-2,4,7 |
 | ORCH-23  | must     | A **process-wide copilot-concurrency ceiling** bounds the TOTAL in-flight `copilot` subprocesses spawned by **background** work, independent of per-stage caps (ORCH-20). Every **background** spawner — all stages, jobs/Reflect, and the live researcher runner (background + fan-out-capable = the multiplicative vector) — acquires from one shared semaphore (`withCopilotSlot`). **Interactive recall is EXEMPT by design** (single-flight, ≤1 concurrent, interactive priority — a user's Ask must never queue behind autonomous background work; bounded +1 overage is acceptable). This is the safety bound that makes raising per-stage caps safe (cap×stages can't multiply into unbounded subprocesses → rate-limit / CPU blowup). Ceiling cores-aware, env-overridable; a per-Instance cap/ceiling setting is **low priority** — a live A/B measured cap=3 at only ~1.72× (copilot itself is the concurrency bottleneck, not the ceiling), so the knob has limited headroom (see changelog). *Revisit recall's exemption if it ever becomes multi-flight/batch.* | test:src/kb/copilotConcurrency.test.ts | ORCH-20; PRIN-16; STACK-9 |
 | ORCH-24  | must     | The **ephemeral-worktree lifecycle is leak-proof + self-healing** (ORCH-20). Every per-item `<stage>-<ULID>` worktree is torn down on success AND failure — a failed `worktree remove` falls back to a **raw dir delete** so an ephemeral worktree can never accumulate (a leaked dir is what `worktree prune` cannot reap, and each later `worktree add` pays an O(leaked-branches) sweep, so leaks compound into a pipeline/UI stall). At a **quiescent point** (boot / staging provision, where no item is in flight) leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches are **reaped** (the persistent `staging` + `job-<id>` worktrees are never touched). Worktree-lifecycle + status-enumeration git calls are **time-bounded** so a broken/degraded staging can never hang the pipeline or a read-only status/jobs read. (A crash or kill mid-item must not leave staging in a state that wedges later work — the #135 poison-loop cascade.) | test:canonicalAdvance.test.ts | ORCH-12,20; OBS-7 |
+| ORCH-25  | must     | Every git op executed **under the canonical-writer lock** — the ff-advance/replay, the promotion gate, and **every** in-section stage/control-plane commit — is **time-bounded** (`boundedGit`): a blocked op (a stuck `index.lock`, a credential/editor prompt, a stalled fetch, a hung hook) **throws → the section's `finally` releases the lock → the watchdog (OBS-7) surfaces it**, never a silent permanent wedge that stalls the whole pipeline (the #163 deadlock). Distinct from ORCH-24 (off-lock worktree/status git): ORCH-25 is the **under-lock writers**, whose hang would hold the one serialized writer forever | test:src/kb/boundedCanonicalGit.test.ts | ORCH-18; OBS-7 |
 
 ### ORCH-3 — The canonical vault is always clean
 - **Status:** draft · **Priority:** must
@@ -168,6 +169,25 @@ Three layers; only one has a brain.
 - **Traces:** DATA-10, LIFE-9, PRIN-5
 - **Verify:** test:src/kb/copilotAgent.test.ts
 
+### ORCH-25 — Canonical-writer git is time-bounded (no silent wedge)
+- **Status:** draft · **Priority:** must
+- **Statement:** Every git operation executed **inside** the canonical-writer lock's critical
+  section — the ff-advance/replay (`advanceOrCollide`), the promotion gate (`promote`), and every
+  in-section stage or control-plane commit (`linkOne`, `dedupClaimsOnce`, `captureToInbox`,
+  `normalizeInbox`, `purgeResetPromote`, the recall-output + Control-Panel commits) — **MUST** run
+  through a **time-bounded** git client (`boundedGit`). A blocked op (a stuck `.git/index.lock`, a
+  credential/editor prompt, a stalled fetch, a hung hook) **MUST** throw so the section's `finally`
+  **releases the lock**, rather than holding the single serialized writer forever and silently
+  wedging the whole pipeline.
+- **Rationale:** #163 — the lock serializes *every* canonical write, so one unbounded, blocked git
+  op there is a whole-pipeline silent deadlock (the UI reads "Running" while nothing advances).
+  Bounding converts it into a thrown error the OBS-7 watchdog names + surfaces. (Re-entrancy was
+  ruled out by a full lock-safety audit; the real mechanism was unbounded in-section git.) Distinct
+  from ORCH-24, which bounds the **off-lock** worktree-lifecycle/status git (a hang there stalls one
+  item's setup, not the shared lock).
+- **Traces:** ORCH-18, OBS-7
+- **Verify:** test:src/kb/boundedCanonicalGit.test.ts (advance + promote, #176); test:src/kb/boundedGitUnderLock.test.ts (autonomous + control-plane writers, #182); test:src/kb/stageLock.test.ts (the OBS-7 stuck-section watchdog that surfaces a hung hold, #170)
+
 ## 5. Open questions
 
 - [x] **Poke delivery** — resolved: **event poke + periodic sweep** (ORCH-15). Poke for
@@ -200,6 +220,19 @@ Three layers; only one has a brain.
 
 ## 6. Changelog
 
+- 2026-06-02 — **#163: canonical-writer git made time-bounded — the CURE (ORCH-25; #176/#182).** Sibling
+  to the watchdog entry below: the watchdog (#170) made the wedge *loud*; this makes it *impossible*.
+  A full lock-safety audit ruled out re-entrancy (no nested `lock.run` anywhere) and found the real
+  mechanism — git ops run **under** the lock via **raw, unbounded `simpleGit`**, so one blocked op
+  (a stuck `index.lock`, credential/editor prompt, stalled fetch, hung hook) holds the single
+  serialized writer **forever, silently**. Fix: route **every** under-lock git op through `boundedGit`
+  (simple-git `block` timeout) so a hang **throws → `finally` releases the lock → the watchdog
+  surfaces it**. #176 bound the hot path (`advanceOrCollide` + `promote` — the observed wedge); #182
+  closed the class (`linkOne`, `dedupClaimsOnce`, `captureToInbox`, `normalizeInbox`,
+  `purgeResetPromote`, recall-output + Control-Panel commits). Pinned as **ORCH-25**, Verify = the
+  boundedGit class tests (real fn under `lock.run` vs a blocking commit hook → rejects + lock frees,
+  fails-before/passes-after). The **off-lock** prepare/worktree-setup handles stay unbounded by design
+  (a hang there stalls one item's setup, not the lock) — lower-severity future hardening, not chased.
 - 2026-06-02 — **#163: canonical-writer lock made self-surfacing (no silent wedge).** The §5 `Mutex`
   is the pipeline's most dangerous wedge point — a critical section that never settles (a re-entrant
   `lock.run` self-deadlock, or any hung await) blocks every future canonical write while the pipeline
