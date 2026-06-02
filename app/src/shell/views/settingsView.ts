@@ -3,6 +3,7 @@
 // Principal-initiated "clean & rebuild" of the KB. Editing config (e.g. switching the KB) is
 // deferred (SHELL-8/10).
 import { esc } from '../html';
+import { withTimeout, renderLoadError } from '../loadGuard';
 import type { InstanceSettings } from '../../kb/types';
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
@@ -14,9 +15,10 @@ const REPLAY_CONFIRM =
 export async function mountSettings(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="card"><h1>⚙️ Settings</h1><p class="muted">Loading…</p></div>`;
 
-  // Settings must never error the shell. Any IPC failure degrades to a friendly message.
+  // Settings must never error the shell. Any IPC failure (incl. a #145 hang — withTimeout bounds
+  // every await below) degrades to a friendly, retryable message.
   try {
-    const state = await window.kbApi.getState();
+    const state = await withTimeout(window.kbApi.getState());
     const name = state.vaultConfig?.name ?? '—';
     const vaultPath = state.activeVaultPath;
 
@@ -24,7 +26,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     let copilotLine = '<li class="muted">Copilot — status unavailable</li>';
     if (vaultPath) {
       try {
-        const ins = await window.kbApi.inspect(vaultPath);
+        const ins = await withTimeout(window.kbApi.inspect(vaultPath));
         const mark = ins.copilot.available ? '✅' : '⚠️';
         copilotLine = `<li>${mark} Copilot — <span class="muted">${esc(ins.copilot.detail)}</span></li>`;
       } catch {
@@ -37,7 +39,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     // sends the full settings (the IPC contract takes the whole object) without clobbering the other.
     const settings: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info' };
     try {
-      Object.assign(settings, await window.kbApi.getInstanceSettings());
+      Object.assign(settings, await withTimeout(window.kbApi.getInstanceSettings()));
     } catch {
       // Leave the safe defaults.
     }
@@ -96,11 +98,8 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     wireVerbosity(container, settings);
     wireReplay(container);
   } catch {
-    container.innerHTML = `
-      <div class="card">
-        <h1>⚙️ Settings</h1>
-        <p class="error">Could not load settings right now.</p>
-      </div>`;
+    // #145: failed/timed-out load → a retryable error, never an infinite spinner.
+    renderLoadError(container, '<h1>⚙️ Settings</h1>', () => void mountSettings(container));
   }
 }
 
