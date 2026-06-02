@@ -272,10 +272,11 @@ export interface ResearcherConfigPatch {
 }
 
 /** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;
- *  `ran:true` + `failed` means the pass ERRORED (e.g. packaged-app can't spawn copilot, #160) — a
- *  failure the UI surfaces distinctly from a legit "no new finding" (failed ≠ empty). */
+ *  `ran:true` + `failed` means the pass ERRORED (e.g. packaged-app can't spawn copilot, #160); `ran:true`
+ *  + `ceilingReached` means it was paused by the per-Instance rate-limit (RESEARCH-11) — both distinct
+ *  from a legit "no new finding" (failed/blocked ≠ empty). */
 export type RunResearcherResult =
-  | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string }
+  | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string; ceilingReached?: boolean }
   | { ran: false; reason: 'not-found' | 'no-kb' };
 
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
