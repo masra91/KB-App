@@ -127,6 +127,16 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **SPEC-0032 §9 dep: in-flight item roster on the view-model (VIZ-2).** The
+  `PipelineStatusView` gains `inFlight: InFlightItem[]` — every queued item as a "carriage" at its
+  stage, `active` marking the draining batch. Pure `buildInFlightRoster` computes `active = busy &&
+  index < cap` (the drain processes `queue[0..cap)`) — **no surgery on the load-bearing drain
+  concurrency**; each drain stage just gained a tiny `currentSince()` timestamp for the active
+  carriage's dwell (`sinceTs` precise-for-active, omitted-for-queued per DEV-4). Gathered in
+  `pipeline.ts` (archive: `processing` + inbox, cap 1; connect cap 1; decompose/claims cap STAGE_CAP).
+  Third + final §9 data field (after STAGE_ORDER #168 + conversion counts #169); the `kb:pipelineEvent`
+  push is the remaining VIZ §9 piece. Tested: `buildInFlightRoster` (active batch + sinceTs, idle, name
+  fallback, multi-stage) + the stage `currentSince` additions are covered by the existing stage suites.
 - 2026-06-02 — **#163: surface a STUCK write lock (OBS-7/11).** DEV-2's watchdog (#170) added
   `LockState.stuck`/`heldMs`; this renders them so the silent canonical-writer deadlock the watchdog
   catches is now **visible**: `lockHtml` shows "⚠️ Stuck — held by `<holder>` for `Ns`; the pipeline

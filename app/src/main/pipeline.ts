@@ -27,7 +27,7 @@ import { researchDepsOptions } from './researchWiring';
 import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
-import { assemblePipelineStatus, toSetAsideViews, deriveStageError, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { assemblePipelineStatus, toSetAsideViews, deriveStageError, buildInFlightRoster, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
 import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
 import { readConversionCounts } from '../kb/conversionCounts';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
@@ -63,6 +63,10 @@ import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
 import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
+
+/** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
+ *  Module-scoped so the Status roster (SPEC-0032 VIZ-2) can mark the active draining batch. */
+const STAGE_CAP = 3;
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
  *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
@@ -168,8 +172,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across all stages
   // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
   // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
-  // stays cap=1 until its ephemeral-worktree migration (Phase 2).
-  const STAGE_CAP = 3;
+  // stays cap=1 until its ephemeral-worktree migration (Phase 2). (STAGE_CAP is module-scoped.)
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
@@ -315,12 +318,26 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     { stage: 'claims', queueDepth: claimsQ.length, setAside: setAsideFor('claims'), busy: claims.busy(), hasError: hasErrorFor('claims') },
   ];
 
+  // SPEC-0032 VIZ-2: in-flight carriages — each stage's queue items, `active` = the draining batch
+  // (`busy && index < cap`; the drain processes `queue[0..cap)`). Archive's active item is its
+  // `processing` (prepended; cap=1); connect drains 1 block at a time (cap=1); decompose/claims = STAGE_CAP.
+  const inFlight = buildInFlightRoster([
+    {
+      stage: 'archive',
+      items: [...(archiveStatus.processing ? [{ id: archiveStatus.processing }] : []), ...archiveQ.map((id) => ({ id }))],
+      busy: orch.busy(), cap: 1, since: archiveStatus.updatedAt ?? null,
+    },
+    { stage: 'decompose', items: decompQ.map((id) => ({ id })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
+    { stage: 'connect', items: connectQ.map((cs) => ({ id: cs.blockKey })), busy: connect.busy(), cap: 1, since: connect.currentSince() },
+    { stage: 'claims', items: claimsQ.map((rel) => ({ id: path.basename(rel, '.md') })), busy: claims.busy(), cap: STAGE_CAP, since: claims.currentSince() },
+  ]);
+
   // Last activity: the newest of the archivist status, the spans-file mtime (any stage's last span),
   // and the newest dev-log entry — so a quietly-working pipeline isn't mistaken for stalled (OBS-11).
   const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
-  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, ...(lastActivity ? { lastActivity } : {}) });
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, inFlight, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /**

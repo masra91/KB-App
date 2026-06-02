@@ -960,6 +960,7 @@ export class ConnectStage {
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
+  private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
 
   /**
    * @param afterDrain optional hook run (serialized under the shared lock) after a drain that
@@ -1005,10 +1006,16 @@ export class ConnectStage {
     return this.draining;
   }
 
+  /** When the current drain began (ISO), or null when idle (SPEC-0032 VIZ-2 in-flight dwell). */
+  currentSince(): string | null {
+    return this.drainStartedAt;
+  }
+
   poke(): Promise<void> {
     this.pending = true;
     if (!this.draining) {
       this.draining = true;
+      this.drainStartedAt = new Date().toISOString();
       this.current = this.runDrains();
     }
     return this.current ?? Promise.resolve();
@@ -1022,6 +1029,7 @@ export class ConnectStage {
       }
     } finally {
       this.draining = false;
+      this.drainStartedAt = null;
       this.current = null;
     }
   }
