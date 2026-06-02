@@ -44,6 +44,9 @@ and a unique `key` here.
 | SPEC-0029 | AUDIT   | Audit & Activity (lineage + read-only views) | feature | draft | `features/` |
 | SPEC-0030 | OBS     | Pipeline Status & Diagnostics (status view + dev logs) | feature | draft | `features/` |
 | SPEC-0031 | VAULT   | Obsidian Vault Representation (the human view) | feature | draft | `features/` |
+| SPEC-0034 | MACOS   | macOS Signing, Entitlements & File Access (TCC-protected vaults) | architecture | draft | `architecture/` |
+
+<!-- SPEC-0032 (VIZ) + SPEC-0033 (DESIGN) are reserved by PR #156 (Visual Design stream); rows land on that merge. -->
 
 ## Reserved / planned (not yet written)
 
