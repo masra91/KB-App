@@ -16,6 +16,7 @@ interface ClaimRef {
   statement: string;
   status: string;
   confidence: number;
+  derivedFrom: string; // source dir (provenance) — for the VAULT-13 citation on regenerated rows
 }
 
 function parseClaim(md: string, rel: string): ClaimRef | null {
@@ -26,14 +27,27 @@ function parseClaim(md: string, rel: string): ClaimRef | null {
   let subject = '';
   let status = '';
   let confidence = 0;
+  let derivedFrom = '';
   for (const line of fm.split('\n')) {
     let m: RegExpMatchArray | null;
     if ((m = line.match(/^subject:\s*(.+)$/))) subject = m[1].trim().replace(/^"|"$/g, '');
     else if ((m = line.match(/^status:\s*(.+)$/))) status = m[1].trim();
     else if ((m = line.match(/^confidence:\s*(.+)$/))) confidence = Number(m[1].trim()) || 0;
+    else if ((m = line.match(/^\s+derivedFrom:\s*(\[.*\])\s*$/))) {
+      try {
+        const arr = JSON.parse(m[1]) as unknown[];
+        if (Array.isArray(arr) && arr.length > 0) derivedFrom = String(arr[0]);
+      } catch {
+        /* leave empty — citation simply omitted for this row */
+      }
+    }
   }
   if (!subject) return null;
-  return { rel, subject, statement: body, status, confidence };
+  // Statement = the body's FIRST line. A claim body may carry a trailing "Source: [[…]]" citation
+  // (VAULT-13) that is provenance, not the assertion — exclude it (parity with the recallTools /
+  // connectStage parsers fixed in #116; this was the third claim-body parser, latently affected).
+  const statement = body.split('\n', 1)[0]?.trim() ?? '';
+  return { rel, subject, statement, status, confidence, derivedFrom };
 }
 
 /** Every claim under `wtRoot/claims`, repo-relative. */
@@ -75,6 +89,7 @@ async function regenClaimsBlock(wtRoot: string, nodeRel: string, claims: ClaimRe
     statement: c.statement,
     status: c.status as ClaimBacklink['status'],
     confidence: c.confidence,
+    source: c.derivedFrom || undefined, // VAULT-13: navigable source citation on merge-regenerated rows
   }));
   await fs.writeFile(file, applyClaimsBlock(md, links), 'utf8');
 }

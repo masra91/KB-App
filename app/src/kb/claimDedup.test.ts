@@ -185,6 +185,8 @@ describe('applyClaimDedup — the within-source dedup PASS (CLAIMS-19)', () => {
     // Ada's block: lists survivors (aac1, aac4, aac5), not the dropped aac3.
     const adaMd = await fs.readFile(path.join(root, ada), 'utf8');
     expect(adaMd).toContain(`[[${claimRel('aac1')}]]`);
+    // VAULT-13 residual: dedup-regenerated rows carry the navigable source citation (S1's date).
+    expect(adaMd).toContain('[[sources/2026/06/02/S1/source.md|2026-06-02]]');
     expect(adaMd).toContain(`[[${claimRel('aac4')}]]`);
     expect(adaMd).toContain(`[[${claimRel('aac5')}]]`);
     expect(adaMd).not.toContain(`[[${claimRel('aac3')}]]`);

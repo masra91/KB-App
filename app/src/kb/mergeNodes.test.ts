@@ -15,7 +15,37 @@ const node = (name: string) => `---\nid: ${name}\nkind: person\nname: ${name}\n-
 const claim = (subject: string, statement: string) =>
   `---\nid: 01C\nsubject: ${subject}\nstatus: fact\nconfidence: 0.9\n---\n\n${statement}\n`;
 
+// A claim file in the real post-VAULT-13 shape: provenance.derivedFrom + a trailing "Source: [[…]]"
+// citation in the body (what renderClaimMd writes). Exercises the first-line statement parse + the
+// source-citation threading on merge-regeneration (VAULT-13 residual).
+const claimProv = (subject: string, statement: string, src: string) =>
+  `---\nid: 01D\nsubject: ${subject}\nstatus: fact\nconfidence: 0.9\nprovenance:\n  derivedFrom: ["${src}"]\n  transformedBy: claims\n  mentions: ["m"]\ncreatedAt: 2026-05-31T00:00:00Z\n---\n\n${statement}\n\nSource: [[${src}/source.md|2026-05-31]]\n`;
+
 describe('mergeNodes (CONNECT-10/11)', () => {
+  it('regenerated block carries a clean statement + the VAULT-13 source citation (residual)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'wt');
+      const canonical = 'entities/person/steve-jobs.md';
+      const loser = 'entities/person/steven-jobs.md';
+      const src = 'sources/2026/05/31/01SRC';
+      await write(root, canonical, node('Steve Jobs'));
+      await write(root, loser, node('Steven Jobs'));
+      await write(root, 'claims/2026/05/31/01D.md', claimProv(loser, 'Co-founded Apple.', src));
+
+      await mergeNodes(root, canonical, [loser]);
+      const canonMd = await fs.readFile(path.join(root, canonical), 'utf8');
+      // statement is clean (first line, NOT the whole body with its Source trailer) — the #116 parity fix
+      expect(canonMd).toContain('— Co-founded Apple. *(fact, 0.9)*');
+      // and the row carries the navigable source citation (VAULT-13 on the merge-regenerated path)
+      expect(canonMd).toContain(`[[${src}/source.md|2026-05-31]]`);
+      // the entity node's block row uses the "·" citation form, never the raw "Source:" body line
+      expect(canonMd).not.toContain('Source: [[');
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
   it('repoints the loser’s claims to the canonical, regenerates its claims block, deletes the loser', async () => {
     const dir = await makeTempDir();
     try {
