@@ -9,6 +9,7 @@
 // (retry, then set aside; CLAIMS-12 / ORCH-12).
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { parseClaimsDecision, type ClaimsDecision, CLAIM_STATUSES } from './claims';
 import type { SourceInput } from './decomposeAgent';
@@ -51,20 +52,23 @@ function launchFlags(): string[] {
   return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
 }
 
-const defaultRunner: CopilotRunner = async (prompt) => {
-  try {
-    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
-      timeout: COPILOT_TIMEOUT_MS,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    return stdout;
-  } catch (err) {
-    // Surface the subprocess stderr on the error so the stage's dev-log records the real cause (OBS-4).
-    const stderr = (err as { stderr?: unknown }).stderr;
-    if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
-    throw err;
-  }
-};
+const defaultRunner: CopilotRunner = async (prompt) =>
+  // Acquire one global copilot slot so concurrent (cap>1) stage drains can't fan out past the
+  // process-wide ceiling (dogfood #4 / copilotConcurrency).
+  withCopilotSlot(async () => {
+    try {
+      const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
+        timeout: COPILOT_TIMEOUT_MS,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      return stdout;
+    } catch (err) {
+      // Surface the subprocess stderr on the error so the stage's dev-log records the real cause (OBS-4).
+      const stderr = (err as { stderr?: unknown }).stderr;
+      if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
+      throw err;
+    }
+  });
 
 /** The versioned per-stage instruction template (SPEC-0014 Q9 / SPEC-0016 §3.1), composed
  *  per entity. Signal `type` is an OPEN nudge in prose (CLAIMS-13); claim `status` is a
