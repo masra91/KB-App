@@ -214,7 +214,12 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
   const totalQueue = parts.stages.reduce((n, s) => n + s.queueDepth, 0);
 
   let overall: OverallState;
-  if (anyRunning) {
+  if (parts.lock.stuck) {
+    // #163: a stuck-held canonical-writer lock IS a stall — the pipeline is wedged on that section
+    // and can't progress. Without this it would read `running` (anyRunning includes `lock.held`),
+    // masking the exact silent-deadlock SPEC-0030 exists to surface (OBS-11). The watchdog set `stuck`.
+    overall = 'stalled';
+  } else if (anyRunning) {
     overall = 'running';
   } else if (totalQueue === 0) {
     overall = 'idle';
