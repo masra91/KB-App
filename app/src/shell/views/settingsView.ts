@@ -76,8 +76,8 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>
       <div class="card">
         <h2>Diagnostics</h2>
-        <p class="muted">Dev-log verbosity for this Knowledge Base (SPEC-0030). <strong>Info</strong> is the default; <strong>Debug</strong> adds verbose detail — and includes redaction-protected captured text / egress payloads — to troubleshoot a stuck pipeline. Applies on the next pipeline start.</p>
-        <label class="verbosity-row">Dev-log level
+        <p class="muted">Diagnostic detail for this Knowledge Base. <strong>Info</strong> is the default; <strong>Debug</strong> adds verbose detail — and includes redaction-protected captured text / data sent to external services — to troubleshoot a stuck pipeline. Applies on the next pipeline start.</p>
+        <label class="verbosity-row">Diagnostic detail
           <select id="devlog-level">${levelOpt('info', 'Info')}${levelOpt('debug', 'Debug')}</select>
         </label>
         <p id="verbosity-status" class="muted" role="status" aria-live="polite"></p>

@@ -110,12 +110,21 @@ describe('run-now + add-from-template', () => {
     expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-2', template: 'web', egressTier: 'public-web', enabled: false });
   });
 
-  it('add with an empty id asks for one (no IPC call)', async () => {
+  it('#6: user types a friendly NAME → slugified into the canonical id behind the scenes', async () => {
+    const c = await mount();
+    (c.querySelector<HTMLSelectElement>('.researcher-add-template')!).value = 'web';
+    (c.querySelector<HTMLInputElement>('.researcher-add-id')!).value = 'Prior Art Web Search';
+    c.querySelector<HTMLButtonElement>('.researcher-add-btn')!.click();
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'prior-art-web-search', template: 'web', egressTier: 'public-web', enabled: false });
+  });
+
+  it('add with an empty name asks for one (no IPC call)', async () => {
     const c = await mount();
     c.querySelector<HTMLButtonElement>('.researcher-add-btn')!.click();
     await flush();
     expect(setResearcherConfig).not.toHaveBeenCalled();
-    expect(c.querySelector('.researcher-add-status')?.textContent).toMatch(/id/);
+    expect(c.querySelector('.researcher-add-status')?.textContent).toMatch(/name/i);
   });
 });
 

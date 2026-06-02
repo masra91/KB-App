@@ -12,6 +12,8 @@
 // derived from the loaded data, not imported from AUDIT_ACTORS (a runtime value).
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
+import { formatTimestamp } from '../formatTime';
+import { stageDisplayName } from '../stageLabels';
 import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
@@ -179,16 +181,16 @@ function traceableSubject(e: ActivityFeedEntry): string | null {
 
 export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const trace = traceableSubject(e);
-  const traceBtn = trace ? `<button class="activity-trace link" data-act="lineage" data-id="${esc(trace)}">lineage</button>` : '';
+  const traceBtn = trace ? `<button class="activity-trace link" data-act="lineage" data-id="${esc(trace)}">trace origin</button>` : '';
   const raw = open
     ? `<div class="activity-raw">${e.events.map(rawEventHtml).join('')}</div>`
     : '';
   return `
     <li class="activity-entry${open ? ' open' : ''}">
       <button class="activity-entry-head" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-        <span class="activity-actor-badge">${esc(e.actor)}</span>
+        <span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
         <span class="activity-summary">${esc(e.summary)}</span>
-        <span class="activity-ts muted">${esc(e.ts)}</span>
+        <span class="activity-ts muted">${esc(formatTimestamp(e.ts))}</span>
         ${e.eventCount > 1 ? `<span class="activity-evcount muted">${e.eventCount} events</span>` : ''}
       </button>
       ${traceBtn}
@@ -208,7 +210,7 @@ export function lineageHtml(l: Lineage): string {
   }
   const sources = l.sources.length ? `<div class="lineage-sources muted">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<code>${esc(s)}</code>`).join(', ')}</div>` : '';
   const timeline = l.events
-    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge">${esc(e.actor)}</span> <span>${esc(e.eventType)}</span> <span class="muted">${esc(e.ts)}</span></li>`)
+    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="muted">${esc(formatTimestamp(e.ts))}</span></li>`)
     .join('');
   const decisions = l.decisions.length
     ? `<div class="lineage-decisions"><span class="muted">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`
