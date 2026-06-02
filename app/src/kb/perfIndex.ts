@@ -11,7 +11,10 @@
 // "Recent window" (OBS-14 open question): aggregate the newest `window` spans, not all history.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { vaultSpansPath, type Span } from './tracing';
+import { vaultSpansPath, COPILOT_OP, STAGE_RUN_OP, type Span } from './tracing';
+
+// Re-export the span ops so callers that aggregate spans can reference them from one place.
+export { COPILOT_OP, STAGE_RUN_OP } from './tracing';
 
 /** Bump when the cached shape changes — an older cache is then discarded. */
 export const PERF_INDEX_VERSION = 1;
@@ -24,11 +27,6 @@ export const DEFAULT_SPAN_WINDOW = 5000;
 
 /** Default count of slow operations surfaced (OBS-15). */
 export const DEFAULT_SLOW_COUNT = 10;
-
-/** The op that times a single Copilot invocation (OBS-13) — the dominant cost. */
-export const COPILOT_OP = 'copilot.invoke';
-/** The op that wraps one stage's per-item processing (its Copilot + git/worktree time). */
-export const STAGE_RUN_OP = 'stage.run';
 
 /** Copilot-call latency summary (OBS-13/14) — the dominant pipeline cost. */
 export interface CopilotLatency {

@@ -13,6 +13,7 @@ import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { parseConnectDecision, type Candidate, type ConnectDecision } from './connect';
 import type { AgentTrace } from './archivist';
+import { COPILOT_OP, type SpanCtx } from './tracing';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000;
@@ -32,7 +33,7 @@ export interface CandidateSet {
 }
 
 /** A decider maps a candidate set to a validated verdict. May throw (CONNECT-14). */
-export type ConnectDecider = (set: CandidateSet) => Promise<ConnectDecision>;
+export type ConnectDecider = (set: CandidateSet, ctx?: SpanCtx) => Promise<ConnectDecision>;
 
 /** Injectable runner: given the composed prompt, return the session's stdout. */
 export type CopilotRunner = (prompt: string) => Promise<string>;
@@ -128,7 +129,7 @@ export interface ConnectDeciderOptions {
 export function makeConnectDecider(opts: ConnectDeciderOptions = {}): ConnectDecider {
   const run = opts.run ?? defaultRunner;
   let available: boolean | null = opts.available ?? null;
-  return async (set) => {
+  return async (set, ctx) => {
     if (available === null) {
       try {
         available = (await detectCopilot()).available;
@@ -143,8 +144,16 @@ export function makeConnectDecider(opts: ConnectDeciderOptions = {}): ConnectDec
     const at = new Date().toISOString();
     const t0 = Date.now();
     const ids = set.candidates.map((c) => c.id);
-    const decision = parseConnectDecision(await run(buildConnectPrompt(set)), set.blockKey, ids);
-    const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
-    return { ...decision, agent };
+    // OBS-13: time the Copilot call as a child of the stage's run span (failures included).
+    const cs = ctx?.span?.child(COPILOT_OP);
+    try {
+      const decision = parseConnectDecision(await run(buildConnectPrompt(set)), set.blockKey, ids);
+      cs?.end('ok');
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
+      return { ...decision, agent };
+    } catch (e) {
+      cs?.end('error');
+      throw e;
+    }
   };
 }

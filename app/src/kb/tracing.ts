@@ -21,6 +21,11 @@ import { noopDevLog, type DevLog } from './devlog';
 /** A span's terminal outcome. `ok` = succeeded, `error` = threw, `setaside` = item set aside. */
 export type SpanOutcome = 'ok' | 'error' | 'setaside';
 
+/** The op that wraps one stage's per-item processing (its Copilot + git/worktree time). */
+export const STAGE_RUN_OP = 'stage.run';
+/** The op that times a single Copilot invocation (OBS-13) — the dominant cost. */
+export const COPILOT_OP = 'copilot.invoke';
+
 /** A completed timed span (SPEC-0030 OBS-12). Durations are ms; timestamps ISO-8601. */
 export interface Span {
   spanId: string;
@@ -52,6 +57,12 @@ export interface ActiveSpan {
   child(op: string, fields?: Omit<SpanFields, 'parentSpanId'>): ActiveSpan;
   /** Stamp `endTs`/`durationMs` and record the span. Idempotent (a second call is a no-op). */
   end(outcome?: SpanOutcome): void;
+}
+
+/** Span context handed to an agent decider so it can time its Copilot call as a CHILD of the
+ *  stage's run span (OBS-12 nesting) — without the thin agent needing a `Tracer` of its own. */
+export interface SpanCtx {
+  span?: ActiveSpan;
 }
 
 export interface Tracer {
@@ -119,7 +130,9 @@ class ActiveSpanImpl implements ActiveSpan {
     return new ActiveSpanImpl(
       this.sink,
       op,
-      { stage: this.fields.stage, ...fields, parentSpanId: this.id },
+      // Inherit the parent's stage + itemId so a copilot child auto-carries them (OBS-16) unless
+      // the caller overrides; `parentSpanId` links the nesting (OBS-12).
+      { stage: this.fields.stage, itemId: this.fields.itemId, ...fields, parentSpanId: this.id },
       this.sink.now().toISOString(),
     );
   }
@@ -177,8 +190,9 @@ export function createVaultTracer(vaultPath: string, opts: Omit<TracerOptions, '
   return createTracer({ ...opts, dir: path.dirname(vaultSpansPath(vaultPath)), file: path.basename(vaultSpansPath(vaultPath)) });
 }
 
-/** A no-op active span — `end`/`child` do nothing (the noop tracer hands these out). */
-const noopActiveSpan: ActiveSpan = {
+/** A no-op active span — `end`/`child` do nothing. The safe default a stage hands a decider when
+ *  no tracer is wired, so the agent's `ctx.span?.child(...)` path stays uniform (tests / standalone). */
+export const noopActiveSpan: ActiveSpan = {
   id: '',
   child: () => noopActiveSpan,
   end: () => {},

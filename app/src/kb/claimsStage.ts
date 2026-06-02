@@ -31,6 +31,7 @@ import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
+import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
 const STAGE = 'claims';
 /** Default attempts before a poison entity is set aside (CLAIMS-12). */
@@ -238,6 +239,7 @@ export async function claimsOne(
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   maxReviewRounds = DEFAULT_MAX_REVIEW_ROUNDS,
   log: DevLog = noopDevLog,
+  span: ActiveSpan = noopActiveSpan,
 ): Promise<ClaimsOneResult> {
   root = path.resolve(root);
   const entityId = path.basename(entityRel, '.md');
@@ -261,7 +263,7 @@ export async function claimsOne(
       const priorState = await readClaimsState(sourceDirWt, entityId);
       const priorReviews: AnsweredReview[] = priorState.answered.map((a) => ({ question: a.question, verdict: a.verdict, note: a.note }));
       const input: EntityInput = { entityId, kind: ref.kind, name: ref.name, source, ...(priorReviews.length > 0 ? { priorReviews } : {}) };
-      const decision = await decider(input);
+      const decision = await decider(input, { span });
       const model = decision.agent?.model ?? 'default';
 
       // REVIEW-5: if the agent raised any reviews, PARK this item — apply NO claims until answered.
@@ -398,6 +400,7 @@ export class ClaimsStage {
   private readonly afterDrain?: () => Promise<void>;
   private readonly cap: number;
   private readonly log: DevLog;
+  private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -417,6 +420,7 @@ export class ClaimsStage {
     afterDrain?: () => Promise<void>,
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
+    tracer: Tracer = noopTracer,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -425,6 +429,7 @@ export class ClaimsStage {
     this.afterDrain = afterDrain;
     this.cap = cap;
     this.log = log.child({ scope: 'claims' });
+    this.tracer = tracer;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -474,10 +479,22 @@ export class ClaimsStage {
       // retry), so a settled batch never rejects; an unexpected throw stops this pass for a later sweep.
       const batch = queue.slice(0, this.cap);
       try {
+        // OBS-12: each entity gets a `stage.run` span wrapping its decider's `copilot.invoke` child.
         await Promise.all(
-          batch.map((entityRel) =>
-            claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log),
-          ),
+          batch.map((entityRel) => {
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: path.basename(entityRel, '.md') });
+            return claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log, span).then(
+              (r) => {
+                // A park (review raised) is a successful outcome, not an error.
+                span.end(r.ok || r.parked ? 'ok' : r.setAside ? 'setaside' : 'error');
+                return r;
+              },
+              (err) => {
+                span.end('error');
+                throw err;
+              },
+            );
+          }),
         );
         worked = true;
       } catch (err) {

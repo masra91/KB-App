@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import type { CapturedMeta } from './ingest';
 import { type ArchiveDecision, type ArchivistDecider, deterministicDecide } from './archivist';
+import { COPILOT_OP } from './tracing';
 import { detectCopilot } from './copilot';
 
 const exec = promisify(execFile);
@@ -98,7 +99,7 @@ export interface CopilotDeciderOptions {
 export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistDecider {
   const run = opts.run ?? defaultRunner;
   let available: boolean | null = opts.available ?? null;
-  return async (meta) => {
+  return async (meta, ctx) => {
     if (available === null) {
       try {
         available = (await detectCopilot()).available;
@@ -115,11 +116,16 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
     const params = launchFlags();
     const at = new Date().toISOString();
     const t0 = Date.now();
+    // OBS-13: time the Copilot call as a child of the stage's run span (failures included; the
+    // archivist falls back rather than throwing, so the span ends `error` without re-throwing).
+    const cs = ctx?.span?.child(COPILOT_OP);
     try {
       const decision = parseDecision(await run(buildPrompt(meta)), meta);
+      cs?.end('ok');
       return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at } };
     } catch (err) {
       // ORCH-8 resilience: fall back, but record the failure for posterity.
+      cs?.end('error');
       const error = err instanceof Error ? err.message : String(err);
       return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model, params, ok: false, error, ms: Date.now() - t0, at } };
     }

@@ -30,8 +30,14 @@ import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
+import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan, type SpanOutcome } from './tracing';
 
 const STAGE = 'decompose';
+
+/** Map a per-item result to its stage-run span outcome (set-aside is distinct from a plain error). */
+function spanOutcome(ok: boolean, setAside: boolean): SpanOutcome {
+  return ok ? 'ok' : setAside ? 'setaside' : 'error';
+}
 /** Default attempts before a poison source is set aside (DECOMP-6). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
 
@@ -145,6 +151,7 @@ export async function decomposeOne(
   lock: Mutex = new Mutex(),
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   log: DevLog = noopDevLog,
+  span: ActiveSpan = noopActiveSpan,
 ): Promise<DecomposeOneResult> {
   root = path.resolve(root);
   let result: DecomposeOneResult = { sourceId: path.basename(sourceRel), ok: false, candidateIds: [], setAside: false };
@@ -160,7 +167,7 @@ export async function decomposeOne(
     const runId = ulid();
     const auditPath = path.join(sourceDirWt, 'audit.jsonl');
     try {
-      const decision = await decider(input);
+      const decision = await decider(input, { span });
       const model = decision.agent?.model ?? 'default';
 
       // Mint candidate ULIDs + write candidate files (orchestrator-owned effects; DECOMP-3/5).
@@ -249,6 +256,7 @@ export class DecomposeStage {
   private readonly maxAttempts: number;
   private readonly cap: number;
   private readonly log: DevLog;
+  private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -261,6 +269,7 @@ export class DecomposeStage {
     maxAttempts: number = DEFAULT_MAX_ATTEMPTS,
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
+    tracer: Tracer = noopTracer,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -268,6 +277,7 @@ export class DecomposeStage {
     this.maxAttempts = maxAttempts;
     this.cap = cap;
     this.log = log.child({ scope: 'decompose' });
+    this.tracer = tracer;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
@@ -317,7 +327,22 @@ export class DecomposeStage {
       // an unexpected throw stops this pass for a later poke/sweep to retry.
       const batch = queue.slice(0, this.cap);
       try {
-        await Promise.all(batch.map((rel) => decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts, this.log)));
+        // OBS-12: each item gets a `stage.run` span that wraps its decider's `copilot.invoke` child.
+        await Promise.all(
+          batch.map((rel) => {
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: path.basename(rel) });
+            return decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts, this.log, span).then(
+              (r) => {
+                span.end(spanOutcome(r.ok, r.setAside));
+                return r;
+              },
+              (err) => {
+                span.end('error');
+                throw err;
+              },
+            );
+          }),
+        );
       } catch (err) {
         this.log.error('decompose.drain-error', { err }); // unexpected — surface it, then let a later poke/sweep retry
         return;
