@@ -3,7 +3,7 @@
 // real pipeline is capture → archive → decompose (candidates) → CONNECT (entities) → CLAIMS
 // (SPEC-0021 STAGING-5); these tests exercise the Claims tail with a seeded entity graph
 // (Connect's output stood in via renderEntityNode) rather than running Connect end-to-end.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
@@ -458,6 +458,137 @@ describe.skipIf(!gitAvailable)('CLAIMS-21 — a Connect-merged entity derives cl
       // The good source's claim is linked in the block (the poison source contributed nothing).
       const node = await fs.readFile(path.join(root, entityRel), 'utf8');
       expect(node.match(/\[\[claims\/.+\.md\]\]/g) ?? []).toHaveLength(1);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('CLAIMS-21 perf — block regen is scoped to the entity\'s OWN claims (no full claims/ scan)', () => {
+  // One claim per call whose statement is the source text — lets us tell each entity's claims apart.
+  const claimText: ClaimsDecider = async (input) => ({
+    entityId: input.entityId,
+    claims: [aClaim({ statement: input.source.text ?? '', mentions: [input.name] })],
+    agent: { via: 'copilot', model: 'test' },
+  });
+
+  /** Seed N unrelated single-source entities and claim them all; return their claim ids (the file
+   *  basenames). After this, claims/ holds lots of files belonging to OTHER entities. */
+  async function seedNoise(root: string, n: number): Promise<Set<string>> {
+    const ids = new Set<string>();
+    for (let i = 0; i < n; i++) {
+      const { entityRels } = await setup(root, `Unrelated fact ${i}`, [`Noise${i}`]);
+      const res = await claimsOne(root, entityRels[0], claimText);
+      res.claimIds.forEach((id) => ids.add(id));
+    }
+    return ids;
+  }
+
+  it('regenerates the correct multi-source block amid many UNRELATED claims, leaving them untouched (output-preserving)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const noise = await seedNoise(root, 6);
+      expect(noise.size).toBe(6);
+      expect(await readClaimFiles(root)).toHaveLength(6);
+
+      const factA = 'Grace Hopper invented the first compiler.';
+      const factB = 'Grace Hopper was a rear admiral in the United States Navy.';
+      const srcA = await archiveText(root, factA);
+      const srcB = await archiveText(root, factB);
+      const target = await seedMergedEntity(root, 'Grace Hopper', [srcA, srcB]);
+      await new ClaimsStage(root, claimText).poke();
+
+      // The target's block links BOTH its sources' claims (correct + complete), unaffected by the noise.
+      const node = await fs.readFile(path.join(root, target), 'utf8');
+      expect(node.match(/\[\[claims\/.+\.md\]\]/g) ?? []).toHaveLength(2);
+      expect(node).toContain(factA);
+      expect(node).toContain(factB);
+      // All 6 unrelated + 2 target claim files present and unchanged — no cross-entity drift.
+      expect(await readClaimFiles(root)).toHaveLength(8);
+    });
+  });
+
+  it('does NOT read unrelated entities\' claim files when regenerating a block (the complexity win)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const noise = await seedNoise(root, 5); // unrelated claim ids — must NOT be read during the target regen
+
+      const srcA = await archiveText(root, 'Ada Lovelace wrote the first algorithm.');
+      const srcB = await archiveText(root, 'Ada Lovelace worked with Charles Babbage.');
+      const target = await seedMergedEntity(root, 'Ada Lovelace', [srcA, srcB]);
+      await claimsOne(root, target, claimText); // source A claimed → block now references A's claim path
+
+      // Regenerating for source B reads A's claim file (via the block's wikilink) but must touch NO
+      // unrelated claim file — pre-fix this walked all of claims/ (O(vault)); now it's O(entity claims).
+      const spy = vi.spyOn(fs, 'readFile');
+      try {
+        await claimsOne(root, target, claimText); // source B → block regen
+      } finally {
+        const readIds = spy.mock.calls
+          .map((c) => path.basename(String(c[0]), '.md'))
+          .filter((b) => noise.has(b));
+        spy.mockRestore();
+        expect(readIds).toEqual([]); // no unrelated claim file was opened
+      }
+    });
+  });
+
+  it('drops a block wikilink whose claim file was deleted (CLAIMS-19 dedup) — no crash, no broken link', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const factA = 'Ada Lovelace wrote the first algorithm.';
+      const factB = 'Ada Lovelace worked with Charles Babbage.';
+      const srcA = await archiveText(root, factA);
+      const srcB = await archiveText(root, factB);
+      const target = await seedMergedEntity(root, 'Ada Lovelace', [srcA, srcB]);
+
+      await claimsOne(root, target, claimText); // source A claimed → block references A's claim file
+      let node = await fs.readFile(path.join(root, target), 'utf8');
+      const aPath = (node.match(/\[\[(claims\/[^\]]+)\]\]/) ?? [])[1];
+      expect(aPath).toBeTruthy();
+
+      // Simulate CLAIMS-19 dedup deleting A's claim file while its wikilink still sits in the block —
+      // the `catch { continue }` skip path: a referenced-but-missing claim file must not crash regen
+      // or leave a dangling `[[…]]` link.
+      await fs.rm(path.join(root, aPath), { force: true });
+      await simpleGit(root).raw('add', '-A');
+      await simpleGit(root).commit('test: drop a claim file referenced by the block (dedup)');
+
+      await claimsOne(root, target, claimText); // source B → regen reads the (now-missing) A path, skips it
+      node = await fs.readFile(path.join(root, target), 'utf8');
+      const rows = node.match(/\[\[claims\/.+\.md\]\]/g) ?? [];
+      expect(rows).toHaveLength(1); // only B survives — the dead A link is dropped, not dangling
+      expect(rows[0]).not.toContain(aPath); // no broken link to the deleted file
+      expect(node).toContain(factB);
+    });
+  });
+
+  it('regenerates correctly from claims/ even when the block was hand-edited/corrupted (claims/ is canonical, not the block)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const factA = 'Ada Lovelace wrote the first algorithm.';
+      const factB = 'Ada Lovelace worked with Charles Babbage.';
+      const srcA = await archiveText(root, factA);
+      const srcB = await archiveText(root, factB);
+      const target = await seedMergedEntity(root, 'Ada Lovelace', [srcA, srcB]);
+
+      await claimsOne(root, target, claimText); // source A claimed → block has A's row
+      let node = await fs.readFile(path.join(root, target), 'utf8');
+      expect(node).toContain(factA);
+
+      // HAND-EDIT the Obsidian block: corrupt the rendered statement (keep the [[claims/…]] wikilink),
+      // commit it to canonical — the exact "user edited the view between runs" hazard.
+      node = node.replace(factA, 'TOTALLY WRONG HUMAN EDIT');
+      await fs.writeFile(path.join(root, target), node, 'utf8');
+      await simpleGit(root).raw('add', '-A');
+      await simpleGit(root).commit('test: hand-edit (corrupt) the rendered claims block');
+
+      // Source B's regen pulls A's data from the CANONICAL claim file (via the intact wikilink), so the
+      // corrupted display is overwritten — the block is never trusted as state (D's robustness invariant).
+      await claimsOne(root, target, claimText);
+      node = await fs.readFile(path.join(root, target), 'utf8');
+      expect(node).toContain(factA); // A's correct statement, restored from claims/
+      expect(node).not.toContain('TOTALLY WRONG HUMAN EDIT'); // the hand-edit did NOT become authoritative
+      expect(node).toContain(factB);
+      expect(node.match(/\[\[claims\/.+\.md\]\]/g) ?? []).toHaveLength(2);
     });
   });
 });

@@ -22,7 +22,7 @@ import path from 'node:path';
 import simpleGit from 'simple-git';
 import { ulid, dateShard } from './ulid';
 import { readCapturedMeta } from './ingest';
-import { renderClaimMd, applyClaimsBlock, oneLine, type ClaimBacklink } from './claimDoc';
+import { renderClaimMd, applyClaimsBlock, oneLine, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END, type ClaimBacklink } from './claimDoc';
 import type { ClaimStatus } from './claims';
 import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
 import type { SourceInput } from './decomposeAgent';
@@ -270,27 +270,43 @@ export function parseClaimBacklink(md: string, claimPath: string, entityRel: str
   return { claimPath, statement, status: status as ClaimStatus, confidence, source };
 }
 
-/** Every claim file about `entityRel`, as block back-links, sorted by claim id (the file name) so the
- *  regenerated block is deterministic / replay-stable (VAULT-10). Scans `<root>/claims/` in `wt`. */
-async function collectEntityBacklinks(wt: string, entityRel: string): Promise<ClaimBacklink[]> {
+/** The claim-file paths an entity's existing block already references — its `[[claims/…]]` wikilinks.
+ *  Each Claims run regenerates the block from the union, so the block is the entity's CUMULATIVE claim
+ *  index; recovering the paths here lets block regen read only the entity's OWN claims instead of
+ *  scanning all of `claims/` (CLAIMS-21 perf — O(entity claims), not O(vault)). Only the path LIST is
+ *  taken from the block; the claim DATA is re-read from the canonical files (see {@link entityBacklinks}),
+ *  so a hand-edited block is overwritten by the correct regeneration, never trusted as state. */
+function priorClaimPaths(entityMd: string): string[] {
+  const start = entityMd.indexOf(CLAIMS_BLOCK_START);
+  if (start === -1) return [];
+  const endMarker = entityMd.indexOf(CLAIMS_BLOCK_END, start);
+  const block = entityMd.slice(start, endMarker === -1 ? undefined : endMarker);
+  const out: string[] = [];
+  const re = /\[\[(claims\/[^\]|]+)\]\]/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(block)) !== null) out.push(m[1]);
+  return out;
+}
+
+/** The entity's claims block back-links, built from the UNION of its prior claim files (referenced by
+ *  the existing block) + this run's newly-written claim files — reading ONLY those files, never the whole
+ *  `claims/` tree (CLAIMS-21 perf). The claim data comes from the canonical files via the hardened
+ *  {@link parseClaimBacklink} (claims/ is the source of truth, CLAIMS-9), so a corrupted/hand-edited block
+ *  can't drift the result. Deleted files (e.g. CLAIMS-19 dedup) are skipped. Sorted by claim id so the
+ *  regenerated block is deterministic / replay-stable (VAULT-10). */
+async function entityBacklinks(wt: string, entityMd: string, newClaimRels: string[], entityRel: string): Promise<ClaimBacklink[]> {
+  const paths = Array.from(new Set([...priorClaimPaths(entityMd), ...newClaimRels]));
   const out: ClaimBacklink[] = [];
-  async function walk(dir: string): Promise<void> {
-    let entries: import('node:fs').Dirent[];
+  for (const rel of paths) {
+    let md: string;
     try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
+      md = await fs.readFile(path.join(wt, rel), 'utf8');
     } catch {
-      return;
+      continue; // referenced file no longer exists (e.g. collapsed by CLAIMS-19 dedup) — skip
     }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) await walk(full);
-      else if (e.isFile() && e.name.endsWith('.md')) {
-        const link = parseClaimBacklink(await fs.readFile(full, 'utf8'), path.relative(wt, full), entityRel);
-        if (link) out.push(link);
-      }
-    }
+    const link = parseClaimBacklink(md, rel, entityRel);
+    if (link) out.push(link);
   }
-  await walk(path.join(wt, 'claims'));
   return out.sort((a, b) => (path.basename(a.claimPath) < path.basename(b.claimPath) ? -1 : 1));
 }
 
@@ -442,6 +458,7 @@ export async function claimsOne(
       // provenance is THIS single source (CLAIMS-21: clean per-claim provenance, never derivedFrom[0]).
       const createdAt = new Date().toISOString();
       const claimIds: string[] = [];
+      const newClaimRels: string[] = [];
       for (const claim of decision.claims) {
         const id = ulid();
         const rel = path.join('claims', dateShard(id), `${id}.md`);
@@ -453,13 +470,16 @@ export async function claimsOne(
           'utf8',
         );
         claimIds.push(id);
+        newClaimRels.push(rel);
       }
 
       // Regenerate the entity node's delimited claims block (CLAIMS-9) from the UNION of ALL claim
       // files about this entity — this source's just-written claims PLUS any sibling source's already
-      // on the checkpoint (CLAIMS-21). canonical data lives in claims/; the block is its regenerable
-      // index, so a per-source run never clobbers another source's rows. Identity untouched (CLAIMS-11).
-      const backlinks = await collectEntityBacklinks(wt, entityRel);
+      // on the checkpoint (CLAIMS-21). Scoped to the entity's OWN claim files (prior paths recovered
+      // from the existing block; data re-read from the canonical files) — O(entity claims), never a
+      // full `claims/` scan. canonical data lives in claims/; the block is its regenerable index, so a
+      // per-source run never clobbers another source's rows. Identity untouched (CLAIMS-11).
+      const backlinks = await entityBacklinks(wt, entityMd, newClaimRels, entityRel);
       await fs.writeFile(entityPathWt, applyClaimsBlock(entityMd, backlinks), 'utf8');
 
       let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
