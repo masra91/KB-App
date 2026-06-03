@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   buildResearcherViews,
   lastRunFromEvent,
+  researcherOutcomeLabel,
   isRiskyResearcherChange,
   isEgressTier,
   isResearcherTemplate,
@@ -41,6 +42,32 @@ describe('lastRunFromEvent', () => {
     expect(noFind).toMatchObject({ eventType: 'no-finding', citations: 0 });
     expect(noFind?.sourceId).toBeUndefined();
     expect(lastRunFromEvent(undefined)).toBeNull();
+  });
+
+  it('surfaces the escalation reviewId so the Field Desk can deep-link "needs your review" (RESEARCH-11)', () => {
+    const esc = lastRunFromEvent(ev({ eventType: 'escalated', subjects: { researcherId: 'web-1', requestId: 'r', reviewId: 'REV123' }, payload: { what: 'Atlas' } }));
+    expect(esc).toMatchObject({ eventType: 'escalated', reviewId: 'REV123' });
+    // a normal pass carries no reviewId (so no dangling deep-link)
+    expect(lastRunFromEvent(ev())?.reviewId).toBeUndefined();
+  });
+});
+
+describe('researcherOutcomeLabel — no dev slugs in the UI (KB product principle)', () => {
+  it('maps every researcher run-outcome eventType to a Principal-facing label', () => {
+    expect(researcherOutcomeLabel('researched')).toBe('found sources');
+    expect(researcherOutcomeLabel('no-finding')).toBe('no new findings');
+    expect(researcherOutcomeLabel('research-failed')).toBe('run failed');
+    expect(researcherOutcomeLabel('ceiling-reached')).toBe('paused — rate limit reached');
+    expect(researcherOutcomeLabel('escalated')).toBe('paused — needs your review');
+    // none of the mapped labels leak the raw kebab-case slug
+    for (const slug of ['no-finding', 'research-failed', 'ceiling-reached', 'escalated']) {
+      expect(researcherOutcomeLabel(slug)).not.toContain('-');
+    }
+  });
+
+  it('HUMANIZES an unknown eventType (kebab → spaced) — never leaks a raw dev slug, even for a future kind', () => {
+    expect(researcherOutcomeLabel('some-future-kind')).toBe('some future kind');
+    expect(researcherOutcomeLabel('some-future-kind')).not.toContain('-'); // the no-slug guarantee is total
   });
 });
 

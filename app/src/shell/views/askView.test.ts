@@ -55,7 +55,10 @@ describe('Ask view (SPEC-0026 ASK-1/2/8)', () => {
     expect(transcript.textContent).toContain('Who was Ada Lovelace?');
     expect(transcript.textContent).toContain('first computer programmer');
     expect(transcript.querySelector('.ask-citations')).toBeTruthy();
-    expect(transcript.querySelector('.ask-citations')!.textContent).toContain('claims/person/ada-lovelace.md');
+    // #2: the reference shows the human label + capitalized kind; the raw vault path is in the tooltip, not inline.
+    expect(transcript.querySelector('.ask-citations .cite-ref')!.textContent).toContain('Claim');
+    expect(transcript.querySelector('.ask-citations')!.textContent).not.toContain('claims/person/ada-lovelace.md');
+    expect(transcript.querySelector('.ask-citations .cite-ref')!.getAttribute('title')).toContain('claims/person/ada-lovelace.md');
     // pull-only: nothing was asked before the user submitted
     expect(ask).toHaveBeenCalledTimes(1);
   });
@@ -278,7 +281,11 @@ describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
     expect(refs).toHaveLength(2);
     expect(root.querySelector('.ask-citations')?.textContent).toContain('References');
     expect(refs[0].textContent).toContain('[1]');
-    expect(refs[0].textContent).toContain('entities/person/ada-lovelace.md');
+    // #2: label-first + capitalized kind inline; the raw path lives in the tooltip, not the visible text.
+    expect(refs[0].textContent).toContain('Ada Lovelace'); // the human label
+    expect(refs[0].textContent).toContain('Entity'); // capitalized kind
+    expect(refs[0].textContent).not.toContain('entities/person/ada-lovelace.md');
+    expect(refs[0].getAttribute('title')).toContain('entities/person/ada-lovelace.md');
     expect(refs[1].textContent).toContain('coined bug');
   });
 

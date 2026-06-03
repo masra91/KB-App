@@ -235,7 +235,7 @@ export async function decomposeOne(
       const wtGit = simpleGit(wt);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`decompose: set aside ${result.sourceId} (collision-exhausted)`);
-      await lock.run(() => advanceOrCollide(root, workBranch, base));
+      await lock.run(() => advanceOrCollide(root, workBranch, base), 'decompose:setaside-advance');
     });
     log.error('decompose.setaside', { itemId: result.sourceId, reason: 'collision-exhausted' });
     result = { ...result, ok: false, setAside: true };
@@ -261,6 +261,7 @@ export class DecomposeStage {
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
+  private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
 
   constructor(
     root: string,
@@ -301,11 +302,17 @@ export class DecomposeStage {
     return this.draining;
   }
 
+  /** When the current drain began (ISO), or null when idle (SPEC-0032 VIZ-2 in-flight dwell). */
+  currentSince(): string | null {
+    return this.drainStartedAt;
+  }
+
   /** Drain the queue, coalescing concurrent pokes; resolves only once fully idle. */
   poke(): Promise<void> {
     this.pending = true;
     if (!this.draining) {
       this.draining = true;
+      this.drainStartedAt = new Date().toISOString();
       this.current = this.runDrains();
     }
     return this.current ?? Promise.resolve();
@@ -319,6 +326,7 @@ export class DecomposeStage {
       }
     } finally {
       this.draining = false;
+      this.drainStartedAt = null;
       this.current = null;
     }
   }

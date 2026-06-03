@@ -28,9 +28,12 @@ export const DEFAULT_STAGE_CAP = 1;
  *  sub-second; this only ever fires on a genuine stall. */
 const WORKTREE_GIT_TIMEOUT_MS = 20_000;
 
-/** A simple-git handle whose every command is time-bounded (see {@link WORKTREE_GIT_TIMEOUT_MS}). */
-export function boundedGit(dir: string): ReturnType<typeof simpleGit> {
-  return simpleGit(dir, { timeout: { block: WORKTREE_GIT_TIMEOUT_MS } });
+/** A simple-git handle whose every command is time-bounded: simple-git kills the child if it goes
+ *  `timeoutMs` with no output (a stalled fetch, a credential/editor prompt, a hung hook), so a
+ *  blocked git op REJECTS instead of hanging forever. `timeoutMs` is overridable so callers under
+ *  the canonical-writer lock can tune it and tests can drive the timeout fast (#163). */
+export function boundedGit(dir: string, timeoutMs: number = WORKTREE_GIT_TIMEOUT_MS): ReturnType<typeof simpleGit> {
+  return simpleGit(dir, { timeout: { block: timeoutMs } });
 }
 
 /** The stages that create EPHEMERAL per-item worktrees via {@link withEphemeralWorktree} (named
@@ -168,8 +171,13 @@ export type AdvanceOutcome = 'advanced' | 'collision';
  * Runs in the canonical worktree (`root`), which is clean + on the canonical branch (stages commit
  * in their own disposable worktrees, never here).
  */
-export async function advanceOrCollide(root: string, workBranch: string, base: string): Promise<AdvanceOutcome> {
-  const git = simpleGit(root);
+export async function advanceOrCollide(root: string, workBranch: string, base: string, timeoutMs?: number): Promise<AdvanceOutcome> {
+  // Time-bounded (#163): this runs UNDER the canonical-writer lock, so a git op that blocks
+  // indefinitely (root-repo `index.lock` from a zombie git, a credential/editor prompt, a stalled
+  // network) would hold the lock forever and wedge the whole pipeline silently. A bounded client
+  // turns that into a thrown error → the section's `finally` releases the lock → the stuck-section
+  // watchdog (#170) surfaces it, instead of a permanent silent deadlock.
+  const git = boundedGit(root, timeoutMs);
   const head = (await git.revparse(['HEAD'])).trim();
   if (head === base) {
     await git.raw('merge', '--ff-only', workBranch); // base unchanged → clean fast-forward
@@ -203,6 +211,8 @@ export interface OptimisticAdvanceOptions {
   workBranch: string;
   /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
   maxCollisionRetries?: number;
+  /** OBS-7 / #163 watchdog label naming the holder of the canonical-writer lock during the advance. */
+  label?: string;
 }
 
 export type OptimisticAdvanceResult = 'advanced' | 'noop' | 'setaside';
@@ -231,7 +241,7 @@ export async function withOptimisticAdvance(
     const base = await canonicalHead(opts.root);
     const committed = await prepare(base);
     if (!committed) return 'noop';
-    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base));
+    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base), opts.label ?? 'advance');
     if (outcome === 'advanced') return 'advanced';
     // 'collision' → re-sync to the moved canonical and retry the whole item.
   }
@@ -248,6 +258,8 @@ export interface ConcurrentAdvanceOptions {
   stage: string;
   /** Same-path collision retries before set-aside (ORCH-19). Defaults to DEFAULT_MAX_COLLISION_RETRIES. */
   maxCollisionRetries?: number;
+  /** OBS-7 / #163 watchdog label naming the lock holder during the advance. Defaults to `<stage>:advance`. */
+  label?: string;
 }
 
 /** Context handed to a `prepare` callback under {@link withConcurrentAdvance}: its PRIVATE ephemeral
@@ -279,7 +291,7 @@ export async function withConcurrentAdvance(
     const outcome = await withEphemeralWorktree(opts.root, opts.stage, base, async ({ wt, workBranch }) => {
       const committed = await prepare({ wt, base });
       if (!committed) return 'noop' as const;
-      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base));
+      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base), opts.label ?? `${opts.stage}:advance`);
     });
     if (outcome === 'noop') return 'noop';
     if (outcome === 'advanced') return 'advanced';

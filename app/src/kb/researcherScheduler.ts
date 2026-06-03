@@ -35,7 +35,8 @@ export async function isResearcherDue(root: string, r: ResearcherConfig, now: nu
 /** The synthetic standing request a scheduled researcher runs against (its topic/label/prompt). */
 export function standingRequest(r: ResearcherConfig, id: string, ts: string): ResearchRequest {
   const what = r.topics?.[0] ?? r.label ?? r.template;
-  return { id, ts, by: { stage: 'scheduler' }, what, why: 'scheduled standing research', context: '', dedupKey: dedupKeyFor({ what, by: {} }) };
+  // A standing pass is a chain ROOT (depth 1) — its cadence, not a depth limit, is what bounds it.
+  return { id, ts, by: { stage: 'scheduler' }, what, why: 'scheduled standing research', context: '', dedupKey: dedupKeyFor({ what, by: {} }), depth: 1 };
 }
 
 export class ResearcherScheduler {

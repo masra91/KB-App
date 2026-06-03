@@ -20,6 +20,7 @@
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
 import { makeGatedFetch } from './researchFetch';
 import { acquireCopilotSlot } from './copilotConcurrency';
+import { noopDevLog, type DevLog } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
 // VALUE import of the SDK is a dynamic `import()` inside liveSdkSession, keeping that lazy property.
@@ -36,6 +37,22 @@ import type { SessionConfig, SystemMessageConfig } from '@github/copilot-sdk';
  */
 export const WEB_FETCH_TOOL_NAME = 'fetch';
 export const WEB_SEARCH_TOOL_NAME = 'web_search';
+
+/**
+ * HARD retrieval-budget enforcement (RESEARCH-11; mirrors recall #113). The live session counts `fetch`
+ * tool calls and, once `maxToolCalls` are used, REFUSES further fetches and tells the agent to submit
+ * now. Diagnosed cause of the #51 `found:false`-despite-fetches: with the budget only ADVISORY (prompt
+ * text), the agent over-fetched (11/18 vs 8), wandered, and never converged to `submitFindings`; the
+ * one in-budget run found a finding. Enforcing the cap both bounds egress AND forces convergence.
+ */
+export function budgetExhausted(usedFetches: number, maxToolCalls: number): boolean {
+  return usedFetches >= maxToolCalls;
+}
+/** The message returned to the agent in place of a fetch once the budget is spent — instructs it to
+ *  stop fetching and submit, so the loop converges instead of wandering. */
+export function budgetExhaustedMessage(maxToolCalls: number): string {
+  return `Retrieval budget exhausted (${maxToolCalls} fetches used). Do not fetch any more — call submitFindings now with the citations you already have.`;
+}
 
 /**
  * The Web research SKILL (RESEARCH-12) — injected as the SDK session system message. It frames
@@ -164,6 +181,9 @@ export interface WebResearchOptions {
   /** Absolute path to the BYOA `copilot` CLI (ORCH-21 / BUG #65) — the SDK spawns THIS binary so it
    *  works inside the packaged app's asar. Resolved by the main tier; absent → SDK default search (dev). */
   cliPath?: string;
+  /** Diagnostic dev-log (OBS-1) for the research scope — the CAUSE behind a failed session is logged
+   *  here so a packaged-app SDK failure is never silent (#160 no-silent-swallow). Default: no-op. */
+  log?: DevLog;
   /** Injected session runner — production uses the SDK; tests/Slice-1a inject a fake. Returns the
    *  agent's note + raw cited URLs for one bounded research pass over `query`. */
   session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
@@ -191,8 +211,14 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
       const citations = filterCitations(out.citations, allowedDomains);
       const note = out.note.trim();
       return { found: note.length > 0, note, citations, query };
-    } catch {
-      return { found: false, note: '', citations: [], query };
+    } catch (err) {
+      // DO NOT swallow as a silent no-finding (#160 / BUG #65): a packaged-app that can't spawn the
+      // BYOA copilot throws HERE, and a bare `catch {}` made it indistinguishable from "found nothing".
+      // Log the cause to the research dev-log (OBS-1) + return `failed` so runResearcher audits it as
+      // `research-failed` (failed ≠ empty, OBS-4). The cause is the cliPath/SDK error, not the KB.
+      const message = err instanceof Error ? err.message : String(err);
+      (opts.log ?? noopDevLog).child({ scope: 'research' }).error('research.session-failed', { itemId: r.id, err, query });
+      return { found: false, note: '', citations: [], query, failed: true, error: message };
     }
   };
 }
@@ -217,6 +243,7 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     const gatedFetch = makeGatedFetch({ allowedDomains });
     let submitted: { note: string; citations: string[] } | null = null;
+    let usedFetches = 0; // RESEARCH-11 hard budget — count fetch tool calls, refuse past maxToolCalls
 
     // Hold ONE process-global copilot slot for the whole session (ORCH-23): researchers are background +
     // fan-out-capable, the multiplicative-concurrency vector the semaphore guards. Released in finally.
@@ -231,6 +258,10 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
           overridesBuiltInTool: true, // our gated fetch IS the agent's fetch
           handler: async (args: unknown) => {
             const url = String((args as { url?: unknown }).url ?? '');
+            // RESEARCH-11 hard cap: once the budget is spent, refuse + steer to submitFindings (so the
+            // agent converges instead of wandering — the #51 found:false cause). Counts every call.
+            if (budgetExhausted(usedFetches, maxToolCalls)) return { error: budgetExhaustedMessage(maxToolCalls), url };
+            usedFetches++;
             try {
               const res = await gatedFetch(url); // isAllowedUrl + SSRF-Agent; throws on a blocked/SSRF URL
               return { url: res.url, status: res.status, text: res.text, truncated: res.truncated };

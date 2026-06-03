@@ -80,7 +80,7 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
 | PANEL-6 | must     | Config changes are **persisted** (per-Instance config — where jobs/posture/agent settings live) and take effect **without a restart** where feasible | test:app/src/kb/instanceConfig.test.ts, jobRegistry.test.ts | SETUP-6; SCOPE-1 |
 | PANEL-7 | must     | **Risky/destructive** panel actions (disable a stage, set posture → Autonomous, retire an agent) **confirm** and are **audited**; read-only observation needs no confirm | test:app/src/kb/jobsPanel.test.ts (confirm gate + conforming `panel` audit events), app/src/shell/views/jobsView.test.ts + settingsView.test.ts (confirm UI) | AUTO-1,8 |
 | PANEL-8 | should   | The panel **links to the Review queue** (SPEC-0018) — the "needs you" count is visible from Manage | test:app/src/shell/reviewBadge.test.ts, app/src/shell/shell.test.ts | REVIEW-?; AUTO-10 |
-| PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/views/agentsView.test.ts (degrade) | ORCH-10 |
+| PANEL-9 | should   | Panel views **reflect live status** (ORCH-10) and **degrade gracefully** when a backing feature isn't built yet (e.g. Sources stub) or its IPC fails/**hangs** (never an infinite spinner — #145) | test:app/src/kb/agentCatalog.test.ts (live status); app/src/shell/loadGuard.test.ts + per-view hang→retry/fallback tests (reviewsView/settingsView/activityView/sourcesView/jobsView/statusView) (degrade) | ORCH-10 |
 | PANEL-10| should   | Action buttons (e.g. **Run now**) reflect a clear **state machine** — idle → confirm → **running** (disabled + status text) → back to idle on completion — never leaving the user unsure whether something is running | test:app/src/shell/views/researchersView.test.ts, app/src/shell/views/jobsView.test.ts | OBS-5; [#108](https://github.com/masra91/KB-App/issues/108) |
 
 ## 5. User flows / surface
@@ -185,3 +185,31 @@ Exactly one view active at a time (SHELL-2). Reviews stays its own top-level vie
   **Status** (load via `withTimeout`; its existing live poll auto-retries, so no button — stays
   read-only per OBS-9). UI-only — ships independent of the backend `kb:listJobs` fix (#135 cascade).
   Tests: `loadGuard.test.ts` (timeout/passthrough/retry-render) + per-view hang→retry coverage.
+- 2026-06-02 — **#145 follow-up: the resilience sweep is now complete across ALL Manage views (PANEL-9
+  fully discharged).** #149 hardened Jobs/Researchers/Agents/Status; this extends the same
+  `loadGuard` pattern to the remaining mount-loading views so none can infinite-spin on a hung IPC:
+  **Reviews** + **Settings** (load via `withTimeout` → `renderLoadError` with Retry on timeout/failure),
+  **Activity** (read-only AUDIT-8 — `withTimeout` on `activityFeed`/`activityLineage` → an inline
+  retryable error in its body, header/controls stay mounted), and **Sources** (`withTimeout` on
+  `getState`; its content is mostly static placeholders, so a hang degrades to the rendered view with
+  em-dash vault info — graceful, never a spinner). Capture (a non-blocking status line) + Ask
+  (on-demand recall, not a mount-gated load) are out of scope by design. Tests: per-view fake-timer
+  hang→retry/fallback coverage (`reviewsView`/`settingsView`/`activityView`/new `sourcesView` tests).
+- 2026-06-02 — **UI clarity / de-jargon pass** (KB-PM-triaged dogfood of the Manage surface + Recall +
+  set-aside). Removed internal artifacts / dev jargon from user-facing copy, **display-layer only**
+  (never mutating the canonical `kind`/`stage`/path/`id` the vault/audit/wikilinks depend on — guarded
+  by unchanged-value tests). Two shared render helpers: `shell/formatTime.ts` (`formatTimestamp` →
+  friendly/relative "2 min ago" / short date, replacing raw ISO everywhere it showed — Status, Activity,
+  Researchers last-run) and `shell/stageLabels.ts` (`stageDisplayName` → readable stage/actor names:
+  claims→"Claim extraction", connect→"Linking", archivist→"Archiving", decompose→"Decompose",
+  panel→"Control Panel"; raw id kept in a `title`). Plus: Settings dropped the `(SPEC-0030)` id + "Dev-log"→
+  "Diagnostic detail" + "egress payloads"→"data sent to external services"; **Recall References**
+  (SPEC-0026) lead with the human label + capitalized kind, raw vault path demoted to a tooltip (the
+  deep-link still uses the canonical `ref` via the index); Researchers "Egress"→"Data reach" (config
+  chrome only — the egress *security control* stays "egress"), add-researcher now takes a **Name** and
+  slugifies the id behind the scenes (no hand-typed slug), "via your gh"→"the GitHub CLI"; **Status**
+  (SPEC-0030, stays a diagnostics surface) softened — cache paths → basenames (+ tooltip),
+  "Canonical-writer lock"→"Write lock" (technical name in tooltip), friendly times + stage names;
+  Activity "lineage"→"trace origin". Held per KB-PM: Sources "coming soon" rows + the raw audit
+  drill-down (intentional AUDIT-5 transparency). Tests: `formatTime.test.ts`, `stageLabels.test.ts`,
+  + updated view assertions (path-in-tooltip, slugify, display-name).

@@ -6,6 +6,7 @@
 // ambiguous-link review type (empty subject → empty `refs`).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountReviews } from './reviewsView';
+import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { KbApi, ReviewSummary } from '../../kb/types';
 
 const POLL_MS = 5000; // keep in sync with REVIEW_POLL_MS in reviewsView.ts
@@ -55,6 +56,25 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     expect(root.querySelector('.review-confirm')).toBeTruthy();
     expect(root.querySelector('.review-reject')).toBeTruthy();
     expect(root.textContent).toContain('About: Ada');
+  });
+
+  it('#145: a hung listReviews times out → retryable error (no infinite spinner), and Retry re-loads', async () => {
+    const list = vi.fn<KbApi['listReviews']>().mockReturnValue(new Promise<ReviewSummary[]>(() => {})); // hangs
+    setApi(list);
+    const mounted = mountReviews(root);
+    expect(root.textContent).toContain('Loading…'); // spinner initially
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
+    await mounted;
+    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.load-error')).toBeTruthy();
+    expect(root.querySelector('.load-retry')).toBeTruthy();
+
+    // Retry succeeds → the list renders.
+    list.mockResolvedValue([CLAIM_REVIEW]);
+    root.querySelector<HTMLButtonElement>('.load-retry')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.review-q')?.textContent).toContain('Ada Lovelace');
   });
 
   it('renders a CONNECT-15 ambiguous-LINK review (empty subject) — confirm/reject, no "About" line (#110)', async () => {

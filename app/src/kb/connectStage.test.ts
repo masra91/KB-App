@@ -9,13 +9,15 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce } from './connectStage';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
 import { parseConnectDecision } from './connect';
 import type { Candidate, ConnectDecision } from './connect';
 import { Mutex } from './stageLock';
+import { planSetAsideAction } from './pipelineControl'; // the stage-agnostic seam (DEV-3 #162)
+import { toSetAsideViews } from './pipelineStatusView'; // the Status-view union (DEV-3 #162)
 
 function gitInstalledSync(): boolean {
   try {
@@ -643,6 +645,97 @@ describe.skipIf(!gitAvailable)('Connect within-source claim dedup (CLAIMS-19)', 
       expect(second.committed).toBe(false);
       expect(second.dropped).toBe(0);
       expect((await simpleGit(root).revparse(['HEAD'])).trim()).toBe(headAfter);
+    });
+  });
+});
+
+// ── Set-aside recovery (OBS-17, Connect half — mirrors claims CLAIMS-20) ─────────────────────
+describe.skipIf(!gitAvailable)('Connect set-aside recovery (OBS-17)', () => {
+  const KEY = 'person|steve jobs';
+  // Induce a poison set-aside block: a throwing decider, K attempts → set aside (CONNECT-14).
+  async function seedSetAside(root: string, lock: Mutex): Promise<void> {
+    await seedCandidate(root, 'person', 'Steve Jobs', '01S1');
+    await commitAll(root, 'seed');
+    const failing: ConnectDecider = async () => {
+      throw new Error('boom');
+    };
+    for (let n = 0; n < DEFAULT_MAX_ATTEMPTS; n++) await connectOne(root, KEY, failing, lock, DEFAULT_MAX_ATTEMPTS);
+  }
+
+  it('lists a set-aside block (keyed by blockKey, with a human name), off the active queue', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      expect(await readConnectQueue(root)).toHaveLength(0); // set aside → not in the active queue
+      const items = await listConnectSetAsideItems(root);
+      expect(items).toHaveLength(1);
+      expect(items[0].blockKey).toBe(KEY);
+      expect(items[0].name).toBe('Steve Jobs'); // the candidate's spelling, not the normalized key
+      expect(items[0].failures).toBe(DEFAULT_MAX_ATTEMPTS);
+    });
+  });
+
+  it('retry re-enqueues the block and clears it from the set-aside list (idempotent)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      await retryConnectItem(root, KEY, lock);
+      expect(await listConnectSetAsideItems(root)).toHaveLength(0); // reopened → no longer set aside
+      expect((await readConnectQueue(root)).map((s) => s.blockKey)).toContain(KEY); // back in the queue
+      // Idempotent in the read-outside/act-under-lock window: a second retry is harmless.
+      await retryConnectItem(root, KEY, lock);
+      expect((await readConnectQueue(root)).map((s) => s.blockKey)).toContain(KEY);
+    });
+  });
+
+  it('dismiss retires the block permanently — off BOTH the queue and the set-aside list (idempotent)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      await dismissConnectItem(root, KEY, lock);
+      expect(await listConnectSetAsideItems(root)).toHaveLength(0); // dismissed ≠ recoverable
+      expect(await readConnectQueue(root)).toHaveLength(0); // never re-queued
+      await dismissConnectItem(root, KEY, lock); // idempotent
+      expect(await readConnectQueue(root)).toHaveLength(0);
+    });
+  });
+
+  // The GLUED recovery path that pipelineControlForActive composes (OBS-17 e2e, #55 done-bar):
+  // poison block → surfaces in the Status-view union → the stage-agnostic planner resolves the
+  // renderer's blockKey server-side → my primitive runs → block re-derives (retry) / retires (dismiss).
+  // Drives the exact composition from #162's pipeline dispatch, deterministically (no copilot).
+  it('end-to-end: poison block surfaces in status, then Retry re-derives and Dismiss retires (#55)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const lock = new Mutex();
+      await seedSetAside(root, lock);
+
+      // 1. Surfaces in the Status view (the assembler maps connect items via toSetAsideViews(_, 'connect')).
+      const items = await listConnectSetAsideItems(root);
+      const views = toSetAsideViews(
+        items.map((i) => ({ itemId: i.blockKey, name: i.name, failures: i.failures, rounds: i.rounds })),
+        'connect',
+      );
+      expect(views).toEqual([{ stage: 'connect', itemId: KEY, name: 'Steve Jobs', reason: `set aside after ${DEFAULT_MAX_ATTEMPTS} failed attempts` }]);
+
+      // 2. Server-side resolve the renderer's itemId (blockKey) → handle, via the stage-agnostic planner.
+      const targets = items.map((i) => ({ id: i.blockKey, handle: i.blockKey, label: i.name }));
+      const plan = planSetAsideAction(targets, { stage: 'connect', action: 'retry', itemId: KEY });
+      expect('handle' in plan && plan.handle).toBe(KEY);
+
+      // 3. Retry → block re-derives (back in the active queue), off the set-aside list.
+      if ('handle' in plan) await retryConnectItem(root, plan.handle, lock);
+      expect((await readConnectQueue(root)).map((s) => s.blockKey)).toContain(KEY);
+      expect(await listConnectSetAsideItems(root)).toHaveLength(0);
+
+      // A renderer-supplied itemId NOT in the live list resolves to a no-op error (trust boundary).
+      expect('error' in planSetAsideAction(targets, { stage: 'connect', action: 'retry', itemId: 'person|ghost' })).toBe(true);
     });
   });
 });

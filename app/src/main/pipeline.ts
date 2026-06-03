@@ -12,27 +12,30 @@
 // ref-advance serialize through it.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import simpleGit from 'simple-git';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
-import { ConnectStage, readConnectQueue } from '../kb/connectStage';
+import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
-import { createVaultDevLog, readRecentDevLogEntries } from '../kb/devlog';
+import { createVaultDevLog, readRecentDevLogEntries, type DevLog } from '../kb/devlog';
+import { researchDepsOptions } from './researchWiring';
+import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
-import { assemblePipelineStatus, toSetAsideViews, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
-import { planSetAsideAction } from '../kb/pipelineControl';
+import { assemblePipelineStatus, toSetAsideViews, deriveStageError, buildInFlightRoster, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
+import { readConversionCounts } from '../kb/conversionCounts';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
 import { reviewResumeStage } from '../kb/reviewResume';
+import { resumeApprovedResearchEscalation } from '../kb/researchResume';
 import { runFullReplay } from '../kb/replay';
 import { JobScheduler } from '../kb/jobScheduler';
 import { exampleJobBehavior, EXAMPLE_JOB_TYPE } from '../kb/exampleJob';
@@ -50,7 +53,6 @@ import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRe
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
-import { makeWebResearchFn } from '../kb/researchWebAgent';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
@@ -61,6 +63,10 @@ import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
 import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
+
+/** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
+ *  Module-scoped so the Status roster (SPEC-0032 VIZ-2) can mark the active draining batch. */
+const STAGE_CAP = 3;
 
 /** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
  *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
@@ -81,6 +87,7 @@ interface ActivePipeline {
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
   lock: Mutex;
+  log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
 }
 
 let active: ActivePipeline | null = null;
@@ -142,7 +149,10 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   await reapEphemeralWorktrees(stagingWt, log.child({ scope: 'pipeline' })).catch((err) =>
     log.child({ scope: 'pipeline' }).warn('startup.worktree-reap-failed', { itemId: vaultPath, err }),
   );
-  const lock = new Mutex(); // the shared serialized canonical writer for this vault (§5)
+  // The shared serialized canonical writer for this vault (§5). The watchdog logs a loud `lock.stuck`
+  // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
+  // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
+  const lock = new Mutex({ log: log.child({ scope: 'lock' }) });
   // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
   // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
   // (archive→sources; connect→entities), so `main` tracks the resolved graph.
@@ -162,8 +172,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across all stages
   // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
   // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
-  // stays cap=1 until its ephemeral-worktree migration (Phase 2).
-  const STAGE_CAP = 3;
+  // stays cap=1 until its ephemeral-worktree migration (Phase 2). (STAGE_CAP is module-scoped.)
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
   const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer);
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
@@ -192,12 +201,14 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // pending `research-request` signals a stage emitted through the dedup dispatcher), then a standing
   // pass for every due scheduled researcher. Both execute via runResearcher — output is a cited
   // secondary source via the ingest path (NOT the JobBehavior write-sink — Option (a), JOBS-10
-  // intact). The default cognition is the Web SDK adapter behind the seam (egress-gated + SSRF-safe);
-  // passing no `researchFn`/`session` leaves the live web fetch gated (piece-1, throws → no-finding)
-  // so the inline trigger is wired + audited without making a live call yet. Reaching outside the KB
-  // is read-only-world (AUTO-6).
-  const researchers = new ResearcherScheduler(stagingWt, {}, lock, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock };
+  // intact). The cognition is the Web SDK adapter behind the seam (egress-gated + SSRF-safe), wired
+  // with the resolved BYOA copilot cliPath so it runs in the packaged app, and the dev-log so a
+  // session failure is logged + surfaced as `research-failed` (#160), not a silent no-finding.
+  // Reaching outside the KB is read-only-world (AUTO-6).
+  // Wire the resolved BYOA copilot cliPath + the dev-log into BOTH researcher entry points via the one
+  // shared seam (#160 / BUG #65): without cliPath the packaged app can't spawn copilot → the SDK throws.
+  const researchers = new ResearcherScheduler(stagingWt, researchDepsOptions(log), lock, log);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock, log };
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;
 }
@@ -264,7 +275,7 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
 export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
   if (!active) return null;
   const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
-  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside] = await Promise.all([
+  const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside, connectSetAside, conversion] = await Promise.all([
     readQueue(stagingWt),
     readDecomposeQueue(stagingWt),
     readConnectQueue(stagingWt),
@@ -273,9 +284,16 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     readRecentDevLogEntries(vaultPath, { limit: 25 }),
     loadPerfIndex(stagingWt),
     listWorktrees(vaultPath),
-    listSetAsideItems(stagingWt), // OBS-17: claims poison items, the canonical claims-path reader (CLAIMS-20)
+    listSetAsideItems(stagingWt), // OBS-17: claims poison items (canonical claims-path reader, CLAIMS-20)
+    listConnectSetAsideItems(stagingWt), // OBS-17: connect poison blocks (CLAIMS-20 connect twin, #157)
+    readConversionCounts(stagingWt, vaultPath), // SPEC-0032 VIZ-3: funnel counts (staging state + promoted on main)
   ]);
-  const setAsideItems = toSetAsideViews(claimsSetAside); // → Status-view shape (stage·name + reason)
+  // Union every stage's set-aside items into the view (claims + connect; future stages append here).
+  // Each stage maps its item to the generic {itemId, name, failures, rounds} source shape.
+  const setAsideItems = [
+    ...toSetAsideViews(claimsSetAside.map((i) => ({ itemId: i.entityId, name: i.name, failures: i.failures, rounds: i.rounds })), 'claims'),
+    ...toSetAsideViews(connectSetAside.map((i) => ({ itemId: i.blockKey, name: i.name, failures: i.failures, rounds: i.rounds })), 'connect'),
+  ];
 
   const recentErrors: RecentError[] = recentRaw.map((e) => ({
     ts: e.ts,
@@ -288,8 +306,10 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   }));
   const setAsideFor = (stage: string): number =>
     recentErrors.filter((e) => e.stage === stage && e.event.includes('setaside')).length;
-  const hasErrorFor = (stage: string): boolean =>
-    recentErrors.some((e) => e.stage === stage && e.level === 'error');
+  // #163: a stage is errored only if it has a FRESH error — a recovered stage's error ages out
+  // (was unbounded: any error in the last-N log lines kept the badge red forever).
+  const nowMs = Date.now();
+  const hasErrorFor = (stage: string): boolean => deriveStageError(recentErrors, stage, nowMs);
 
   const stages: StageInput[] = [
     { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveStatus.processing ? { currentItem: archiveStatus.processing } : {}) },
@@ -298,40 +318,67 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
     { stage: 'claims', queueDepth: claimsQ.length, setAside: setAsideFor('claims'), busy: claims.busy(), hasError: hasErrorFor('claims') },
   ];
 
+  // SPEC-0032 VIZ-2: in-flight carriages — each stage's queue items, `active` = the draining batch
+  // (`busy && index < cap`; the drain processes `queue[0..cap)`). Archive's active item is its
+  // `processing` (prepended; cap=1); connect drains 1 block at a time (cap=1); decompose/claims = STAGE_CAP.
+  const inFlight = buildInFlightRoster([
+    {
+      stage: 'archive',
+      items: [...(archiveStatus.processing ? [{ id: archiveStatus.processing }] : []), ...archiveQ.map((id) => ({ id }))],
+      busy: orch.busy(), cap: 1, since: archiveStatus.updatedAt ?? null,
+    },
+    { stage: 'decompose', items: decompQ.map((id) => ({ id })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
+    { stage: 'connect', items: connectQ.map((cs) => ({ id: cs.blockKey })), busy: connect.busy(), cap: 1, since: connect.currentSince() },
+    { stage: 'claims', items: claimsQ.map((rel) => ({ id: path.basename(rel, '.md') })), busy: claims.busy(), cap: STAGE_CAP, since: claims.currentSince() },
+  ]);
+
   // Last activity: the newest of the archivist status, the spans-file mtime (any stage's last span),
   // and the newest dev-log entry — so a quietly-working pipeline isn't mistaken for stalled (OBS-11).
   const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
-  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, ...(lastActivity ? { lastActivity } : {}) });
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, inFlight, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /**
  * OBS-17 — act on a set-aside (poison) item from the Status view: **retry** (re-enqueue to re-derive)
- * or **dismiss** (retire from the recoverable list). Claims-only in v1 (PM ruling); the request is
- * stage-parameterized so decompose/connect are additive (register their own branch here). Resolves
- * the surfaced `itemId` (entityId) to its node path via the canonical `listSetAsideItems`, then calls
- * the stage-owned primitive under the shared canonical-writer lock (the primitives lock internally).
- * Retry pokes the Claims drain so the item re-processes promptly rather than waiting for the sweep.
+ * or **dismiss** (retire from the recoverable list). Stage-dispatched (claims + connect today); a new
+ * stage is one more branch here — the planner + view stay stage-agnostic. Each branch builds the
+ * stage's *live* `{id, handle, label}` list (the `handle` is **server-derived**, never the renderer's
+ * `itemId` — the #153/#157 trust boundary) and binds the stage-owned primitives, which write under
+ * the shared canonical-writer lock. Retry pokes the stage drain so the item re-processes promptly.
  * Best-effort + honest: a stale/already-recovered item returns `{ok:false}` with a reason, never throws.
  */
 export async function pipelineControlForActive(req: PipelineControlRequest): Promise<PipelineControlResult> {
   const a = active;
   if (!a) return { ok: false, message: 'No knowledge base open.' };
-  if (req.stage !== 'claims') {
-    return { ok: false, message: `Recovery for the "${req.stage}" stage isn’t supported yet (claims-only for now).` };
-  }
   try {
-    // Plan against the *live* set-aside list (pure): validates stage/action + resolves itemId→path,
-    // or returns why it can't proceed (unsupported stage / already-recovered item).
-    const plan = planSetAsideAction(await listSetAsideItems(a.stagingWt), req);
+    let targets: SetAsideTarget[];
+    let doRetry: (handle: string) => Promise<void>;
+    let doDismiss: (handle: string) => Promise<void>;
+    let pokeAfterRetry: () => void;
+    if (req.stage === 'claims') {
+      targets = (await listSetAsideItems(a.stagingWt)).map((i) => ({ id: i.entityId, handle: i.entityRel, label: i.name || i.entityId }));
+      doRetry = (h) => retryClaimsItem(a.stagingWt, h, a.lock);
+      doDismiss = (h) => dismissClaimsItem(a.stagingWt, h, a.lock);
+      pokeAfterRetry = () => void a.claims.poke();
+    } else if (req.stage === 'connect') {
+      targets = (await listConnectSetAsideItems(a.stagingWt)).map((i) => ({ id: i.blockKey, handle: i.blockKey, label: i.name || i.blockKey }));
+      doRetry = (h) => retryConnectItem(a.stagingWt, h, a.lock);
+      doDismiss = (h) => dismissConnectItem(a.stagingWt, h, a.lock);
+      pokeAfterRetry = () => void a.connect.poke();
+    } else {
+      return { ok: false, message: `Recovery for the “${req.stage}” stage isn’t supported yet.` };
+    }
+    // Plan against the live list (pure): validate the action + resolve itemId→handle, or a no-op reason.
+    const plan = planSetAsideAction(targets, req);
     if ('error' in plan) return { ok: false, message: plan.error };
     if (req.action === 'retry') {
-      await retryClaimsItem(a.stagingWt, plan.entityRel, a.lock);
-      void a.claims.poke(); // re-drain promptly (don't wait for the periodic sweep)
+      await doRetry(plan.handle);
+      pokeAfterRetry(); // re-drain promptly (don't wait for the periodic sweep)
       return { ok: true, message: `Retrying ${plan.label}.` };
     }
-    await dismissClaimsItem(a.stagingWt, plan.entityRel, a.lock);
+    await doDismiss(plan.handle);
     return { ok: true, message: `Dismissed ${plan.label}.` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -364,7 +411,15 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
   // deletion-aware gate (STAGING-10). Promote under the shared lock, like the stages' afterDrain.
   if (result.ok) {
     const consolidation = await executeApprovedConsolidation(active.stagingWt, id, active.lock);
-    if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath));
+    if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath), 'consolidation:promote');
+  }
+  // SPEC-0028 RESEARCH-11 (D7 fast-follow): if this Review was a CONFIRMED research depth-limit
+  // escalation, continue the chain one level deeper now — so the "Continue researching X?" control
+  // actually continues (no dead affordance). Self-gating (no-op for any other review), so it's safe to
+  // call unconditionally. Uses the same cliPath+dev-log wiring as the scheduler/Run-now (#160).
+  if (result.ok) {
+    const resumed = await resumeApprovedResearchEscalation(active.stagingWt, id, researchDepsOptions(active.log));
+    if (resumed.resumed) active.log.child({ scope: 'research' }).info('research.resumed-after-confirm', { reviewId: id, sources: resumed.sourceIds?.length ?? 0 });
   }
   return result;
 }
@@ -390,11 +445,11 @@ export async function saveRecallOutput(result: AskResult): Promise<SaveRecallOut
     const abs = path.join(root, built.rel);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, built.markdown, 'utf8');
-    const git = simpleGit(root);
+    const git = boundedGit(root); // #163: bounded — runs under the canonical-writer lock
     await git.add(built.rel);
     await git.commit(`recall: save output ${id}`);
     await promote(a.vaultPath); // mirror the new outputs/ note to main (evergreen, deletion-aware gate)
-  });
+  }, 'recall-output:save');
   // Conforming audit — appends to the gitignored cross-cutting control log (not canonical); fine off-lock.
   await appendAuditEvent(root, {
     actor: 'output',
@@ -481,7 +536,7 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
       });
     }
     await commitRegistryChange(root, summarizeJobChange(clean));
-  });
+  }, 'job-config:write');
   if (applied) {
     // Conforming audit (PANEL-7 / AUDIT-2/11): one `panel` event per changed field, carrying the why.
     // Appends to the gitignored `.kb/audit.jsonl` (not canonical) — fine outside the lock.
@@ -508,7 +563,7 @@ export async function runActiveJobNow(id: string): Promise<RunJobResult> {
       const instanceCfg = await readInstanceConfig(root);
       await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: resolveJobPosture(instanceCfg.autonomyDefault, undefined) });
       await commitRegistryChange(root, `seed job ${id} for run-now`);
-    });
+    }, 'job:seed-for-run-now');
   }
   const res = await active.jobs.runNow(id);
   const outcome = res === 'skipped' || res === 'not-found' || res === 'unknown-type' ? res : res.outcome;
@@ -559,7 +614,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
     devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : prior.devLogLevel;
     await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel });
     await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel}`);
-  });
+  }, 'instance-settings:write');
   if (prior.autonomyDefault !== settings.autonomyDefault) {
     await appendAuditEvent(root, {
       actor: 'panel',
@@ -684,7 +739,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
     }
     applied = true;
     await commitControlFile(root, researcherRegistryPath(root), `researcher ${clean.id} config change`);
-  });
+  }, 'researcher-config:write');
   if (applied) {
     // Conforming `panel` audit: one event per changed behavior-relevant field (from→to), validated
     // values only — never a dropped-invalid field, never a no-op re-assert (QA-2 #81 follow-up).
@@ -717,14 +772,23 @@ export async function runActiveResearcherNow(id: string): Promise<RunResearcherR
     context: '',
     dedupKey: dedupKeyFor({ what, by: {} }),
   };
-  const res = await runResearcher(root, r, req, { research: makeWebResearchFn() });
+  // Same cliPath+dev-log wiring + per-template cognition as the scheduler (one seam, #160) — so Run-now
+  // can't silently no-op in the packaged app, and a code/m365 researcher tests its OWN adapter.
+  const opts = researchDepsOptions(active.log);
+  const res = await runResearcher(root, r, req, { research: selectResearchFn(root, r, opts) });
   await appendAuditEvent(root, {
     actor: 'panel',
     eventType: 'researcher-run-now',
     subjects: { researcherId: id },
-    payload: { outcome: res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
+    payload: { outcome: res.failed ? 'failed' : res.ceilingReached ? 'ceiling-reached' : res.sourceIds.length > 0 ? 'researched' : 'no-finding', why: 'Principal manual run via Control Panel' },
   });
-  return { ran: true, sourceIds: res.sourceIds, note: res.note };
+  return {
+    ran: true,
+    sourceIds: res.sourceIds,
+    note: res.note,
+    ...(res.failed ? { failed: true, ...(res.error ? { error: res.error } : {}) } : {}),
+    ...(res.ceilingReached ? { ceilingReached: true } : {}),
+  };
 }
 
 /** Recent runs for a researcher (RESEARCH-15) — its `researcher` audit events, newest-first. */
@@ -747,8 +811,10 @@ async function commitRegistryChange(root: string, message: string): Promise<void
  * canonical branch directly; under the lock it is just another linear advance that stages cherry-pick
  * their disjoint work onto). A no-op write (identical bytes) commits nothing.
  */
-async function commitControlFile(root: string, absPath: string, message: string): Promise<void> {
-  const git = simpleGit(root);
+// Exported for the #163 regression gate (boundedGit under the lock); `timeoutMs` defaults to the
+// standard bound and is overridable so the test can drive the timeout fast.
+export async function commitControlFile(root: string, absPath: string, message: string, timeoutMs?: number): Promise<void> {
+  const git = boundedGit(root, timeoutMs); // #163: bounded — runs under the canonical-writer lock
   const rel = path.relative(root, absPath);
   await git.add(rel);
   const staged = (await git.diff(['--cached', '--name-only'])).trim();

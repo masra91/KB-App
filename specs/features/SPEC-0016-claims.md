@@ -344,6 +344,7 @@ inside the entity node so its substance reads in place:
 | CLAIMS-18  | should   | The Claims work-list is discovered by a **derived sweep of `entities/`** in v1 (terminal `claims` marker in the source audit, keyed by `entityId`); the eventual seam is a **`queue/claims/` folder + per-entity poke** (DECOMP-16) — later stages attach with no change to Claims | test:claimsStage.test.ts | ORCH-9,15; DECOMP-16 |
 | CLAIMS-19  | should   | **Within-source near-duplicate claim collapse**: claims that share the **same source provenance** AND normalize to the **same statement** collapse to one canonical (fact>interpretation>hypothesis, then confidence, then earliest id); the rest are deleted and the affected nodes' claims blocks regenerated. Deterministic + idempotent; runs as **Connect's post-Claims pass** (SPEC-0016 §6). Symmetric-relationship rewordings ("A↔B") are NOT collapsed — deferred to typed links (SPEC-0020 CONNECT-20); the residual is logged | test:claimDedup.test.ts, connectStage.test.ts | DATA-3; LIFE-8; SPEC-0020 |
 | CLAIMS-20  | should   | A **set-aside claims item is user-recoverable** (the #137 escape hatch): `retryClaimsItem` appends a **per-entity `reopened`** marker that supersedes the prior `setaside`/`failed` count so the entity re-enters the queue and re-derives (per-ENTITY, **not** a source-wide replay epoch — siblings untouched); `dismissClaimsItem` appends a **terminal `dismissed`** marker (permanently retired, never re-derived, distinct from the recoverable `setaside`); `listSetAsideItems` enumerates the recoverable set. All append-only on the source audit (CLAIMS-11), committed under the canonical-writer lock (CLAIMS-15) | test:claimsStage.test.ts | ORCH-12; SPEC-0030 OBS-17; [#137](https://github.com/masra91/KB-App/issues/137) |
+| CLAIMS-21  | must     | A **Connect-merged entity has MANY sources** (`derivedFrom` is multi-valued post-Connect): Claims processes it **per (entity × source)** — **every** source contributes its claims (within-source restatements collapse via CLAIMS-19; cross-source restatements are kept with independent provenance via CLAIMS-17). Deriving from only `derivedFrom[0]` **silently drops the later sources' facts — data loss — and is prohibited.** Each resulting claim's `evidence.derivedFrom` references the **single** source it came from (clean per-claim provenance) | test:claimsStage.test.ts | CLAIMS-5,17,19; SPEC-0020 CONNECT; [data-loss dogfood] |
 
 ### CLAIMS-5 — The work unit is an entity + its whole source
 - **Status:** draft · **Priority:** must
@@ -500,11 +501,16 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 - [x] **`claims/` physical layout** *(architecture)* — *resolved at build time:*
       **`claims/<dateShard(id)>/<id>.md`**, mirroring `entities/`. (Partition-by-subject was
       considered but date-shard keeps the convention uniform across sources/entities/claims.)
-- [ ] **Entity-driven unit after Connect** — v1's "one entity ↔ one source" holds only
-      because Decompose mints fresh per-source nodes. Once Connect merges nodes spanning
-      multiple sources, a merged entity has *many* sources: does Claims then run per
-      (entity × source) pair, or re-run over the merged entity with all sources? (Revisit
-      when Connect is specced; the Principal flagged ambivalence here.)
+- [x] **Entity-driven unit after Connect** — *resolved (Principal ruling, 2026-06-02):*
+      **per (entity × source)** — once Connect merges nodes spanning multiple sources, Claims
+      runs over **each** `derivedFrom` source of the merged entity, not just the first. Chosen
+      over re-running across the combined merged entity because per-source processing keeps
+      **clean per-claim `Source: [[…]]` provenance** (the citation/grounding model) and aligns
+      with CLAIMS-17 (cross-source restatements kept) + CLAIMS-19 (within-source collapse).
+      Pinned as **CLAIMS-21**. Surfaced by DEV-1's enrich dogfood as a live **data-loss** bug
+      (a merged entity's later sources' facts were silently dropped — only `derivedFrom[0]`
+      processed); the deferral condition ("revisit when Connect is specced") resolved when
+      Connect shipped (SPEC-0020).
 - [ ] **`relatesTo` shape** — bare entity-name strings (as drafted) vs. a richer
       `{name, predicate?}` hint. Kept minimal for v1; Connect's needs will pin it.
 - [ ] **Claim granularity / dedup within one run** — should the agent be nudged to emit
@@ -521,6 +527,20 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 
 ## 8. Changelog
 
+- 2026-06-03 — **CLAIMS-21 implemented (#197)** — `parseEntityNode` now returns ALL `derivedFrom`
+  sources; `claimsOne` processes one pending (entity × source) pair per call and the drain re-queues
+  the entity until every source is terminal; each claim carries its single source as provenance; the
+  entity claims-block is regenerated from the **union of all claim files about the entity** (CLAIMS-9)
+  so a per-source run never clobbers a sibling's rows. Set-aside/retry/dismiss stay per-pair. The
+  data-loss bug is closed; `Verify` graduated `none-yet → test:claimsStage.test.ts` (the
+  Grace-Hopper-across-2-sources fails-before/passes-after regression + parse-level + per-source-failure).
+- 2026-06-02 — **CLAIMS-21: per-(entity × source) claims for Connect-merged entities** (resolves
+  §7's deferred "entity-driven unit after Connect"; Principal ruling). A merged entity has many
+  `derivedFrom` sources; Claims now derives from **each** of them, not just `derivedFrom[0]` —
+  closing a **data-loss** bug DEV-1's enrich dogfood reproduced (a merged entity's later sources'
+  facts were silently dropped). Per-source chosen over a combined re-run to preserve clean
+  per-claim provenance (CLAIMS-17/19 handle dedup). A **fails-before/passes-after** regression
+  test (the Grace-Hopper-across-2-sources repro) is required before the fix lands (E2 bar).
 - 2026-06-02 — **CLAIMS-20: set-aside items are user-recoverable** (#137 escape hatch backing
   SPEC-0030 OBS-17). Added `retryClaimsItem` (per-entity `reopened` marker → re-enters the queue,
   siblings untouched — deliberately *not* a source-wide `replay-reset` epoch, which would

@@ -96,4 +96,46 @@ describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
       await expect(runResearcher(root, { ...web, id: '../evil' }, request, { research })).rejects.toThrow(/unsafe researcher id/);
     });
   });
+
+  it('the global per-Instance ceiling refuses a pass past the cap — NO egress + a ceiling-reached no-op (RESEARCH-11)', async () => {
+    await withVault(async (root) => {
+      let calls = 0;
+      const research: ResearchFn = async () => {
+        calls++;
+        return { found: true, note: 'a finding', citations: [], query: 'q' };
+      };
+      // ceiling=1: the first pass egresses + is recorded; the second is refused BEFORE the cognition runs.
+      const r1 = await runResearcher(root, web, request, { research, instanceCeiling: 1, now: () => '2026-06-02T01:00:00.000Z' });
+      const r2 = await runResearcher(root, web, { ...request, id: 'req-2' }, { research, instanceCeiling: 1, now: () => '2026-06-02T01:05:00.000Z' });
+      expect(calls).toBe(1); // the 2nd pass never reached egress — the hard backstop, not advisory
+      expect(r1.sourceIds).toHaveLength(1);
+      expect(r1.ceilingReached).toBeUndefined(); // an admitted pass is NOT flagged ceiling
+      expect(r2.sourceIds).toEqual([]);
+      expect(r2.ceilingReached).toBe(true); // distinguishable from a legit no-finding (ceiling ≠ empty)
+      expect(r2.note).toMatch(/ceiling reached/i);
+      const audit = await readAudit(root);
+      const ceiling = audit.find((a) => a.eventType === 'ceiling-reached');
+      expect(ceiling, 'a refused pass must audit ceiling-reached (no silent action)').toBeDefined();
+      expect(ceiling!.actor).toBe('researcher');
+      expect((ceiling!.payload as Record<string, unknown>).ceiling).toBe(1);
+    });
+  });
+
+  it('a FAILED pass audits `research-failed` (not the silent `no-finding`) so failed≠empty (#160)', async () => {
+    await withVault(async (root) => {
+      // The cognition reports failure (e.g. packaged-app can't spawn copilot) — distinct from a no-finding.
+      const research: ResearchFn = async () => ({ found: false, note: '', citations: [], query: 'Project Atlas', failed: true, error: 'spawn copilot ENOENT' });
+      const res = await runResearcher(root, web, request, { research, now: () => '2026-06-02T01:00:00.000Z' });
+      expect(res.sourceIds).toEqual([]);
+      expect(res.failed).toBe(true);
+      expect(res.error).toMatch(/ENOENT/);
+      const audit = await readAudit(root);
+      const failed = audit.find((a) => a.eventType === 'research-failed');
+      expect(failed, 'a failure must emit research-failed').toBeDefined();
+      expect(failed!.actor).toBe('researcher');
+      expect((failed!.payload as Record<string, unknown>).error).toMatch(/ENOENT/);
+      // and it must NOT be miscounted as a legit no-finding (the bug that hid this).
+      expect(audit.some((a) => a.eventType === 'no-finding')).toBe(false);
+    });
+  });
 });

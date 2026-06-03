@@ -127,6 +127,45 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-02 — **SPEC-0032 §9 dep: in-flight item roster on the view-model (VIZ-2).** The
+  `PipelineStatusView` gains `inFlight: InFlightItem[]` — every queued item as a "carriage" at its
+  stage, `active` marking the draining batch. Pure `buildInFlightRoster` computes `active = busy &&
+  index < cap` (the drain processes `queue[0..cap)`) — **no surgery on the load-bearing drain
+  concurrency**; each drain stage just gained a tiny `currentSince()` timestamp for the active
+  carriage's dwell (`sinceTs` precise-for-active, omitted-for-queued per DEV-4). Gathered in
+  `pipeline.ts` (archive: `processing` + inbox, cap 1; connect cap 1; decompose/claims cap STAGE_CAP).
+  Third + final §9 data field (after STAGE_ORDER #168 + conversion counts #169); the `kb:pipelineEvent`
+  push is the remaining VIZ §9 piece. Tested: `buildInFlightRoster` (active batch + sinceTs, idle, name
+  fallback, multi-stage) + the stage `currentSince` additions are covered by the existing stage suites.
+- 2026-06-02 — **#163: surface a STUCK write lock (OBS-7/11).** DEV-2's watchdog (#170) added
+  `LockState.stuck`/`heldMs`; this renders them so the silent canonical-writer deadlock the watchdog
+  catches is now **visible**: `lockHtml` shows "⚠️ Stuck — held by `<holder>` for `Ns`; the pipeline
+  is wedged" (and the held-duration on a normal hold); `overallHtml` adds a specific stuck banner; and
+  the assembler treats a stuck lock as **`overall: 'stalled'`** — without that, `lock.held` reads
+  `running` and masks the wedge (the exact silent-stall this spec exists to make loud). Holder labels
+  are `stage:op` (#170), shown via `holderLabel` as "Claim extraction (advance)" — naming the exact
+  stuck section. View-only (my half of the #163 lock split; DEV-2 owns the lock mechanics). Tests:
+  assembler stuck→stalled; lockHtml stuck + held-duration; overallHtml stuck banner.
+- 2026-06-02 — **#163 fix: stage error badges are now time-bounded (OBS-5/6).** `hasErrorFor` flagged
+  a stage errored if *any* of the last-N warn/error log lines was an error — no time bound and (since
+  the dev log only surfaces warn+error here) no info-level "progress" to supersede it — so a recovered
+  stage stayed **red forever**. New pure `deriveStageError(errors, stage, nowMs, freshMs)`
+  (`DEFAULT_ERROR_FRESH_MS` = 2 min) marks a stage errored only on a **fresh** error: a one-off error
+  ages out (then `deriveStageState` shows running/idle), while a genuinely-broken stage re-errors each
+  attempt and stays red. Regression test (fails-before/passes-after): a stale error → not-errored
+  (the old unbounded check returned errored). `pipeline.ts` calls it with `Date.now()`.
+- 2026-06-02 — **OBS-17 extended to Connect (the stage-agnostic seam, additive — no rewrite).** The
+  recovery surface now covers **connect** set-aside (poison) blocks alongside claims, exactly as the
+  seam was designed. Refactored the pure layer to be stage-agnostic: `planSetAsideAction(targets, req)`
+  takes a pre-resolved `{id, handle, label}[]` (the `handle` is **server-derived** — entityRel for
+  claims, blockKey for connect — never the renderer's `itemId`, the #153/#157 trust boundary) and
+  `toSetAsideViews(items, stage)` tags any stage; `pipeline.ts` dispatches per stage (claims →
+  `listSetAsideItems`/`retryClaimsItem`/`dismissClaimsItem`; connect → DEV-1's #157
+  `listConnectSetAsideItems`/`retryConnectItem`/`dismissConnectItem`) and the assembler unions both
+  stages' views. Adding decompose later is one more dispatch branch + a list mapper — the planner,
+  view, and IPC contract are unchanged. Tests: stage-agnostic `planSetAsideAction` (claims + connect
+  targets + trust-boundary no-op), `toSetAsideViews(items, stage)`, mixed-stage panel render. DEV-1
+  verifies the connect e2e (poison block → Status view → Retry/Dismiss).
 - 2026-06-02 — **OBS-17 action-half → test:. Interactive unblock complete.** The Status view's
   set-aside panel now carries **Retry** + **Dismiss** per item, wired to a new **`kb:pipelineControl`**
   IPC (`{action, stage, itemId}`, stage-parameterized) → `pipelineControlForActive` (main/pipeline.ts).

@@ -6,6 +6,7 @@
 // reports, it never mutates.
 import type { LockState } from './stageLock';
 import type { PerfIndex } from './perfIndex';
+import type { StageId } from './pipelineStages';
 
 /**
  * One set-aside (poison) item as the Status view renders it (OBS-17) — a thin PRESENTATION shape,
@@ -21,11 +22,11 @@ export interface SetAsideView {
   reason?: string;
 }
 
-/** The fields {@link toSetAsideViews} needs from a claims-path set-aside item (structural — the
- *  domain `claimsStage.SetAsideItem` is assignable). Kept local so this view-model stays free of a
- *  stage dependency. */
+/** The fields {@link toSetAsideViews} needs from any stage's set-aside item. `itemId` is the
+ *  renderer-facing id the stage surfaces (entityId for claims, blockKey for connect). Kept local +
+ *  generic so this view-model stays free of any stage dependency. */
 export interface SetAsideSource {
-  entityId: string;
+  itemId: string;
   name: string;
   failures: number;
   rounds: number;
@@ -40,12 +41,13 @@ export function setAsideReason(failures: number, rounds: number): string {
   return 'set aside after repeated failures';
 }
 
-/** Map claims-path set-aside items (`claimsStage.listSetAsideItems`) to the Status-view presentation
- *  shape (OBS-17, claims-only v1). Tags `stage:'claims'`; derives the reason. */
-export function toSetAsideViews(items: SetAsideSource[]): SetAsideView[] {
+/** Map a stage's set-aside items to the Status-view presentation shape (OBS-17), tagging the `stage`
+ *  and deriving the reason. Stage-agnostic — claims + connect (+ future stages) each map their list
+ *  through this; the assembler unions the results. */
+export function toSetAsideViews(items: SetAsideSource[], stage: string): SetAsideView[] {
   return items.map((it) => ({
-    stage: 'claims',
-    itemId: it.entityId,
+    stage,
+    itemId: it.itemId,
     name: it.name,
     reason: setAsideReason(it.failures, it.rounds),
   }));
@@ -86,6 +88,60 @@ export interface WorktreeInfo {
   branch?: string;
 }
 
+/** Cumulative funnel conversion counts (SPEC-0032 VIZ §9 / VIZ-3) — current-state tallies, raw; the
+ *  VIZ frontend computes the between-bucket deltas + dedup/fan-out ratios. Each is a conversion point,
+ *  not 1:1 with the 6 stations. */
+export interface ConversionCounts {
+  captured: number;
+  candidates: number;
+  entities: number;
+  claims: number;
+  promoted: number;
+}
+
+/** One in-flight item (SPEC-0032 VIZ-2) — a "carriage" on the Line: a live source/block at its
+ *  current `stage`. `active` marks the one(s) the stage is currently draining (only those ember-
+ *  breathe, VIZ-6); the rest are queued behind. `sinceTs` is the drain-start dwell, precise for
+ *  active carriages, omitted for queued (DEV-4: dwell is only rendered on the active one). */
+export interface InFlightItem {
+  itemId: string;
+  name: string;
+  stage: StageId;
+  sinceTs?: string;
+  active?: boolean;
+}
+
+/** One stage's contribution to the roster: its queue `items` in drain order (head drained first),
+ *  whether it's `busy`, its `cap` (the first `cap` items are the active batch while busy), and the
+ *  active batch's start time (`since`). */
+export interface StageRoster {
+  stage: StageId;
+  items: { id: string; name?: string }[];
+  busy: boolean;
+  cap: number;
+  since: string | null;
+}
+
+/** Build the in-flight carriage roster (SPEC-0032 VIZ-2, pure). Each stage's queue items become
+ *  carriages; `active = busy && index < cap` (the drain processes `queue[0..cap)`), and `sinceTs` is
+ *  the drain start for active carriages only. `name` falls back to the id. */
+export function buildInFlightRoster(stages: StageRoster[]): InFlightItem[] {
+  const out: InFlightItem[] = [];
+  for (const s of stages) {
+    s.items.forEach((it, i) => {
+      const active = s.busy && i < s.cap;
+      out.push({
+        itemId: it.id,
+        name: it.name ?? it.id,
+        stage: s.stage,
+        ...(active ? { active: true } : {}),
+        ...(active && s.since ? { sinceTs: s.since } : {}),
+      });
+    });
+  }
+  return out;
+}
+
 /** The assembled Status view-model (OBS-5/6/7/11/15). */
 export interface PipelineStatusView {
   /** Overall state (OBS-5/11). */
@@ -106,12 +162,36 @@ export interface PipelineStatusView {
   perf: PerfIndex;
   /** Set-aside / poison items with reason (OBS-17) — the actionable recovery list (claims-only v1). */
   setAsideItems: SetAsideView[];
+  /** Cumulative funnel conversion counts (SPEC-0032 VIZ-3). */
+  conversion: ConversionCounts;
+  /** In-flight items (carriages) with their current stage (SPEC-0032 VIZ-2). */
+  inFlight: InFlightItem[];
   /** When this snapshot was assembled (ISO). */
   builtAt: string;
 }
 
 /** No progress for this long with a non-empty queue ⇒ stalled (OBS-11). */
 export const DEFAULT_STALL_MS = 5 * 60_000; // 5 minutes
+
+/** A stage's error badge clears this long after its last error (#163): a stage that errored once and
+ *  recovered should not stay red forever. A genuinely-broken stage re-errors on each attempt, staying
+ *  inside the window → stays red; a recovered one ages out → clears (then `deriveStageState` shows
+ *  running/idle). The dev log only carries warn+error here, so there are no info-level "progress"
+ *  entries to supersede an error with — freshness is the right (and only available) clearing signal. */
+export const DEFAULT_ERROR_FRESH_MS = 2 * 60_000; // 2 minutes
+
+/**
+ * Whether a stage should show as **errored** right now (#163): true iff it has an `error`-level entry
+ * within `freshMs` of `nowMs`. This bounds the old unbounded "any error in the last-N log lines" check
+ * that left recovered stages stuck red. Pure + time-injected so it's testable without a clock.
+ */
+export function deriveStageError(errors: RecentError[], stage: string, nowMs: number, freshMs: number = DEFAULT_ERROR_FRESH_MS): boolean {
+  return errors.some((e) => {
+    if (e.stage !== stage || e.level !== 'error') return false;
+    const ts = Date.parse(e.ts);
+    return Number.isFinite(ts) && nowMs - ts <= freshMs;
+  });
+}
 
 /** The raw per-stage signals the assembler derives a {@link StageState} from. */
 export interface StageInput {
@@ -145,6 +225,8 @@ export interface AssembleParts {
   worktrees: WorktreeInfo[];
   perf: PerfIndex;
   setAsideItems: SetAsideView[];
+  conversion: ConversionCounts;
+  inFlight: InFlightItem[];
   /** Most-recent activity timestamp (ISO) from any source (status, spans, dev log). */
   lastActivity?: string;
 }
@@ -179,7 +261,12 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
   const totalQueue = parts.stages.reduce((n, s) => n + s.queueDepth, 0);
 
   let overall: OverallState;
-  if (anyRunning) {
+  if (parts.lock.stuck) {
+    // #163: a stuck-held canonical-writer lock IS a stall — the pipeline is wedged on that section
+    // and can't progress. Without this it would read `running` (anyRunning includes `lock.held`),
+    // masking the exact silent-deadlock SPEC-0030 exists to surface (OBS-11). The watchdog set `stuck`.
+    overall = 'stalled';
+  } else if (anyRunning) {
     overall = 'running';
   } else if (totalQueue === 0) {
     overall = 'idle';
@@ -200,6 +287,8 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     worktrees: parts.worktrees,
     perf: parts.perf,
     setAsideItems: parts.setAsideItems,
+    conversion: parts.conversion,
+    inFlight: parts.inFlight,
     builtAt,
   };
 }

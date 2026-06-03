@@ -11,11 +11,11 @@ import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView } from './pipelineStatusView';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem } from './pipelineStatusView';
 import type { DevLogLevel } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
-export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView };
+export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem };
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -219,10 +219,13 @@ export type RunJobResult =
 /** Last-run summary for a researcher, derived from its newest `researcher` audit event, for display. */
 export interface ResearcherLastRun {
   ts: string; // ISO timestamp of the last pass
-  eventType: string; // 'researched' | 'no-finding'
+  eventType: string; // 'researched' | 'no-finding' | 'research-failed' | 'ceiling-reached' | 'escalated'
   what: string; // the request term it answered
   sourceId?: string; // the secondary source produced (when it found something)
   citations: number; // external citations on the finding
+  /** The depth-limit escalation Review this pass raised (RESEARCH-11) — present on an `escalated`
+   *  event, so the Field Desk can deep-link "needs your review" to the open Review (no dead affordance). */
+  reviewId?: string;
 }
 
 /** One manageable researcher as the Researchers view needs it (RESEARCH-15): config + last run. */
@@ -247,6 +250,12 @@ export interface ResearcherView {
   schedule: SchedulePreset;
   posture: AutonomyPosture;
   topics: string[];
+  /** Per-pass retrieval/chain bounds (RESEARCH-11) — surfaced read-only in the "reach readout" so the
+   *  Principal can see a researcher's spend ceiling without opening anything. Editor deferred (§10). */
+  budget: { maxToolCalls: number; maxDepth: number };
+  /** The researcher's tool/MCP allowlist (RESEARCH-12) — surfaced read-only in the reach readout so a
+   *  researcher's reach is always legible. Empty = the template's default surface. Editor deferred. */
+  allowedTools: string[];
   lastRun: ResearcherLastRun | null; // null = never run
 }
 
@@ -271,9 +280,12 @@ export interface ResearcherConfigPatch {
   topics?: string[];
 }
 
-/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run. */
+/** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;
+ *  `ran:true` + `failed` means the pass ERRORED (e.g. packaged-app can't spawn copilot, #160); `ran:true`
+ *  + `ceilingReached` means it was paused by the per-Instance rate-limit (RESEARCH-11) — both distinct
+ *  from a legit "no new finding" (failed/blocked ≠ empty). */
 export type RunResearcherResult =
-  | { ran: true; sourceIds: string[]; note: string }
+  | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string; ceilingReached?: boolean }
   | { ran: false; reason: 'not-found' | 'no-kb' };
 
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---

@@ -11,6 +11,7 @@
 // the same `listReviews()` the badge counts. It re-renders only when the open-review *set* changes
 // and never while a note is being written (so it can't clobber in-progress input).
 import { esc } from '../html';
+import { withTimeout, renderLoadError } from '../loadGuard';
 import type { ReviewSummary } from '../../kb/types';
 
 /** Poll cadence — matches the rail badge (shell.ts) so the list and the count never drift. */
@@ -63,10 +64,13 @@ function hasDirtyNote(container: HTMLElement): boolean {
 async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean } = {}): Promise<void> {
   let reviews: ReviewSummary[];
   try {
-    reviews = await window.kbApi.listReviews();
+    // #145: bound the wait so a hung `listReviews` can't leave an infinite spinner; a hang then
+    // surfaces as a normal rejection this catch handles.
+    reviews = await withTimeout(window.kbApi.listReviews());
   } catch {
     if (!opts.onlyIfChanged) {
-      container.innerHTML = `<div class="card"><h1>🔍 Reviews</h1><p class="error">Could not load reviews right now.</p></div>`;
+      // Initial/forced load failed → a retryable error (the poll keeps trying too).
+      renderLoadError(container, '<h1>🔍 Reviews</h1>', () => void refresh(container));
     }
     return; // poll error → keep the last good list
   }

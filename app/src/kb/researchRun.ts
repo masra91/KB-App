@@ -15,7 +15,8 @@
 //   #77 class). The researcher id that reaches `.kb/researchers/<id>` is slug-validated upstream.
 import { captureToInbox } from './ingest';
 import { appendAuditEvent } from './audit';
-import { isSafeResearcherId, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
+import { admitResearchPass } from './researchCeiling';
+import { isSafeResearcherId, RESEARCH_INSTANCE_CEILING, RESEARCH_INSTANCE_WINDOW_MS, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
 
 /** What the injected cognition returns. `found:false` = nothing worth recording (audited no-op). */
 export interface ResearchFindings {
@@ -27,6 +28,15 @@ export interface ResearchFindings {
   citations: string[];
   /** The outbound query actually used (built from the request only — D6a; recorded for audit). */
   query: string;
+  /**
+   * The pass FAILED (SDK/CLI unavailable, session error) rather than legitimately finding nothing
+   * (#160 / BUG #65 class). A failure MUST stay distinguishable from a no-finding — a packaged-app
+   * that can't spawn the BYOA copilot should surface an error, not a silent "no new finding". The
+   * cognition adapter sets this + logs the cause; `runResearcher` audits it as `research-failed`.
+   */
+  failed?: boolean;
+  /** The failure cause (when `failed`) — recorded in the audit so it's never silent (OBS-4). */
+  error?: string;
 }
 
 /** The cognition seam: run one external research pass for `r` answering `req`. Production = the Web
@@ -37,6 +47,10 @@ export interface RunResearcherDeps {
   research: ResearchFn;
   /** Injectable ISO clock (deterministic tests). */
   now?: () => string;
+  /** Override the global per-Instance egress ceiling (RESEARCH-11). Default RESEARCH_INSTANCE_CEILING. */
+  instanceCeiling?: number;
+  /** Override the per-Instance ceiling's rolling window in ms. Default RESEARCH_INSTANCE_WINDOW_MS. */
+  instanceWindowMs?: number;
 }
 
 export interface RunResearcherResult {
@@ -44,6 +58,14 @@ export interface RunResearcherResult {
   sourceIds: string[];
   /** One-liner outcome for the dispatcher's summary / caller audit. */
   note: string;
+  /** The pass failed (vs a legit no-finding) — so the caller/UI surfaces an error, not "no finding". */
+  failed?: boolean;
+  /** The failure cause, when `failed`. */
+  error?: string;
+  /** The pass was refused by the global per-Instance ceiling (RESEARCH-11) — a rate-limit pause, NOT a
+   *  legit empty result. Kept distinct so the UI/audit don't report a runaway-backstop block as
+   *  "no new finding" (the failed≠empty principle, applied to the ceiling). */
+  ceilingReached?: boolean;
 }
 
 /**
@@ -56,7 +78,39 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
   if (!isSafeResearcherId(r.id)) throw new Error(`runResearcher: refusing unsafe researcher id ${JSON.stringify(r.id)}`);
   const now = deps.now ?? (() => new Date().toISOString());
 
+  // Global per-Instance egress ceiling (RESEARCH-11) — the cross-researcher HARD backstop, checked at
+  // this single chokepoint so it bounds BOTH inline dispatch runs AND scheduled standing passes. Once the
+  // rolling-window count is spent, REFUSE before any egress (no `deps.research`) + audit the no-op so the
+  // backstop is never silent (AUDIT-2). Self-healing: capacity returns as passes age out of the window.
+  const ceiling = deps.instanceCeiling ?? RESEARCH_INSTANCE_CEILING;
+  const windowMs = deps.instanceWindowMs ?? RESEARCH_INSTANCE_WINDOW_MS;
+  const admission = await admitResearchPass(root, Date.parse(now()) || Date.now(), ceiling, windowMs);
+  if (!admission.allowed) {
+    await appendAuditEvent(root, {
+      actor: 'researcher',
+      eventType: 'ceiling-reached',
+      ts: now(),
+      subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
+      payload: { what: req.what, why: req.why, countInWindow: admission.countInWindow, ceiling: admission.ceiling, windowHours: windowMs / 3_600_000, egressTier: r.egressTier },
+    });
+    return { sourceIds: [], note: `per-Instance research ceiling reached (${admission.countInWindow}/${admission.ceiling} passes in ${windowMs / 3_600_000}h)`, ceilingReached: true };
+  }
+
   const findings = await deps.research(r, req);
+
+  if (findings.failed) {
+    // The cognition FAILED (e.g. packaged-app can't spawn the BYOA copilot — #160 / BUG #65), not a
+    // legit empty result. Audit it as a DISTINCT `research-failed` event (never the silent `no-finding`
+    // that hid this in the live build) so the Activity feed + OBS surface the error (AUDIT-2, OBS-4).
+    await appendAuditEvent(root, {
+      actor: 'researcher',
+      eventType: 'research-failed',
+      ts: now(),
+      subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
+      payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier, error: findings.error ?? 'unknown error' },
+    });
+    return { sourceIds: [], note: `research failed: ${findings.error ?? 'unknown error'}`, failed: true, ...(findings.error ? { error: findings.error } : {}) };
+  }
 
   if (!findings.found || findings.note.trim().length === 0) {
     // RESEARCH-4: not relevant / nothing found → no-op, but audited (no silent actions, AUDIT-2).

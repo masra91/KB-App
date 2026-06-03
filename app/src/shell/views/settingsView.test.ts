@@ -6,6 +6,7 @@
 // instanceConfig.test.ts; Replay is covered by SPEC-0022's own tests.)
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountSettings } from './settingsView';
+import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { KbApi, InstanceSettings } from '../../kb/types';
 
 function setApi(autonomyDefault: 'guarded' | 'autonomous', setSpy?: KbApi['setInstanceSettings']): {
@@ -100,5 +101,43 @@ describe('Settings · Dev-log verbosity (SPEC-0030 OBS-10)', () => {
     // The whole settings object is sent — autonomyDefault not clobbered (no confirm; benign toggle).
     expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'debug' });
     expect(root.querySelector('#verbosity-status')?.textContent).toContain('Debug');
+  });
+});
+
+describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('times out a hung getState → retryable error, and Retry re-loads successfully', async () => {
+    const getState = vi.fn<KbApi['getState']>().mockReturnValueOnce(new Promise(() => {})); // hangs
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = { getState };
+    const mounted = mountSettings(root);
+    expect(root.textContent).toContain('Loading…'); // spinner initially
+
+    await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
+    await mounted;
+    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.load-error')).toBeTruthy();
+    expect(root.querySelector('.load-retry')).toBeTruthy();
+
+    // Retry succeeds → Settings renders.
+    getState.mockResolvedValue({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'My KB', createdAt: 't' } });
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      getState,
+      inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
+      getInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const })),
+      setInstanceSettings: vi.fn(async (s: InstanceSettings) => s) as KbApi['setInstanceSettings'],
+    };
+    root.querySelector<HTMLButtonElement>('.load-retry')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.textContent).toContain('My KB');
   });
 });

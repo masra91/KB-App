@@ -3,7 +3,8 @@
 // recallAgent; here we prove the egress gate, citation filtering, tier guard, and untrusted-content
 // skill framing.
 import { describe, it, expect } from 'vitest';
-import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL } from './researchWebAgent';
+import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL, budgetExhausted, budgetExhaustedMessage } from './researchWebAgent';
+import { noopDevLog, type DevLog, type Fields } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 const web = (over: Partial<ResearcherConfig> = {}): ResearcherConfig => ({
@@ -94,6 +95,23 @@ describe('WEB_RESEARCH_SKILL — untrusted-content posture (RESEARCH-12)', () =>
   });
 });
 
+describe('retrieval budget — HARD enforcement (RESEARCH-11; #51 found:false root cause)', () => {
+  it('budgetExhausted gates exactly maxToolCalls fetches (the (max+1)th is refused)', () => {
+    // used 0..7 (< 8) proceed; used 8 (== budget) is exhausted → refuse the 9th call.
+    expect(budgetExhausted(0, 8)).toBe(false);
+    expect(budgetExhausted(7, 8)).toBe(false);
+    expect(budgetExhausted(8, 8)).toBe(true);
+    expect(budgetExhausted(18, 8)).toBe(true); // the over-fetch DEV-2 observed would now be refused
+  });
+  it('budgetExhaustedMessage steers the agent to stop fetching + submit (forces convergence)', () => {
+    const msg = budgetExhaustedMessage(8);
+    expect(msg).toMatch(/budget exhausted/i);
+    expect(msg).toContain('8');
+    expect(msg).toMatch(/call submitFindings now/i);
+    expect(msg).toMatch(/do not fetch any more/i);
+  });
+});
+
 describe('makeWebResearchFn — injected session (seam)', () => {
   it('runs the request-only query, filters citations through the allowlist, returns a finding', async () => {
     const fn = makeWebResearchFn({
@@ -117,18 +135,50 @@ describe('makeWebResearchFn — injected session (seam)', () => {
     expect(f.found).toBe(false);
   });
 
-  it('a session failure degrades to a no-finding, never throws into the dispatch', async () => {
-    const fn = makeWebResearchFn({
-      session: async () => {
-        throw new Error('network down');
-      },
-    });
-    const f = await fn(web(), req);
-    expect(f).toMatchObject({ found: false, note: '', citations: [] });
-  });
-
   it('an empty note is a valid no-finding', async () => {
     const fn = makeWebResearchFn({ session: async () => ({ note: '   ', citations: [] }) });
-    expect((await fn(web(), req)).found).toBe(false);
+    const f = await fn(web(), req);
+    expect(f.found).toBe(false);
+    expect(f.failed).toBeUndefined(); // a legit empty result is NOT a failure
+  });
+});
+
+describe('makeWebResearchFn — session failure is surfaced, NOT swallowed (#160 / BUG #65 class)', () => {
+  /** A DevLog that records what was logged + the scope it was bound to. */
+  function recordingLog(): { log: DevLog; errors: Array<{ scope?: string; event: string; fields?: Fields }> } {
+    const errors: Array<{ scope?: string; event: string; fields?: Fields }> = [];
+    const make = (scope?: string): DevLog => ({
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: (event, fields) => errors.push({ scope, event, fields }),
+      child: (bind) => make(typeof bind.scope === 'string' ? bind.scope : scope),
+      flush: () => Promise.resolve(),
+    });
+    return { log: make(), errors };
+  }
+
+  it('a failed session returns failed≠empty (not a silent found:false) and never throws into the dispatch', async () => {
+    const { log, errors } = recordingLog();
+    const fn = makeWebResearchFn({
+      session: async () => {
+        // Mirrors the packaged-app failure: the SDK can't spawn the BYOA copilot.
+        throw new Error('spawn copilot ENOENT');
+      },
+      log,
+    });
+    const f = await fn(web(), req); // must resolve, not reject (resilient dispatch)
+    expect(f.found).toBe(false);
+    expect(f.failed).toBe(true); // the distinguishing flag — before #160 this was a silent found:false
+    expect(f.error).toMatch(/ENOENT/);
+    // the cause is logged at the `research` scope (OBS-1) — never a silent swallow.
+    const logged = errors.find((e) => e.event === 'research.session-failed');
+    expect(logged).toBeDefined();
+    expect(logged!.scope).toBe('research');
+  });
+
+  it('defaults to the no-op logger when none is injected (no crash on the failure path)', async () => {
+    const fn = makeWebResearchFn({ session: async () => { throw new Error('boom'); }, log: noopDevLog });
+    await expect(fn(web(), req)).resolves.toMatchObject({ failed: true });
   });
 });

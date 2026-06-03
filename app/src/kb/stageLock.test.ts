@@ -2,8 +2,24 @@
 // semantics must be unchanged; `state()` is read-only bookkeeping for the Status view.
 import { describe, it, expect } from 'vitest';
 import { Mutex } from './stageLock';
+import type { DevLog } from './devlog';
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** A DevLog that captures `warn` events — to assert the #163 watchdog surfaces a stuck section. */
+function capturingLog(): { log: DevLog; warns: Array<{ event: string; fields?: Record<string, unknown> }> } {
+  const warns: Array<{ event: string; fields?: Record<string, unknown> }> = [];
+  const log: DevLog = {
+    debug: () => {},
+    info: () => {},
+    warn: (event, fields) => warns.push({ event, fields }),
+    error: () => {},
+    child: () => log,
+    flush: async () => {},
+  };
+  return { log, warns };
+}
 
 describe('Mutex (canonical writer)', () => {
   it('serializes sections — they never overlap, order preserved', async () => {
@@ -59,5 +75,54 @@ describe('Mutex (canonical writer)', () => {
     expect(lock.state().holder).toBeUndefined();
     release();
     await p;
+  });
+
+  // #163: the lock's watchdog turns a critical section that never settles (a re-entrant `lock.run`
+  // self-deadlock, or any hung await) from a SILENT wedge into a loud, named, surfaced state.
+  it('#163 watchdog: a section held past stuckMs sets `stuck` + logs a named `lock.stuck`', async () => {
+    const { log, warns } = capturingLog();
+    const lock = new Mutex({ log, stuckMs: 20 });
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const p = lock.run(async () => { await gate; }, 'claims:afterDrain');
+    await tick();
+    expect(lock.state().stuck).toBeUndefined(); // not yet — held < threshold
+    await sleep(40); // exceed stuckMs
+    const s = lock.state();
+    expect(s.stuck).toBe(true);
+    expect(s.holder).toBe('claims:afterDrain'); // the holder names itself (no more "a stage")
+    expect(typeof s.heldMs).toBe('number');
+    expect(warns.some((w) => w.event === 'lock.stuck' && w.fields?.holder === 'claims:afterDrain')).toBe(true);
+    release();
+    await p;
+    expect(lock.state()).toMatchObject({ held: false, waiters: 0 }); // cleared on settle
+    expect(lock.state().stuck).toBeUndefined();
+  });
+
+  it('#163 watchdog: a fast section never trips `stuck` / `lock.stuck`', async () => {
+    const { log, warns } = capturingLog();
+    const lock = new Mutex({ log, stuckMs: 1000 });
+    await lock.run(async () => { await tick(); }, 'claims:advance');
+    expect(warns.some((w) => w.event === 'lock.stuck')).toBe(false);
+    expect(lock.state().stuck).toBeUndefined();
+  });
+
+  it('#163: a RE-ENTRANT lock.run still deadlocks (known) but the watchdog SURFACES it — no silent wedge', async () => {
+    const { log, warns } = capturingLog();
+    const lock = new Mutex({ log, stuckMs: 20 });
+    // The exact #163 bug: a section re-enters the SAME mutex; the inner section queues behind the
+    // outer, which awaits the inner → mutual deadlock. We deliberately do NOT await it (it never
+    // settles); the assertion is that the watchdog turns the silent wedge into a named `lock.stuck`.
+    let started = false;
+    void lock.run(async () => {
+      started = true;
+      await lock.run(async () => {}, 'inner'); // re-entrant → never resolves (self-deadlock)
+    }, 'outer:reentrant');
+    await tick();
+    expect(started).toBe(true);
+    await sleep(40);
+    expect(lock.state().stuck).toBe(true);
+    expect(lock.state().holder).toBe('outer:reentrant'); // names the deadlocking holder
+    expect(warns.some((w) => w.event === 'lock.stuck' && w.fields?.holder === 'outer:reentrant')).toBe(true);
   });
 });

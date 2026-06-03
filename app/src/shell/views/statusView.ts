@@ -15,6 +15,8 @@
 // render helpers are pure (data → HTML string) so they unit-test without a DOM.
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
+import { formatTimestamp } from '../formatTime';
+import { stageDisplayName } from '../stageLabels';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
@@ -161,11 +163,16 @@ export function bodyHtml(s: BodyState): string {
 /** OBS-5/11: the headline state. A stall is called out prominently (the silent stall, made loud). */
 export function overallHtml(v: PipelineStatusView): string {
   const label = { running: 'Running', idle: 'Idle', stalled: 'Stalled' }[v.overall];
-  const stalledNote = v.stalled
-    ? `<p class="status-stall-note error">⚠️ Work is queued but nothing has progressed${v.lastActivity ? ` since ${esc(v.lastActivity)}` : ''} — the pipeline looks stuck. Check recent errors + the lock below.</p>`
+  // #163: a stuck write lock is the precise wedge cause — call it out specifically (more actionable
+  // than the generic stall note, and it can't be masked by an otherwise-"running" badge).
+  const stuckNote = v.lock.stuck
+    ? `<p class="status-stuck-note error">⛔ The write lock has been held by <strong>${esc(v.lock.holder ? holderLabel(v.lock.holder) : 'a stage')}</strong>${typeof v.lock.heldMs === 'number' ? ` for ${esc(heldFor(v.lock.heldMs))}` : ''} and isn’t releasing — the pipeline is wedged. See the write lock below.</p>`
     : '';
-  const last = v.lastActivity ? `<span class="status-lastact muted">last activity ${esc(v.lastActivity)}</span>` : '';
-  return `<div class="status-overall status-overall-${esc(v.overall)}"><span class="status-badge status-${esc(v.overall)}">${esc(label)}</span>${last}</div>${stalledNote}`;
+  const stalledNote = v.stalled && !v.lock.stuck
+    ? `<p class="status-stall-note error">⚠️ Work is queued but nothing has progressed${v.lastActivity ? ` since ${esc(formatTimestamp(v.lastActivity))}` : ''} — the pipeline looks stuck. Check recent errors + the lock below.</p>`
+    : '';
+  const last = v.lastActivity ? `<span class="status-lastact muted">last activity ${esc(formatTimestamp(v.lastActivity))}</span>` : '';
+  return `<div class="status-overall status-overall-${esc(v.overall)}"><span class="status-badge status-${esc(v.overall)}">${esc(label)}</span>${last}</div>${stuckNote}${stalledNote}`;
 }
 
 /** OBS-5: per-stage flow — state, queue depth, current item, set-aside count. */
@@ -176,7 +183,7 @@ export function stagesHtml(stages: StageStatus[]): string {
       const setAside = st.setAside > 0 ? `<span class="status-setaside error">${st.setAside} set aside</span>` : '';
       return `
         <li class="status-stage status-stage-${esc(st.state)}">
-          <span class="status-stage-name">${esc(st.stage)}</span>
+          <span class="status-stage-name" title="${esc(st.stage)}">${esc(stageDisplayName(st.stage))}</span>
           <span class="status-badge status-${esc(st.state)}">${esc(st.state)}</span>
           <span class="status-queue muted">queue ${st.queueDepth}</span>
           ${current}
@@ -204,7 +211,7 @@ export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; 
       return `
         <li class="status-setaside-item">
           <span class="status-badge status-setaside">set aside</span>
-          <span class="status-setaside-id">${esc(it.stage)} · ${esc(label)}</span>
+          <span class="status-setaside-id">${esc(stageDisplayName(it.stage))} · ${esc(label)}</span>
           ${it.reason ? `<span class="muted">${esc(it.reason)}</span>` : ''}
           <span class="status-setaside-actions">
             <button type="button" class="status-setaside-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
@@ -216,16 +223,42 @@ export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; 
   return `<h2 class="status-h2">Set aside — needs attention (${items.length})</h2>${banner}<ul class="status-setaside-items">${rows}</ul>`;
 }
 
-/** OBS-7: the canonical-writer lock — held/holder/waiters (so a stall's cause is visible). */
+/** Format a held-lock duration (ms) compactly for the OBS-7 readout (#163): "45s", "2m 5s". */
+function heldFor(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+/** Human label for a lock holder (#163). The watchdog labels sections `stage:op` (e.g.
+ *  `claims:advance`, `connect:afterDrain`) so the exact stuck section is nameable — map the stage to
+ *  its display name + keep the `op` as the diagnostic suffix ("Claim extraction (advance)"). */
+function holderLabel(holder: string): string {
+  const i = holder.indexOf(':');
+  if (i === -1) return stageDisplayName(holder);
+  return `${stageDisplayName(holder.slice(0, i))} (${holder.slice(i + 1)})`;
+}
+
+/** OBS-7: the canonical-writer lock — held/holder/waiters, and (#163) a **stuck** warning when the
+ *  watchdog flags a section held too long, so a silent deadlock surfaces instead of reading "held". */
 export function lockHtml(lock: PipelineStatusView['lock']): string {
+  // "Write lock" is the user-facing label; the technical name rides in the tooltip (#7 softening).
+  const heading = `<h2 class="status-h2" title="Canonical-writer lock">Write lock</h2>`;
   if (!lock.held) {
     const waiting = lock.waiters > 0 ? ` <span class="muted">(${lock.waiters} waiting)</span>` : '';
-    return `<h2 class="status-h2">Canonical-writer lock</h2><p class="status-lock muted">free${waiting}</p>`;
+    return `${heading}<p class="status-lock muted">free${waiting}</p>`;
   }
-  const who = lock.holder ? esc(lock.holder) : 'a stage';
-  const since = lock.since ? ` since ${esc(lock.since)}` : '';
+  const who = lock.holder ? esc(holderLabel(lock.holder)) : 'a stage';
   const waiting = lock.waiters > 0 ? `, ${lock.waiters} waiting` : '';
-  return `<h2 class="status-h2">Canonical-writer lock</h2><p class="status-lock">held by <strong>${who}</strong>${esc(since)}${esc(waiting)}</p>`;
+  if (lock.stuck) {
+    // #163: the watchdog flagged this section held past the threshold — the canonical writer never
+    // released. Surface the wedge loudly (not the silent "held by a stage").
+    const forHow = typeof lock.heldMs === 'number' ? ` for ${heldFor(lock.heldMs)}` : ' too long';
+    return `${heading}<p class="status-lock-stuck error">⚠️ <strong>Stuck</strong> — held by <strong>${who}</strong>${esc(forHow)}${esc(waiting)}; the pipeline is wedged on this section. Check recent errors below.</p>`;
+  }
+  const since = lock.since ? ` since ${esc(formatTimestamp(lock.since))}` : '';
+  const forHow = typeof lock.heldMs === 'number' ? ` <span class="muted">(${esc(heldFor(lock.heldMs))})</span>` : '';
+  return `${heading}<p class="status-lock">held by <strong>${who}</strong>${since}${esc(waiting)}${forHow}</p>`;
 }
 
 /** OBS-6: recent errors + set-aside markers, each expandable to its cause (drill-down). */
@@ -287,7 +320,8 @@ export function latencyHtml(v: PipelineStatusView): string {
 export function worktreesHtml(worktrees: WorktreeInfo[]): string {
   if (worktrees.length === 0) return '';
   const rows = worktrees
-    .map((w) => `<li class="muted"><code>${esc(w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
+    // Show the worktree dir basename (the full `.kb/cache/...` path is dev-noise); keep it as a tooltip.
+    .map((w) => `<li class="muted" title="${esc(w.path)}"><code>${esc(w.path.replace(/\/+$/, '').split('/').pop() ?? w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
     .join('');
   return `<h2 class="status-h2">Worktrees</h2><ul class="status-worktrees">${rows}</ul>`;
 }

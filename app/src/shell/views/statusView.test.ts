@@ -43,6 +43,8 @@ const STALLED: PipelineStatusView = {
   worktrees: [{ path: '.kb/cache/worktrees/staging', branch: 'staging' }],
   perf: PERF,
   setAsideItems: [{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }],
+  conversion: { captured: 10, candidates: 14, entities: 7, claims: 22, promoted: 6 },
+  inFlight: [{ itemId: 'SRC9', name: 'SRC9', stage: 'decompose', active: true, sinceTs: '2026-06-02T00:02:30.000Z' }],
   builtAt: '2026-06-02T00:03:00.000Z',
 };
 
@@ -58,7 +60,7 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     const h = overallHtml(STALLED);
     expect(h).toContain('Stalled');
     expect(h).toContain('status-stall-note'); // the loud "stuck" banner
-    expect(h).toContain('2026-06-02T00:00:00.000Z'); // since last activity
+    expect(h).not.toContain('2026-06-02T00:00:00.000Z'); // raw ISO replaced by a friendly time (#3)
   });
 
   it('stagesHtml shows state + queue + current item + set-aside (OBS-5/6)', () => {
@@ -70,9 +72,33 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   });
 
   it('lockHtml shows the holder + waiters (OBS-7)', () => {
-    expect(lockHtml(STALLED.lock)).toContain('held by <strong>connect</strong>');
+    expect(lockHtml(STALLED.lock)).toContain('held by <strong>Linking</strong>'); // display name (#4), holder id 'connect'
     expect(lockHtml(STALLED.lock)).toContain('1 waiting');
     expect(lockHtml({ held: false, waiters: 0 })).toContain('free');
+  });
+
+  it('lockHtml surfaces a STUCK lock loudly with the held-duration (#163 OBS-7)', () => {
+    const h = lockHtml({ held: true, waiters: 1, holder: 'claims:advance', stuck: true, heldMs: 125000 });
+    expect(h).toContain('Stuck');
+    expect(h).toContain('status-lock-stuck');
+    expect(h).toContain('2m 5s'); // heldFor(125000)
+    expect(h).toContain('wedged');
+  });
+
+  it('lockHtml shows the held-duration on a normal (non-stuck) hold', () => {
+    const h = lockHtml({ held: true, waiters: 0, holder: 'connect', since: '2026-06-02T00:01:00.000Z', heldMs: 3000 });
+    expect(h).toContain('held by <strong>Linking</strong>');
+    expect(h).toContain('3s');
+    expect(h).not.toContain('Stuck');
+  });
+
+  it('overallHtml surfaces a stuck write lock specifically (#163 OBS-11), even past the badge', () => {
+    const stuck: PipelineStatusView = { ...STALLED, lock: { held: true, waiters: 0, holder: 'claims:advance', stuck: true, heldMs: 60000 } };
+    const h = overallHtml(stuck);
+    expect(h).toContain('status-stuck-note');
+    expect(h).toContain('isn’t releasing'); // the wedge call-out
+    expect(h).toContain('Claim extraction'); // holder display name
+    expect(h).not.toContain('status-stall-note'); // stuck note replaces the generic stall note
   });
 
   it('errorsHtml drills down to the cause when expanded (OBS-6)', () => {
@@ -97,13 +123,13 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   it('setAsideHtml lists poison items with stage · name + reason, name preferred over id (OBS-17)', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace', reason: 'set aside after 3 failed attempts' }]);
     expect(h).toContain('Set aside — needs attention (1)');
-    expect(h).toContain('claims · Ada Lovelace'); // the friendly name is the visible label
+    expect(h).toContain('Claim extraction · Ada Lovelace'); // stage display name (#4) + friendly item name
     expect(h).toContain('set aside after 3 failed attempts');
   });
 
   it('setAsideHtml falls back to the item id when no name is known', () => {
     const h = setAsideHtml([{ stage: 'claims', itemId: '01NONAME' }]);
-    expect(h).toContain('claims · 01NONAME');
+    expect(h).toContain('Claim extraction · 01NONAME');
   });
 
   it('setAsideHtml renders retry/dismiss buttons carrying the stage + id (OBS-17 actions)', () => {
@@ -112,6 +138,18 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
     expect(h).toContain('data-act="setaside-dismiss"');
     expect(h).toContain('data-stage="claims"');
     expect(h).toContain('data-id="01ADAID"');
+  });
+
+  it('setAsideHtml renders mixed-stage items, each button carrying its own stage (claims + connect)', () => {
+    const h = setAsideHtml([
+      { stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' },
+      { stage: 'connect', itemId: 'block:engine', name: 'Analytical Engine' },
+    ]);
+    expect(h).toContain('Set aside — needs attention (2)');
+    expect(h).toContain('Claim extraction · Ada Lovelace'); // display name (#4); raw stage stays in data-stage
+    expect(h).toContain('Linking · Analytical Engine');
+    expect(h).toContain('data-stage="connect"'); // the connect item's action dispatches to connect (raw id intact)
+    expect(h).toContain('data-id="block:engine"');
   });
 
   it('setAsideHtml disables the buttons + shows the outcome banner while/after acting', () => {
@@ -134,7 +172,7 @@ describe('statusView render helpers (OBS-5/6/7/11/15)', () => {
   it('bodyHtml includes the set-aside panel for the STALLED fixture (OBS-17)', () => {
     const h = bodyHtml({ view: STALLED, loading: false, errorMsg: '', expanded: new Set() });
     expect(h).toContain('Set aside — needs attention');
-    expect(h).toContain('claims · Ada Lovelace');
+    expect(h).toContain('Claim extraction · Ada Lovelace');
   });
 
   it('bodyHtml renders empty/loading/no-KB states', () => {

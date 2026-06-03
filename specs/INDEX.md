@@ -46,6 +46,7 @@ and a unique `key` here.
 | SPEC-0031 | VAULT   | Obsidian Vault Representation (the human view) | feature | draft | `features/` |
 | SPEC-0032 | VIZ     | Pipeline Visualization & Live Tracker         | feature | draft | `features/` |
 | SPEC-0033 | DESIGN  | Visual Design Language & Process              | architecture | draft | `architecture/` |
+| SPEC-0034 | MACOS   | macOS Signing, Entitlements & File Access (TCC-protected vaults) | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 

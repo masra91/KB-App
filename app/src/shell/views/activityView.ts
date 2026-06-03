@@ -11,6 +11,9 @@
 // audit domain modules' node:fs/simple-git runtime deps (STACK-6). The actor filter options are
 // derived from the loaded data, not imported from AUDIT_ACTORS (a runtime value).
 import { esc } from '../html';
+import { withTimeout } from '../loadGuard';
+import { formatTimestamp } from '../formatTime';
+import { stageDisplayName } from '../stageLabels';
 import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
@@ -54,7 +57,8 @@ async function load(container: HTMLElement): Promise<void> {
   errorMsg = '';
   renderBody(container);
   try {
-    const res = await window.kbApi.activityFeed(filter);
+    // #145: bound the wait so a hung `activityFeed` can't leave an infinite spinner.
+    const res = await withTimeout(window.kbApi.activityFeed(filter));
     entries = res.entries;
     total = res.total;
     truncated = res.truncated;
@@ -108,13 +112,15 @@ function wire(container: HTMLElement): void {
     } else if (act === 'clear-lineage') {
       lineage = null;
       renderLineage(container);
+    } else if (act === 'retry-load') {
+      void load(container); // #145: re-run the feed load after a failure/timeout
     }
   });
 }
 
 async function traceLineage(container: HTMLElement, id: string): Promise<void> {
   try {
-    lineage = await window.kbApi.activityLineage(id);
+    lineage = await withTimeout(window.kbApi.activityLineage(id));
   } catch (err) {
     lineage = { subjectId: id, kind: 'unknown', sources: [], events: [], decisions: [] };
     errorMsg = err instanceof Error ? err.message : String(err);
@@ -157,7 +163,9 @@ interface BodyState {
 
 export function bodyHtml(s: BodyState): string {
   if (s.loading) return `<p class="muted">Loading…</p>`;
-  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)}</p>`;
+  // #145: a failed/timed-out load is retryable, never an infinite spinner. The view's header +
+  // controls stay mounted around this body, so a button here (not a full renderLoadError) suffices.
+  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="btn load-retry" data-act="retry-load">Retry</button></p>`;
   if (s.entries.length === 0) return `<p class="muted activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
   const note = s.truncated
     ? `<p class="muted activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
@@ -173,16 +181,16 @@ function traceableSubject(e: ActivityFeedEntry): string | null {
 
 export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const trace = traceableSubject(e);
-  const traceBtn = trace ? `<button class="activity-trace link" data-act="lineage" data-id="${esc(trace)}">lineage</button>` : '';
+  const traceBtn = trace ? `<button class="activity-trace link" data-act="lineage" data-id="${esc(trace)}">trace origin</button>` : '';
   const raw = open
     ? `<div class="activity-raw">${e.events.map(rawEventHtml).join('')}</div>`
     : '';
   return `
     <li class="activity-entry${open ? ' open' : ''}">
       <button class="activity-entry-head" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-        <span class="activity-actor-badge">${esc(e.actor)}</span>
+        <span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
         <span class="activity-summary">${esc(e.summary)}</span>
-        <span class="activity-ts muted">${esc(e.ts)}</span>
+        <span class="activity-ts muted">${esc(formatTimestamp(e.ts))}</span>
         ${e.eventCount > 1 ? `<span class="activity-evcount muted">${e.eventCount} events</span>` : ''}
       </button>
       ${traceBtn}
@@ -202,7 +210,7 @@ export function lineageHtml(l: Lineage): string {
   }
   const sources = l.sources.length ? `<div class="lineage-sources muted">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<code>${esc(s)}</code>`).join(', ')}</div>` : '';
   const timeline = l.events
-    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge">${esc(e.actor)}</span> <span>${esc(e.eventType)}</span> <span class="muted">${esc(e.ts)}</span></li>`)
+    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="muted">${esc(formatTimestamp(e.ts))}</span></li>`)
     .join('');
   const decisions = l.decisions.length
     ? `<div class="lineage-decisions"><span class="muted">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`

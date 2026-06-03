@@ -183,16 +183,30 @@ function setBusy(container: HTMLElement, on: boolean): void {
   if (input) input.disabled = on;
 }
 
+/** Human-facing kind label for a citation (dogfood #2 — capitalized, not the raw lowercase id). */
+const CITATION_KIND_LABEL: Record<string, string> = { entity: 'Entity', claim: 'Claim', source: 'Source' };
+
+/** The display name for a reference (dogfood #2): the human label/title, else the note basename — never
+ *  the full vault path (which is dev-facing). The canonical `ref` is untouched: it still drives the
+ *  deep-link via `data-cite` (index → `citations[n-1].ref` in the handler) + rides along in the tooltip. */
+function refDisplayName(c: Citation): string {
+  if (c.label && c.label.trim().length > 0) return c.label.trim();
+  const base = c.ref.replace(/\/+$/, '').split('/').pop() ?? c.ref;
+  return base.replace(/\.md$/i, '');
+}
+
 /** The References list (ASK-13/14) — one entry per citation, numbered to match the inline `[n]`
  *  markers (DEV-3's dense/gap-free contract). Each is a deep-link into Obsidian (data-cite index;
- *  the handler opens it via main), mirroring the inline markers from the same canonical target. */
+ *  the handler opens it via main), mirroring the inline markers from the same canonical target.
+ *  Display (dogfood #2): lead with the human name + capitalized kind; the raw vault path is demoted
+ *  to the hover tooltip, not shown inline. */
 function renderReferences(citations: Citation[], turnIndex: number): string {
   if (citations.length === 0) return '';
   const items = citations
     .map((c, i) => {
       const n = i + 1;
-      const label = c.label ? ` — ${esc(c.label)}` : '';
-      return `<li><a class="cite-ref" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="Open in Obsidian"><span class="cite-num">[${n}]</span> <code>${esc(c.kind)}</code> ${esc(c.ref)}${label}</a></li>`;
+      const kind = CITATION_KIND_LABEL[c.kind] ?? c.kind;
+      return `<li><a class="cite-ref" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
     })
     .join('');
   return `<div class="ask-citations"><span class="muted">References</span><ul>${items}</ul></div>`;
