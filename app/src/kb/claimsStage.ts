@@ -23,6 +23,7 @@ import simpleGit from 'simple-git';
 import { ulid, dateShard } from './ulid';
 import { readCapturedMeta } from './ingest';
 import { renderClaimMd, applyClaimsBlock, oneLine, type ClaimBacklink } from './claimDoc';
+import type { ClaimStatus } from './claims';
 import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
 import type { SourceInput } from './decomposeAgent';
 import { reviewRel, writeReviewFile } from './reviewStore';
@@ -158,7 +159,10 @@ export async function findEntityFiles(root: string): Promise<string[]> {
 interface EntityRef {
   kind: string;
   name: string;
-  derivedFrom: string; // repo-relative source dir (provenance; CLAIMS-5)
+  // ALL the sources the entity derives from (provenance; CLAIMS-5). Post-Connect a merged entity
+  // spans MANY sources (CLAIMS-21) — Claims processes it per (entity × source), so every source's
+  // facts are captured. Decompose's pre-merge nodes have exactly one. Never empty (parse throws).
+  sources: string[];
 }
 
 function parseScalarValue(raw: string): string {
@@ -173,13 +177,15 @@ function parseScalarValue(raw: string): string {
   return t;
 }
 
-/** Extract `kind`, `name`, and `provenance.derivedFrom[0]` from an entity node's frontmatter. */
+/** Extract `kind`, `name`, and ALL of `provenance.derivedFrom` from an entity node's frontmatter.
+ *  CLAIMS-21: a Connect-merged entity carries every source it spans — Claims must see them all, or
+ *  the later sources' facts are silently dropped (the reproduced data-loss bug). */
 export function parseEntityNode(md: string): EntityRef {
   const fmEnd = md.indexOf('\n---', 3);
   const fm = fmEnd === -1 ? md : md.slice(0, fmEnd);
   let kind = '';
   let name = '';
-  let derivedFrom = '';
+  let sources: string[] = [];
   for (const line of fm.split('\n')) {
     const k = line.match(/^kind:\s*(.+)$/);
     if (k) kind = parseScalarValue(k[1]);
@@ -189,21 +195,111 @@ export function parseEntityNode(md: string): EntityRef {
     if (d) {
       try {
         const arr = JSON.parse(d[1]) as unknown[];
-        if (Array.isArray(arr) && arr.length > 0) derivedFrom = String(arr[0]);
+        if (Array.isArray(arr)) sources = arr.map(String).filter((s) => s.length > 0);
       } catch {
         /* leave empty → caught below */
       }
     }
   }
   if (!kind || !name) throw new Error('claims: entity node missing kind/name');
-  if (!derivedFrom) throw new Error('claims: entity node missing provenance.derivedFrom');
-  return { kind, name, derivedFrom };
+  if (sources.length === 0) throw new Error('claims: entity node missing provenance.derivedFrom');
+  return { kind, name, sources };
+}
+
+/** A source is "pending" for an entity when Claims hasn't yet reached a terminal/parked/exhausted
+ *  outcome for that (entity × source) pair — the same predicate {@link readClaimsQueue} sorts on. */
+function isPendingSource(state: ClaimsState, maxAttempts: number): boolean {
+  return !state.terminal && !state.parked && state.failures < maxAttempts;
+}
+
+/** The first source (in node order) still needing claims for this entity, or null if all are done.
+ *  CLAIMS-21: the work unit is one (entity × source) pair; the drain re-queues the entity until every
+ *  source is terminal, so each call advances exactly one pending source. `baseDir` is the vault root
+ *  (or a worktree synced to a canonical checkpoint). */
+async function firstPendingSource(baseDir: string, ref: EntityRef, entityId: string, maxAttempts: number): Promise<string | null> {
+  for (const src of ref.sources) {
+    const state = await readClaimsState(path.join(baseDir, src), entityId);
+    if (isPendingSource(state, maxAttempts)) return src;
+  }
+  return null;
+}
+
+/** The entity's sources currently terminal via a recoverable `setaside` (NOT `claimed`/`dismissed`).
+ *  The retry/dismiss escape hatch (CLAIMS-20) acts on exactly these — a multi-source entity may have
+ *  one poison source set aside while its siblings claimed cleanly. */
+async function setAsideSources(baseDir: string, ref: EntityRef, entityId: string): Promise<string[]> {
+  const out: string[] = [];
+  for (const src of ref.sources) {
+    const state = await readClaimsState(path.join(baseDir, src), entityId);
+    if (state.terminal && state.terminalReason === 'setaside') out.push(src);
+  }
+  return out;
+}
+
+/** Parse one claim file into a back-link IF it is a claim about `entityRel` (else null). Used to
+ *  regenerate an entity's claims block from the UNION of its claim files (CLAIMS-9/21): the claim
+ *  files under `claims/` are canonical, the node block is their regenerable index — so a per-source
+ *  run never clobbers a sibling source's already-written rows. */
+function parseClaimBacklink(md: string, claimPath: string, entityRel: string): ClaimBacklink | null {
+  const fmEnd = md.indexOf('\n---', 3);
+  const fm = fmEnd === -1 ? md : md.slice(0, fmEnd);
+  const body = fmEnd === -1 ? '' : md.slice(fmEnd + 4);
+  let subject = '';
+  let status = '';
+  let confidence = NaN;
+  let source = '';
+  for (const line of fm.split('\n')) {
+    const s = line.match(/^subject:\s*(.+)$/);
+    if (s) subject = parseScalarValue(s[1]);
+    const st = line.match(/^status:\s*(.+)$/);
+    if (st) status = st[1].trim();
+    const c = line.match(/^confidence:\s*(.+)$/);
+    if (c) confidence = Number(c[1].trim());
+    const d = line.match(/^\s+derivedFrom:\s*(\[.*\])\s*$/);
+    if (d) {
+      try {
+        const arr = JSON.parse(d[1]) as unknown[];
+        if (Array.isArray(arr) && arr.length > 0) source = String(arr[0]);
+      } catch {
+        /* leave empty */
+      }
+    }
+  }
+  if (subject !== entityRel) return null;
+  const statement = body.split('\n').map((l) => l.trim()).find((l) => l.length > 0 && !l.startsWith('Source:')) ?? '';
+  return { claimPath, statement, status: status as ClaimStatus, confidence, source };
+}
+
+/** Every claim file about `entityRel`, as block back-links, sorted by claim id (the file name) so the
+ *  regenerated block is deterministic / replay-stable (VAULT-10). Scans `<root>/claims/` in `wt`. */
+async function collectEntityBacklinks(wt: string, entityRel: string): Promise<ClaimBacklink[]> {
+  const out: ClaimBacklink[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else if (e.isFile() && e.name.endsWith('.md')) {
+        const link = parseClaimBacklink(await fs.readFile(full, 'utf8'), path.relative(wt, full), entityRel);
+        if (link) out.push(link);
+      }
+    }
+  }
+  await walk(path.join(wt, 'claims'));
+  return out.sort((a, b) => (path.basename(a.claimPath) < path.basename(b.claimPath) ? -1 : 1));
 }
 
 /**
- * The claims work queue (CLAIMS-16): entity nodes with no terminal claims marker (for that
- * entityId, in their source's audit) and fewer than `maxAttempts` failures. Returned as
- * repo-relative entity paths, sorted by entity id (the file name) so drains are deterministic.
+ * The claims work queue (CLAIMS-16): entity nodes with at least one source still pending claims —
+ * no terminal marker (for that entityId, in that source's audit), not parked, fewer than
+ * `maxAttempts` failures. CLAIMS-21: a Connect-merged entity stays queued until EVERY source it
+ * spans has a terminal marker, so each source contributes (no data loss). Returned as repo-relative
+ * entity paths, sorted by entity id (the file name) so drains are deterministic.
  */
 export async function readClaimsQueue(root: string, maxAttempts = DEFAULT_MAX_ATTEMPTS): Promise<string[]> {
   root = path.resolve(root);
@@ -217,11 +313,8 @@ export async function readClaimsQueue(root: string, maxAttempts = DEFAULT_MAX_AT
     } catch {
       continue; // unreadable/foreign node — skip (not our well-formed unit)
     }
-    const sourceDir = path.join(root, ref.derivedFrom);
-    const { terminal, failures, parked } = await readClaimsState(sourceDir, entityId);
-    // Skip done (terminal), exhausted (failures), and PARKED items (awaiting an answer; REVIEW-5).
-    if (terminal || parked || failures >= maxAttempts) continue;
-    queued.push(rel);
+    // Queued iff ANY source still needs claims — the entity leaves the queue only once all are done.
+    if (await firstPendingSource(root, ref, entityId, maxAttempts)) queued.push(rel);
   }
   return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
 }
@@ -277,7 +370,16 @@ export async function claimsOne(
     const entityPathWt = path.join(wt, entityRel);
     const entityMd = await fs.readFile(entityPathWt, 'utf8');
     const ref = parseEntityNode(entityMd);
-    const sourceDirWt = path.join(wt, ref.derivedFrom);
+    // CLAIMS-21: process ONE pending (entity × source) pair per call — the first source still owed
+    // claims, re-read off this fresh checkpoint. The drain re-queues the entity until every source is
+    // terminal, so all sources contribute. If none are pending (a concurrent writer finished the last
+    // one), there's nothing to advance → noop.
+    const sourceRel = await firstPendingSource(wt, ref, entityId, maxAttempts);
+    if (!sourceRel) {
+      result = { entityId, ok: true, claimIds: [], setAside: false };
+      return false;
+    }
+    const sourceDirWt = path.join(wt, sourceRel);
     const auditPath = path.join(sourceDirWt, 'audit.jsonl');
     const runId = ulid();
     try {
@@ -317,10 +419,10 @@ export async function claimsOne(
               stage: STAGE,
               runId,
               item: { kind: 'entity', ref: entityRel },
-              auditRel: path.join(ref.derivedFrom, 'audit.jsonl'),
+              auditRel: path.join(sourceRel, 'audit.jsonl'),
               markerKey: { entityId },
             },
-            subject: { ...(req.refs ? { refs: req.refs } : {}), sources: [ref.derivedFrom] },
+            subject: { ...(req.refs ? { refs: req.refs } : {}), sources: [sourceRel] },
             createdAt: createdAtR,
           };
           await writeReviewFile(path.join(wt, reviewRel(id)), review);
@@ -336,10 +438,10 @@ export async function claimsOne(
         return true;
       }
 
-      // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6).
+      // Mint claim ULIDs + write claim files (orchestrator-owned effects; CLAIMS-3/6). Each claim's
+      // provenance is THIS single source (CLAIMS-21: clean per-claim provenance, never derivedFrom[0]).
       const createdAt = new Date().toISOString();
       const claimIds: string[] = [];
-      const backlinks: ClaimBacklink[] = [];
       for (const claim of decision.claims) {
         const id = ulid();
         const rel = path.join('claims', dateShard(id), `${id}.md`);
@@ -347,21 +449,17 @@ export async function claimsOne(
         await fs.mkdir(path.dirname(dest), { recursive: true });
         await fs.writeFile(
           dest,
-          renderClaimMd(claim, { id, subject: entityRel, derivedFrom: ref.derivedFrom, createdAt, agent: decision.agent }),
+          renderClaimMd(claim, { id, subject: entityRel, derivedFrom: sourceRel, createdAt, agent: decision.agent }),
           'utf8',
         );
         claimIds.push(id);
-        backlinks.push({
-          claimPath: rel,
-          statement: claim.statement,
-          status: claim.status,
-          confidence: claim.confidence,
-          source: ref.derivedFrom, // VAULT-13: navigable source citation in the entity's claims block
-        });
       }
 
-      // Regenerate the entity node's delimited claims block (CLAIMS-9): canonical data lives in
-      // claims/; this is the regenerable Obsidian-readable back-link. Identity is untouched (CLAIMS-11).
+      // Regenerate the entity node's delimited claims block (CLAIMS-9) from the UNION of ALL claim
+      // files about this entity — this source's just-written claims PLUS any sibling source's already
+      // on the checkpoint (CLAIMS-21). canonical data lives in claims/; the block is its regenerable
+      // index, so a per-source run never clobbers another source's rows. Identity untouched (CLAIMS-11).
+      const backlinks = await collectEntityBacklinks(wt, entityRel);
       await fs.writeFile(entityPathWt, applyClaimsBlock(entityMd, backlinks), 'utf8');
 
       let audit = auditLine({ runId, entityId, sourceId, model, event: 'start' });
@@ -401,13 +499,18 @@ export async function claimsOne(
     }
   };
 
-  // Same-path collision exhaustion (ORCH-19): set the entity aside so it can't head-of-line-block.
+  // Same-path collision exhaustion (ORCH-19): set the pending (entity × source) pair aside so it
+  // can't head-of-line-block. Targets the same source `prepare` was working (the first pending one);
+  // siblings already claimed are untouched (CLAIMS-21).
   const onExhausted = async (): Promise<void> => {
     const base = await canonicalHead(root);
     await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
       const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
+      const sourceRel = (await firstPendingSource(wt, ref, entityId, maxAttempts)) ?? ref.sources[0];
+      const auditPath = path.join(wt, sourceRel, 'audit.jsonl');
+      await fs.mkdir(path.dirname(auditPath), { recursive: true });
       await fs.appendFile(
-        path.join(wt, ref.derivedFrom, 'audit.jsonl'),
+        auditPath,
         auditLine({ runId: ulid(), entityId, event: 'setaside', reason: 'collision-exhausted' }),
         'utf8',
       );
@@ -425,12 +528,14 @@ export async function claimsOne(
 }
 
 /**
- * Append ONE per-entity audit event to the entity's SOURCE audit.jsonl and commit it under the
- * canonical-writer lock, via the same optimistic-advance machinery as a normal claims commit
- * (CLAIMS-15, ORCH-17/18). Shared by the CLAIMS-20 recovery primitives. The source dir is
- * `mkdir -p`'d first because a set-aside item's source may be incomplete/absent (BUG #135) — the
- * marker must persist regardless. A rare same-path collision retries; exhaustion throws (a manual,
- * one-at-a-time recovery action shouldn't exhaust — surface it rather than silently drop).
+ * Append ONE per-entity audit event to EACH currently-set-aside source of the entity, and commit
+ * under the canonical-writer lock via the same optimistic-advance machinery as a normal claims
+ * commit (CLAIMS-15, ORCH-17/18). Shared by the CLAIMS-20 recovery primitives. CLAIMS-21: a merged
+ * entity may have a poison source set aside while siblings claimed cleanly — retry/dismiss act on the
+ * set-aside pairs only, never re-opening a cleanly-claimed source. If none are set aside it's a noop.
+ * Each source dir is `mkdir -p`'d first because a set-aside item's source may be incomplete/absent
+ * (BUG #135). A rare same-path collision retries; exhaustion throws (a manual, one-at-a-time recovery
+ * action shouldn't exhaust — surface it rather than silently drop).
  */
 async function appendEntityAudit(
   root: string,
@@ -443,9 +548,13 @@ async function appendEntityAudit(
   const entityId = path.basename(entityRel, '.md');
   const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
     const ref = parseEntityNode(await fs.readFile(path.join(wt, entityRel), 'utf8'));
-    const auditPath = path.join(wt, ref.derivedFrom, 'audit.jsonl');
-    await fs.mkdir(path.dirname(auditPath), { recursive: true }); // BUG #135: source dir may be absent
-    await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, ...fields }), 'utf8');
+    const targets = await setAsideSources(wt, ref, entityId);
+    if (targets.length === 0) return false; // nothing set aside → nothing to recover (noop)
+    for (const src of targets) {
+      const auditPath = path.join(wt, src, 'audit.jsonl');
+      await fs.mkdir(path.dirname(auditPath), { recursive: true }); // BUG #135: source dir may be absent
+      await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, ...fields }), 'utf8');
+    }
     const wtGit = simpleGit(wt);
     await wtGit.raw('add', '-A');
     await wtGit.commit(commitMessage(entityId));
@@ -508,10 +617,12 @@ export async function listSetAsideItems(root: string): Promise<SetAsideItem[]> {
       continue; // unreadable/foreign node — not our well-formed unit
     }
     const entityId = path.basename(rel, '.md');
-    const state = await readClaimsState(path.join(root, ref.derivedFrom), entityId);
-    if (state.terminal && state.terminalReason === 'setaside') {
-      out.push({ entityRel: rel, entityId, kind: ref.kind, name: ref.name, derivedFrom: ref.derivedFrom, failures: state.failures, rounds: state.rounds });
-    }
+    // CLAIMS-21: an entity is recoverable if ANY of its sources is set aside — one row per entity
+    // (retry/dismiss reopen every set-aside pair). `derivedFrom`/`failures`/`rounds` report the first.
+    const setAside = await setAsideSources(root, ref, entityId);
+    if (setAside.length === 0) continue;
+    const state = await readClaimsState(path.join(root, setAside[0]), entityId);
+    out.push({ entityRel: rel, entityId, kind: ref.kind, name: ref.name, derivedFrom: setAside[0], failures: state.failures, rounds: state.rounds });
   }
   return out.sort((a, b) => (a.entityId < b.entityId ? -1 : 1));
 }
