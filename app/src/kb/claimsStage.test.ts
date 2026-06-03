@@ -109,11 +109,50 @@ async function seedEntities(root: string, srcRel: string, names: string[]): Prom
 
 /** Capture → archive a source, then seed entity nodes for it; return source + entity rels. */
 async function setup(root: string, text: string, names: string[]): Promise<{ srcRel: string; entityRels: string[] }> {
-  await captureToInbox(root, 'in-app-panel', [{ kind: 'text', text }]);
-  const q = await readQueue(root);
-  const srcRel = await archiveOne(root, q[q.length - 1], deterministicDecider);
+  const srcRel = await archiveText(root, text);
   const entityRels = await seedEntities(root, srcRel, names);
   return { srcRel, entityRels };
+}
+
+/** Capture → archive ONE text source; return its repo-relative source dir. */
+async function archiveText(root: string, text: string): Promise<string> {
+  await captureToInbox(root, 'in-app-panel', [{ kind: 'text', text }]);
+  const q = await readQueue(root);
+  return archiveOne(root, q[q.length - 1], deterministicDecider);
+}
+
+/**
+ * Seed ONE resolved entity node whose provenance spans MULTIPLE sources — Connect's merge output
+ * (CONNECT-7/8), the post-merge graph a real Connect run produces. Commits it to canonical so Claims
+ * has a multi-source entity to attach to. The CLAIMS-21 data-loss fixture.
+ */
+async function seedMergedEntity(root: string, name: string, srcRels: string[]): Promise<string> {
+  const now = new Date().toISOString();
+  const id = ulid();
+  const rel = entityFileRel('person', name, id, new Set(await findEntityFiles(root)));
+  const dest = path.join(root, rel);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  await fs.writeFile(
+    dest,
+    renderEntityNode({
+      id,
+      kind: 'person',
+      name,
+      confidence: 0.9,
+      aliases: [id],
+      derivedFrom: srcRels,
+      resolvedFrom: [],
+      tags: [],
+      createdAt: now,
+      updatedAt: now,
+      agent: { via: 'copilot', model: 'test' },
+    }),
+    'utf8',
+  );
+  const git = simpleGit(root);
+  await git.raw('add', '-A');
+  await git.commit('test: seed Connect-merged entity (multi-source)');
+  return rel;
 }
 
 async function readClaimFiles(root: string): Promise<string[]> {
@@ -135,10 +174,14 @@ async function readClaimFiles(root: string): Promise<string[]> {
   return out;
 }
 
-describe('parseEntityNode (CLAIMS-5 — resolves an entity to its whole source)', () => {
-  it('extracts kind, name, and derivedFrom, handling quoted scalars', () => {
+describe('parseEntityNode (CLAIMS-5/21 — resolves an entity to ALL its sources)', () => {
+  it('extracts kind, name, and the single source, handling quoted scalars', () => {
     const md = '---\nid: 01J\nkind: person\nname: "Q3: budget"\nconfidence: 0.9\nprovenance:\n  derivedFrom: ["sources/2026/05/30/01JSRC"]\n---\n\n# Q3: budget\n';
-    expect(parseEntityNode(md)).toEqual({ kind: 'person', name: 'Q3: budget', derivedFrom: 'sources/2026/05/30/01JSRC' });
+    expect(parseEntityNode(md)).toEqual({ kind: 'person', name: 'Q3: budget', sources: ['sources/2026/05/30/01JSRC'] });
+  });
+  it('extracts EVERY source of a Connect-merged entity, not just derivedFrom[0] (CLAIMS-21)', () => {
+    const md = '---\nid: 01J\nkind: person\nname: Grace Hopper\nprovenance:\n  derivedFrom: ["sources/2026/05/30/01A", "sources/2026/05/31/01B"]\n---\n\n# Grace Hopper\n';
+    expect(parseEntityNode(md).sources).toEqual(['sources/2026/05/30/01A', 'sources/2026/05/31/01B']);
   });
   it('throws when kind/name are missing', () => {
     expect(() => parseEntityNode('---\nid: x\n---\n')).toThrow(/kind\/name/);
@@ -292,6 +335,78 @@ describe.skipIf(!gitAvailable)('no cross-source claim dedup in v1 (CLAIMS-17)', 
       expect(ents).toHaveLength(2); // two un-merged Steve nodes (the graph may hold same-name nodes)
       for (const e of ents) await claimsOne(root, e, claimsDeciderFor([aClaim()]));
       expect(await readClaimFiles(root)).toHaveLength(2); // one claim per entity, not merged
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('CLAIMS-21 — a Connect-merged entity derives claims from EVERY source (data-loss regression)', () => {
+  // ONE claim per call whose statement IS the source's text — so each source's facts are
+  // distinguishable and we can prove BOTH sources contributed, not just provenance.derivedFrom[0].
+  const perSourceClaim: ClaimsDecider = async (input) => ({
+    entityId: input.entityId,
+    claims: [aClaim({ statement: input.source.text ?? '', mentions: [input.name] })],
+    agent: { via: 'copilot', model: 'test' },
+  });
+
+  it('processes per (entity × source): both sources contribute claims, each with single-source provenance', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // The repro: a Connect-merged "Grace Hopper" node spanning two sources, each asserting a
+      // DIFFERENT fact. Pre-fix only derivedFrom[0] (srcA) is ever processed → factB is silently
+      // dropped (the reproduced data loss). Post-fix every source contributes its claims.
+      const factA = 'Grace Hopper invented the first compiler.';
+      const factB = 'Grace Hopper was a rear admiral in the United States Navy.';
+      const srcA = await archiveText(root, factA);
+      const srcB = await archiveText(root, factB);
+      const entityRel = await seedMergedEntity(root, 'Grace Hopper', [srcA, srcB]);
+
+      await new ClaimsStage(root, perSourceClaim).poke(); // drain the whole queue
+
+      // BOTH sources' facts are present — one claim file per source (data loss closed).
+      const claims = await readClaimFiles(root);
+      expect(claims).toHaveLength(2);
+      const joined = claims.join('\n---\n');
+      expect(joined).toContain(factA); // derivedFrom[0] — always worked
+      expect(joined).toContain(factB); // the LATER source — dropped pre-fix, present post-fix
+
+      // Each claim carries its OWN single source as provenance (clean per-claim provenance, CLAIMS-21).
+      const claimFor = (fact: string) => claims.find((c) => c.includes(fact))!;
+      expect(claimFor(factA)).toContain(`derivedFrom: ["${srcA}"]`);
+      expect(claimFor(factB)).toContain(`derivedFrom: ["${srcB}"]`);
+
+      // The entity's regenerated claims block links BOTH claims (union across sources, CLAIMS-9).
+      const node = await fs.readFile(path.join(root, entityRel), 'utf8');
+      expect(node.match(/\[\[claims\/.+\.md\]\]/g) ?? []).toHaveLength(2);
+
+      // Fully drained — every (entity × source) pair has a terminal marker (commit-to-dequeue).
+      expect(await readClaimsQueue(root)).toHaveLength(0);
+    });
+  });
+
+  it('a per-source failure sets aside only THAT source — the entity\'s other sources still claim (CLAIMS-12 per pair)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const factA = 'Ada Lovelace wrote the first algorithm.';
+      const srcA = await archiveText(root, factA);
+      const srcBad = await archiveText(root, 'unused — this source dir is deleted below');
+      const entityRel = await seedMergedEntity(root, 'Ada Lovelace', [srcA, srcBad]);
+      // Make srcBad poison: delete its captured payload so readSourceInput throws for that source only.
+      await fs.rm(path.join(root, srcBad), { recursive: true, force: true });
+      await simpleGit(root).raw('add', '-A');
+      await simpleGit(root).commit('test: drop one source dir (poison that pair)');
+
+      const stage = new ClaimsStage(root, perSourceClaim, new Mutex(), DEFAULT_MAX_ATTEMPTS);
+      for (let n = 0; n < DEFAULT_MAX_ATTEMPTS + 1; n++) await stage.poke(); // must NOT hang/loop
+
+      // The good source claimed; the poison source is set aside after K — queue drains (no head-of-line block).
+      expect(await readClaimsQueue(root)).toHaveLength(0);
+      const claims = await readClaimFiles(root);
+      expect(claims).toHaveLength(1);
+      expect(claims[0]).toContain(factA);
+      expect(claims[0]).toContain(`derivedFrom: ["${srcA}"]`);
+      // The good source's claim is linked in the block (the poison source contributed nothing).
+      const node = await fs.readFile(path.join(root, entityRel), 'utf8');
+      expect(node.match(/\[\[claims\/.+\.md\]\]/g) ?? []).toHaveLength(1);
     });
   });
 });
@@ -613,7 +728,7 @@ describe.skipIf(!gitAvailable)('CLAIMS-20 — set-aside items are user-recoverab
       await new ClaimsStage(root, claimsDeciderFor([aClaim()]), lock, DEFAULT_MAX_ATTEMPTS).poke();
       expect(await readClaimFiles(root)).toHaveLength(before); // nothing derived
       const ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
-      const state = await readClaimsState(path.join(root, ref.derivedFrom), path.basename(rel, '.md'));
+      const state = await readClaimsState(path.join(root, ref.sources[0]), path.basename(rel, '.md'));
       expect(state.terminalReason).toBe('dismissed'); // distinct from the recoverable `setaside`
     });
   });
@@ -647,7 +762,7 @@ describe.skipIf(!gitAvailable)('CLAIMS-20 — set-aside items are user-recoverab
       await retryClaimsItem(root, rel, lock);
       // After the reopen the count is back to 0 — a fresh K failures are needed to set it aside again.
       const ref = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
-      const sourceDir = path.join(root, ref.derivedFrom);
+      const sourceDir = path.join(root, ref.sources[0]);
       expect((await readClaimsState(sourceDir, path.basename(rel, '.md'))).failures).toBe(0);
 
       await setAside(root, rel, lock); // fail K more times

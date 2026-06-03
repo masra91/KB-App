@@ -344,7 +344,7 @@ inside the entity node so its substance reads in place:
 | CLAIMS-18  | should   | The Claims work-list is discovered by a **derived sweep of `entities/`** in v1 (terminal `claims` marker in the source audit, keyed by `entityId`); the eventual seam is a **`queue/claims/` folder + per-entity poke** (DECOMP-16) — later stages attach with no change to Claims | test:claimsStage.test.ts | ORCH-9,15; DECOMP-16 |
 | CLAIMS-19  | should   | **Within-source near-duplicate claim collapse**: claims that share the **same source provenance** AND normalize to the **same statement** collapse to one canonical (fact>interpretation>hypothesis, then confidence, then earliest id); the rest are deleted and the affected nodes' claims blocks regenerated. Deterministic + idempotent; runs as **Connect's post-Claims pass** (SPEC-0016 §6). Symmetric-relationship rewordings ("A↔B") are NOT collapsed — deferred to typed links (SPEC-0020 CONNECT-20); the residual is logged | test:claimDedup.test.ts, connectStage.test.ts | DATA-3; LIFE-8; SPEC-0020 |
 | CLAIMS-20  | should   | A **set-aside claims item is user-recoverable** (the #137 escape hatch): `retryClaimsItem` appends a **per-entity `reopened`** marker that supersedes the prior `setaside`/`failed` count so the entity re-enters the queue and re-derives (per-ENTITY, **not** a source-wide replay epoch — siblings untouched); `dismissClaimsItem` appends a **terminal `dismissed`** marker (permanently retired, never re-derived, distinct from the recoverable `setaside`); `listSetAsideItems` enumerates the recoverable set. All append-only on the source audit (CLAIMS-11), committed under the canonical-writer lock (CLAIMS-15) | test:claimsStage.test.ts | ORCH-12; SPEC-0030 OBS-17; [#137](https://github.com/masra91/KB-App/issues/137) |
-| CLAIMS-21  | must     | A **Connect-merged entity has MANY sources** (`derivedFrom` is multi-valued post-Connect): Claims processes it **per (entity × source)** — **every** source contributes its claims (within-source restatements collapse via CLAIMS-19; cross-source restatements are kept with independent provenance via CLAIMS-17). Deriving from only `derivedFrom[0]` **silently drops the later sources' facts — data loss — and is prohibited.** Each resulting claim's `evidence.derivedFrom` references the **single** source it came from (clean per-claim provenance) | none-yet | CLAIMS-5,17,19; SPEC-0020 CONNECT; [data-loss dogfood] |
+| CLAIMS-21  | must     | A **Connect-merged entity has MANY sources** (`derivedFrom` is multi-valued post-Connect): Claims processes it **per (entity × source)** — **every** source contributes its claims (within-source restatements collapse via CLAIMS-19; cross-source restatements are kept with independent provenance via CLAIMS-17). Deriving from only `derivedFrom[0]` **silently drops the later sources' facts — data loss — and is prohibited.** Each resulting claim's `evidence.derivedFrom` references the **single** source it came from (clean per-claim provenance) | test:claimsStage.test.ts | CLAIMS-5,17,19; SPEC-0020 CONNECT; [data-loss dogfood] |
 
 ### CLAIMS-5 — The work unit is an entity + its whole source
 - **Status:** draft · **Priority:** must
@@ -527,6 +527,13 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 
 ## 8. Changelog
 
+- 2026-06-03 — **CLAIMS-21 implemented (#197)** — `parseEntityNode` now returns ALL `derivedFrom`
+  sources; `claimsOne` processes one pending (entity × source) pair per call and the drain re-queues
+  the entity until every source is terminal; each claim carries its single source as provenance; the
+  entity claims-block is regenerated from the **union of all claim files about the entity** (CLAIMS-9)
+  so a per-source run never clobbers a sibling's rows. Set-aside/retry/dismiss stay per-pair. The
+  data-loss bug is closed; `Verify` graduated `none-yet → test:claimsStage.test.ts` (the
+  Grace-Hopper-across-2-sources fails-before/passes-after regression + parse-level + per-source-failure).
 - 2026-06-02 — **CLAIMS-21: per-(entity × source) claims for Connect-merged entities** (resolves
   §7's deferred "entity-driven unit after Connect"; Principal ruling). A merged entity has many
   `derivedFrom` sources; Claims now derives from **each** of them, not just `derivedFrom[0]` —
