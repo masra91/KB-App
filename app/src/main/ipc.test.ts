@@ -139,11 +139,20 @@ describe('MACOS-7 — folder-permission IPC ("Asking for the keys")', () => {
     await expect(fs.stat(path.join(vaultDir, '.kb', '.permission-probe'))).rejects.toThrow();
   });
 
-  it('kb:probeVaultAccess returns ok:false for a non-existent vault — and does NOT mis-flag it as a permission denial', async () => {
-    const missing = path.join(vaultDir, 'no', 'such', 'vault'); // no .kb here → ENOENT, not EPERM
-    const res = await invoke<{ ok: boolean; denied: boolean }>('kb:probeVaultAccess', missing);
+  it('kb:probeVaultAccess refuses an off-config path (defense-in-depth) — never writes outside the active vault', async () => {
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'KB', initGitIfNeeded: true }); // active = vaultDir
+    const offConfig = path.join(vaultDir, 'elsewhere'); // a different path than the active vault
+    const res = await invoke<{ ok: boolean; denied: boolean }>('kb:probeVaultAccess', offConfig);
     expect(res.ok).toBe(false);
-    expect(res.denied).toBe(false); // only real permission denials route to Blocked
+    expect(res.denied).toBe(false); // a config mismatch is NOT a permission denial (doesn't route to Blocked)
+    // the probe never touched the off-config path — no marker written there (rejected before any fs write)
+    await expect(fs.stat(path.join(offConfig, '.kb', '.permission-probe'))).rejects.toThrow();
+  });
+
+  it('kb:probeVaultAccess refuses when no KB is configured (null active vault)', async () => {
+    const res = await invoke<{ ok: boolean; denied: boolean }>('kb:probeVaultAccess', vaultDir);
+    expect(res.ok).toBe(false); // no active vault yet → nothing to probe
+    expect(res.denied).toBe(false);
   });
 
   it('kb:openSystemSettingsPrivacy deep-links to the Files-and-Folders Privacy anchor', async () => {

@@ -128,7 +128,15 @@ export function registerIpc(): void {
   // marker is removed immediately so nothing pollutes the user's vault. `denied` distinguishes a
   // permission failure (→ the Blocked recovery) from a generic one.
   ipcMain.handle('kb:probeVaultAccess', async (_e, vaultPath: string): Promise<ProbeVaultAccessResult> => {
-    const marker = path.join(path.resolve(vaultPath), '.kb', '.permission-probe');
+    // Defense-in-depth (KB-QD #201): this handler writes to a renderer-supplied path, so confine it to
+    // the ACTIVE vault — never probe (write into) an arbitrary off-config path. Mirrors the path-
+    // containment posture at every fs-touching IPC boundary.
+    const resolved = path.resolve(vaultPath);
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath || resolved !== cfg.activeVaultPath) {
+      return { ok: false, denied: false, message: 'That folder isn’t the active knowledge base.' };
+    }
+    const marker = path.join(resolved, '.kb', '.permission-probe');
     try {
       await fs.writeFile(marker, '', 'utf8');
       await fs.rm(marker, { force: true });
