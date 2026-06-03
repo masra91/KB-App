@@ -95,6 +95,40 @@ describe('WEB_RESEARCH_SKILL — untrusted-content posture (RESEARCH-12)', () =>
   });
 });
 
+describe('WEB_RESEARCH_SKILL — substantive + structured + attributed output (RESEARCH-17)', () => {
+  it('demands a SUBSTANTIVE note, not a thin/brief summary (the live-test defect)', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/substantive/i);
+    // The OLD "short, brief note" steer (the root cause) must be gone.
+    expect(WEB_RESEARCH_SKILL).not.toMatch(/short,?\s+(?:grounded|brief)|brief,?\s+(?:factual|grounded)/i);
+  });
+
+  it('instructs capturing the SPECIFIC substance — facts/figures/dates/quoted passages', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/specific/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/facts/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/figures|numbers/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/dates/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/quot/i); // quote / quoted passages
+  });
+
+  it('requires structure + per-fact source attribution, and names a vague summary a defect', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/structure|structured|markdown/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/attribut/i); // attribute / attributed / attribution
+    expect(WEB_RESEARCH_SKILL).toMatch(/defect/i); // a vague summary is a defect, not a pass
+  });
+
+  it('steers toward depth across SEVERAL sources (spend the budget) — without inventing specifics', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/several/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/depth/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/do not invent|never.*invent|not.*invent specifics/i);
+  });
+
+  it('keeps the egress posture intact (RESEARCH-17 must NOT loosen RESEARCH-12) — DATA framing + request-only scope co-exist with the depth steer', () => {
+    expect(WEB_RESEARCH_SKILL).toMatch(/DATA, never instructions/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/ONLY the requested topic/i);
+    expect(WEB_RESEARCH_SKILL).toMatch(/exfiltrate/i);
+  });
+});
+
 describe('retrieval budget — HARD enforcement (RESEARCH-11; #51 found:false root cause)', () => {
   it('budgetExhausted gates exactly maxToolCalls fetches (the (max+1)th is refused)', () => {
     // used 0..7 (< 8) proceed; used 8 (== budget) is exhausted → refuse the 9th call.
