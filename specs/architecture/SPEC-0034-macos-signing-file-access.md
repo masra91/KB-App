@@ -167,9 +167,24 @@ above (MACOS-2, MACOS-7); recorded here for provenance:
       **warns + steers the user to System Settings → Privacy & Security → Files and Folders** (reuses
       the MACOS-1 fallback; clear, no silent failure, no dead-end). A System-Settings deep-link is an
       optional fast-follow, not v1.
+- [x] **Notarization (MACOS-8) → DEFERRED for now (Principal, 2026-06-03); interim posture = keep
+      vaults OUTSIDE TCC-protected folders.** Notarized *distribution* is creds-gated (needs the
+      Principal's `notarytool` / App-Store-Connect profile) and only matters for **shipping to other
+      users** — it is **not** required for the Principal's own dev/testing. **Important nuance, so we
+      don't conflate the two:** TCC-folder *access* is gated on **signing** (already working — certs
+      present, MACOS-3/5 verified), **not** on notarization. So a *signed* build already writes into
+      `~/Documents` et al.; an *unsigned* dev build does not (the grant doesn't propagate to git/copilot
+      children — the original #56 failure). **Interim plan:** keep dev/test vaults **outside** the
+      TCC-protected folders (`~/Documents`, `~/Desktop`, `~/Downloads`) — e.g. `~/kb-test…` — so the
+      unsigned dev build works without the grant. Revisit MACOS-8 when the Principal provides
+      notarization creds (or when we want to dogfood a signed build against a Documents vault). #56 is
+      therefore **"done except creds-gated notarized distribution."**
 
 ## 9. Changelog
 
+- 2026-06-03 — **Notarization (MACOS-8) deferred (Principal).** Interim posture: keep dev/test vaults
+  outside TCC-protected folders (notarization is distribution-only + creds-gated; TCC *access* is gated
+  on signing, which already works). #56 reduces to "done except creds-gated notarized distribution."
 - 2026-06-02 — **KB-Lead product sign-off (both §8 calls ruled) → spec LOCKED (product forks closed).** (a)
   **iCloud Drive = detect-warn-only for v1** — MACOS-2's end-to-end guarantee covers local TCC folders
   (Documents/Desktop/Downloads) only; iCloud's eviction/placeholder edges must not block the #56 MUST.
