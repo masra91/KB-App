@@ -1,48 +1,59 @@
-// Pipeline Status view (SPEC-0030 OBS-5/6/7/8/9/11/15/17) — the live "what's the pipeline doing, and
-// why is it stuck?" observatory. Read-only by default (OBS-9): config/general retries live in
-// Reviews / Control Panel — it reports, never mutates. The ONE sanctioned exception is OBS-17's
-// poison-recovery: a set-aside item carries Retry / Dismiss actions so the Principal can clear a
-// stuck poison-loop in place (delegating to the stage-owned `kb:pipelineControl` primitives — the
-// view itself holds no mutation logic). Complements Activity (SPEC-0029): Activity = what happened;
-// Status = what's happening now + where it broke.
+// Pipeline Status view — "The Line" (SPEC-0032 / DESIGN-VIZ + SPEC-0030 OBS-5/6/7/8/9/11/15/17). The
+// static `<h2>` lists of the old Status view are replaced by **The Line**: a refinery-conveyor
+// instrument panel — six stations on a horizontal spine, each with a gauge-rail funnel; in-flight
+// sources as carriages (the per-item "pizza tracker"); set-aside items pulled onto a siding with
+// Retry / Dismiss; and a stuck-canonical-writer-lock alarm (the "silent stall, made loud"). Ember =
+// work, cool = rest; condensed signage + tabular numerics; one signature motion (index) + one ambient
+// (ember breathe), with full reduced-motion parity. Built on the shared `_design-system` foundation
+// (#179): `--viz-*` tokens, bundled faces, flat-ink primitives — this file is the surface composition.
 //
-// Shows (OBS-5/6/7/15): overall state (running/idle/stalled), per-stage flow (state + queue depth +
-// current item + set-aside), the canonical-writer lock holder/waiters, recent errors with
-// drill-down, the live worktrees, and the latency/throughput breakdown (Copilot p50/p95,
-// where-time-goes). Live-updates by polling `kb:pipelineStatusView` (OBS-8) — but only while the
-// view is visible (the shell mounts once + toggles display; idle polling when hidden is wasteful,
-// per the #86 dogfood). Thin DOM over the typed IPC; `esc()` on every interpolation (XSS-safe);
-// render helpers are pure (data → HTML string) so they unit-test without a DOM.
+// Read-only by default (OBS-9): it reports, never mutates. The ONE sanctioned exception is OBS-17's
+// poison recovery — a set-aside item carries Retry / Dismiss that delegate to the stage-owned
+// `kb:pipelineControl` primitives (no mutation logic lives here). Live by polling `kb:pipelineStatusView`
+// every 2500ms while visible (OBS-8); the §9 event-push channel is a deferred fast-follow (poll is the
+// floor). Thin DOM over the typed IPC; `esc()` on every interpolation (XSS-safe); render helpers are
+// pure (data → HTML string) so they unit-test without a DOM; the funnel/stepper math lives in
+// `theLineModel.ts` (also pure).
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
 import { formatTimestamp } from '../formatTime';
 import { stageDisplayName } from '../stageLabels';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
+import {
+  buildStations,
+  splitCarriages,
+  OVERALL_GLYPH,
+  type StationModel,
+  type CarriageModel,
+} from './theLineModel';
+import type { PipelineStatusView, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
+
+/** Which lens the Line foregrounds (VIZ-5). Default `stage` — at-a-glance health is the more frequent
+ *  job; `item` foregrounds the carriages. Same structure + data, only the visual weight shifts. */
+type Lens = 'stage' | 'item';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
 let view: PipelineStatusView | null = null;
 let loading = false;
 let errorMsg = '';
 let expanded = new Set<number>(); // recent-error rows drilled-down to their cause (OBS-6)
+let lens: Lens = 'stage'; // pivot toggle (VIZ-5)
 let timer: ReturnType<typeof setInterval> | null = null;
-let actionMsg = ''; // transient outcome of the last OBS-17 retry/dismiss (shown atop the panel)
+let actionMsg = ''; // transient outcome of the last OBS-17 retry/dismiss
 let acting = false; // a recovery action is in flight — disable the buttons so it can't double-fire
+let lastHtml = ''; // change-guard: skip re-rendering identical HTML so CSS motion doesn't restart (VIZ-9)
 
 export function mountStatus(container: HTMLElement): void {
   view = null;
   loading = true;
   errorMsg = '';
   expanded = new Set();
+  lens = 'stage';
   actionMsg = '';
   acting = false;
-  container.innerHTML = `
-    <div class="card status-view">
-      <h1>📊 Pipeline Status</h1>
-      <p class="muted">What the pipeline is doing right now — and where it's stuck. Read-only.</p>
-      <div class="status-body" id="statusBody"></div>
-    </div>`;
+  lastHtml = '';
+  container.innerHTML = `<div class="viz-surface the-line"><div class="line-body" id="lineBody"></div></div>`;
   wire(container);
   void load(container);
   // Live-update (OBS-8) — poll only while visible (don't burn IPC when another view is showing).
@@ -89,6 +100,15 @@ function wire(container: HTMLElement): void {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el) return;
     const act = el.dataset.act;
+    // VIZ-5 pivot — non-mutating; flips which lens the Line foregrounds.
+    if (act === 'pivot') {
+      const next = el.dataset.lens === 'item' ? 'item' : 'stage';
+      if (next !== lens) {
+        lens = next;
+        renderBody(container);
+      }
+      return;
+    }
     if (act === 'toggle-err') {
       const i = Number(el.dataset.i);
       if (expanded.has(i)) expanded.delete(i);
@@ -130,97 +150,182 @@ async function runControl(container: HTMLElement, req: PipelineControlRequest): 
 }
 
 function renderBody(container: HTMLElement): void {
-  const el = container.querySelector<HTMLElement>('#statusBody');
-  if (el) el.innerHTML = bodyHtml({ view, loading, errorMsg, expanded, actionMsg, acting });
+  const el = container.querySelector<HTMLElement>('#lineBody');
+  if (!el) return;
+  const html = lineBodyHtml({ view, loading, errorMsg, expanded, lens, actionMsg, acting }, Date.now());
+  // VIZ-9 change-guard: only touch the DOM when the markup actually changed, so an unchanged poll
+  // doesn't restart the ember-breathe / stepper animations (and saves layout on the calm idle).
+  if (html !== lastHtml) {
+    el.innerHTML = html;
+    lastHtml = html;
+  }
 }
 
-// ── Render (pure helpers return HTML strings) ─────────────────────────────────────────────────
+// ── Render (pure helpers return HTML strings) ─────────────────────────────────────────────────────
 
 interface BodyState {
   view: PipelineStatusView | null;
   loading: boolean;
   errorMsg: string;
   expanded: Set<number>;
+  lens: Lens;
   actionMsg?: string; // OBS-17: outcome of the last retry/dismiss
   acting?: boolean; // OBS-17: a recovery action is in flight (buttons disabled)
 }
 
-export function bodyHtml(s: BodyState): string {
-  if (s.errorMsg) return `<p class="status-error error">Couldn’t load status: ${esc(s.errorMsg)}</p>`;
-  if (s.loading && s.view === null) return `<p class="muted">Loading…</p>`;
-  if (s.view === null) return `<p class="muted status-empty">No knowledge base open.</p>`;
+/** The whole Line body (`nowMs` injected for the carriage dwell so it's testable without a clock). */
+export function lineBodyHtml(s: BodyState, nowMs: number): string {
+  if (s.errorMsg) return `<p class="line-error viz-body" role="alert">Couldn’t load status: ${esc(s.errorMsg)}</p>`;
+  if (s.loading && s.view === null) return `<p class="line-loading viz-body">Loading…</p>`;
+  if (s.view === null) return `<p class="line-empty viz-body">No knowledge base open.</p>`;
+  const stations = buildStations(s.view);
+  const { shown, more } = splitCarriages(s.view.inFlight, nowMs);
   return [
     overallHtml(s.view),
-    stagesHtml(s.view.stages),
-    setAsideHtml(s.view.setAsideItems, { actionMsg: s.actionMsg, acting: s.acting }),
-    lockHtml(s.view.lock),
-    errorsHtml(s.view.recentErrors, s.expanded),
-    latencyHtml(s.view),
-    worktreesHtml(s.view.worktrees),
+    alarmHtml(s.view),
+    pivotHtml(s.lens),
+    `<div class="line-core line-lens-${esc(s.lens)}">`,
+    spineHtml(stations),
+    carriagesHtml(shown, more),
+    `</div>`,
+    sidingHtml(s.view.setAsideItems, { actionMsg: s.actionMsg, acting: s.acting }),
+    readoutHtml(s.view, s.expanded),
   ].join('');
 }
 
-/** OBS-5/11: the headline state. A stall is called out prominently (the silent stall, made loud). */
+/** OBS-5/11: the headline state badge (`◐ RUNNING`). Large display element → state hue allowed (§3). */
 export function overallHtml(v: PipelineStatusView): string {
   const label = { running: 'Running', idle: 'Idle', stalled: 'Stalled' }[v.overall];
-  // #163: a stuck write lock is the precise wedge cause — call it out specifically (more actionable
-  // than the generic stall note, and it can't be masked by an otherwise-"running" badge).
-  const stuckNote = v.lock.stuck
-    ? `<p class="status-stuck-note error">⛔ The write lock has been held by <strong>${esc(v.lock.holder ? holderLabel(v.lock.holder) : 'a stage')}</strong>${typeof v.lock.heldMs === 'number' ? ` for ${esc(heldFor(v.lock.heldMs))}` : ''} and isn’t releasing — the pipeline is wedged. See the write lock below.</p>`
+  const last = v.lastActivity
+    ? `<span class="line-lastact viz-body">last activity <span class="viz-numeric">${esc(formatTimestamp(v.lastActivity))}</span></span>`
     : '';
-  const stalledNote = v.stalled && !v.lock.stuck
-    ? `<p class="status-stall-note error">⚠️ Work is queued but nothing has progressed${v.lastActivity ? ` since ${esc(formatTimestamp(v.lastActivity))}` : ''} — the pipeline looks stuck. Check recent errors + the lock below.</p>`
-    : '';
-  const last = v.lastActivity ? `<span class="status-lastact muted">last activity ${esc(formatTimestamp(v.lastActivity))}</span>` : '';
-  return `<div class="status-overall status-overall-${esc(v.overall)}"><span class="status-badge status-${esc(v.overall)}">${esc(label)}</span>${last}</div>${stuckNote}${stalledNote}`;
+  return `<header class="line-head viz-ruled">
+    <span class="line-title viz-signage">Pipeline</span>
+    <span class="line-overall line-overall-${esc(v.overall)} viz-signage" role="status"><span class="line-overall-glyph" aria-hidden="true">${esc(OVERALL_GLYPH[v.overall])}</span> ${esc(label)}</span>
+    ${last}
+  </header>`;
 }
 
-/** OBS-5: per-stage flow — state, queue depth, current item, set-aside count. */
-export function stagesHtml(stages: StageStatus[]): string {
-  const rows = stages
-    .map((st) => {
-      const current = st.currentItem ? `<span class="status-current muted">▶ ${esc(st.currentItem)}</span>` : '';
-      const setAside = st.setAside > 0 ? `<span class="status-setaside error">${st.setAside} set aside</span>` : '';
-      return `
-        <li class="status-stage status-stage-${esc(st.state)}">
-          <span class="status-stage-name" title="${esc(st.stage)}">${esc(stageDisplayName(st.stage))}</span>
-          <span class="status-badge status-${esc(st.state)}">${esc(st.state)}</span>
-          <span class="status-queue muted">queue ${st.queueDepth}</span>
-          ${current}
-          ${setAside}
-        </li>`;
-    })
+/** OBS-11/VIZ-1 — the "silent stall, made loud" alarm, the headline reason this surface exists. A
+ *  STUCK canonical-writer lock (#163 P0 class) is THE silent wedge: render it as the primary oxide
+ *  alarm naming the holder + elapsed (#170 `lock.stuck`/`heldMs`/holder). Else a generic stall (queued
+ *  but no progress) raises the same alarm box. Oxide colors only the glyph + the box's left edge — the
+ *  reason text stays `--viz-ink` (oxide is sub-AA on small text, §3 / Design-Lead cert). Healthy idle
+ *  and a held-but-moving lock stay quiet. */
+export function alarmHtml(v: PipelineStatusView): string {
+  if (v.lock.stuck) {
+    const who = v.lock.holder ? holderLabel(v.lock.holder) : 'a stage';
+    const forHow = typeof v.lock.heldMs === 'number' ? heldFor(v.lock.heldMs) : null;
+    return `<div class="line-alarm line-alarm-stuck" role="alert">
+      <span class="line-alarm-glyph viz-state-error" aria-hidden="true">✕</span>
+      <span class="line-alarm-text viz-body"><strong>Stuck</strong> — the write lock has been held by <strong>${esc(who)}</strong>${forHow ? ` for <span class="viz-numeric">${esc(forHow)}</span>` : ''} and isn’t releasing; the pipeline is wedged on this section. See the write lock below.</span>
+    </div>`;
+  }
+  if (v.stalled) {
+    return `<div class="line-alarm line-alarm-stall" role="alert">
+      <span class="line-alarm-glyph viz-state-error" aria-hidden="true">✕</span>
+      <span class="line-alarm-text viz-body">Work is queued but nothing has progressed${v.lastActivity ? ` since <span class="viz-numeric">${esc(formatTimestamp(v.lastActivity))}</span>` : ''} — the pipeline looks stuck. Check the write lock + recent errors below.</span>
+    </div>`;
+  }
+  return '';
+}
+
+/** VIZ-5 pivot toggle — flip emphasis between per-stage (default) and per-item. Non-mutating. */
+export function pivotHtml(active: Lens): string {
+  const btn = (l: Lens, text: string): string =>
+    `<button type="button" class="viz-btn viz-focusable line-pivot-btn${active === l ? ' line-pivot-on' : ''}" data-act="pivot" data-lens="${l}" aria-pressed="${active === l}">${text}</button>`;
+  return `<div class="line-pivot" role="group" aria-label="Lens">${btn('stage', 'Per-stage')}${btn('item', 'Per-item')}</div>`;
+}
+
+/** §2/§6: the station spine — six stations on one horizontal rule, each a glyph + signage + gauge-rail
+ *  (volume bar + directional conversion caption). State = glyph + hue + fill (never colour alone). */
+export function spineHtml(stations: StationModel[]): string {
+  return `<section class="line-spine-wrap" aria-label="Pipeline stations"><ol class="line-spine">${stations.map(stationHtml).join('')}</ol></section>`;
+}
+
+function stationHtml(st: StationModel): string {
+  // Small text (the state word, counts, captions, queue, set-aside badge) stays ink/ink-muted; the
+  // state hue rides the glyph + the gauge-rail bar (large/graphic) only (§3 contrast rule).
+  const current = st.currentItem ? `<span class="line-station-current viz-body">▶ ${esc(st.currentItem)}</span>` : '';
+  const queue = st.queueDepth > 0 ? `<span class="line-station-queue viz-body">queue <span class="viz-numeric">${st.queueDepth}</span></span>` : '';
+  const setAside = st.setAside > 0 ? `<span class="line-station-setaside line-badge-error"><span class="viz-numeric">${st.setAside}</span> set aside</span>` : '';
+  const latency = st.slowest && st.latency ? `<span class="line-station-latency viz-numeric" title="Slowest station">slowest · ${esc(st.latency)}</span>` : '';
+  const caption = st.rail.caption
+    ? `<span class="line-rail-caption line-cap-${st.rail.captionKind} viz-numeric">${esc(st.rail.caption)}</span>`
+    : '';
+  return `<li class="line-station line-station-${esc(st.state)}${st.slowest ? ' line-station-slow' : ''}" data-stage="${esc(st.stage)}">
+    <span class="line-station-glyph ${st.stateClass}" aria-hidden="true">${esc(st.glyph)}</span>
+    <span class="line-station-name viz-signage">${esc(st.name)}</span>
+    <span class="line-station-state viz-chip" title="${esc(st.state)}">${esc(st.state)}</span>
+    <span class="line-rail" aria-hidden="true"><span class="line-rail-bar ${st.stateClass}${st.slowest ? ' line-rail-bar-slow' : ''}" style="height:${st.rail.barPct}%"></span></span>
+    <span class="line-rail-count viz-numeric">${st.rail.count}</span>
+    ${caption}
+    ${queue}
+    ${current}
+    ${setAside}
+    ${latency}
+  </li>`;
+}
+
+/** §2/VIZ-2: in-flight carriages — each live source is a six-cell stepper (done · current · pending)
+ *  with its current dwell. Beyond N=12 the rest collapse to a "+K more" row (VIZ-9 virtualization). */
+export function carriagesHtml(shown: CarriageModel[], more: number): string {
+  if (shown.length === 0 && more === 0) {
+    return `<section class="line-flight"><h2 class="line-h2 viz-signage">In flight</h2><p class="line-flight-empty viz-body">Nothing on the line right now.</p></section>`;
+  }
+  const rows = shown.map(carriageHtml).join('');
+  const moreRow = more > 0 ? `<li class="line-carriage line-carriage-more viz-body">+<span class="viz-numeric">${more}</span> more in flight</li>` : '';
+  return `<section class="line-flight"><h2 class="line-h2 viz-signage">In flight (<span class="viz-numeric">${shown.length + more}</span>)</h2><ul class="line-carriages">${rows}${moreRow}</ul></section>`;
+}
+
+function carriageHtml(c: CarriageModel): string {
+  const cur = c.cells.findIndex((r) => r === 'current');
+  const cells = c.cells
+    .map((role) => `<span class="line-cell line-cell-${role}${role === 'current' && c.active ? ' line-cell-breathe' : ''}" aria-hidden="true"></span>`)
     .join('');
-  return `<h2 class="status-h2">Stages</h2><ul class="status-stages">${rows}</ul>`;
+  const dwell = c.dwell ? `<span class="line-carriage-dwell viz-numeric">${esc(c.dwell)}</span>` : '';
+  return `<li class="line-carriage${c.active ? ' line-carriage-active' : ''}">
+    <span class="line-carriage-name viz-body">▸ ${esc(c.name)}</span>
+    <span class="line-stepper" role="img" aria-label="${esc(c.stageName)} — step ${cur + 1} of 6">${cells}</span>
+    <span class="line-carriage-stage viz-signage">${esc(c.stageName)}</span>
+    ${dwell}
+  </li>`;
 }
 
-/** OBS-17: set-aside / poison items — what the pipeline gave up on + why, the recovery list. Each
- *  item carries **Retry** (re-enqueue to re-derive) + **Dismiss** (retire from the list) actions that
- *  fire `kb:pipelineControl` — the one sanctioned mutation on this otherwise read-only view (OBS-9).
- *  Shows the entity's name when known (friendlier than the ULID id), falling back to the id. The item
- *  carries its `stage` + id on the buttons so the handler targets the right primitive (claims-only v1).
- *  `acting` disables the buttons while an action is in flight; `actionMsg` reports the last outcome. */
-export function setAsideHtml(items: SetAsideView[], opts: { actionMsg?: string; acting?: boolean } = {}): string {
+/** §2/§6 VIZ-7: the set-aside siding — errored/poison items pulled OFF the line, oxide-prominent, each
+ *  carrying Retry / Dismiss (OBS-17). Reuses the existing `kb:pipelineControl` contract verbatim
+ *  (`data-act`/`data-stage`/`data-id`) — no new mutation surface. Oxide carries the badge fill + the
+ *  siding's left border; the reason line stays ink (§3). `acting` disables the buttons single-flight;
+ *  `actionMsg` reports the last outcome. */
+export function sidingHtml(items: SetAsideView[], opts: { actionMsg?: string; acting?: boolean } = {}): string {
   if (items.length === 0) return '';
   const dis = opts.acting ? ' disabled' : '';
-  const banner = opts.actionMsg ? `<p class="status-setaside-msg muted">${esc(opts.actionMsg)}</p>` : '';
+  const banner = opts.actionMsg ? `<p class="line-siding-msg viz-body">${esc(opts.actionMsg)}</p>` : '';
   const rows = items
     .map((it) => {
       const label = it.name ?? it.itemId;
       const data = `data-stage="${esc(it.stage)}" data-id="${esc(it.itemId)}" data-label="${esc(label)}"`;
-      return `
-        <li class="status-setaside-item">
-          <span class="status-badge status-setaside">set aside</span>
-          <span class="status-setaside-id">${esc(stageDisplayName(it.stage))} · ${esc(label)}</span>
-          ${it.reason ? `<span class="muted">${esc(it.reason)}</span>` : ''}
-          <span class="status-setaside-actions">
-            <button type="button" class="status-setaside-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
-            <button type="button" class="status-setaside-dismiss" data-act="setaside-dismiss" ${data}${dis}>Dismiss</button>
-          </span>
-        </li>`;
+      return `<li class="line-siding-item">
+        <span class="line-siding-badge" aria-hidden="true">✕ set aside</span>
+        <span class="line-siding-where viz-body">${esc(stageDisplayName(it.stage))} · ${esc(label)}</span>
+        ${it.reason ? `<span class="line-siding-reason viz-body">${esc(it.reason)}</span>` : ''}
+        <span class="line-siding-actions">
+          <button type="button" class="viz-btn viz-focusable line-siding-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
+          <button type="button" class="viz-btn viz-focusable line-siding-dismiss" data-act="setaside-dismiss" ${data}${dis}>Dismiss</button>
+        </span>
+      </li>`;
     })
     .join('');
-  return `<h2 class="status-h2">Set aside — needs attention (${items.length})</h2>${banner}<ul class="status-setaside-items">${rows}</ul>`;
+  return `<section class="line-siding"><h2 class="line-h2 viz-signage">⟂ Set aside — needs attention (<span class="viz-numeric">${items.length}</span>)</h2>${banner}<ul class="line-siding-items">${rows}</ul></section>`;
+}
+
+// ── Secondary instrument readout — retains OBS-6/7/15 depth the Line doesn't surface inline ─────────
+
+/** The diagnostic readout below the Line: the write lock (OBS-7), recent errors w/ drill-down (OBS-6),
+ *  latency & throughput (OBS-15), and worktrees (OBS-7). The Line is the at-a-glance instrument; this
+ *  is the depth behind it. */
+function readoutHtml(v: PipelineStatusView, expanded: Set<number>): string {
+  return `<section class="line-readout">${[lockHtml(v.lock), errorsHtml(v.recentErrors, expanded), latencyHtml(v), worktreesHtml(v.worktrees)].join('')}</section>`;
 }
 
 /** Format a held-lock duration (ms) compactly for the OBS-7 readout (#163): "45s", "2m 5s". */
@@ -240,50 +345,47 @@ function holderLabel(holder: string): string {
 }
 
 /** OBS-7: the canonical-writer lock — held/holder/waiters, and (#163) a **stuck** warning when the
- *  watchdog flags a section held too long, so a silent deadlock surfaces instead of reading "held". */
+ *  watchdog flags a section held too long (the primary alarm is `alarmHtml`; this is the readout detail). */
 export function lockHtml(lock: PipelineStatusView['lock']): string {
-  // "Write lock" is the user-facing label; the technical name rides in the tooltip (#7 softening).
-  const heading = `<h2 class="status-h2" title="Canonical-writer lock">Write lock</h2>`;
+  const heading = `<h2 class="line-h2 viz-signage" title="Canonical-writer lock">Write lock</h2>`;
   if (!lock.held) {
-    const waiting = lock.waiters > 0 ? ` <span class="muted">(${lock.waiters} waiting)</span>` : '';
-    return `${heading}<p class="status-lock muted">free${waiting}</p>`;
+    const waiting = lock.waiters > 0 ? ` <span class="viz-body">(<span class="viz-numeric">${lock.waiters}</span> waiting)</span>` : '';
+    return `${heading}<p class="line-lock viz-body">free${waiting}</p>`;
   }
   const who = lock.holder ? esc(holderLabel(lock.holder)) : 'a stage';
   const waiting = lock.waiters > 0 ? `, ${lock.waiters} waiting` : '';
   if (lock.stuck) {
-    // #163: the watchdog flagged this section held past the threshold — the canonical writer never
-    // released. Surface the wedge loudly (not the silent "held by a stage").
     const forHow = typeof lock.heldMs === 'number' ? ` for ${heldFor(lock.heldMs)}` : ' too long';
-    return `${heading}<p class="status-lock-stuck error">⚠️ <strong>Stuck</strong> — held by <strong>${who}</strong>${esc(forHow)}${esc(waiting)}; the pipeline is wedged on this section. Check recent errors below.</p>`;
+    return `${heading}<p class="line-lock line-lock-stuck viz-body"><span class="line-lock-glyph viz-state-error" aria-hidden="true">✕</span> <strong>Stuck</strong> — held by <strong>${who}</strong>${esc(forHow)}${esc(waiting)}; the pipeline is wedged on this section. Check recent errors below.</p>`;
   }
   const since = lock.since ? ` since ${esc(formatTimestamp(lock.since))}` : '';
-  const forHow = typeof lock.heldMs === 'number' ? ` <span class="muted">(${esc(heldFor(lock.heldMs))})</span>` : '';
-  return `${heading}<p class="status-lock">held by <strong>${who}</strong>${since}${esc(waiting)}${forHow}</p>`;
+  const forHow = typeof lock.heldMs === 'number' ? ` <span class="viz-body">(<span class="viz-numeric">${esc(heldFor(lock.heldMs))}</span>)</span>` : '';
+  return `${heading}<p class="line-lock viz-body">held by <strong>${who}</strong>${since}${esc(waiting)}${forHow}</p>`;
 }
 
-/** OBS-6: recent errors + set-aside markers, each expandable to its cause (drill-down). */
+/** OBS-6: recent errors + set-aside markers, each expandable to its cause (drill-down). The level
+ *  badge is a ruled chip (ink text, not oxide — small text §3); state still reads via the badge + glyph. */
 export function errorsHtml(errors: RecentError[], expanded: Set<number>): string {
-  if (errors.length === 0) return `<h2 class="status-h2">Recent errors</h2><p class="muted">None — clean.</p>`;
+  if (errors.length === 0) return `<h2 class="line-h2 viz-signage">Recent errors</h2><p class="viz-body line-readout-empty">None — clean.</p>`;
   const rows = errors
     .map((e, i) => {
       const open = expanded.has(i);
       const where = [e.stage, e.itemId].filter(Boolean).map((x) => esc(String(x))).join(' · ');
       const detail = open
-        ? `<div class="status-err-detail"><pre><code>${esc(e.message ?? '(no message)')}</code></pre>${e.runId ? `<div class="muted">runId ${esc(e.runId)}</div>` : ''}</div>`
+        ? `<div class="line-err-detail"><pre><code>${esc(e.message ?? '(no message)')}</code></pre>${e.runId ? `<div class="viz-body line-err-runid">runId <span class="viz-numeric">${esc(e.runId)}</span></div>` : ''}</div>`
         : '';
-      return `
-        <li class="status-err status-err-${esc(e.level)}${open ? ' open' : ''}">
-          <button class="status-err-head" data-act="toggle-err" data-i="${i}" aria-expanded="${open}">
-            <span class="status-badge status-${esc(e.level)}">${esc(e.level)}</span>
-            <span class="status-err-event">${esc(e.event)}</span>
-            ${where ? `<span class="muted">${where}</span>` : ''}
-            <span class="status-err-ts muted">${esc(e.ts)}</span>
-          </button>
-          ${detail}
-        </li>`;
+      return `<li class="line-err line-err-${esc(e.level)}${open ? ' open' : ''}">
+        <button class="line-err-head viz-focusable" data-act="toggle-err" data-i="${i}" aria-expanded="${open}">
+          <span class="viz-chip line-err-level">${esc(e.level)}</span>
+          <span class="line-err-event viz-body">${esc(e.event)}</span>
+          ${where ? `<span class="viz-body line-err-where">${where}</span>` : ''}
+          <span class="line-err-ts viz-numeric">${esc(e.ts)}</span>
+        </button>
+        ${detail}
+      </li>`;
     })
     .join('');
-  return `<h2 class="status-h2">Recent errors</h2><ul class="status-errors">${rows}</ul>`;
+  return `<h2 class="line-h2 viz-signage">Recent errors</h2><ul class="line-errors">${rows}</ul>`;
 }
 
 /** OBS-15: latency & throughput — Copilot p50/p95, per-stage throughput, where-time-goes. */
@@ -292,28 +394,27 @@ export function latencyHtml(v: PipelineStatusView): string {
   const w = v.perf.whereTimeGoes;
   const copilot =
     c.count > 0
-      ? `<p class="status-latency">Copilot calls: <strong>${c.count}</strong> · avg ${c.avgMs}ms · p50 ${c.p50Ms}ms · p95 ${c.p95Ms}ms</p>`
-      : `<p class="muted">No Copilot calls recorded yet.</p>`;
+      ? `<p class="line-latency viz-body">Copilot calls: <strong class="viz-numeric">${c.count}</strong> · avg <span class="viz-numeric">${c.avgMs}ms</span> · p50 <span class="viz-numeric">${c.p50Ms}ms</span> · p95 <span class="viz-numeric">${c.p95Ms}ms</span></p>`
+      : `<p class="viz-body line-readout-empty">No Copilot calls recorded yet.</p>`;
   const where =
     w.totalMs > 0
-      ? `<p class="status-where muted">Where time goes: ${Math.round(w.copilotPct * 100)}% Copilot, ${100 - Math.round(w.copilotPct * 100)}% other (${Math.round(w.copilotMs / 1000)}s / ${Math.round(w.totalMs / 1000)}s)</p>`
+      ? `<p class="line-where viz-body">Where time goes: <span class="viz-numeric">${Math.round(w.copilotPct * 100)}%</span> Copilot, <span class="viz-numeric">${100 - Math.round(w.copilotPct * 100)}%</span> other (<span class="viz-numeric">${Math.round(w.copilotMs / 1000)}s / ${Math.round(w.totalMs / 1000)}s</span>)</p>`
       : '';
   const stages = v.perf.stages.length
-    ? `<ul class="status-throughput">${v.perf.stages
-        .map((st) => `<li class="muted">${esc(st.stage)}: ${st.throughputPerMin}/min · ${st.runs} runs · avg ${st.avgMs}ms</li>`)
+    ? `<ul class="line-throughput">${v.perf.stages
+        .map((st) => `<li class="viz-body">${esc(stageDisplayName(st.stage))}: <span class="viz-numeric">${st.throughputPerMin}/min</span> · <span class="viz-numeric">${st.runs}</span> runs · avg <span class="viz-numeric">${st.avgMs}ms</span></li>`)
         .join('')}</ul>`
     : '';
-  // Recent slow operations (OBS-15) — the few longest spans, so an outlier is visible.
   const slow = v.perf.slowest.length
-    ? `<div class="status-slowops"><span class="muted">Slowest ops:</span><ul>${v.perf.slowest
+    ? `<div class="line-slowops"><span class="viz-body">Slowest ops:</span><ul>${v.perf.slowest
         .slice(0, 5)
         .map((s) => {
           const where2 = [s.stage, s.itemId].filter(Boolean).map((x) => esc(String(x))).join(' · ');
-          return `<li class="muted">${esc(s.op)}${where2 ? ` (${where2})` : ''}: ${s.durationMs}ms</li>`;
+          return `<li class="viz-body">${esc(s.op)}${where2 ? ` (${where2})` : ''}: <span class="viz-numeric">${s.durationMs}ms</span></li>`;
         })
         .join('')}</ul></div>`
     : '';
-  return `<h2 class="status-h2">Latency &amp; throughput</h2>${copilot}${where}${stages}${slow}`;
+  return `<h2 class="line-h2 viz-signage">Latency &amp; throughput</h2>${copilot}${where}${stages}${slow}`;
 }
 
 /** OBS-7: the live worktrees + the branch each is on. */
@@ -321,7 +422,7 @@ export function worktreesHtml(worktrees: WorktreeInfo[]): string {
   if (worktrees.length === 0) return '';
   const rows = worktrees
     // Show the worktree dir basename (the full `.kb/cache/...` path is dev-noise); keep it as a tooltip.
-    .map((w) => `<li class="muted" title="${esc(w.path)}"><code>${esc(w.path.replace(/\/+$/, '').split('/').pop() ?? w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
+    .map((w) => `<li class="viz-body" title="${esc(w.path)}"><code>${esc(w.path.replace(/\/+$/, '').split('/').pop() ?? w.path)}</code>${w.branch ? ` → ${esc(w.branch)}` : ''}</li>`)
     .join('');
-  return `<h2 class="status-h2">Worktrees</h2><ul class="status-worktrees">${rows}</ul>`;
+  return `<h2 class="line-h2 viz-signage">Worktrees</h2><ul class="line-worktrees">${rows}</ul>`;
 }
