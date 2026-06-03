@@ -66,9 +66,9 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
 │   ▸ turing-1936.md       [███▣········]  Archive  ✓ → Decompose             │
 │   ▸ kb-notes.md          [█████████▣··]  Claims   ⟳                          │
 │                                                                              │
-│   ⟂ SET ASIDE — needs attention (1)                                          │
-│   ▸ napier-bones.md      Claims ✕  set aside after 3 failed attempts         │
-│                                            [ Retry ]  [ Dismiss ]            │
+│   ◑ NEEDS YOUR DECISION (2)                                                  │
+│   ▸ napier-bones.md · Claims · set aside · 3 attempts [ Retry ]  [ Dismiss ] │
+│   ▸ "Mercury" → 2 entities · Connect · ambiguous link  [ Pick… ]             │
 └──────────────────────────────────────────────────────────────────────────────┘
         per-item ◉──○ per-stage          (pivot toggle — same data, shifted weight)
 ```
@@ -95,8 +95,25 @@ It reads at a glance and is the same structure under both lenses (VIZ-5).
   stations, current step lit + animated, completed filled, with its current Copilot dwell time.
   This is the "pizza tracker" (VIZ-2). Click a carriage → expand to its full per-hop trace
   (OBS-16 `spansForItem`).
-- **Set-aside siding (below)** — errored/poison items pulled **off the line** onto a siding,
-  rust-colored and prominent, each carrying **Retry / Dismiss** (VIZ-7, OBS-17).
+- **"Needs your decision" queue (below)** — the actionable queue of items **waiting on a human
+  call**, pulled **off the line** onto a siding (VIZ-7, OBS-17, #192). This is **not framed as
+  failure** — a pending decision is normal workflow, not an error. It is **count-led and
+  actionable** ("**3 need your decision**"), each item carrying its decision affordance:
+  - **set-aside item** → **Retry / Dismiss** (a source the pipeline gave up on after K attempts),
+  - **ambiguous-link review** → answer the disambiguation (SPEC-0018),
+  - **researcher escalation** → **Continue? / Stop** (a depth-cap "continue?" — RESEARCH-11).
+
+  Treatment is **brass** (waiting-on-*you*), **not oxide** — oxide is reserved for the *broken*
+  alarm (stuck lock / errored stage, below). The distinction is the whole point of #192: "the
+  machine needs a decision from you" reads calm + actionable; "the machine is broken" reads as the
+  alarm. (A set-aside item's *cause* is shown as quiet context, not as the headline.)
+  - **Single source of truth — `N` == the list, always (no #110-class drift).** This queue is the
+    **one unified** needs-you surface; it does not run parallel to (and drift from) the per-flow
+    badges. **`N` is the actual count of actionable items aggregated across ALL needs-you flows**
+    (set-aside OBS-17 + ambiguous-link Reviews SPEC-0018 + researcher escalations RESEARCH-11), and
+    it MUST equal the number of rows shown — never "badge says 1, list says nothing needs you"
+    (the #110 bug). Each row **deep-links** to its decision affordance. If a flow has zero items it
+    contributes zero; when all are zero the queue is calm-empty/absent.
 - **Pivot toggle (footer)** — flips emphasis between **per-item** (carriages foreground, stations
   dim to context) and **per-stage** (station gauges foreground, carriages collapse to counts).
   Same Line, same data — only where the visual weight sits (VIZ-5).
@@ -120,11 +137,19 @@ named by role so dark/light and future surfaces stay coherent (DESIGN-7).
 | Idle/at-rest | `--viz-idle` | `#6B7178` slate | `#8A8473` | Stations with nothing moving |
 | **Active (work)** | `--viz-ember` | `#E8743B` ember | `#C2541F` | The signature heat — running stage / lit step |
 | Settled/promoted | `--viz-patina` | `#5FA38C` verdigris | `#3E7D67` | Completed / promoted material |
-| Blocked/waiting | `--viz-brass` | `#C7A24A` brass | `#9A7B2E` | Queued, waiting on lock/sweep |
-| Error/set-aside | `--viz-oxide` | `#D2452F` oxide red | `#B02A18` | Set-aside, failed |
+| Blocked / **needs-you** | `--viz-brass` | `#C7A24A` brass | `#9A7B2E` | Queued/waiting on lock/sweep, **and the "needs your decision" queue** (#192) — waiting on *you*, not broken |
+| Error / **broken** | `--viz-oxide` | `#D2452F` oxide red | `#B02A18` | The *broken* alarm only — stuck lock / errored stage (NOT a pending decision) |
 | Text primary | `--viz-ink` | `#E6E3DC` | `#1C1B18` | Labels, body |
 | Text muted | `--viz-ink-muted` | `#9298A0` | `#6A6557` | Secondary, units |
 
+- **Brass carries two meanings — disambiguate by context, not hue** (resolves KB-QD's GATE-2
+  brass-overload note). `--viz-brass` marks both **system-waiting** (a stage queued on the lock/sweep
+  — resolves itself, *no* user action) and **human-waiting** (the "needs your decision" queue — *act
+  now*). They are told apart by **location + label + affordance**, never by hue alone: human-waiting
+  lives in the `◑ NEEDS YOUR DECISION (N)` block with a **decision affordance** (Retry/Pick/Continue)
+  on each row; system-waiting is inline at a station with **no** affordance. **Never render a bare
+  brass dot where the two could be confused** — a brass item that demands action must sit in the
+  needs-you queue with its button + the block's header glyph/label.
 - **Contrast (measured on dark, vs `--viz-field` `#15171A`):** ink `14.0:1`, brass `7.4:1`,
   patina `6.1:1`, ember `6.0:1`, **oxide `3.96:1`**. Rule that follows from this:
   - **State hues color fills, glyphs, borders, and large/display elements only** — all clear the
@@ -198,9 +223,18 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
 - **Carriage** — `▸ name` + a six-cell stepper `[██████▣·····]` + current dwell ("12s on Copilot").
   Filled = done (patina), `▣` lit = current (ember), `·` = pending. Expandable to the per-hop
   trace.
-- **Siding item** — oxide badge + `stage · name` + reason + **Retry** / **Dismiss**. Single-flight
-  (buttons disable while acting); Dismiss confirms first. Reuses the existing OBS-17
-  `kb:pipelineControl` contract — no new mutation surface.
+- **"Needs your decision" queue** (#192) — a **count-led, brass, actionable** list ("3 need your
+  decision"), **not** an error panel. Each row = a name + the **decision affordance** for its kind
+  (set-aside → **Retry/Dismiss**; review → **Pick…**; escalation → **Continue?/Stop**) + the **stage**
+  it belongs to + the *cause*, both as quiet muted context (not the headline) — e.g.
+  `napier-bones.md · Claims · set aside · 3 attempts`. The **stage label is required** so items
+  across different stages stay triageable (which stage gave up on this source), preserving the
+  OBS-17 read-side's `stage · name` locus (resolves KB-QD's GATE-2 should-fix). Brass
+  (`--viz-brass`, waiting-on-you), **never oxide**
+  — oxide is the *broken* alarm only. Single-flight (affordances disable while acting); destructive
+  picks (Dismiss) confirm first. Reuses the existing OBS-17 `kb:pipelineControl` + review contracts
+  — no new mutation surface. **Calm-empty:** when the queue is empty it's quiet/absent (nothing
+  "needs you" is the good state), never a flashing zero.
 - **Stuck-lock alarm** (the headline "silent stall, made loud" — OBS-11/VIZ-1). A stuck
   canonical-writer lock is *the* silent-stall case (it was the #163 P0). When the view-model reports
   `lock.stuck` (held past the watchdog threshold — `LockState.stuck`/`heldMs`/holder, shipped in
@@ -230,7 +264,7 @@ Every flow in SPEC-0032 §7, mapped to the design:
 | --- | --- | --- |
 | 1 | Open Status → see funnel (10 captured → 7 entities → 22 claims → promoted) + in-flight trackers | The Line lands in **per-stage** lens: station counts + gauge-rail conversion deltas = the funnel; in-flight carriages listed below |
 | 2 | Capture a note → its tracker appears and **advances step-by-step**, active stage pulsing | A new carriage enters at CAPTURE; **indexes** station-by-station; the active step **embers + breathes** |
-| 3 | A source **set aside** → error step red with **Retry / Dismiss** | Carriage moves to the **siding** under the errored station; oxide-colored; Retry/Dismiss present (OBS-17) |
+| 3 | A source **set aside** → **Retry / Dismiss** | Joins the **"Needs your decision" queue** (brass, actionable — *not* error-red); Retry/Dismiss present (OBS-17, #192) |
 | 4 | **Pivot to per-stage** → Connect 22/min, p95 14s | Pivot toggle foregrounds station gauges: throughput/min + Copilot p95 per station |
 
 Plus the cross-cutting requirements: real-time/event-driven + animated (VIZ-1), light purposeful
@@ -246,7 +280,7 @@ motion with calm idle (VIZ-6), smooth at scale (VIZ-9), and the distinct identit
 | VIZ-4 per-stage bars + Copilot latency | §6 gauge-rail, slowest-station tint + p95 |
 | VIZ-5 pivot per-item ↔ per-stage | §2 pivot toggle (one structure, two weightings) |
 | VIZ-6 purposeful motion, calm idle | §5 (3 verbs; ember cools at idle) |
-| VIZ-7 set-aside prominent + Retry/Dismiss | §2 siding, §6 siding item |
+| VIZ-7 set-aside prominent + Retry/Dismiss; **#192 needs-you queue** | §2 "Needs your decision" queue, §6 (actionable brass queue, not failure) |
 | VIZ-8 distinct identity, not generic AI | §1 concept + anti-tell table |
 | VIZ-9 smooth/performant | §5 transform/opacity-only, coalesce, virtualize >12 |
 | DESIGN-2 authored: structure/color/type/motion/language | §§2–6 |
@@ -302,6 +336,15 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   chrome" implementation guardrails (§6); concrete measured contrast ratios + the rule that state
   hues never color small text — which caught that **oxide** (3.96:1), not ember, was the actual
   sub-AA case (§3). Awaiting GATE 2 (KB-QD, flow coverage).
+- 2026-06-02 — **#192 "Needs your decision" queue** — reframed the set-aside siding from a *failure*
+  read into an actionable, count-led **brass** queue ("N need your decision") that aggregates the
+  human-decision items (set-aside Retry/Dismiss, ambiguous-link reviews, researcher "continue?"
+  escalations). Pending decisions are normal workflow, **not** errors — so they read calm + actionable
+  (brass, waiting-on-*you*), distinct from the **broken alarm** (oxide; stuck lock / errored stage).
+  §2/§6/§7 + color table updated; calm-empty when nothing needs you. Routing through GATE 1 + GATE 2.
+  **GATE 2 (KB-QD) PASS** — all affordances preserved; folded in their should-fix: the row keeps the
+  **stage label** (`name · stage · cause`) so items across stages stay triageable (OBS-17 locus).
+  Plus `N == list` single-source-of-truth (anti-#110 drift, per PM). Awaiting GATE 1 (KB-AI-Detector).
 - 2026-06-02 — **Stuck-lock alarm added** (§6) now that #170 (`f2ae987`) shipped
   `LockState.stuck`/`heldMs`/holder-label: a stuck canonical-writer lock (the #163 P0 class) renders
   as the primary oxide alarm — "stuck — held by `<holder>` for `<Ns>`" — paired with overall=stalled,
