@@ -47,6 +47,8 @@ and a unique `key` here.
 | SPEC-0032 | VIZ     | Pipeline Visualization & Live Tracker         | feature | draft | `features/` |
 | SPEC-0033 | DESIGN  | Visual Design Language & Process              | architecture | draft | `architecture/` |
 | SPEC-0034 | MACOS   | macOS Signing, Entitlements & File Access (TCC-protected vaults) | architecture | draft | `architecture/` |
+| SPEC-0035 | HEALTH  | Knowledge Health & Structural Lint            | feature | draft | `features/` |
+| SPEC-0036 | CONTRA  | Contradiction Lifecycle                       | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
