@@ -100,11 +100,20 @@ instrument. The add-control is a row of **named template tiles**, not a dropdown
   permanent clutter.
 - **Template-specific fields** — labeled inline under the kind: Code → `repo` + `PRs (read-only)`;
   M365 → `tenant`. Clearly captioned, not loose inputs.
+- **`EFFORT` field — editable per-pass work-intensity** (`maxToolCalls`, RESEARCH-15/17). An
+  **editable** numeric in the **config line** (with scope/schedule/autonomy) — signage label
+  `EFFORT`, value in **tabular mono**, unit caption `calls / pass`. **Effort is a different axis from
+  reach**: it's *how hard the researcher works per pass*, NOT how far its data travels — so it lives
+  with the steering config, **away from the clearance ladder**, in **neutral `--viz-ink`** (never the
+  clearance-temperature hues, which mean egress). It's **steering, non-risky** → saved like
+  scope/schedule, **no consequence-confirm** (unlike enable / →autonomous / widen-clearance). Reads
+  as an instrument dial you turn up (the Principal raises it past the default).
 - **Reach readout** — a compact, always-visible line under the clearance ladder showing **what this
-  researcher may reach**: its current **budget** (e.g. `budget 8 calls / pass`) + **MCP / tool
-  allowlist** (e.g. `tools: web.search · web.fetch`), tabular/mono. Read-only in this v1 (the
-  *editor* is deferred, §10), but the **posture is always legible** — you can see a researcher's
-  reach + spend ceiling without opening anything (KB-QD GATE-2 ask; RESEARCH-15).
+  researcher may reach**: the **MCP / tool allowlist** (e.g. `tools: web.search · web.fetch`) + the
+  depth limit, tabular/mono. (The numeric *budget* it used to show is now the editable `EFFORT`
+  field above; the allowlist stays a read-only readout — its *editor* is deferred, §10.) The
+  **posture is always legible** — you can see what a researcher may reach without opening anything
+  (KB-QD GATE-2 ask; RESEARCH-15).
 - **Add = named tiles** — the four templates as selectable tiles (glyph + label), each creating a
   **disarmed** researcher (safe; enabling later is the gated step). No `<select>`.
 
@@ -196,7 +205,7 @@ radius/shadow on structure, ember focus rings, no UI-kit Card/Paper surfaces), t
 | # | Flow (SPEC-0028 §6 / RESEARCH-15/17) | How the design serves it |
 | --- | --- | --- |
 | 1 | **Add a researcher** — pick a template → configure → enable | Named **template tiles** → a new **disarmed** strip appears → brief it → arm (confirm) |
-| 2 | **Configure** prompt / scope / egress / schedule / autonomy (+ template fields) | Standing-orders box + config line + **clearance ladder** + labeled template fields (repo/PRs/tenant) |
+| 2 | **Configure** prompt / scope / egress / schedule / autonomy / **effort** (+ template fields) | Standing-orders box + config line (incl. editable **`EFFORT`** numeric) + **clearance ladder** + labeled template fields (repo/PRs/tenant) |
 | 3 | **Enable / disable** (risky — starts egress) | Armed indicator + clearance-color rail; enable/→autonomous/widen-clearance reveal the consequence-worded confirm |
 | 4 | **Run now → result** | **Run** dispatches (ember breathe) → typed **report**: found / nothing / **failed (oxide, distinct)** / escalation |
 | 5 | **See last-run + findings/citations + escalations** | Report footer: `last dispatch <ago>` + cited-source count (links out) + escalation state (RESEARCH-15) |
@@ -237,11 +246,11 @@ egressTier, enabled, schedule, posture, topics, `lastRun {ts, eventType, what, c
 
 - The researcher **runtime / dispatch / egress enforcement** — SPEC-0028 backend; this is the
   manage surface only.
-- **Budget/MCP-allowlist *editors*** — RESEARCH-15 lists budget/MCP config; v1 of this redesign
-  focuses on the painful surfaces (kind, clearance, instructions, run→report). The **readout** of
-  current budget + MCP allowlist **IS in v1** (§2/§6 reach readout — reach is always *visible*); only
-  the *editing* UI is the follow-on within the same language. **Tracked against RESEARCH-15** so
-  "manage view" isn't later read as fully complete (KB-QD GATE-2 note).
+- **MCP-allowlist *editor*** — RESEARCH-15 lists budget + MCP config. **Budget is now editable in v1**
+  (the `EFFORT`/`maxToolCalls` field, §6 — Principal's RESEARCH-17 quality fix); the **MCP/tool
+  allowlist** stays a **read-only readout** in v1 (its editor is the follow-on within the same
+  language). **Tracked against RESEARCH-15** so "manage view" isn't later read as fully complete
+  (KB-QD GATE-2 note).
 - The **#160 backend fix** (cliPath + stop-swallowing) — a dev mission; this spec only requires the
   failed-state be visually distinct.
 
@@ -277,3 +286,9 @@ egressTier, enabled, schedule, posture, topics, `lastRun {ts, eventType, what, c
   (current budget + MCP allowlist) to the strip (§2/§6) so a researcher's reach is legible even
   before the editor lands; clarified §10 that the readout ships in v1 (only the editor defers),
   tracked against RESEARCH-15. **Both gates GREEN → status `active`, checked in.**
+- 2026-06-03 — **`EFFORT` field now editable** (Principal's RESEARCH-17 quality fix, PM design-confirm
+  — not a re-gate): `maxToolCalls` becomes an editable per-pass work-intensity numeric in the config
+  line (signage `EFFORT`, tabular mono, `calls / pass`), neutral ink + **away from the clearance
+  ladder** so effort (work-intensity) is never misread as reach/egress (safety); steering/non-risky,
+  no confirm. The reach readout keeps the read-only MCP/tool allowlist; §10 updated (only the MCP
+  editor remains deferred). §6/§7/§10 updated.
