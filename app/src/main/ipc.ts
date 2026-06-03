@@ -3,6 +3,7 @@ import { ipcMain, dialog, shell, BrowserWindow, type OpenDialogOptions } from 'e
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
+import { isPermissionDeniedError } from '../kb/permissions';
 import { readAppConfig, writeAppConfig } from './appConfig';
 import {
   startPipeline,
@@ -37,6 +38,8 @@ import type {
   AppState,
   VaultConfig,
   CreateKbOptions,
+  ProbeVaultAccessResult,
+  OpenSettingsResult,
   CaptureRequest,
   CaptureResult,
   PipelineStatus,
@@ -119,6 +122,43 @@ export function registerIpc(): void {
     return result;
   });
 
+  // SPEC-0034 MACOS-7: probe vault write-access. A benign write+delete of a hidden marker under the
+  // vault's `.kb/` — the app's own first protected-folder access — so the macOS TCC grant dialog fires
+  // THEN (coupled to the pre-prompt's Continue), not later, decoupled, mid-pipeline (MACOS-5). The
+  // marker is removed immediately so nothing pollutes the user's vault. `denied` distinguishes a
+  // permission failure (→ the Blocked recovery) from a generic one.
+  ipcMain.handle('kb:probeVaultAccess', async (_e, vaultPath: string): Promise<ProbeVaultAccessResult> => {
+    const marker = path.join(path.resolve(vaultPath), '.kb', '.permission-probe');
+    try {
+      await fs.writeFile(marker, '', 'utf8');
+      await fs.rm(marker, { force: true });
+      return { ok: true, denied: false, message: 'Vault folder is accessible.' };
+    } catch (err) {
+      await fs.rm(marker, { force: true }).catch(() => {}); // best-effort cleanup if the write half-landed
+      return { ok: false, denied: isPermissionDeniedError(err), message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // SPEC-0034 MACOS-7: open macOS System Settings → Privacy & Security → Files and Folders for the
+  // denied-recovery flow. The precise sub-anchor is historically flaky across macOS versions, so a
+  // reject falls back to the general Privacy & Security pane — never a no-op click (the dead-end the
+  // design forbids).
+  ipcMain.handle('kb:openSystemSettingsPrivacy', async (): Promise<OpenSettingsResult> => {
+    const FILES = 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders';
+    const PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy';
+    try {
+      await shell.openExternal(FILES);
+      return { ok: true };
+    } catch {
+      try {
+        await shell.openExternal(PRIVACY);
+        return { ok: true, usedFallback: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  });
+
   // SPEC-0013 CAPTURE-1/2: fire-and-forget capture of text + dropped files. The renderer
   // sends file bytes; we hand them to the active orchestrator, which preserves+commits.
   ipcMain.handle('kb:capture', async (_e, req: CaptureRequest): Promise<CaptureResult> => {
@@ -141,6 +181,11 @@ export function registerIpc(): void {
       const out = await orch.capture('in-app-panel', payloads);
       return { ok: true, ids: out.ids, captureBatch: out.captureBatch, committed: out.committed, message: `Captured ${out.ids.length} item(s).` };
     } catch (err) {
+      // #56 / MACOS-7: a folder-permission denial (TCC not granted) must route to the Blocked recovery,
+      // never surface the raw `Operation not permitted` to the user (no dev jargon, no silent stall).
+      if (isPermissionDeniedError(err)) {
+        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+      }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }
   });

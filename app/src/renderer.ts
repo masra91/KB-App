@@ -11,10 +11,13 @@ import '@fontsource/ibm-plex-mono/500.css';
 import '@fontsource/ibm-plex-sans/400.css';
 import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
 import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
+import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" — folder-permission UX
 import './index.css';
 import type { PathInspection } from './kb/types';
 import { esc, baseName } from './shell/html';
 import { mountShell } from './shell/shell';
+import { mountPermissionGate, icloudNoteHtml } from './shell/permissionGate';
+import { isLocalTccProtected, isICloudVault } from './kb/permissions';
 
 const root = document.getElementById('app')!;
 
@@ -59,9 +62,12 @@ function renderDetails(): void {
       ${ins.alreadyKb ? '<li>⚠️ This folder already contains a KB-App config (will be reused).</li>' : ''}
     </ul>
     ${
-      ins.tccProtectedDir
-        ? `<p class="warning">⚠️ This folder is inside your <strong>${esc(ins.tccProtectedDir)}</strong>, a macOS-protected location. KB-App's background tasks (git, Copilot) can be silently blocked there — captures may never finish processing. <strong>Pick a folder outside ${esc(ins.tccProtectedDir)}</strong> (e.g. one directly in your home directory) to be safe.</p>`
-        : ''
+      isICloudVault(ins.tccProtectedDir)
+        ? // iCloud is detect-warn-only (v1, MACOS-2): a calm, non-blocking note — not a steer-away.
+          icloudNoteHtml()
+        : ins.tccProtectedDir
+          ? `<p class="warning">⚠️ This folder is inside your <strong>${esc(ins.tccProtectedDir)}</strong>, a macOS-protected location. KB-App's background tasks (git, Copilot) can be silently blocked there — captures may never finish processing. <strong>Pick a folder outside ${esc(ins.tccProtectedDir)}</strong> (e.g. one directly in your home directory) to be safe.</p>`
+          : ''
     }
     <label class="field">Name<input id="name" value="${esc(baseName(ins.path))}" /></label>
     <label class="checkbox"><input type="checkbox" id="initGit" checked /> Initialize git repo if needed</label>
@@ -82,7 +88,17 @@ async function onCreate(): Promise<void> {
   const res = await window.kbApi.create({ path: chosenPath, name, initGitIfNeeded: initGit });
 
   if (res.ok && res.vaultConfig) {
-    mountShell(root, chosenPath, res.vaultConfig.name);
+    const path = chosenPath;
+    const vaultName = res.vaultConfig.name;
+    // SPEC-0034 MACOS-7: for a vault in a LOCAL TCC-gated folder (Documents/Desktop/Downloads), gate the
+    // first run behind the pre-prompt — Continue performs a probe write so the macOS grant dialog fires
+    // coupled to our explanation (MACOS-5), and a denial drops to the Blocked recovery. Other locations
+    // (incl. iCloud, which is detect-warn-only) proceed straight to the shell.
+    if (isLocalTccProtected(inspection?.tccProtectedDir ?? null)) {
+      mountPermissionGate(root, { vaultPath: path, folder: path, onGranted: () => mountShell(root, path, vaultName) });
+      return;
+    }
+    mountShell(root, path, vaultName);
     return;
   }
   document.getElementById('result')!.innerHTML = `<p class="error">${esc(res.message)}</p>`;

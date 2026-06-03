@@ -85,6 +85,24 @@ describe('The Line — headline + alarm (OBS-5/11, VIZ-1)', () => {
     expect(h).toContain('wedged');
   });
 
+  it('alarmHtml raises the BRASS vault-blocked recovery (MACOS-7/#56) when a write hit a permission denial — above lock/stall', () => {
+    const blocked: PipelineStatusView = { ...STALLED, recentErrors: [{ ts: 't', level: 'error', event: 'claims.failed', message: 'fatal: could not write: Operation not permitted' }] };
+    const h = alarmHtml(blocked);
+    expect(h).toContain('line-alarm-blocked'); // brass (waiting on you), not the oxide stuck/stall alarm
+    expect(h).toContain('can’t write to your vault folder');
+    expect(h).toContain('data-act="open-settings"');
+    expect(h).not.toContain('line-alarm-stuck'); // a vault denial out-prioritizes the lock/stall alarm
+  });
+
+  it('the vault-blocked alarm clears once the denial ages out (a since-fixed grant — #56 freshness)', () => {
+    const denied: PipelineStatusView = { ...STALLED, overall: 'running', stalled: false, lock: { held: false, waiters: 0 }, recentErrors: [{ ts: '2026-06-02T00:00:00.000Z', level: 'error', event: 'claims.failed', message: 'Operation not permitted' }] };
+    const fresh = Date.parse('2026-06-02T00:01:00.000Z'); // within the 2-min window → still blocked
+    const aged = Date.parse('2026-06-02T01:00:00.000Z'); // an hour later → grant fixed → alarm clears
+    expect(alarmHtml(denied, fresh)).toContain('line-alarm-blocked');
+    expect(alarmHtml(denied, aged)).not.toContain('line-alarm-blocked');
+    expect(alarmHtml(denied, aged)).toBe(''); // healthy now (no lock/stall either)
+  });
+
   it('alarmHtml raises a generic stall (queued, no progress) — but not when healthy', () => {
     expect(alarmHtml(STALLED)).toContain('line-alarm-stall'); // stalled, not stuck
     expect(alarmHtml(STALLED)).toContain('looks stuck');
@@ -320,6 +338,22 @@ describe('mountStatus (OBS-8/9 — live + read-only; VIZ-5 pivot)', () => {
     root.querySelector<HTMLButtonElement>('[data-act="pivot"][data-lens="item"]')!.click();
     expect(root.querySelector('.line-lens-item')).not.toBeNull(); // flipped
     expect(statusFn.mock.calls.length).toBe(calls); // pure view change, no re-fetch
+  });
+
+  it('the vault-blocked alarm Open System Settings button calls the deep-link IPC (MACOS-7)', async () => {
+    const blockedView: PipelineStatusView = { ...STALLED, recentErrors: [{ ts: 't', level: 'error', event: 'claims.failed', message: 'Operation not permitted' }] };
+    const openSettings = vi.fn().mockResolvedValue({ ok: true });
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      pipelineStatusView: vi.fn().mockResolvedValue(blockedView),
+      pipelineControl: vi.fn().mockResolvedValue({ ok: true }) as unknown as KbApi['pipelineControl'],
+      openSystemSettingsPrivacy: openSettings,
+    };
+    mountStatus(root);
+    await Promise.resolve(); await Promise.resolve();
+    const btn = root.querySelector<HTMLButtonElement>('.line-open-settings');
+    expect(btn).not.toBeNull();
+    btn!.click();
+    expect(openSettings).toHaveBeenCalledOnce();
   });
 
   it('Retry on a set-aside item calls pipelineControl{retry} then re-fetches (OBS-17)', async () => {
