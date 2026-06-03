@@ -240,7 +240,7 @@ async function setAsideSources(baseDir: string, ref: EntityRef, entityId: string
  *  regenerate an entity's claims block from the UNION of its claim files (CLAIMS-9/21): the claim
  *  files under `claims/` are canonical, the node block is their regenerable index — so a per-source
  *  run never clobbers a sibling source's already-written rows. */
-function parseClaimBacklink(md: string, claimPath: string, entityRel: string): ClaimBacklink | null {
+export function parseClaimBacklink(md: string, claimPath: string, entityRel: string): ClaimBacklink | null {
   const fmEnd = md.indexOf('\n---', 3);
   const fm = fmEnd === -1 ? md : md.slice(0, fmEnd);
   const body = fmEnd === -1 ? '' : md.slice(fmEnd + 4);

@@ -18,7 +18,8 @@ import { DecomposeStage } from './decomposeStage';
 import type { DecomposeDecider } from './decomposeAgent';
 import { renderEntityNode, entityFileRel } from './connectDoc';
 import { ulid } from './ulid';
-import { claimsOne, readClaimsQueue, readClaimsState, findEntityFiles, parseEntityNode, ClaimsStage, retryClaimsItem, dismissClaimsItem, listSetAsideItems, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
+import { claimsOne, readClaimsQueue, readClaimsState, findEntityFiles, parseEntityNode, parseClaimBacklink, ClaimsStage, retryClaimsItem, dismissClaimsItem, listSetAsideItems, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
+import { renderClaimMd } from './claimDoc';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision, ClaimsDecision } from './claims';
 import { findOpenReviews, answerReview, getReview } from './reviewStore';
@@ -188,6 +189,56 @@ describe('parseEntityNode (CLAIMS-5/21 — resolves an entity to ALL its sources
   });
   it('throws when provenance.derivedFrom is missing', () => {
     expect(() => parseEntityNode('---\nkind: person\nname: Steve\n---\n')).toThrow(/derivedFrom/);
+  });
+});
+
+describe('parseClaimBacklink ↔ renderClaimMd round-trip (CLAIMS-9/21 — block regen reads the claim file)', () => {
+  // GUARD against the format coupling KB-QD flagged: `parseClaimBacklink` reconstructs a block
+  // back-link from a claim FILE that `renderClaimMd` wrote. A future render-format tweak that this
+  // parser doesn't track would silently break union block regen — so render → parse → assert fields.
+  const meta = (over: Partial<Parameters<typeof renderClaimMd>[1]> = {}) => ({
+    id: '01JCLAIMROUNDTRIP000000000',
+    subject: 'entities/2026/05/30/01JENTITY.md',
+    derivedFrom: 'sources/2026/05/30/01JSOURCE',
+    createdAt: '2026-05-30T12:00:00.000Z',
+    agent: { via: 'copilot' as const, model: 'test' },
+    ...over,
+  });
+
+  it('round-trips statement, status, confidence, and single-source provenance', () => {
+    const m = meta();
+    const claim: ClaimDecision = { statement: 'Owns the Q3 budget.', status: 'fact', confidence: 0.9, mentions: ['Steve owns Q3'] };
+    const md = renderClaimMd(claim, m);
+    const claimPath = 'claims/2026/05/30/01JCLAIMROUNDTRIP000000000.md';
+
+    const link = parseClaimBacklink(md, claimPath, m.subject);
+    expect(link).toEqual({
+      claimPath,
+      statement: 'Owns the Q3 budget.',
+      status: 'fact',
+      confidence: 0.9,
+      source: m.derivedFrom, // VAULT-13: the claim's single source, parsed from provenance.derivedFrom
+    });
+  });
+
+  it("reads the statement, not the body's `Source:` citation line (the exact coupling that could drift)", () => {
+    // renderClaimMd appends a `Source: [[…]]` line to the body when derivedFrom is present — the parser
+    // must skip it and return the actual statement. A multi-space/whitespace statement is oneLine'd.
+    const m = meta();
+    const claim: ClaimDecision = { statement: 'Led   the\n  Apollo program', status: 'interpretation', confidence: 0.5, mentions: [] };
+    const md = renderClaimMd(claim, m);
+    expect(md).toContain('Source: [['); // precondition: the citation line the parser must not mistake for the statement
+
+    const link = parseClaimBacklink(md, 'claims/x.md', m.subject);
+    expect(link?.statement).toBe('Led the Apollo program'); // collapsed, and NOT the `Source:` line
+    expect(link?.status).toBe('interpretation');
+    expect(link?.confidence).toBe(0.5);
+  });
+
+  it('returns null when the claim is about a DIFFERENT entity (subject guard for the union scan)', () => {
+    const m = meta();
+    const md = renderClaimMd({ statement: 'x', status: 'fact', confidence: 1, mentions: [] }, m);
+    expect(parseClaimBacklink(md, 'claims/x.md', 'entities/2026/05/30/01JOTHER.md')).toBeNull();
   });
 });
 
