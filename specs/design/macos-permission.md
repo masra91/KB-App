@@ -3,15 +3,15 @@ design: DESIGN-MACOS-PERMISSION
 implements: SPEC-0034
 title: macOS Folder-Permission UX — Visual Design ("Asking for the keys")
 type: design
-status: draft
+status: active   # both SPEC-0033 gates cleared 2026-06-02 → checked in as a living design spec
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-02
 updated: 2026-06-02
 related: [SPEC-0034, SPEC-0033, SPEC-0009, SPEC-0017]
 design-system: pipeline-visualization.md   # reuses "The Line" shared _design-system (DESIGN-7)
 gates:
-  ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
-  qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows)
+  ai-patterns: approved      # GATE 1 — KB-AI-Detector (distinctiveness) — 2026-06-02
+  qa-flow-coverage: approved # GATE 2 — KB-Quality-Driver (all key flows) — 2026-06-02
 stage: First-run
 ---
 
