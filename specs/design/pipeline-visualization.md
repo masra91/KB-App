@@ -288,7 +288,7 @@ motion with calm idle (VIZ-6), smooth at scale (VIZ-9), and the distinct identit
 
 ## 9. Data dependencies (what the implementer needs — NOT yet in the OBS view-model)
 
-The design presents over SPEC-0030's `PipelineStatusView` + `PerfIndex`, but two inputs the design
+The design presents over SPEC-0030's `PipelineStatusView` + `PerfIndex`, but a few inputs the design
 requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (these gate
 *implementation*, not this design):
 
@@ -304,6 +304,16 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
    — odometer/index interpolate between polls; push just removes the residual latency.
    (Resolves SPEC-0032 §9 "push mechanism": prefer a dedicated IPC event channel; poll is the
    fallback, not a blocker.)
+4. **Unified needs-you roster (#192) — the gate on the brass "Needs your decision" queue.** The §2/§6
+   queue is the *one* surface aggregating all human-decision items with `N == list` across flows;
+   that requires a single view-model field unifying **set-aside (OBS-17) + ambiguous-link Reviews
+   (SPEC-0018) + researcher escalations (RESEARCH-11)** into one `N`-counted, deep-linkable list. It
+   does not exist yet (a DEV-3 + Reviews/researcher-owner coordination). **Until it lands, the
+   implementation ships the VIZ-7 *baseline* — the oxide set-aside siding + Retry/Dismiss (#196)** —
+   NOT a partial brass relabel of only set-aside (which would make `N` count set-aside alone and
+   break the `N == list` anti-#110 invariant). So: design = the brass unified queue (target); #196 =
+   the baseline (now); the brass reframe is a **tracked follow-up** gated on this field, owned by
+   DEV-4. (Documents the design-ahead-of-impl gap; no silent divergence.)
 
 ## 10. Out of scope
 
