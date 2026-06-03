@@ -19,23 +19,28 @@ export async function mountJobs(container: HTMLElement): Promise<void> {
 }
 
 async function render(container: HTMLElement): Promise<void> {
-  let jobs: JobView[];
+  // #145/#205: bound the WHOLE load→render under one guard — not just the IPC await. #145 timed out a
+  // hung `listJobs` so a degraded backend can't spin forever; #205 extends the same guard over building
+  // and swapping the DOM. A throw while turning a *successfully-fetched* (but malformed/legacy) response
+  // into rows — e.g. a journal entry whose `inspected` isn't a string (the registry/journal are parsed
+  // off disk with an unchecked cast) — would otherwise escape this async fn (the shell mounts views
+  // fire-and-forget, `void mountJobs(el)`) and strand "Loading…" forever, with the timeout already
+  // cleared so #145 can't catch it. Under one guard the loading state is ALWAYS left: to the list, the
+  // empty state, or a retryable error — never an infinite spinner.
   try {
-    // #145: bound the wait — a hung `listJobs` (degraded staging) must never leave an infinite spinner.
-    jobs = await withTimeout(window.kbApi.listJobs());
+    const jobs = await withTimeout(window.kbApi.listJobs());
+
+    const header = `<h1>🛠️ Jobs</h1><p class="muted">Recurring background tasks that keep your KB healthy. Changes apply without a restart.</p>`;
+    if (jobs.length === 0) {
+      container.innerHTML = `<div class="card">${header}<p class="muted">No jobs available — open a Knowledge Base to manage its jobs.</p></div>`;
+      return;
+    }
+
+    container.innerHTML = `<div class="card">${header}<ul class="job-list">${jobs.map(jobItem).join('')}</ul></div>`;
+    wire(container, jobs);
   } catch {
     renderLoadError(container, '<h1>🛠️ Jobs</h1>', () => void render(container));
-    return;
   }
-
-  const header = `<h1>🛠️ Jobs</h1><p class="muted">Recurring background tasks that keep your KB healthy. Changes apply without a restart.</p>`;
-  if (jobs.length === 0) {
-    container.innerHTML = `<div class="card">${header}<p class="muted">No jobs available — open a Knowledge Base to manage its jobs.</p></div>`;
-    return;
-  }
-
-  container.innerHTML = `<div class="card">${header}<ul class="job-list">${jobs.map(jobItem).join('')}</ul></div>`;
-  wire(container, jobs);
 }
 
 /** One job's row: identity + last-run + the enable/schedule/posture controls and a Run-now button. */
@@ -47,9 +52,13 @@ function jobItem(j: JobView): string {
   const postureOpts = (['guarded', 'autonomous'] as const)
     .map((p) => `<option value="${p}"${p === j.posture ? ' selected' : ''}>${POSTURE_LABEL[p]}</option>`)
     .join('');
+  // #205: the journal is parsed off disk with an unchecked `JSON.parse(...) as JournalEntry`, so a
+  // legacy/untyped entry may carry a non-string field (e.g. a numeric `inspected`). `esc` calls
+  // `.replace` and throws on a non-string, which — building the row HTML — would strand the view on
+  // "Loading…". Coerce to string at this trust boundary so a stray entry renders as text, not a crash.
   const last = j.lastRun
-    ? `Last run ${esc(j.lastRun.ts)} — inspected ${esc(j.lastRun.inspected)}; ${j.lastRun.applied} applied, ${j.lastRun.deferred} deferred${
-        j.lastRun.note ? ` (${esc(j.lastRun.note)})` : ''
+    ? `Last run ${esc(String(j.lastRun.ts))} — inspected ${esc(String(j.lastRun.inspected))}; ${j.lastRun.applied} applied, ${j.lastRun.deferred} deferred${
+        j.lastRun.note ? ` (${esc(String(j.lastRun.note))})` : ''
       }`
     : 'Never run';
 
