@@ -129,6 +129,40 @@ describe('SETUP-2 — the picked folder becomes the vault root', () => {
   });
 });
 
+describe('MACOS-7 — folder-permission IPC ("Asking for the keys")', () => {
+  it('kb:probeVaultAccess writes+removes a hidden probe marker; succeeds on an accessible vault (leaves no trace)', async () => {
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'KB', initGitIfNeeded: true });
+    const res = await invoke<{ ok: boolean; denied: boolean }>('kb:probeVaultAccess', vaultDir);
+    expect(res.ok).toBe(true);
+    expect(res.denied).toBe(false);
+    // the probe marker is cleaned up — nothing pollutes the user's vault (no synthetic artifact)
+    await expect(fs.stat(path.join(vaultDir, '.kb', '.permission-probe'))).rejects.toThrow();
+  });
+
+  it('kb:probeVaultAccess returns ok:false for a non-existent vault — and does NOT mis-flag it as a permission denial', async () => {
+    const missing = path.join(vaultDir, 'no', 'such', 'vault'); // no .kb here → ENOENT, not EPERM
+    const res = await invoke<{ ok: boolean; denied: boolean }>('kb:probeVaultAccess', missing);
+    expect(res.ok).toBe(false);
+    expect(res.denied).toBe(false); // only real permission denials route to Blocked
+  });
+
+  it('kb:openSystemSettingsPrivacy deep-links to the Files-and-Folders Privacy anchor', async () => {
+    const res = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openSystemSettingsPrivacy');
+    expect(res.ok).toBe(true);
+    expect(res.usedFallback).toBeUndefined();
+    expect(mocks.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders');
+  });
+
+  it('kb:openSystemSettingsPrivacy falls back to the general Privacy pane if the exact anchor rejects (never a no-op)', async () => {
+    mocks.openExternal.mockRejectedValueOnce(new Error('anchor not resolvable'));
+    const res = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openSystemSettingsPrivacy');
+    expect(res.ok).toBe(true);
+    expect(res.usedFallback).toBe(true);
+    expect(mocks.openExternal).toHaveBeenNthCalledWith(1, 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders');
+    expect(mocks.openExternal).toHaveBeenNthCalledWith(2, 'x-apple.systempreferences:com.apple.preference.security?Privacy');
+  });
+});
+
 describe('SETUP-6 — later launches load the existing KB (no re-onboarding)', () => {
   it('first run (no configured KB): getState reports no vault → setup is shown', async () => {
     const app = await invoke<AppState>('kb:getState');

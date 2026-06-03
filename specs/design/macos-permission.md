@@ -152,3 +152,20 @@ permission modal:
   `Operation not permitted`** (revoked-later / never-granted-pipeline-run, not just first-run deny);
   **exact deep-link anchor `Privacy_FilesAndFolders` + graceful fallback** to the general Privacy
   pane (never a no-op), and **Retry-while-denied returns to Blocked**. Awaiting GATE 1 (KB-AI-Detector).
+- 2026-06-03 — **IMPLEMENTED (DEV-4).** Built on the shared `_design-system`:
+  `app/src/shell/permissionGate.ts` (+ `permissionGate.css`) — the pre-prompt, the **brass** (not oxide)
+  Blocked recovery, and the iCloud note; pure render helpers + a `probe → granted/blocked/retry` controller.
+  Main-process (minimal): `kb:probeVaultAccess` (a benign write+rm of a hidden `.kb/.permission-probe`
+  marker — triggers TCC, leaves no trace) and `kb:openSystemSettingsPrivacy` (deep-link to
+  `Privacy_FilesAndFolders`, **falling back** to the general Privacy pane if the anchor rejects — never a
+  no-op). Pure classifiers `app/src/kb/permissions.ts` (`isPermissionDeniedError` matches the
+  `EPERM`/`EACCES`/`Operation not permitted` signal from both `fs` codes and git/copilot subprocess text;
+  `isLocalTccProtected`/`isICloudVault`). Wired: first-run gates the pre-prompt for local-TCC vaults
+  (`renderer.ts`); the **general write-time denial** routes to Blocked from BOTH a denied capture
+  (`captureView` — friendly message, no raw OS text) AND the Line/Status view (a brass vault-blocked
+  alarm, above the lock/stall alarms — the #56 flows 3/4/5 never-silently-stall). iCloud is detect-warn
+  only (v1). Requirement-traced tests: MACOS-7 (pre-prompt/probe/blocked/retry/open-settings),
+  MACOS-5/#56 (denial classification + routing), MACOS-2 (iCloud detect-warn). **Deferred (v1 scope per
+  §5):** the real first-launch TCC prompt + grant persistence are the cert-gated **signed-build manual
+  check** (MACOS-2/5, DEV-2's recipe) — the human-in-loop "Allow" can't be unit/CI-tested. Awaiting the
+  3-gate review (KB-QD + KB-AI-Detector).

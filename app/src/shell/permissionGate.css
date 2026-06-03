@@ -1,0 +1,90 @@
+/* === macOS folder-permission UX — "Asking for the keys" (SPEC-0034 MACOS-7) ==================== */
+/* Surface styles for the pre-prompt + blocked-recovery + iCloud note, built ON the shared
+   `_design-system` ("The Line") so this app chrome reads as the SAME instrument — not a generic OS
+   permission modal. Guardrails: flat ink, NO card chrome (a ruled panel, not a floating shadowed
+   modal), ember focus (from .viz-focusable), brass = needs-you (the blocked state is expected setup,
+   waiting on YOU — never oxide/broken), the exact folder in mono. Calm: effectively no motion. */
+
+.perm-surface {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 2rem 1.5rem;
+}
+
+/* A ruled panel, not a card — no border-radius, no shadow/elevation, no glass (§ guardrails). */
+.perm-panel {
+  width: 100%;
+  max-width: 30rem;
+  border-top: 1px solid var(--viz-rule);
+  padding: 1.25rem 0 0;
+}
+/* Blocked = brass left edge (large element → hue allowed); the body/consequence text stays ink. */
+.perm-blocked {
+  border-top: 0;
+  border-left: 3px solid var(--viz-brass);
+  padding: 0.25rem 0 0 0.9rem;
+}
+
+.perm-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin-bottom: 0.5rem;
+}
+.perm-glyph {
+  font-size: 1.4rem;
+  line-height: 1;
+  color: var(--viz-ink-muted);
+}
+/* The blocked glyph carries the brass hue (large/glyph element — clears contrast). */
+.perm-glyph-blocked {
+  color: var(--viz-brass);
+}
+.perm-title {
+  font-size: 1.125rem;
+  color: var(--viz-ink);
+  margin: 0;
+}
+.perm-body,
+.perm-steps,
+.perm-note {
+  color: var(--viz-ink);
+  line-height: 1.5;
+  margin: 0 0 0.6rem;
+}
+.perm-note {
+  color: var(--viz-ink-muted);
+  font-size: 0.9rem;
+}
+/* The exact folder, in tabular mono — reads as a precise machine value, never reflows. */
+.perm-path {
+  color: var(--viz-ink);
+  word-break: break-all;
+}
+
+.perm-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+/* The primary action leans ember (the signature accent), without a filled card-button look. */
+.perm-primary {
+  border-color: var(--viz-ember);
+  color: var(--viz-ember);
+}
+
+/* iCloud detect-warn — quiet, non-blocking, muted info (never an alarm). */
+.perm-icloud {
+  width: 100%;
+  max-width: 30rem;
+  color: var(--viz-ink-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.perm-glyph-icloud {
+  color: var(--viz-ink-muted);
+}

@@ -61,6 +61,26 @@ export interface CreateKbResult {
   message: string;
 }
 
+// --- macOS folder-permission UX (SPEC-0034 MACOS-7, "Asking for the keys") ---
+
+/** Result of probing vault write-access (MACOS-7). The probe performs a benign write into the vault to
+ *  trigger the macOS TCC grant dialog; `ok` = the app can write the vault, `denied` = the failure was a
+ *  permission denial (TCC not granted) → route to the Blocked recovery vs a generic error. */
+export interface ProbeVaultAccessResult {
+  ok: boolean;
+  denied: boolean;
+  message: string;
+}
+
+/** Result of opening the macOS System Settings Privacy pane (MACOS-7 denied-recovery). `usedFallback`
+ *  = the precise Files-and-Folders anchor didn't resolve, so the general Privacy & Security pane opened
+ *  instead (never a no-op click). */
+export interface OpenSettingsResult {
+  ok: boolean;
+  usedFallback?: boolean;
+  message?: string;
+}
+
 /** What the renderer asks for on launch to decide Setup vs. loaded (SETUP-6). */
 export interface AppState {
   activeVaultPath: string | null;
@@ -89,6 +109,9 @@ export interface CaptureResult {
   captureBatch: string | null;
   committed: boolean;
   message: string;
+  /** SPEC-0034 MACOS-7 / #56: the capture write hit a macOS folder-permission denial (TCC not granted)
+   *  — so the capture UI routes to the Blocked recovery instead of surfacing the raw OS error string. */
+  blocked?: boolean;
 }
 
 /** Minimal pipeline status for the capture panel (SPEC-0014 ORCH-10). */
@@ -313,6 +336,10 @@ export interface KbApi {
   pickFolder(): Promise<string | null>;
   inspect(path: string): Promise<PathInspection>;
   create(opts: CreateKbOptions): Promise<CreateKbResult>;
+  // SPEC-0034 MACOS-7: probe vault write-access (triggers the macOS TCC dialog) + open the System
+  // Settings Privacy pane for the denied-recovery flow ("Asking for the keys").
+  probeVaultAccess(vaultPath: string): Promise<ProbeVaultAccessResult>;
+  openSystemSettingsPrivacy(): Promise<OpenSettingsResult>;
   capture(req: CaptureRequest): Promise<CaptureResult>;
   pipelineStatus(): Promise<PipelineStatus>;
   // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).

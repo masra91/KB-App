@@ -76,6 +76,17 @@
 .line-alarm-text {
   color: var(--viz-ink);
 }
+/* MACOS-7 vault-blocked: brass (waiting on YOU to grant access — expected setup, not oxide/broken). */
+.line-alarm-blocked {
+  border-left-color: var(--viz-brass);
+}
+.line-alarm-glyph-blocked {
+  color: var(--viz-brass);
+}
+.line-open-settings {
+  margin-left: 0.4rem;
+  vertical-align: baseline;
+}
 
 /* ── Pivot toggle (VIZ-5) ───────────────────────────────────────────────────────────────────── */
 .line-pivot {

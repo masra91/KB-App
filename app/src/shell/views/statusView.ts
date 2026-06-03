@@ -25,6 +25,8 @@ import {
   type StationModel,
   type CarriageModel,
 } from './theLineModel';
+import { isPermissionDeniedError } from '../../kb/permissions';
+import { DEFAULT_ERROR_FRESH_MS } from '../../kb/pipelineStatusView';
 import type { PipelineStatusView, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
@@ -109,6 +111,12 @@ function wire(container: HTMLElement): void {
       }
       return;
     }
+    // MACOS-7: open System Settings for the vault-blocked recovery (opens an external pane; the vault
+    // itself is untouched — this stays within the read-only-except-OBS-17 boundary).
+    if (act === 'open-settings') {
+      void window.kbApi.openSystemSettingsPrivacy();
+      return;
+    }
     if (act === 'toggle-err') {
       const i = Number(el.dataset.i);
       if (expanded.has(i)) expanded.delete(i);
@@ -182,7 +190,7 @@ export function lineBodyHtml(s: BodyState, nowMs: number): string {
   const { shown, more } = splitCarriages(s.view.inFlight, nowMs);
   return [
     overallHtml(s.view),
-    alarmHtml(s.view),
+    alarmHtml(s.view, nowMs),
     pivotHtml(s.lens),
     `<div class="line-core line-lens-${esc(s.lens)}">`,
     spineHtml(stations),
@@ -212,7 +220,28 @@ export function overallHtml(v: PipelineStatusView): string {
  *  but no progress) raises the same alarm box. Oxide colors only the glyph + the box's left edge — the
  *  reason text stays `--viz-ink` (oxide is sub-AA on small text, §3 / Design-Lead cert). Healthy idle
  *  and a held-but-moving lock stay quiet. */
-export function alarmHtml(v: PipelineStatusView): string {
+/** A recent error is "fresh" (still relevant now) iff within the freshness window — or has an
+ *  unparseable ts (err toward fresh: never hide a possible vault denial, #56). Mirrors deriveStageError. */
+function isFreshError(ts: string, nowMs: number): boolean {
+  const t = Date.parse(ts);
+  return !Number.isFinite(t) || nowMs - t <= DEFAULT_ERROR_FRESH_MS;
+}
+
+export function alarmHtml(v: PipelineStatusView, nowMs: number = Date.now()): string {
+  // SPEC-0034 MACOS-7 / #56: a folder-permission denial at write time (`Operation not permitted` — the
+  // app lacks the macOS TCC grant) is the most fundamental wedge, so it takes priority over the lock/
+  // stall alarms. Surface it as the **brass** "vault access blocked" recovery (waiting on YOU to grant
+  // access — expected setup, NOT oxide/broken), with the System-Settings deep-link. This is the
+  // pipeline-run-on-a-never-granted/revoked vault case (the design's flow 4 — never silently stall).
+  // Bounded to FRESH denials (#163 deriveStageError precedent) so a since-fixed grant clears the alarm
+  // instead of lingering until the error rolls off the recent-25 window; an unparseable ts errs toward
+  // SHOWING the alarm (the safe direction — never hide a possible denial).
+  if (v.recentErrors.some((e) => isPermissionDeniedError(e.message) && isFreshError(e.ts, nowMs))) {
+    return `<div class="line-alarm line-alarm-blocked" role="alert">
+      <span class="line-alarm-glyph line-alarm-glyph-blocked" aria-hidden="true">⚠</span>
+      <span class="line-alarm-text viz-body">KB-App can’t write to your vault folder — access is turned off, so the pipeline is stalled until you allow it. <button type="button" class="viz-btn viz-focusable line-open-settings" data-act="open-settings">Open System Settings</button></span>
+    </div>`;
+  }
   if (v.lock.stuck) {
     const who = v.lock.holder ? holderLabel(v.lock.holder) : 'a stage';
     const forHow = typeof v.lock.heldMs === 'number' ? heldFor(v.lock.heldMs) : null;
