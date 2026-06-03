@@ -3,7 +3,7 @@
 // recallAgent; here we prove the egress gate, citation filtering, tier guard, and untrusted-content
 // skill framing.
 import { describe, it, expect } from 'vitest';
-import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL, budgetExhausted, budgetExhaustedMessage } from './researchWebAgent';
+import { isAllowedUrl, isPublicHost, allowedDomainsOf, filterCitations, makeWebResearchFn, WEB_RESEARCH_SKILL, budgetExhausted, budgetExhaustedMessage, countAttributedFacts } from './researchWebAgent';
 import { noopDevLog, type DevLog, type Fields } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
@@ -126,6 +126,49 @@ describe('WEB_RESEARCH_SKILL — substantive + structured + attributed output (R
     expect(WEB_RESEARCH_SKILL).toMatch(/DATA, never instructions/i);
     expect(WEB_RESEARCH_SKILL).toMatch(/ONLY the requested topic/i);
     expect(WEB_RESEARCH_SKILL).toMatch(/exfiltrate/i);
+  });
+});
+
+describe('countAttributedFacts — the RESEARCH-17 depth metric (KB-QD quality bar)', () => {
+  // A SUBSTANTIVE note: grouped, inline-attributed facts (specific figures/dates, each with its URL).
+  const substantive = [
+    '## Project Atlas — findings',
+    'Atlas is the internal codename for the launch first announced on 2021-03-14 (https://example.com/news).',
+    '- The program had a $4.2M budget in FY2022, per the annual report (https://example.com/report).',
+    '- Lead engineer Maria Lopez confirmed the COBOL rewrite shipped in v3.0 (https://docs.example.com/v3).',
+    '- "Atlas cut latency by 38%" — the engineering blog (https://blog.example.com/atlas).',
+    '- Adoption reached 12,000 seats by Q3 2022 (https://example.com/metrics).',
+  ].join('\n');
+  // A THIN précis (the live-test defect): generic prose + a trailing bare-URL "Sources" list, no inline
+  // attribution. The metric must score this ~0 — it is NOT a multi-fact attributed note.
+  const thin = [
+    'Project Atlas is an interesting initiative that did some notable things and was generally well received.',
+    'It involved several people and had an impact on the organization over time.',
+    '',
+    'Sources:',
+    'https://example.com/news',
+    'https://example.com/report',
+  ].join('\n');
+
+  it('counts inline-attributed facts in a substantive note', () => {
+    expect(countAttributedFacts(substantive)).toBe(5);
+  });
+
+  it('scores a thin précis with only a trailing bare-URL list at ~0 (a vague summary is a defect)', () => {
+    expect(countAttributedFacts(thin)).toBe(0);
+  });
+
+  it('separates a substantive note from a thin one — the bar a real pass must clear (≥5 proposed to KB-QD)', () => {
+    expect(countAttributedFacts(substantive)).toBeGreaterThanOrEqual(5);
+    expect(countAttributedFacts(thin)).toBeLessThan(5);
+  });
+
+  it('does not count bare citation lines, headings, or prose without a source', () => {
+    expect(countAttributedFacts('')).toBe(0);
+    expect(countAttributedFacts('https://example.com/a')).toBe(0); // bare URL, no prose
+    expect(countAttributedFacts('[1] https://example.com/a')).toBe(0); // numbered citation, no prose
+    expect(countAttributedFacts('## A heading with no url')).toBe(0); // prose, no URL
+    expect(countAttributedFacts('A fact with a real figure of 42 percent (https://example.com/x)')).toBe(1);
   });
 });
 

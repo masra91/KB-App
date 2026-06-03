@@ -108,6 +108,31 @@ export const WEB_RESEARCH_SKILL = [
   'submitFindings once, with an empty note and no citations.',
 ].join('\n');
 
+/**
+ * Depth metric for the RESEARCH-17 quality bar: how many **source-attributed facts** a findings-note
+ * carries. An attributed fact is a content line/bullet that BOTH (a) carries a source URL and (b) has
+ * real prose around it — so a thin précis with only a trailing bare-URL "Sources:" list scores ~0,
+ * while a structured note with inline-attributed facts scores its fact count. Deterministic + pure, so
+ * the bar is unit-testable here AND reusable as the soft floor in the opt-in live dogfood (a real pass
+ * must produce ≥N attributed facts, not a vague summary). KB-QD ratifies N; this counts.
+ */
+const ATTRIBUTED_FACT_URL_RE = /\bhttps?:\/\/[^\s)\]]+/i;
+export function countAttributedFacts(note: string): number {
+  let count = 0;
+  for (const raw of note.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || !ATTRIBUTED_FACT_URL_RE.test(line)) continue;
+    // Strip the URL(s) + leading markdown markers (bullets, headings, quote/number prefixes), then
+    // require real prose — a bare citation line ("https://…" alone, or "[1] https://…") is NOT a fact.
+    const prose = line
+      .replace(/\bhttps?:\/\/[^\s)\]]+/gi, ' ')
+      .replace(/^[-*+>#\d.()[\]:|•\s]+/, ' ');
+    const words = prose.split(/\s+/).filter((w) => /[a-z0-9]/i.test(w));
+    if (words.length >= 3) count++;
+  }
+  return count;
+}
+
 /** Normalize a hostname for allowlist comparison (lowercase, strip leading `www.`). */
 function hostOf(url: string): string | null {
   try {
