@@ -58,7 +58,7 @@ describe('readResearcherRegistry', () => {
       expect(r.schedule).toBe('off');
       expect(r.posture).toBe('guarded');
       expect(r.scope).toBe('global'); // empty → default
-      expect(r.budget).toEqual({ maxToolCalls: 8, maxDepth: 2 }); // invalid numbers → defaults
+      expect(r.budget).toEqual({ maxToolCalls: 15, maxDepth: 2 }); // invalid numbers → defaults (RESEARCH-17: default 15)
     });
   });
 
