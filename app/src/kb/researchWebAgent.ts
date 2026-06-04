@@ -22,6 +22,7 @@ import { makeGatedFetch } from './researchFetch';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import { noopDevLog, type DevLog } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
+import { DEFAULT_RESEARCH_SESSION_TIMEOUT_MS } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
 // VALUE import of the SDK is a dynamic `import()` inside liveSdkSession, keeping that lazy property.
 import type { SessionConfig, SystemMessageConfig } from '@github/copilot-sdk';
@@ -343,6 +344,9 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
       try {
         await session.sendAndWait(
           `${prompt}\n\nResearch this and then call submitFindings exactly once:\n${query}\n\nUse up to ${maxToolCalls} tool calls — read several sources in depth and capture the specific facts/figures/dates/quotes they contain, each attributed to its source URL (a thin summary is a defect). Cite only pages you actually fetched.`,
+          // Generous stuck-backstop, not a cost cap (the budget bounds spend): a deep multi-fetch pass
+          // routinely exceeds the SDK's 60s default and would otherwise false-fail with a session.idle timeout.
+          DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
         );
       } finally {
         await session.disconnect();

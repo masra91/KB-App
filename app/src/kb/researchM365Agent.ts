@@ -26,6 +26,7 @@
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
+import { DEFAULT_RESEARCH_SESSION_TIMEOUT_MS } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK.
 import type { SessionConfig, SystemMessageConfig, MCPServerConfig } from '@github/copilot-sdk';
 
@@ -217,6 +218,9 @@ function liveSdkSession(opts: M365ResearchOptions): NonNullable<M365ResearchOpti
       try {
         await session.sendAndWait(
           `${prompt}\n\nResearch this across your configured M365 surfaces (${surfaces.join(', ')}), then call submitFindings exactly once:\n${query}\n\nUse at most ${maxToolCalls} tool calls. Cite only items you actually read.`,
+          // Generous stuck-backstop, not a cost cap (the budget bounds spend): a multi-surface pass can
+          // exceed the SDK's 60s default and would otherwise false-fail with a session.idle timeout.
+          DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
         );
       } finally {
         await session.disconnect();
