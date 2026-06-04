@@ -193,6 +193,71 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
   });
 });
 
+describe('Jobs view · #205 load resilience (no infinite spinner when data arrives but render throws)', () => {
+  // The #145/#149 timeout closes the IPC-HANG half of the infinite-spinner class. These cover the half
+  // it can't: the response ARRIVES (no hang, no timeout) but turning it into rows throws — which would
+  // escape the fire-and-forget `mountJobs` and strand "Loading…" with the timeout already cleared.
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+
+  it('exits the loading state on a clean all-disabled response — renders the rows, never stuck on Loading', async () => {
+    setApi({
+      listJobs: vi.fn(async () => [
+        job({ id: 'reflect', enabled: false }),
+        job({ id: 'example', production: false, enabled: false }),
+      ]),
+      setJobConfig: vi.fn(),
+      runJobNow: vi.fn(),
+    });
+    await mountJobs(root);
+    expect(root.textContent).not.toContain('Loading…'); // the transition completed
+    expect(root.querySelectorAll('.job')).toHaveLength(2);
+  });
+
+  it('renders a job whose journal field is a non-string (legacy/untyped journal) instead of stranding Loading', async () => {
+    // The registry/journal are parsed off disk with an unchecked `as JournalEntry`, so a legacy entry
+    // can carry a numeric `inspected`. Pre-#205 `esc(5)` → `(5).replace(...)` threw mid-render and the
+    // view spun forever; now the field is coerced and the row renders the value as text.
+    const bad = job({
+      id: 'example',
+      registered: true,
+      enabled: true,
+      lastRun: { ts: '2026-06-02T07:00:00.000Z', inspected: 5 as unknown as string, applied: 1, deferred: 0 },
+    });
+    setApi({ listJobs: vi.fn(async () => [bad]), setJobConfig: vi.fn(), runJobNow: vi.fn() });
+    await mountJobs(root);
+    expect(root.textContent).not.toContain('Loading…');
+    expect(li(root, 'example').querySelector('.job-lastrun')?.textContent).toContain('inspected 5');
+  });
+
+  it('a render that throws on a fetched response falls back to a retryable error, never an infinite spinner', async () => {
+    // Data arrives (no hang, no timeout) but rendering throws — the gap #149's IPC-only timeout can't
+    // catch. The whole load→render is now guarded, so we land on a retryable error, not "Loading…".
+    const exploding = job({ id: 'reflect' });
+    Object.defineProperty(exploding, 'label', {
+      get(): string {
+        throw new Error('render boom');
+      },
+    });
+    const listJobs = vi.fn<KbApi['listJobs']>().mockResolvedValueOnce([exploding]);
+    setApi({ listJobs, setJobConfig: vi.fn(), runJobNow: vi.fn() });
+    await mountJobs(root);
+
+    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.load-error')?.textContent).toContain('Couldn’t load');
+    expect(root.querySelector('.load-retry')).toBeTruthy();
+
+    // Retry re-runs the load; a healthy response now renders the list (belt-and-suspenders recovery).
+    listJobs.mockResolvedValueOnce([job({ id: 'reflect' })]);
+    root.querySelector<HTMLButtonElement>('.load-retry')!.click();
+    await tick();
+    expect(root.querySelector('.job[data-id="reflect"]')).toBeTruthy();
+  });
+});
+
 describe('Jobs view · #145 load resilience (no infinite spinner on a hung IPC)', () => {
   let root: HTMLElement;
   beforeEach(() => {
