@@ -103,8 +103,9 @@ Review like any source.
 | RESEARCH-12| must     | **Untrusted-content defense**: fetched external content is treated as **data, never instructions**; researchers are prompted/structured accordingly and constrained by egress tier (limits exfiltration), read-only world (limits action), a **per-researcher tool/MCP allowlist**, and budget; findings are **marked externally-sourced** | none-yet | PRIN-19,20; AUTO-6 |
 | RESEARCH-13| must     | MCP servers / external tools are **third-party deps** — **vetted, pinned, version-aged** | none-yet | ENG-1,2,4,7 |
 | RESEARCH-14| should   | Researchers are a **prime Copilot SDK adopter** (tools/MCP, sessions, ORCH-21/22) — behind the agent interface, deterministic fallback retained | none-yet | ORCH-21,22 |
-| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/budget/MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations | none-yet | PANEL-1; VISION-11 |
+| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/**budget — incl. an editable per-pass `maxToolCalls`, default 15**/MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations | none-yet | PANEL-1; VISION-11 |
 | RESEARCH-16| must     | **v1 ships** the framework + three built-in templates — **Web** (public-web), **Code** (local-only, read-only), **M365/WorkIQ** (internal-tenant, OAuth) — plus **custom** | none-yet | VISION-6 |
+| RESEARCH-17| must     | A findings-note must be **substantive + structured**, *not* a thin précis: it captures the **specific** facts / figures / dates / named entities / quoted passages the sources actually contain, **each attributed to its source URL**, with real depth — so the secondary source carries genuine substance for Decompose/Claims. *A vague 3-paragraph summary is a defect, not a pass.* The Web skill prompt instructs **depth + specificity** (over brevity); the per-pass retrieval budget **default is 15** (raised from 8) and is **user-editable per researcher** (RESEARCH-15), under the global per-Instance ceiling (RESEARCH-11). Egress posture is unchanged (gated fetch, allowlist, untrusted-content-as-DATA) — more reads + richer capture, same guards | none-yet | RESEARCH-5,6,11,15; PRIN-2; VISION-5 |
 | RESEARCH-17| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
 
 ## 6. User flows / surface
@@ -199,6 +200,13 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
 
 ## 9. Changelog
 
+- 2026-06-03 — **RESEARCH-17: substantive researcher output + user-editable budget** (Principal —
+  live-test observation that researchers returned a thin ~3-paragraph summary + links). The findings-note
+  must now be **substantive/structured** (specific facts/figures/dates/quotes, each source-attributed,
+  with depth) — the thin précis was the *skill prompt's* doing (it asked for a "short, brief note"), so the
+  fix is the prompt + output shape, not just budget. **Per-pass `maxToolCalls` default raised 8 → 15** and
+  made **user-editable per researcher** in the Manage view (RESEARCH-15); the Principal expects to push it
+  higher. Egress guards unchanged (gated fetch, allowlist, untrusted-content-as-DATA, global ceiling).
 - 2026-06-02 — **RESEARCH-11 fully discharged — all bounds enforced** (KB-PM-greenlit; KB-Developer-5).
   Completed the residual clauses after the per-pass calls cap (#154/#165): a **depth limit** on
   research→finding→`research-request` chains (computed from audit lineage, enforced at the dispatcher),
