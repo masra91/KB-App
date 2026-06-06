@@ -99,4 +99,17 @@ describe('renderSourceMd (SPEC-0013 §3)', () => {
     const md = renderSourceMd({ ...fileMeta, originalName: 'a: b.png' }, deterministicDecide(fileMeta), 'now', 'x');
     expect(md).toContain('originalName: "a: b.png"');
   });
+
+  it('RICHIN-10: emits a clip provenance block for a derived (rich-paste) text source', () => {
+    const richMeta: CapturedMeta = { ...textMeta, raw: 'raw.md', clip: { format: 'html→md', original: 'original.html' } };
+    const md = renderSourceMd(richMeta, deterministicDecide(richMeta), 'now', '# Title');
+    expect(md).toContain('clip:');
+    expect(md).toContain('  format: html→md');
+    expect(md).toContain('  original: original.html');
+  });
+
+  it('RICHIN-10: omits the clip block when there is no derivation (plain text)', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'plain');
+    expect(md).not.toContain('clip:');
+  });
 });

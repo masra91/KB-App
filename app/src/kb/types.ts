@@ -91,7 +91,10 @@ export interface AppState {
 
 export interface CaptureTextInput {
   kind: 'text';
-  text: string;
+  text: string; // the captured payload (Markdown for a rich paste — RICHIN-1)
+  /** Original clipboard HTML for a rich paste, preserved verbatim as an `original.html` sidecar
+   *  (RICHIN-2). Present only when the paste's markup added structure over the plain text. */
+  html?: string;
 }
 export interface CaptureFileInput {
   kind: 'file';

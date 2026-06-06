@@ -13,7 +13,10 @@ import type { ResearchProvenance } from './researchers';
 
 export interface TextPayload {
   kind: 'text';
-  text: string;
+  text: string; // the captured payload (Markdown for a rich paste — RICHIN-1)
+  /** Original clipboard HTML to preserve verbatim as an `original.html` sidecar (RICHIN-2);
+   *  present only for a rich paste whose markup added structure over the plain text. */
+  html?: string;
 }
 export interface FilePayload {
   kind: 'file';
@@ -21,6 +24,16 @@ export interface FilePayload {
   data: Uint8Array; // raw bytes (read by the IPC layer)
 }
 export type CapturePayload = TextPayload | FilePayload;
+
+/** Capture-fidelity provenance for a derived text payload (RICHIN-10): how `raw.md` was
+ *  produced and where the verbatim original lives. Recorded in the captured event + `source.md`. */
+export interface ClipProvenance {
+  format: 'html→md'; // (conversation parsing is a later RICHIN slice)
+  original: string; // sidecar filename holding the verbatim source bytes (e.g. `original.html`)
+}
+
+/** Filename of the verbatim original-clipboard sidecar written next to a rich paste's `raw.md`. */
+export const ORIGINAL_HTML_SIDECAR = 'original.html';
 
 /** The `captured` event written to each unit's `audit.jsonl`; the archivist reads it to
  *  build `source.md`. `source.md` = identity; `audit.jsonl` = history (SPEC-0013 §3). */
@@ -36,6 +49,9 @@ export interface CapturedMeta {
   originalName?: string;
   mimeType?: string;
   bytes?: number;
+  /** Capture-fidelity provenance for a derived text payload (RICHIN-10); present only when
+   *  the payload was normalized from richer markup (rich paste), so the derivation is auditable. */
+  clip?: ClipProvenance;
   /** Citation-rich research provenance, present on a `secondary` source (RESEARCH-6). */
   research?: ResearchProvenance;
 }
@@ -86,6 +102,13 @@ export async function captureToInbox(
       const data = new TextEncoder().encode(p.text);
       // Save typed notes as Markdown so Obsidian renders them (text is valid Markdown).
       await fs.writeFile(path.join(dir, 'raw.md'), p.text, 'utf8');
+      // RICHIN-2: a rich paste preserves the original clipboard bytes verbatim as a sidecar —
+      // conversion is therefore non-destructive and re-derivable (the source of truth is kept).
+      let clip: ClipProvenance | undefined;
+      if (p.html && p.html.length > 0) {
+        await fs.writeFile(path.join(dir, ORIGINAL_HTML_SIDECAR), p.html, 'utf8');
+        clip = { format: 'html→md', original: ORIGINAL_HTML_SIDECAR };
+      }
       meta = {
         id,
         kind: 'text',
@@ -95,6 +118,7 @@ export async function captureToInbox(
         surface,
         captureBatch,
         mimeType: 'text/markdown',
+        ...(clip ? { clip } : {}),
         ...(opts.origin ? { origin: opts.origin } : {}),
         ...(opts.research ? { research: opts.research } : {}),
       };
