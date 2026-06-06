@@ -111,14 +111,45 @@ describe.skipIf(!gitAvailable)('runIntakeConnector (SPEC-0041)', () => {
     expect(await inboxUnits(vault)).toEqual(before); // earlier primary source untouched
   });
 
-  it('INTAKE-9: the connector-default scope + sensitivity are recorded on the intook event', async () => {
+  it('INTAKE-9: the connector-default scope + sensitivity are applied to the SOURCE (not just audited)', async () => {
     await runIntakeConnector(vault, conn({ scope: 'work', sensitivity: 'confidential' }), { fetch: fetchOf([item('a')]), now: T });
-    const events = await readEvents(vault, { actors: ['intake'] });
-    const intook = events.find((e) => e.eventType === 'intook');
+    // The classification rides the captured source unit (the archivist's decider reads it) — proving
+    // a confidential feed lands `confidential` on the source, not silently down-classified (INTAKE-9).
+    const units = await inboxUnits(vault);
+    const meta = await readCapturedMeta(path.join(vault, 'inbox', units[0]));
+    expect(meta.scope).toBe('work');
+    expect(meta.sensitivity).toBe('confidential');
+    // And it's also recorded on the intook audit event.
+    const intook = (await readEvents(vault, { actors: ['intake'] })).find((e) => e.eventType === 'intook');
     expect(intook?.payload).toMatchObject({ scope: 'work', sensitivity: 'confidential', count: 1 });
   });
 
   it('refuses an unsafe connector id before touching any path', async () => {
     await expect(runIntakeConnector(vault, conn({ id: '../escape' }), { fetch: fetchOf([item('a')]), now: T })).rejects.toThrow(/unsafe connector id/);
+  });
+});
+
+// INTAKE-9 end-to-end (pure, no git): the connector classification hint on the captured meta flows
+// through the archivist's default decider into the rendered source.md frontmatter — so the source
+// itself is classified `confidential`, not down-classified to the conservative default.
+describe('INTAKE-9 classification reaches source.md frontmatter', () => {
+  it('deterministicDecide prefers the meta hint → renderSourceMd emits it', async () => {
+    const { deterministicDecide } = await import('./archivist');
+    const { renderSourceMd } = await import('./sourceDoc');
+    const meta = {
+      id: '01J', kind: 'text' as const, raw: 'raw.md', contentHash: 'sha256:x', capturedAt: T(),
+      surface: 'intake:news', captureBatch: '01J', origin: 'external' as const, scope: 'work', sensitivity: 'confidential',
+    };
+    const decision = deterministicDecide(meta);
+    expect(decision).toMatchObject({ scope: 'work', sensitivity: 'confidential', class: 'primary' });
+    const md = renderSourceMd(meta, decision, T(), 'body');
+    expect(md).toContain('scope: work');
+    expect(md).toContain('sensitivity: confidential');
+  });
+
+  it('falls back to conservative global/internal when no hint is supplied', async () => {
+    const { deterministicDecide } = await import('./archivist');
+    const meta = { id: '01J', kind: 'text' as const, raw: 'raw.md', contentHash: 'sha256:x', capturedAt: T(), surface: 'in-app', captureBatch: '01J' };
+    expect(deterministicDecide(meta)).toMatchObject({ scope: 'global', sensitivity: 'internal' });
   });
 });

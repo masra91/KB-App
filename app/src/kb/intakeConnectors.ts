@@ -90,7 +90,9 @@ export type IntakeFetchFn = (c: IntakeConnectorConfig, ctx: IntakeFetchContext) 
 
 /** The dedup key for an item (INTAKE-8): the stable external id, or a content-hash fallback when the
  *  feed gives no id. The fallback hashes the item's stable fields so a re-served identical item maps
- *  to the same key (and an edit under the same id is caught by the id, kept as a new snapshot). */
+ *  to the same key. Slice-1 keys on the id ALONE (no `last-modified`): a re-served item is skipped —
+ *  the never-re-archive guarantee. Revision-snapshot semantics (re-ingesting an edited item under the
+ *  same id) are deferred — see the dedup note in `intakeRun.ts` (feeds re-stamp timestamps, flood risk). */
 export function intakeDedupKey(item: IntakeItem): string {
   const ext = item.externalId.trim();
   if (ext) return `id:${ext}`;

@@ -14,7 +14,6 @@ import { readIntakeRegistry } from './intakeRegistry';
 import { runIntakeConnector } from './intakeRun';
 import { makeRssIntakeFn, type RssIntakeOptions } from './rssConnector';
 import type { IntakeConnectorConfig, IntakeFetchFn } from './intakeConnectors';
-import { ulid } from './ulid';
 import { noopDevLog, type DevLog } from './devlog';
 
 /** Is a connector due for a pull? enabled + scheduled + (never-run OR last + interval ≤ now). */
@@ -110,8 +109,7 @@ export class IntakeScheduler {
     if (this.inFlight.has(c.id)) return;
     this.inFlight.add(c.id);
     try {
-      const ts = new Date(now).toISOString();
-      void ulid(now); // (parity with researcherScheduler's logical-time stamping; reserved)
+      const ts = new Date(now).toISOString(); // stamp the pass with the tick's logical time
       await runIntakeConnector(this.root, c, { fetch: selectIntakeFn(c, this.opts), now: () => ts });
     } catch (err) {
       this.log.child({ scope: 'intake-scheduler' }).error('intake-pass-failed', { itemId: c.id, err });

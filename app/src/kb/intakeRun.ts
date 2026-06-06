@@ -110,8 +110,12 @@ export async function runIntakeConnector(root: string, c: IntakeConnectorConfig,
 
   const inspected = `${c.type}:${c.id} (${items.length} item${items.length === 1 ? '' : 's'} available)`;
   const seen = await readIntakeSeen(root, c.id);
-  // New = not already ingested. An item revised under the same external id is caught here (kept as a
-  // new snapshot only if its id/content key changed — INTAKE-8); a re-served identical item is skipped.
+  // New = not already ingested. Slice-1 dedups on the stable external id ONLY (content-hash fallback
+  // when absent): a re-served item is skipped — never re-archived (INTAKE-8, the safety half). The
+  // spec's revision-snapshot semantics (re-ingest an *edited* item under the same id via
+  // `external-id + last-modified`) are DEFERRED: many feeds re-stamp pubDate/updated on every fetch,
+  // so folding a timestamp into the key would risk re-archive floods — the conservative
+  // never-re-archive guarantee is the Slice-1 priority. (Tracked for a later slice.)
   const fresh = items.filter((it) => !seen.has(intakeDedupKey(it)));
 
   if (fresh.length === 0) {
@@ -135,7 +139,13 @@ export async function runIntakeConnector(root: string, c: IntakeConnectorConfig,
       const stampMs = Number.isFinite(publishedMs) ? publishedMs : Date.parse(fetchedAt) || Date.now();
       // Contained write: ULID path, body supplied by the connector. origin:'external' → a PRIMARY
       // source that re-enters the pipeline (Decompose→Connect→Claims) like any capture (INTAKE-3).
-      const out = await captureToInbox(root, `intake:${c.id}`, [{ kind: 'text', text: renderIntakeSourceBody(c, it, fetchedAt) }], stampMs, { origin: 'external' });
+      // The connector-default scope/sensitivity ride the capture as the archivist's classification
+      // hint (INTAKE-9 / SCOPE-14) so a `confidential` feed isn't down-classified to the default.
+      const out = await captureToInbox(root, `intake:${c.id}`, [{ kind: 'text', text: renderIntakeSourceBody(c, it, fetchedAt) }], stampMs, {
+        origin: 'external',
+        scope: c.scope,
+        sensitivity: c.sensitivity,
+      });
       sourceIds.push(...out.ids);
       ingestedKeys.push(intakeDedupKey(it));
       seen.add(intakeDedupKey(it));
