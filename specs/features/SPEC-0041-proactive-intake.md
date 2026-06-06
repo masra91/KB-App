@@ -1,5 +1,5 @@
 ---
-spec: SPEC-0037
+spec: SPEC-0041
 key: INTAKE
 title: Proactive Intake
 type: feature
