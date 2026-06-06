@@ -176,7 +176,8 @@ export function registerIpc(): void {
     const payloads: CapturePayload[] = [];
     for (const input of req.inputs) {
       if (input.kind === 'text') {
-        if (input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text });
+        // RICHIN-2: carry the original clipboard HTML (if any) so ingest writes the verbatim sidecar.
+        if (input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text, ...(input.html ? { html: input.html } : {}) });
       } else {
         payloads.push({ kind: 'file', name: input.name, data: new Uint8Array(input.data) });
       }

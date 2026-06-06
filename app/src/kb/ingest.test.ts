@@ -159,6 +159,46 @@ describe.skipIf(!gitAvailable)('captureToInbox (SPEC-0013)', () => {
   });
 });
 
+describe.skipIf(!gitAvailable)('captureToInbox — RICHIN rich paste (SPEC-0040)', () => {
+  let dir: string;
+  let vault: string;
+  beforeEach(async () => {
+    dir = await makeTempDir();
+    vault = path.join(dir, 'vault');
+    await createKb({ path: vault, initGitIfNeeded: true });
+  });
+  afterEach(async () => {
+    await rmTempDir(dir);
+  });
+
+  it('RICHIN-2/10: a rich-paste text unit writes raw.md + original.html sidecar + clip provenance', async () => {
+    const md = '# Title\n\n- a\n- b';
+    const html = '<h1>Title</h1><ul><li>a</li><li>b</li></ul>';
+    const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: md, html }]);
+
+    const unit = path.join(vault, 'inbox', res.ids[0]);
+    // raw.md is the derived Markdown payload; the verbatim original is preserved alongside it.
+    expect(await fs.readFile(path.join(unit, 'raw.md'), 'utf8')).toBe(md);
+    expect(await fs.readFile(path.join(unit, 'original.html'), 'utf8')).toBe(html);
+
+    const meta = await readCapturedMeta(unit);
+    expect(meta.kind).toBe('text');
+    expect(meta.clip).toEqual({ format: 'html→md', original: 'original.html' });
+
+    // RICHIN-9: the preservation spine is untouched — committed before processing, tree clean.
+    const git = simpleGit(vault);
+    expect((await git.log()).latest?.message).toContain('capture: 1 item(s) [in-app-panel]');
+    expect((await git.status()).isClean()).toBe(true);
+  });
+
+  it('RICHIN-2: a plain text capture writes NO sidecar and NO clip (sidecar only when it differs)', async () => {
+    const res = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'plain note' }]);
+    const unit = path.join(vault, 'inbox', res.ids[0]);
+    expect(await pathExists(path.join(unit, 'original.html'))).toBe(false);
+    expect((await readCapturedMeta(unit)).clip).toBeUndefined();
+  });
+});
+
 describe('readCapturedMeta error handling', () => {
   it('throws when the audit file is empty', async () => {
     const dir = await makeTempDir();

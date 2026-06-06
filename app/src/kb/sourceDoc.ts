@@ -37,6 +37,13 @@ export function renderSourceMd(
     `raw: ${meta.raw}`,
     `contentHash: ${meta.contentHash}`,
   ];
+  // RICHIN-10: capture-fidelity provenance for a derived text payload — how `raw.md` was
+  // produced (html→md) and the verbatim original kept alongside it. Auditable + re-derivable.
+  if (meta.clip) {
+    fm.push('clip:');
+    fm.push(`  format: ${scalar(meta.clip.format)}`);
+    fm.push(`  original: ${scalar(meta.clip.original)}`);
+  }
   if (meta.originalName) fm.push(`originalName: ${scalar(meta.originalName)}`);
   if (meta.mimeType) fm.push(`mimeType: ${meta.mimeType}`);
   if (typeof meta.bytes === 'number') fm.push(`bytes: ${meta.bytes}`);
