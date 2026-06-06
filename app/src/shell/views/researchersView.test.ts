@@ -139,6 +139,69 @@ describe('Field Desk — §6 anti-generic guardrails (GATE-1 watch-items)', () =
   });
 });
 
+describe('Field Desk — WS2: composes the shared design-system primitives (DESIGN-SYS)', () => {
+  // The migration hoists the inline controls onto the canonical shared primitives (one source of
+  // truth) WITHOUT changing behavior — so Jobs/Reviews compose the same kit. These assert the
+  // primitive classes + their a11y contracts (the §9 GATE-2 watch-items) are on the rendered markup.
+  it('SegmentedControl — schedule/autonomy are .viz-seg-opt in a .viz-seg radiogroup (neutral variant)', async () => {
+    const c = await mount();
+    const groups = Array.from(c.querySelectorAll('.viz-seg[role="radiogroup"]'));
+    // ladder + schedule + autonomy all use the shared .viz-seg group
+    expect(groups.length).toBe(3);
+    const schedule = c.querySelector('.researcher-schedule');
+    expect(schedule?.classList.contains('viz-seg')).toBe(true);
+    expect(schedule?.getAttribute('role')).toBe('radiogroup');
+    const opt = schedule?.querySelector('.viz-seg-opt');
+    expect(opt).not.toBeNull();
+    expect(opt?.getAttribute('role')).toBe('radio'); // proper radio semantics, not a <select>
+    expect(opt?.hasAttribute('aria-checked')).toBe(true);
+    // neutral segments are NOT clearance-tinted
+    expect(c.querySelector('.researcher-schedule .viz-seg-opt--clearance')).toBeNull();
+  });
+
+  it('SegmentedControl — clearance ladder rungs are .viz-seg-opt--clearance carrying data-temp (hue+position, not color-only)', async () => {
+    const c = await mount();
+    const rungs = Array.from(c.querySelectorAll('.rdesk-ladder .viz-seg-opt--clearance'));
+    expect(rungs).toHaveLength(3);
+    // the active rung reads via aria-checked AND data-temp (consequence hue reinforced by the checked state)
+    const active = c.querySelector('.rdesk-ladder .viz-seg-opt[aria-checked="true"]');
+    expect(active?.getAttribute('data-temp')).toBe('public-web');
+  });
+
+  it('ConfirmInline — the confirm box composes .viz-confirm / __msg, and the confirm action is a .viz-btn--danger', async () => {
+    const c = await mount();
+    const confirm = c.querySelector('.researcher-confirm');
+    expect(confirm?.classList.contains('viz-confirm')).toBe(true);
+    expect(c.querySelector('.researcher-confirm-msg')?.classList.contains('viz-confirm__msg')).toBe(true);
+    const go = c.querySelector('.researcher-confirm-go');
+    expect(go?.classList.contains('viz-btn')).toBe(true);
+    expect(go?.classList.contains('viz-btn--danger')).toBe(true); // destructive = oxide border (text stays ink, §2)
+  });
+
+  it('EditableField — the orders box is a .viz-field__input--multiline; captioned fields are .viz-field with .viz-field__input', async () => {
+    listResearchers = vi.fn(async () => [codeRow]); // code row renders repo/PR fields too
+    setApi();
+    const c = await mount();
+    const prompt = c.querySelector('.researcher-prompt');
+    expect(prompt?.classList.contains('viz-field__input')).toBe(true);
+    expect(prompt?.classList.contains('viz-field__input--multiline')).toBe(true);
+    const field = c.querySelector('.rdesk-field.viz-field');
+    expect(field).not.toBeNull();
+    expect(field?.querySelector('.viz-field__label')).not.toBeNull(); // a real labelled control
+    expect(field?.querySelector('input.viz-field__input')).not.toBeNull();
+  });
+
+  it('Button busy — dispatching toggles .viz-btn--busy on the run Button (then clears on completion)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
+    const run = c.querySelector<HTMLButtonElement>('.researcher-run')!;
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click(); // dispatch starts
+    expect(run.classList.contains('viz-btn--busy')).toBe(true); // ember breathe while in-flight
+    await flush(); // dispatch resolves → re-render; the fresh run button is no longer busy
+    expect(c.querySelector('.researcher-run')?.classList.contains('viz-btn--busy')).toBe(false);
+  });
+});
+
 describe('Field Desk — confirm gate (RESEARCH-8/15)', () => {
   it('arming (enable) reveals the consequence-worded confirm, then calls setResearcherConfig', async () => {
     const c = await mount();

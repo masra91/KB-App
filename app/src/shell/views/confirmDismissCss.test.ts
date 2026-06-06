@@ -1,21 +1,25 @@
-// WS1 #1 regression — the inline confirm boxes (Jobs `.confirm` + Researcher desk `.rdesk-confirm`)
-// are shown/hidden by toggling the `hidden` attribute. Their base rule sets `display: flex`, which
-// OVERRIDES the browser default `[hidden] { display: none }` — so before the fix, setting `hidden`
-// could not actually dismiss the box (felt worse once run-now became long-running). The fix restores
-// the hidden contract with an explicit `[hidden] { display: none }` guard.
+// WS1 #1 regression — confirm boxes are shown/hidden by toggling the `hidden` attribute. Their base
+// rule sets `display: flex`, which OVERRIDES the browser default `[hidden] { display: none }` — so
+// before the fix, setting `hidden` could not actually dismiss the box (felt worse once run-now became
+// long-running). The fix restores the hidden contract with an explicit `[hidden] { display: none }` guard.
 //
-// happy-dom applies no stylesheet, so a layout assertion can't catch this; we assert the CSS SOURCE
-// directly. Tests the CLASS: a confirm box whose base rule sets a non-none `display` MUST carry a
+// WS2: the Field-Desk `.rdesk-confirm` now composes the shared `.viz-confirm` primitive
+// (design-system.css), which owns the `display: flex` AND its own `[hidden]` guard. The legacy Jobs
+// `.confirm` keeps its own guard in index.css until its WS2 migration. This test follows the rule to
+// wherever the display lives: a confirm box whose base rule sets a non-none `display` MUST carry a
 // `[hidden]` display:none guard.
+//
+// happy-dom applies no stylesheet, so a layout assertion can't catch this; we assert the CSS SOURCE.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-// vitest runs with cwd = the app package root, where `src/index.css` lives.
-const css = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+// vitest runs with cwd = the app package root.
+const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+const designSystemCss = readFileSync(path.resolve(process.cwd(), 'src/shell/design-system.css'), 'utf8');
 
 /** The `display` value a rule sets, if any (last wins) — naive but sufficient for these flat rules. */
-function displayOf(selector: string): string | null {
+function displayOf(css: string, selector: string): string | null {
   // Match `<selector> { … }` allowing other selectors in the same group (comma list).
   const re = new RegExp(`(^|[,}\\s])${selector.replace(/[.[\]\\]/g, '\\$&')}\\s*(,[^{]*)?\\{([^}]*)\\}`, 'm');
   const m = css.match(re);
@@ -26,15 +30,19 @@ function displayOf(selector: string): string | null {
 }
 
 describe('WS1 #1 — confirm boxes honor the `hidden` attribute (CSS guard present)', () => {
-  for (const cls of ['.confirm', '.rdesk-confirm']) {
-    it(`${cls} sets a non-none display (so a [hidden] guard is required)`, () => {
-      const base = displayOf(cls);
+  // [css source, confirm selector] — the rule lives wherever the display:flex is declared.
+  for (const [css, cls, where] of [
+    [indexCss, '.confirm', 'index.css'], // legacy Jobs confirm (until its WS2 migration)
+    [designSystemCss, '.viz-confirm', 'design-system.css'], // the shared ConfirmInline primitive (WS2)
+  ] as const) {
+    it(`${cls} sets a non-none display in ${where} (so a [hidden] guard is required)`, () => {
+      const base = displayOf(css, cls);
       expect(base).not.toBeNull();
       expect(base).not.toBe('none'); // it's `flex` — this is exactly why the guard is needed
     });
 
-    it(`${cls}[hidden] is guarded to display: none (REGRESSION: hidden must dismiss the box)`, () => {
-      expect(displayOf(`${cls}[hidden]`)).toBe('none');
+    it(`${cls}[hidden] is guarded to display: none in ${where} (REGRESSION: hidden must dismiss the box)`, () => {
+      expect(displayOf(css, `${cls}[hidden]`)).toBe('none');
     });
   }
 });

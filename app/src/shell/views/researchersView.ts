@@ -73,9 +73,9 @@ async function render(container: HTMLElement): Promise<void> {
 /** Segmented instrument selector (§6) — custom radio-style control, NOT a native <select>. */
 function segmented(cls: string, label: string, options: readonly { value: string; text: string }[], selected: string): string {
   const rungs = options
-    .map((o) => `<button type="button" role="radio" class="rdesk-seg-opt viz-signage viz-focusable" data-value="${esc(o.value)}" aria-checked="${o.value === selected ? 'true' : 'false'}">${esc(o.text)}</button>`)
+    .map((o) => `<button type="button" role="radio" class="rdesk-seg-opt viz-seg-opt viz-signage viz-focusable" data-value="${esc(o.value)}" aria-checked="${o.value === selected ? 'true' : 'false'}">${esc(o.text)}</button>`)
     .join('');
-  return `<div class="rdesk-seg"><span class="rdesk-seg-label viz-signage">${esc(label)}</span><span class="${esc(cls)}" role="radiogroup" aria-label="${esc(label)}">${rungs}</span></div>`;
+  return `<div class="rdesk-seg"><span class="rdesk-seg-label viz-signage">${esc(label)}</span><span class="viz-seg ${esc(cls)}" role="radiogroup" aria-label="${esc(label)}">${rungs}</span></div>`;
 }
 
 /** The clearance ladder (§2/§3) — 3 rungs, the active one lit in its temperature; a spatial exposure
@@ -83,9 +83,9 @@ function segmented(cls: string, label: string, options: readonly { value: string
 function clearanceLadder(active: EgressTier): string {
   const rungs = EGRESS_TIERS.map(
     (t) =>
-      `<button type="button" role="radio" class="rdesk-rung viz-signage viz-focusable" data-tier="${esc(t)}" data-temp="${esc(t)}" aria-checked="${t === active ? 'true' : 'false'}" title="${esc(EGRESS_TIER_LABELS[t])}">${esc(CLEARANCE[t].rung)}</button>`,
+      `<button type="button" role="radio" class="rdesk-rung viz-seg-opt viz-seg-opt--clearance viz-signage viz-focusable" data-tier="${esc(t)}" data-temp="${esc(t)}" aria-checked="${t === active ? 'true' : 'false'}" title="${esc(EGRESS_TIER_LABELS[t])}">${esc(CLEARANCE[t].rung)}</button>`,
   ).join('');
-  return `<div class="rdesk-clearance"><span class="rdesk-clearance-label viz-signage">clearance</span><span class="rdesk-ladder" role="radiogroup" aria-label="Data clearance">${rungs}</span></div>`;
+  return `<div class="rdesk-clearance"><span class="rdesk-clearance-label viz-signage">clearance</span><span class="rdesk-ladder viz-seg" role="radiogroup" aria-label="Data clearance">${rungs}</span></div>`;
 }
 
 /** The state glyph carried on the report flag (DESIGN-4: state via glyph + hue + fill, NEVER color
@@ -144,8 +144,8 @@ function strip(r: ResearcherView): string {
       </div>
       ${reachReadout(r)}
       <div class="rdesk-orders">
-        <label class="rdesk-orders-label viz-signage">Standing orders</label>
-        <textarea class="researcher-prompt rdesk-prompt viz-body viz-focusable" rows="3" placeholder="What should this researcher look for? Which sites, repo, or work surfaces?">${esc(r.prompt)}</textarea>
+        <label class="rdesk-orders-label viz-field__label viz-signage">Standing orders</label>
+        <textarea class="researcher-prompt rdesk-prompt viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="3" placeholder="What should this researcher look for? Which sites, repo, or work surfaces?">${esc(r.prompt)}</textarea>
         <div class="rdesk-fields">
           ${field('scope', 'researcher-scope', r.scope, '')}
           ${fields}
@@ -161,10 +161,10 @@ function strip(r: ResearcherView): string {
         ${reportLine(r)}
         <button type="button" class="viz-btn rdesk-run researcher-run" data-clearance="${esc(r.egressTier)}">▷ Run</button>
       </div>
-      <div class="rdesk-confirm researcher-confirm" hidden>
-        <p class="rdesk-confirm-msg researcher-confirm-msg viz-body"></p>
+      <div class="rdesk-confirm viz-confirm researcher-confirm" hidden>
+        <p class="rdesk-confirm-msg viz-confirm__msg researcher-confirm-msg viz-body"></p>
         <button type="button" class="viz-btn researcher-confirm-cancel">Cancel</button>
-        <button type="button" class="viz-btn rdesk-confirm-go researcher-confirm-go">Confirm</button>
+        <button type="button" class="viz-btn viz-btn--danger rdesk-confirm-go researcher-confirm-go">Confirm</button>
       </div>
       <p class="rdesk-status researcher-status viz-body" role="status" aria-live="polite"></p>
     </li>`;
@@ -172,7 +172,7 @@ function strip(r: ResearcherView): string {
 
 /** A labeled instrument field (caption + input) — flat, captioned, not a loose input (§2). */
 function field(label: string, cls: string, value: string, placeholder: string): string {
-  return `<label class="rdesk-field"><span class="rdesk-field-label viz-signage">${esc(label)}</span><input type="text" class="${esc(cls)} rdesk-input viz-body viz-focusable" value="${esc(value)}" placeholder="${esc(placeholder)}" /></label>`;
+  return `<label class="rdesk-field viz-field"><span class="rdesk-field-label viz-field__label viz-signage">${esc(label)}</span><input type="text" class="${esc(cls)} rdesk-input viz-field__input viz-body viz-focusable" value="${esc(value)}" placeholder="${esc(placeholder)}" /></label>`;
 }
 
 /** The add-dock (§2) — named template TILES (glyph + label), not a <select>. Each creates a disarmed
@@ -312,7 +312,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
           status.textContent = '';
           runBtn.disabled = true;
           runBtn.textContent = 'DISPATCHING…';
-          li.classList.add('rdesk-dispatching');
+          runBtn.classList.add('viz-btn--busy'); // §3 busy state — ember breathe on the Button primitive
           try {
             const res = await window.kbApi.runResearcherNow(id);
             let msg: string;
@@ -327,7 +327,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
             status.textContent = "Couldn't run.";
             runBtn.disabled = false;
             runBtn.textContent = '▷ Run';
-            li.classList.remove('rdesk-dispatching');
+            runBtn.classList.remove('viz-btn--busy');
           }
         },
         () => {},

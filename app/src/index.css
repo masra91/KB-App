@@ -424,9 +424,10 @@ button:disabled {
 
 /* Shared confirm/button styling (also used by the Settings replay flow). */
 .confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-/* WS1 #1: the `display: flex` above (and on `.rdesk-confirm`) wins over the default `[hidden]` rule
-   (display: none), so toggling the `hidden` attribute couldn't dismiss the box. Restore that contract. */
-.confirm[hidden], .rdesk-confirm[hidden] { display: none; }
+/* WS1 #1: the `display: flex` above wins over the default `[hidden]` rule (display: none), so toggling
+   the `hidden` attribute couldn't dismiss the box. Restore that contract. (The Field-Desk `.rdesk-confirm`
+   now composes the `.viz-confirm` primitive, whose own `[hidden]` guard lives in design-system.css.) */
+.confirm[hidden] { display: none; }
 .confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
 .btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
 .btn:hover { background: var(--hover); }
@@ -513,30 +514,25 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-kind { font-size: 0.8rem; color: var(--viz-ink); }
 .rdesk-clearance { display: inline-flex; align-items: center; gap: 0.45rem; }
 .rdesk-clearance-label { font-size: 0.62rem; color: var(--viz-ink-muted); text-transform: none; letter-spacing: 0.04em; }
-.rdesk-ladder { display: inline-flex; gap: 2px; }
-/* Rungs — ghosted by default; the active one fills in its temperature. Spatial exposure scale, not a select. */
-.rdesk-rung { background: transparent; border: 1px solid var(--viz-rule); color: var(--viz-idle); font-size: 0.62rem; letter-spacing: 0.06em; padding: 0.12rem 0.5rem; cursor: pointer; border-radius: 0; }
-.rdesk-rung[aria-checked='true'][data-temp='local-only'] { background: var(--viz-patina); border-color: var(--viz-patina); color: var(--viz-field); }
-.rdesk-rung[aria-checked='true'][data-temp='internal-tenant'] { background: var(--viz-brass); border-color: var(--viz-brass); color: var(--viz-field); }
-.rdesk-rung[aria-checked='true'][data-temp='public-web'] { background: var(--viz-ember); border-color: var(--viz-ember); color: var(--viz-field); }
-.rdesk-rung:hover:not([aria-checked='true']) { border-color: var(--viz-ink-muted); color: var(--viz-ink); }
+/* The ladder (.rdesk-ladder) + rungs (.rdesk-rung) now compose the shared SegmentedControl primitive
+   (.viz-seg / .viz-seg-opt--clearance, design-system.css §4) — layout + temperatures live there. */
 
 .rdesk-reach { font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.45rem 0 0; }
 
 .rdesk-orders { margin-top: 0.55rem; }
-.rdesk-orders-label, .rdesk-field-label, .rdesk-seg-label { font-size: 0.62rem; color: var(--viz-ink-muted); }
-.rdesk-prompt { display: block; width: 100%; margin-top: 0.25rem; background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.5rem 0.6rem; resize: vertical; }
+.rdesk-seg-label { font-size: 0.62rem; color: var(--viz-ink-muted); }
+/* The orders box (.rdesk-prompt), captioned fields (.rdesk-field / .rdesk-field-label) + inputs
+   (.rdesk-input) now compose the EditableField primitive (.viz-field*, design-system.css §6);
+   only surface deltas remain (top margin, flow gaps, the field min-width). */
+.rdesk-prompt { margin-top: 0.25rem; }
 .rdesk-fields { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: end; margin-top: 0.5rem; }
-.rdesk-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
-.rdesk-input { background: var(--viz-field); color: var(--viz-ink); border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0; padding: 0.2rem 0.1rem; min-width: 12ch; }
+.rdesk-input { min-width: 12ch; }
 .rdesk-save { margin-left: auto; align-self: end; }
 
 .rdesk-config { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 0.7rem; }
 .rdesk-seg { display: inline-flex; align-items: center; gap: 0.4rem; }
-.rdesk-seg > [role='radiogroup'] { display: inline-flex; gap: 2px; }
-.rdesk-seg-opt { background: transparent; border: 1px solid var(--viz-rule); color: var(--viz-idle); font-size: 0.64rem; letter-spacing: 0.05em; padding: 0.12rem 0.45rem; cursor: pointer; border-radius: 0; }
-.rdesk-seg-opt[aria-checked='true'] { color: var(--viz-ink); border-color: var(--viz-ink-muted); background: var(--viz-rule); }
-.rdesk-seg-opt:hover:not([aria-checked='true']) { color: var(--viz-ink); }
+/* The segment group (.viz-seg) + options (.rdesk-seg-opt) compose the neutral SegmentedControl
+   primitive (.viz-seg-opt, design-system.css §4). */
 
 .rdesk-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.7rem; padding-top: 0.55rem; }
 /* Typed report — state-coded via a leading GLYPH flag + data-state, NOT by coloring the small body
@@ -552,13 +548,11 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-review-link { background: transparent; border: 0; padding: 0 0 0 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--viz-brass); cursor: pointer; text-transform: none; }
 .rdesk-review-link:hover { color: var(--viz-ember); text-decoration: underline; }
 .rdesk-run { margin-left: auto; }
-.rdesk-dispatching .rdesk-run { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
+/* The dispatching/busy state now lives on the Button primitive (.viz-btn--busy, toggled in JS). */
 
-.rdesk-confirm { margin-top: 0.6rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; border-left: 2px solid var(--viz-brass); padding-left: 0.6rem; }
-.rdesk-confirm-msg { flex: 1 1 100%; margin: 0; color: var(--viz-ink); }
-/* Danger framed by the oxide BORDER (≥3:1 graphic), text stays --viz-ink at AA (same rule as the report). */
-.rdesk-confirm-go { color: var(--viz-ink); border-color: var(--viz-oxide); }
-.rdesk-confirm-go:hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
+/* The confirm box (.rdesk-confirm / -msg / -go) composes the ConfirmInline primitive (.viz-confirm,
+   .viz-confirm__msg, .viz-btn--danger; design-system.css §5); only the top margin is a surface delta. */
+.rdesk-confirm { margin-top: 0.6rem; }
 .rdesk-status { margin: 0.4rem 0 0; font-size: 0.8rem; min-height: 1em; color: var(--viz-ink-muted); }
 /* WS1 #2: honest run-eligibility line — muted at-rest; a paused (won't-run) researcher reads slightly dimmer. */
 .rdesk-eligibility { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); }
