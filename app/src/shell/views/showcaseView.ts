@@ -21,10 +21,12 @@ function cell(caption: string, body: string): string {
   return `<div class="showcase-cell"><div class="showcase-demo">${body}</div><span class="showcase-cap viz-numeric">${esc(caption)}</span></div>`;
 }
 
-/** A flagged PRIMITIVE GAP — a matrix cell the shipped CSS can't render. We render the markup the spec
- *  implies (so the gap is visible) + a loud caption naming the missing class. NO invented styling. */
-function gap(caption: string, missing: string, body = ''): string {
-  return `<div class="showcase-cell showcase-cell--gap">${body ? `<div class="showcase-demo">${body}</div>` : ''}<span class="showcase-cap showcase-cap--gap viz-numeric">⚠ gap · ${esc(caption)} · missing ${esc(missing)}</span></div>`;
+/** An INTENTIONAL non-gap cell — a state KB-Design-Lead ruled surface-composed or deferred (NOT a
+ *  shared-primitive gap). Renders the closest shipped example + an ℹ caption explaining why it isn't a
+ *  shared-primitive cell. (The original 4 faithful-mirror ⚠ gaps were triaged: 2 closed in
+ *  design-system.css, 2 reconciled to "intentional/deferred" in _design-system.md — so 0 ⚠ remain.) */
+function note(caption: string, why: string, body = ''): string {
+  return `<div class="showcase-cell showcase-cell--note">${body ? `<div class="showcase-demo">${body}</div>` : ''}<span class="showcase-cap showcase-cap--note viz-numeric">ℹ ${esc(caption)} · ${esc(why)}</span></div>`;
 }
 
 function section(title: string, ref: string, cells: string[]): string {
@@ -57,18 +59,18 @@ function buttonSection(): string {
   // sizes
   cells.push(cell('default/sm', `<button type="button" class="viz-btn viz-btn--sm">Action</button>`));
   cells.push(cell('default/md', `<button type="button" class="viz-btn">Action</button>`));
-  // GAP: the _design-system.md §3 `clearance-tinted` Button variant isn't a shipped class — the
-  // researcher Run/arm coloring lives in surface CSS (.rdesk-*), not a .viz-btn--clearance modifier.
-  cells.push(gap('clearance-tinted (patina/brass/ember)', '.viz-btn--clearance', `<button type="button" class="viz-btn">Run</button>`));
+  // Surface-composed, not a shared variant (KB-Design-Lead ruling): Researchers tints arm/Run via
+  // `.rdesk-*`; promote to `.viz-btn--clearance` only when a 2nd surface needs clearance-colored buttons.
+  cells.push(note('clearance-tinted', 'surface-composed (Researchers .rdesk-*) — promote on a 2nd consumer', `<button type="button" class="viz-btn">Run</button>`));
   return section('Button', '_design-system §3', cells);
 }
 
 // ── SegmentedControl (§4) ─────────────────────────────────────────────────────────────────────
-function seg(opts: { label: string; checked?: boolean; cls?: string; temp?: string }[]): string {
+function seg(opts: { label: string; checked?: boolean; cls?: string; temp?: string; disabled?: boolean }[]): string {
   const inner = opts
     .map(
       (o) =>
-        `<button type="button" role="radio" class="viz-seg-opt viz-signage viz-focusable${o.cls ?? ''}"${o.temp ? ` data-temp="${o.temp}"` : ''} aria-checked="${o.checked ? 'true' : 'false'}">${esc(o.label)}</button>`,
+        `<button type="button" role="radio" class="viz-seg-opt viz-signage viz-focusable${o.cls ?? ''}"${o.temp ? ` data-temp="${o.temp}"` : ''} aria-checked="${o.checked ? 'true' : 'false'}"${o.disabled ? ' disabled' : ''}>${esc(o.label)}</button>`,
     )
     .join('');
   return `<span class="viz-seg" role="radiogroup" aria-label="demo">${inner}</span>`;
@@ -90,9 +92,8 @@ function segmentedSection(): string {
   cells.push(cell('clearance/local·patina', clear('local-only')));
   cells.push(cell('clearance/internal·brass', clear('internal-tenant')));
   cells.push(cell('clearance/public·ember', clear('public-web')));
-  // GAP: _design-system.md §4 says the disabled group dims to 0.5, but no `:disabled`/group-disabled rule
-  // is shipped for .viz-seg-opt.
-  cells.push(gap('neutral/disabled (dim 0.5)', '.viz-seg-opt disabled rule', seg([{ label: 'Off' }, { label: 'Daily', checked: true }, { label: 'Hourly' }])));
+  // disabled group (closed: `.viz-seg-opt:disabled` dims to 0.5 — KB-Design-Lead ruling).
+  cells.push(cell('neutral/disabled (dim 0.5)', seg([{ label: 'Off', disabled: true }, { label: 'Daily', checked: true, disabled: true }, { label: 'Hourly', disabled: true }])));
   return section('SegmentedControl', '_design-system §4', cells);
 }
 
@@ -107,9 +108,9 @@ function confirmSection(): string {
   // hidden — proves the [hidden]{display:none} contract (#215). It renders nothing visible by design;
   // the caption documents it (the contract itself is unit-asserted in confirmDismissCss.test.ts).
   cells.push(cell('inline/hidden ([hidden]→none)', `<div class="viz-confirm" hidden><p class="viz-confirm__msg">hidden</p></div><span class="showcase-note viz-body">renders nothing (hidden) — contract OK</span>`));
-  // GAP: _design-system.md §5 describes a `dialog` variant (overlay on a scrim); only the inline
-  // presentation is shipped (.viz-confirm) — no dialog/scrim class.
-  cells.push(gap('dialog (scrim overlay)', '.viz-confirm--dialog / scrim', confirmBody(true)));
+  // dialog variant deferred (KB-Design-Lead ruling): inline `.viz-confirm` is the shipped form; the
+  // scrim-dialog lands when a real flow has no inline anchor (§5 already calls it "rare").
+  cells.push(note('dialog variant', 'deferred — inline .viz-confirm is the shipped form (§5)', confirmBody(true)));
   return section('ConfirmInline + Dialog', '_design-system §5', cells);
 }
 
@@ -129,8 +130,8 @@ function editableFieldSection(): string {
   cells.push(cell('numeric/dirty (save shown)', `<span class="showcase-inline">${field('reads / pass', `<input type="text" inputmode="numeric" class="viz-field__input viz-field__input--numeric viz-focusable" value="20" />`)} <button type="button" class="viz-btn viz-btn--primary viz-btn--sm">Save</button></span>`));
   cells.push(cell('numeric/invalid (oxide rule, ink text)', field('reads / pass', `<input type="text" inputmode="numeric" class="viz-field__input viz-field__input--numeric viz-field__input--invalid viz-focusable" value="0" aria-invalid="true" />`)));
   cells.push(cell('multiline/invalid', field('standing orders', `<textarea class="viz-field__input viz-field__input--multiline viz-field__input--invalid viz-body viz-focusable" rows="2">…</textarea>`)));
-  // GAP: _design-system.md §6 says disabled dims to 0.5, but no `.viz-field__input:disabled` rule is shipped.
-  cells.push(gap('text/disabled (dim 0.5)', '.viz-field__input disabled rule', field('scope', `<input type="text" class="viz-field__input" value="global" disabled />`)));
+  // disabled (closed: `.viz-field__input:disabled` dims to 0.5 — KB-Design-Lead ruling).
+  cells.push(cell('text/disabled (dim 0.5)', field('scope', `<input type="text" class="viz-field__input viz-focusable" value="global" disabled />`)));
   return section('EditableField', '_design-system §6', cells);
 }
 
@@ -141,7 +142,7 @@ export function mountShowcase(container: HTMLElement): void {
     <div class="showcase viz-surface">
       <header class="showcase-head">
         <h1 class="showcase-title viz-signage">Design-System Showcase</h1>
-        <p class="showcase-sub viz-body">Every blessed WS2 primitive × variant × state — the living reference + the home of the HYBRID visual snapshot. Faithful mirror of <span class="viz-numeric">design-system.css</span>; <span class="showcase-cap--gap">⚠ gap</span> cells flag spec'd states with no shipped class.</p>
+        <p class="showcase-sub viz-body">Every blessed WS2 primitive × variant × state — the living reference + the home of the HYBRID visual snapshot. Faithful mirror of <span class="viz-numeric">design-system.css</span>; <span class="showcase-cap--note">ℹ</span> cells mark states that are intentionally surface-composed or deferred (per KB-Design-Lead).</p>
       </header>
       ${buttonSection()}
       ${segmentedSection()}

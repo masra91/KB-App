@@ -78,16 +78,22 @@ describe('Showcase — EditableField matrix (§6)', () => {
   });
 });
 
-describe('Showcase — faithful-mirror: documented primitive GAPS are flagged (not faked)', () => {
-  it('flags exactly the 4 spec-vs-shipped gaps with a ⚠ caption naming the missing class', () => {
-    const gaps = Array.from(root.querySelectorAll('.showcase-cell--gap')).map((g) => g.querySelector('.showcase-cap--gap')?.textContent ?? '');
-    expect(gaps).toHaveLength(4);
-    const joined = gaps.join(' | ');
-    expect(joined).toContain('.viz-btn--clearance'); // Button clearance-tinted variant not shipped
-    expect(joined).toContain('.viz-seg-opt disabled rule'); // SegmentedControl disabled dim not shipped
-    expect(joined).toContain('.viz-confirm--dialog'); // ConfirmInline dialog variant not shipped
-    expect(joined).toContain('.viz-field__input disabled rule'); // EditableField disabled dim not shipped
-    for (const g of gaps) expect(g).toContain('⚠ gap');
-    // a gap NEVER invents primitive styling — it only flags; no showcase-only .viz-* override exists
+describe('Showcase — faithful-mirror triage (KB-Design-Lead rulings): 0 gaps remain', () => {
+  it('has NO ⚠ gap cells — the 4 findings were closed (2) or reconciled to intentional notes (2)', () => {
+    expect(root.querySelectorAll('.showcase-cell--gap')).toHaveLength(0);
+  });
+
+  it('reconciled states render as ℹ INTENTIONAL notes (clearance-tinted = surface-composed; dialog = deferred)', () => {
+    const notes = Array.from(root.querySelectorAll('.showcase-cell--note')).map((n) => n.querySelector('.showcase-cap--note')?.textContent ?? '');
+    expect(notes).toHaveLength(2);
+    const joined = notes.join(' | ');
+    expect(joined).toContain('clearance-tinted'); // surface-composed (Researchers), not a shared variant yet
+    expect(joined).toContain('dialog'); // deferred — inline is the shipped form
+    for (const n of notes) expect(n).toContain('ℹ');
+  });
+
+  it('CLOSED states now render with the shipped disabled rules (SegmentedControl + EditableField)', () => {
+    expect(root.querySelector('.viz-seg-opt[disabled]')).not.toBeNull(); // .viz-seg-opt:disabled (closed)
+    expect(root.querySelector('input.viz-field__input[disabled]')).not.toBeNull(); // .viz-field__input:disabled (closed)
   });
 });
