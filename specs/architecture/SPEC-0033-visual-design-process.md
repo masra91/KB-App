@@ -104,3 +104,11 @@ A design spec (one per surface, e.g. `specs/design/<surface>.md`) documents:
   all key user flows), then **checked in as living design specs** (structure/colors/themes/
   typography/motion/visual language; images optional). First surface: SPEC-0032 (Pipeline
   Visualization). Principal direction as the visual-polish push begins.
+- 2026-06-06 — **DESIGN-7 shared system now authored deliberately** (WS2 of the Principal
+  app-review). After two surfaces (SPEC-0032 "The Line", SPEC-0028 "The Field Desk") proved the
+  instrument language, the shared design system stops *only emerging* (DESIGN-7) and becomes a
+  **deliberate, gated artifact**: `specs/design/_design-system.md` (`design: DESIGN-SYS`) promotes
+  the first four primitives — **Button · SegmentedControl · ConfirmInline+Dialog · EditableField** —
+  into one canonical kit surfaces compose. Authored per this process (GATE 1 distinctiveness →
+  GATE 2 flow coverage); the **component-library *code*** stays downstream (§6 unchanged). New
+  primitives still emerge per DESIGN-7 as a 2nd surface needs them.
