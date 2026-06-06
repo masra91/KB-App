@@ -6,7 +6,7 @@ type: feature
 status: draft
 owners: [KB-Lead, Principal]
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-06-06
 related: [SPEC-0003, SPEC-0004, SPEC-0005, SPEC-0006, SPEC-0007, SPEC-0014, SPEC-0018, SPEC-0020, SPEC-0023, SPEC-0026, SPEC-0027]
 stage: Enrich
 supersedes: null
@@ -79,8 +79,9 @@ Review like any source.
   window, depth. Tools: web search/fetch. *"Get the press release / prior art for X."*
 - **Code** — egress tier **`local-only`** (+ GitHub/Azure DevOps **reads** via BYOA). Config:
   repo path, worktree-under-repo (y/n), git-refresh policy, **PR provider** (GitHub *or* Azure
-  DevOps), branches/PRs to watch. **Strictly read-only** (RESEARCH-10). *"Answer questions
-  about this codebase / what changed in these PRs."*
+  DevOps), branches/PRs to watch. **Strictly read-only** (RESEARCH-10). **Reasons over the repo via
+  the Copilot SDK** — reads relevant files in depth into a cited findings-note, not a grep dump
+  (RESEARCH-20). *"Answer questions about this codebase / what changed in these PRs."*
 - **M365 / WorkIQ** — egress tier **`internal-tenant`**. Config: M365 MCP/tenant (OAuth),
   surfaces (mail/calendar/SharePoint/Teams). *"Any updates in my email/meetings I should know?"*
 - **Custom** — generic core: own prompt + MCP servers + tools + declared egress tier.
@@ -108,6 +109,7 @@ Review like any source.
 | RESEARCH-17| must     | A findings-note must be **substantive + structured**, *not* a thin précis: it captures the **specific** facts / figures / dates / named entities / quoted passages the sources actually contain, **each attributed to its source URL**, with real depth — so the secondary source carries genuine substance for Decompose/Claims. *A vague 3-paragraph summary is a defect, not a pass.* The Web skill prompt instructs **depth + specificity** (over brevity); the per-pass retrieval budget **default is 15** (raised from 8) and is **user-editable per researcher** (RESEARCH-15), under the global per-Instance ceiling (RESEARCH-11). Egress posture is unchanged (gated fetch, allowlist, untrusted-content-as-DATA) — more reads + richer capture, same guards | none-yet | RESEARCH-5,6,11,15; PRIN-2; VISION-5 |
 | RESEARCH-19| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
 | RESEARCH-18| must     | Each researcher has a **per-pass session timeout** — a **stuck-session backstop, NOT a cost bound**. Cost/depth is bounded by the **budget** (`maxToolCalls`) + the per-Instance ceiling (RESEARCH-11); the agent bills **tokens/tools, never wall-clock time**, so a clock cap can only guess at "too long for real work." It exists for one reason: a wedged session would otherwise hold its one **global copilot slot** (ORCH-23) forever and starve the pipeline. **Default 15 min** (the SDK's 60s default false-failed deep multi-fetch passes — `research.session-failed: Timeout after 60000ms waiting for session.idle`); **user-editable per researcher** (RESEARCH-15), passed to the live SDK session. Finite ≠ a deadline for real work | test: `researchSessionTimeout`(wiring) → none-yet (editor) | RESEARCH-11,15,17; ORCH-23 |
+| RESEARCH-20| must     | The **Code researcher reasons over the repo via the Copilot SDK** (same `ResearchFn` seam as Web/M365, registered in `selectResearchFn`'s per-template switch — no `makeResearchDeps` change), **not** a deterministic `git grep` dump (today's `researchCodeAgent.ts` shells `git grep` + recent-log + PR-title-match — no model, no SDK, ignores the budget — so the Principal's run (#7) was a literal "code" string-dump, "extremely low effort"). It **reads the relevant files in depth and synthesizes a substantive, source-attributed findings-note** that clears the **RESEARCH-17 depth bar**, with **real repo `path:line` citations** (only files it actually read — fabricated/unread paths rejected, the citation analog of the Web allowlist). **Read-only stays inviolate (RESEARCH-10):** the SDK session's repo tools (read-file / list / grep / log) are thin wrappers over the **read-only `codeGit` layer** in the **isolated, gitignored** worktree — the `availableTools` allow-list admits ONLY those read tools + `submitFindings`; **no** write/exec/network verb is reachable. Fetched repo + PR content is **DATA, never instructions (RESEARCH-12)** (a README/comment saying "ignore your instructions" is quoted content, not a directive). The pass **honors `maxToolCalls`** (read-tool calls counted + refused past budget, forcing convergence — Web's fetch-cap analog) **and the RESEARCH-18 session timeout**; the query is built from the **request (D6a)** via `buildOutboundQuery`, never the template name. A **deterministic fallback is retained (RESEARCH-14)** — SDK-unavailable degrades to today's grep note, never a hard failure. **Slice 1 = local repo**; the gh/az **PR reads stay as-is** (deterministic, CONFIG-pinned) | none-yet | RESEARCH-5,6,10,11,12,14,16,17,18; D6a; AUTO-6 |
 
 ## 6. User flows / surface
 
@@ -138,7 +140,9 @@ Security-dominant, so v1 lands in three reviewable slices, lowest-egress-risk fi
   posture**, the `researcher` audit actor, and the **Researchers** Control-Panel view. Invocation:
   **inline + on-demand + scheduled** (scheduled = a `researcher` job type, see decision D5).
 - **Slice 2 — Code researcher** (`local-only`, strictly read-only, isolated gitignored worktree;
-  RESEARCH-10) — its own PR + security review.
+  RESEARCH-10) — its own PR + security review. *(Slice 2a/2b shipped the deterministic read pass —
+  grep + log + gh/az PR title-match. **WS4 / RESEARCH-20** upgrades the local-repo read to **agentic
+  SDK reasoning** behind the same seam; gh/az PR reads stay as-is.)*
 - **Slice 3 — M365/WorkIQ** (`internal-tenant`, OAuth MCP) + **custom** researcher polish.
 
 ## 8. Resolved decisions (Slice 1 locked) + escalations
@@ -199,8 +203,29 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
     **safety backstop, not a normal-use limit**, and **self-healing** (passes age out of the window).
     Purely a runaway/volume backstop — *not* the egress↔sensitivity policy (that stays D6, escalated).
 
+### RESEARCH-20 (WS4) — open forks: recommendations (proposed by KB-Developer-5; **KB-Lead to ratify**)
+
+Two forks the dispatch flagged. Recommendations below with rationale — **not yet locked**; KB-Lead ratifies before implementation (spec-before-code).
+
+- **D-WS4-a — grep pre-filter vs. fully agentic. → RECOMMEND: hybrid (cheap `git grep` SEED + agent-directed depth), not fully-agentic-from-scratch.** The existing `git grep` + recent-log becomes a **deterministic seed** that focuses the SDK session (the hit-file set + matched lines are handed to the agent as a starting map); the agent then **reads those + follows its own reasoning** — opening related files, issuing further reads/greps through the read-only layer — to synthesize the depth-bar note. Rationale: (1) bounds the search space in a large repo → fewer tool calls, faster convergence under `maxToolCalls`; (2) it mirrors the **Web posture** ("search broadly, then read several sources in depth") — grep is Code's *search*, agentic file-reading is the *depth*; (3) it **preserves the RESEARCH-14 deterministic fallback for free** — the seed IS today's grep note, so an SDK-unavailable env degrades to it gracefully; (4) avoids unbounded directory walks. The agent is **seeded, not caged** — it may read beyond the seed (so a thin-grep topic still gets reasoned over), with `maxToolCalls` + the per-Instance ceiling as the hard backstops. *Fully-agentic-from-scratch* (no seed) is rejected for v1: it burns budget re-discovering what grep finds in one call and loses the cheap fallback.
+- **D-WS4-b — bounding a large repo. → RECOMMEND: a deterministic candidate-set guard fed to the agent, with `maxToolCalls` as the hard read-budget backstop.** Concretely (proposed defaults, **tunable**, KB-Lead to set the numbers): cap the files the session may open to the **grep-hit set + a bounded relevance frontier** — *≤ ~40 candidate files*, *≤ ~256 KB read per file* (truncate-with-marker beyond), and a **path ignore-set** that skips `.git/`, `node_modules/`, `dist/`/`build/` artifacts, lockfiles, and binary/generated blobs. The read tools enforce the per-file byte cap + ignore-set deterministically (the agent can't escape them); `maxToolCalls` caps the number of reads; the per-Instance ceiling (RESEARCH-11) caps passes. Rationale: keeps egress/compute bounded **and** convergent without the agent drowning in a monorepo, while the hard caps live in the read layer (not the prompt). The exact caps are a **KB-Lead/Principal tuning call**, not a Slice-1 blocker — the *mechanism* (deterministic guard + budget backstop) is what RESEARCH-20 asserts.
+
 ## 9. Changelog
 
+- 2026-06-06 — **RESEARCH-20: Code researcher grep → agentic (WS4)** (Principal app-review #7 — the Code
+  researcher's run was a literal "code" string-dump, "extremely low effort"; KB-Lead root-caused it as a
+  deterministic `git grep` with no model/SDK/budget). New requirement: the Code researcher must **reason
+  over the repo via the Copilot SDK** behind the same `ResearchFn` seam as Web/M365 — read relevant files
+  in depth and synthesize a **substantive, source-attributed findings-note** (RESEARCH-17 depth bar) with
+  **real `path:line` citations**, honoring `maxToolCalls` + the RESEARCH-18 timeout, with the **RESEARCH-10
+  read-only invariants intact** (read-only `codeGit` layer + isolated gitignored worktree + read-only
+  `availableTools` allow-list), repo content framed as **DATA (RESEARCH-12)**, query from the **request
+  (D6a)**, and a **deterministic grep fallback retained (RESEARCH-14)**. **Slice 1 = local repo**; gh/az PR
+  reads stay as-is. The degenerate "code" outbound query was already fixed in WS1 #6 (`researchWhatFor` →
+  real name, not the template word). **Two forks proposed with recommendations (§8 D-WS4-a/b), flagged for
+  KB-Lead ratification:** (a) hybrid grep-seed + agent-directed depth (not fully-agentic); (b) deterministic
+  candidate-set guard (file-count/byte caps + ignore-set) with `maxToolCalls` as the hard backstop.
+  **Spec-only — no implementation until this lands + is reviewed** (KB-Lead product + KB-QD gate-2).
 - 2026-06-04 — **RESEARCH-18: session timeout is a stuck-backstop, not a budget — and both it + the
   budget are user-editable** (Principal, from a live `Run now` failure: `research.session-failed:
   Timeout after 60000ms waiting for session.idle`). Root cause: the live SDK sessions used the Copilot
