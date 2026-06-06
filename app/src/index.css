@@ -379,6 +379,53 @@ button:disabled {
 .ask-save:disabled { opacity: 0.5; cursor: default; }
 .ask-save-status.error { color: var(--error); }
 
+/* --- Explore view (SPEC-0039 EXPLORE) — the read-only entity-neighborhood graph, in "The Line"
+   instrument language: flat ruled structure (no card chrome), composing the design-system primitives
+   (viz-chip / viz-btn / viz-field__input / viz-numeric). Distinct from Obsidian's generic graph. --- */
+.explore { padding: 0.25rem 0; }
+.explore-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
+.explore-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 60ch; }
+.explore-empty { color: var(--viz-ink-muted); padding: 1.2rem 0; max-width: 56ch; }
+
+/* Search-to-focus */
+.explore-search { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; }
+.explore-focus { min-width: 24ch; }
+
+/* Breadcrumb trail */
+.explore-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-bottom: 0.7rem; font-size: 0.7rem; }
+.explore-crumb { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; color: var(--viz-ink-muted); font-size: 0.7rem; letter-spacing: 0.06em; }
+.explore-crumb[data-rel]:hover { color: var(--viz-ember); }
+.explore-crumb--current { color: var(--viz-ink); cursor: default; }
+.explore-crumb-sep { color: var(--viz-idle); }
+
+/* The focused entity — a flat instrument card on the spine, lit ember (the focus) */
+.explore-center { padding: 0.6rem 0 0.8rem 0.9rem; border-left: 2px solid var(--viz-ember); margin-bottom: 1.1rem; }
+.explore-center-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.55rem; }
+.explore-center-name { font-size: 1.1rem; color: var(--viz-ink); letter-spacing: 0.02em; }
+.explore-kind { color: var(--viz-ink-muted); }
+.explore-conf { font-size: 0.72rem; color: var(--viz-ink-muted); }
+.explore-open { margin-left: auto; font-size: 0.7rem; }
+.explore-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.45rem; }
+.explore-tag { font-size: 0.62rem; }
+
+/* Center claims — read-only, the "leads back to reading" affordance */
+.explore-claims { list-style: none; padding: 0; margin: 0.6rem 0 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.explore-claim { font-size: 0.85rem; color: var(--viz-ink); }
+.explore-claim-status { font-size: 0.58rem; margin-right: 0.1rem; }
+.explore-noclaims { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
+
+/* The 1-hop neighborhood */
+.explore-neighbors-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
+.explore-neighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.explore-recenter { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
+.explore-recenter:hover { border-left-color: var(--viz-ember); background: var(--viz-rule); }
+.explore-edge { color: var(--viz-idle); font-size: 0.9rem; width: 1.1rem; text-align: center; }
+.explore-neighbor-name { color: var(--viz-ink); }
+.explore-recenter:hover .explore-neighbor-name { color: var(--viz-ember); }
+.explore-more { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
+.explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
+.explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }
+
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {
   margin: 0.75rem 0.7rem 0.2rem;

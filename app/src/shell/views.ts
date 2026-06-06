@@ -11,6 +11,7 @@ export const VIEW_REVIEWS = 'reviews';
 export const VIEW_ACTIVITY = 'activity';
 export const VIEW_STATUS = 'status';
 export const VIEW_ASK = 'ask';
+export const VIEW_EXPLORE = 'explore'; // SPEC-0039 — read-only entity-neighborhood graph view
 // Control Panel — the "Manage" section of sibling views (SPEC-0027 PANEL-1).
 export const VIEW_JOBS = 'jobs';
 export const VIEW_AGENTS = 'agents';
@@ -40,6 +41,7 @@ export const NAV_VIEWS: NavView[] = [
   { id: VIEW_ACTIVITY, label: 'Activity', icon: '📜' },
   { id: VIEW_STATUS, label: 'Status', icon: '📊' },
   { id: VIEW_ASK, label: 'Ask', icon: '💬' },
+  { id: VIEW_EXPLORE, label: 'Explore', icon: '🗺️' },
   { id: VIEW_JOBS, label: 'Jobs', icon: '🛠️', group: GROUP_MANAGE },
   { id: VIEW_AGENTS, label: 'Agents', icon: '🤖', group: GROUP_MANAGE },
   { id: VIEW_RESEARCHERS, label: 'Researchers', icon: '🔬', group: GROUP_MANAGE },

@@ -5,6 +5,7 @@
 // TYPE-ONLY imports so the renderer/preload get one import surface (`../../kb/types`) without
 // pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
 // type` is erased at build time.
+import type { ExploreEntityRef, ExploreNeighborhood } from './explorePanel';
 import type { SchedulePreset, AutonomyPosture } from './jobs';
 import type { EgressTier, ResearcherTemplate } from './researchers';
 import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
@@ -378,6 +379,11 @@ export interface KbApi {
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
   runResearcherNow(id: string): Promise<RunResearcherResult>;
   listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
+  // SPEC-0039 EXPLORE: the read-only entity-neighborhood view over the evergreen `entities/` graph.
+  // `exploreEntities` feeds the search-to-focus picker; `exploreNeighborhood` returns the focused
+  // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).
+  exploreEntities(): Promise<ExploreEntityRef[]>;
+  exploreNeighborhood(focus?: string): Promise<ExploreNeighborhood>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT
