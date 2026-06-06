@@ -58,6 +58,25 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     expect(root.textContent).toContain('About: Ada');
   });
 
+  it('WS2 PR3: composes the shared Button + EditableField primitives (DESIGN-SYS §8/§9)', async () => {
+    setApi(vi.fn(async () => [CLAIM_REVIEW]));
+    await mountReviews(root);
+    // Button — Confirm is the emphasized action (.viz-btn--primary); Reject is the neutral .viz-btn.
+    const confirm = root.querySelector('.review-confirm');
+    expect(confirm?.classList.contains('viz-btn')).toBe(true);
+    expect(confirm?.classList.contains('viz-btn--primary')).toBe(true);
+    expect(confirm?.classList.contains('primary')).toBe(false); // bespoke chrome dropped → the primitive
+    const reject = root.querySelector('.review-reject');
+    expect(reject?.classList.contains('viz-btn')).toBe(true);
+    // EditableField — the note is a labelled multiline input (a11y: the .viz-field label wraps the control).
+    const field = root.querySelector('.review-note-field.viz-field');
+    expect(field).not.toBeNull();
+    expect(field?.querySelector('.viz-field__label')).not.toBeNull();
+    const note = root.querySelector('.review-note');
+    expect(note?.classList.contains('viz-field__input')).toBe(true);
+    expect(note?.classList.contains('viz-field__input--multiline')).toBe(true);
+  });
+
   it('#145: a hung listReviews times out → retryable error (no infinite spinner), and Retry re-loads', async () => {
     const list = vi.fn<KbApi['listReviews']>().mockReturnValue(new Promise<ReviewSummary[]>(() => {})); // hangs
     setApi(list);
