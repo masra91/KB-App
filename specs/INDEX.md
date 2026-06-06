@@ -49,6 +49,7 @@ and a unique `key` here.
 | SPEC-0034 | MACOS   | macOS Signing, Entitlements & File Access (TCC-protected vaults) | architecture | draft | `architecture/` |
 | SPEC-0035 | HEALTH  | Knowledge Health & Structural Lint            | feature | draft | `features/` |
 | SPEC-0036 | CONTRA  | Contradiction Lifecycle                       | feature | draft | `features/` |
+| SPEC-0037 | EXPLORE | Explore & Visualization (entity-neighborhood view) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -66,7 +67,7 @@ assigned at creation time.
 | ~~RESEARCH~~ | _written → SPEC-0028 (key RESEARCH)_ | feature | Enrich  | Researchers: parallel registry (Web/Code/M365 + custom), invoked inline/scheduled/on-demand |
 | ~~CONNECT~~ | _written → SPEC-0020 (key CONNECT)_ | feature | Enrich  | Connect & Expand (Enrich v3) — sole writer of evergreen `entities/` + promotion gate (SPEC-0019 CANON-5) |
 | ~~ASK~~    | _written → SPEC-0026 (key ASK)_  | feature | Query     | grounded NL query — agentic structure-aware retrieval |
-| EXPLORE    | Explore & Visualization          | feature | Explore   | graphs, timelines, relationship maps |
+| ~~EXPLORE~~ | _written → SPEC-0037 (key EXPLORE)_ | feature | Explore | in-app read-only entity-neighborhood view over `entities/`; global graph + timeline deferred (v2) |
 | ~~REVIEW~~ | _written → SPEC-0018 (key REVIEW)_ | feature | Review  | the "needs you" queue (AUTO-10) — boolean escalations → primary sources |
 | ~~REFLECT~~ | _written → SPEC-0024 (key REFLECT)_ | feature | Reflect | Reflect & Rumination — runs on the Autonomous Jobs engine (SPEC-0023, key JOBS) |
 | ~~AUDIT~~  | _written → SPEC-0029 (key AUDIT)_ | feature | Audit     | canonical audit model + coverage mandate + read-only Activity/Lineage views |
