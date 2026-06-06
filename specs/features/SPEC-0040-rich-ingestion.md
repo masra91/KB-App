@@ -1,5 +1,5 @@
 ---
-spec: SPEC-0037
+spec: SPEC-0040
 key: RICHIN
 title: Rich Ingestion
 type: feature
@@ -75,9 +75,10 @@ spec is done only when all of §4 is delivered end-to-end.*
   at any size; RICHIN only *warns* above a soft threshold (RICHIN-11).
 - **New surfaces** — hotkey/tray quick-capture (QCAP) and folder-watch (WATCH) are
   their own specs; RICHIN enriches the **existing in-app composer** only.
-- **Inline/embedded-image extraction** from a rich paste (data-URI images, remote
-  `<img>` → local file units) — kept as Markdown image references in Slice 1; extraction
-  deferred (see §6).
+- **Inline/embedded-image extraction** from a rich paste — **deferred to Slice 2**
+  (KB-Lead). v1 preserves inline/data-URI images **within the `original.html` sidecar
+  only** (not extracted to file units); remote `<img>` remain Markdown image references
+  in `raw.md`. (See §6.)
 - **Non-HTML rich clipboard flavors** (RTF-only sources with no `text/html`) — Slice 1
   handles `text/html` + `text/plain`; RTF→Markdown deferred.
 
@@ -167,7 +168,7 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 | RICHIN-8   | must     | Conversation parsing is **conservative + non-destructive**: it triggers only on high confidence / explicit choice, falls back to ordinary rich paste otherwise, and always keeps the original clipboard as the `original.*` sidecar | none-yet | INGEST-2; DATA-2 |
 | RICHIN-9   | must     | RICHIN changes **only the composer surface + capture-time text→Markdown normalization**; it does **not** alter the inbox/commit/archive preservation spine (CAPTURE-3/4/5/7/9) or fire-and-forget (CAPTURE-2) | none-yet | CAPTURE-2,3,4; INGEST-2 |
 | RICHIN-10  | should   | `source.md` records **capture-fidelity provenance** — a `clip` block (`format: html→md \| conversation \| plain`, `original: <sidecar\|null>`) for pasted items — so the derivation is auditable | none-yet | DATA-5; CAPTURE-6,13 |
-| RICHIN-11  | may      | The composer **warns** when a dropped/pasted file exceeds a **soft size threshold** (preservation still in-vault at any size); it does not block | none-yet | (SPEC-0013 §5) |
+| RICHIN-11  | may      | The composer **soft-warns** (never blocks) when a paste/file exceeds a tunable threshold — v1: **>~1 MB pasted text** / **>~25 MB file**; preservation stays in-vault at any size | none-yet | (SPEC-0013 §5) |
 | RICHIN-12  | should   | A **pasted image** (clipboard image flavor, no markup) is captured as a **file unit** (`raw.<ext>`, `kind: file`), identical to a dropped image; if pasted with text, both units share one `captureBatch` | none-yet | CAPTURE-14; DATA-1 |
 
 ### RICHIN-1 — Rich paste → semantic Markdown
@@ -250,10 +251,11 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 - **Traces:** CAPTURE-2,3,4, INGEST-2
 - **Verify:** none-yet · *(later: reuse SPEC-0013 ingest/orchestrator tests as a guard)*
 
-## 5. Design forks — recommendations for KB-Lead ratification
+## 5. Design forks — RATIFIED by KB-Lead (2026-06-06)
 
-> Each fork states the question, the options, a **recommendation**, and why. KB-Lead
-> ratifies (or overrides) on product review; nothing is locked until then.
+> Each fork states the question, the options, the **recommendation**, and why. All
+> three were **ratified by KB-Lead on product review (2026-06-06)**; recorded here as
+> the locked decisions.
 
 ### Fork 1 — Formatting fidelity: how much to preserve (Markdown vs raw)
 - **Question:** On a rich paste, what is the durable source of truth — flatten to plain
@@ -261,7 +263,8 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 - **Options:** (a) flatten to plain text; (b) convert to Markdown, discard HTML;
   (c) **Markdown is the captured payload (`raw.md`), original clipboard HTML kept
   verbatim as a sidecar (`original.html`).**
-- **Recommendation: (c).**
+- **Decision: (c) — RATIFIED (KB-Lead).** *"Re-derivable-on-Replay is the right reason;
+  the verbatim original honors INGEST-2 immutability."*
 - **Rationale:** Conversion is lossy and converter-versioned; (a) throws away the
   structure that's the whole point, (b) makes the lossy step irreversible. (c) honors
   preservation-first (INGEST-2/CAPTURE-4) — the true bytes are never destroyed and
@@ -276,7 +279,7 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 - **Options:** (a) per-type capture-time extraction (PDF→text, docx→md, OCR);
   (b) **uniform byte-for-byte preservation, one unit per file, `mimeType` recorded,
   extraction deferred to Enrich**; the surface is type-aware only for icons/warnings.
-- **Recommendation: (b).**
+- **Decision: (b) — RATIFIED (KB-Lead)** (matches CAPTURE-4/14).
 - **Rationale:** (a) drags enrichment into the sacred capture path and multiplies
   failure modes against the fire-and-forget guarantee — exactly what SPEC-0013 §5 and
   SPEC-0008 already defer to Enrich. (b) keeps capture dumb/reliable, reuses CAPTURE-14
@@ -290,8 +293,9 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 - **Options:** (a) ordinary rich text (no special handling); (b) **detect/elect →
   normalize to a single Markdown source with attributed ordered turns**; (c) split each
   turn into a separate unit.
-- **Recommendation: (b), gated on high-confidence detection or an explicit "paste as
-  conversation" choice, with original-clip sidecar always kept.**
+- **Decision: (b) — RATIFIED (KB-Lead)**, gated on high-confidence detection or an
+  explicit "paste as conversation" choice, with original-clip sidecar always kept;
+  no turn-splitting at ingest (that's Enrich's job).
 - **Rationale:** (a) loses attribution (who-said-what is the value); (c) destroys the
   conversation-as-context and front-runs Enrich's semantic decomposition. (b) keeps one
   artifact = one source (CAPTURE-14), preserves the ordering/attribution signal for
@@ -302,25 +306,27 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
 
 ## 6. Open questions
 
-- [ ] **HTML→Markdown converter** *(engineering, for impl + KB-Lead awareness)* —
-      in-house minimal converter vs a well-aged library (e.g. Turndown). Lean library
-      for table/nesting correctness, **pinned + ≥7-day-aged** per the dep guard (E1/ENG);
-      revisit if the dependency surface is unjustified. Decide at implementation.
-- [ ] **Soft size-warning threshold (RICHIN-11)** — concrete value (e.g. 25 MB?) and
-      whether it's a warn-only or a confirm. Confirm with KB-Lead; preservation stays
+**Resolved on KB-Lead product review (2026-06-06):**
+- [x] **HTML→Markdown converter** — use a **reputable, well-established HTML→Markdown
+      library, pinned + ≥7-day-aged (E1)**; **do not hand-roll HTML parsing**
+      (correctness/security). The single dependency must be justified at implementation.
+- [x] **Soft size-warning threshold (RICHIN-11)** — **soft-warn, never block**; v1
+      (tunable): **>~1 MB pasted text / >~25 MB file**. Preservation stays
       in-vault-at-any-size regardless.
-- [ ] **Inline/embedded images in a rich paste** — Slice 1 keeps `<img>`/data-URI as
-      Markdown image references. Extracting them into sibling file units (sharing the
-      `captureBatch`) is deferred — decide whether remote-`<img>` fetch belongs in
-      capture at all (offline/privacy) or only in Enrich.
+- [x] **Inline/embedded images in a rich paste** — **defer extraction to Slice 2.** v1
+      preserves inline/data-URI images **within the `original.html` sidecar only** (not
+      extracted to file units); remote `<img>` stay as Markdown image references in
+      `raw.md`. (Re-decide remote-fetch-vs-Enrich when Slice 2 is scoped.)
+- [x] **`captureBatch` for a single rich paste** — only mint a `captureBatch` when a
+      gesture yields **>1 unit** (e.g. text + pasted image); a lone paste needs none.
+      Matches SPEC-0013's "arrived together" semantics.
+
+**Still open:**
 - [ ] **Non-HTML rich flavors (RTF only)** — some native apps offer RTF without
       `text/html`. Slice 1 handles `text/html`+`text/plain`; RTF→Markdown deferred.
 - [ ] **Conversation turn schema + platform adapters** — the stable turn representation
       (headings vs a fenced metadata block) and which platforms get dedicated adapters
       in the conversation slice.
-- [ ] **`captureBatch` for a single rich paste** — a lone paste needs no batch; confirm
-      we only mint a `captureBatch` when a gesture yields >1 unit (e.g. text + pasted
-      image), matching SPEC-0013's "arrived together" semantics.
 
 ## 7. Changelog
 
@@ -328,6 +334,13 @@ provenance: { origin: principal, surface: in-app-panel, captureBatch: 01J…, �
   composer surface + capture-time text→Markdown normalization for **rich/formatted
   paste**, **multi-file drag**, and **conversation paste**, without changing the
   preservation/archive spine. Reserved RICHIN-1…12. Three design forks recommended for
-  KB-Lead ratification (formatting fidelity → keep Markdown + original sidecar; per-type
-  files → uniform preserve, defer extraction; chat-paste → single attributed source).
-  Slice 1 = rich-text paste + multi-file drag; conversation parsing follows in-spec.
+  KB-Lead ratification. Slice 1 = rich-text paste + multi-file drag; conversation
+  parsing follows in-spec.
+- 2026-06-06 — renumbered SPEC-0037 → **SPEC-0040** per KB-PM's allocation of record
+  (0037=WATCH, 0038=QCAP, 0039=EXPLORE, 0041=INTAKE) after a 4-way next-free collision
+  (main topped at 0036).
+- 2026-06-06 — **product-APPROVED by KB-Lead; all three forks RATIFIED.** Open-question
+  answers folded in: HTML→MD via a reputable pinned ≥7-day library (no hand-rolling);
+  RICHIN-11 soft-warn thresholds set (>~1 MB text / >~25 MB file, never block); inline-
+  image extraction deferred to Slice 2 (v1 keeps them in `original.html`); `captureBatch`
+  minted only for multi-unit gestures. Cleared to KB-QD gate-2.
