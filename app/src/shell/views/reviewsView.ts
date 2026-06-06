@@ -99,10 +99,13 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
           ${r.refs.length ? `<p class="muted">About: ${r.refs.map(esc).join(', ')}</p>` : ''}
           <p class="muted">Raised by: ${esc(r.stage)}</p>
         </details>
-        <textarea class="review-note" rows="2" placeholder="Optional note (e.g. a correction) — saved as a source"></textarea>
+        <label class="viz-field review-note-field">
+          <span class="viz-field__label viz-signage">Note (optional)</span>
+          <textarea class="review-note viz-field__input viz-field__input--multiline" rows="2" placeholder="Optional note (e.g. a correction) — saved as a source"></textarea>
+        </label>
         <div class="review-actions">
-          <button type="button" class="primary review-confirm" data-id="${esc(r.id)}">Confirm</button>
-          <button type="button" class="review-reject" data-id="${esc(r.id)}">Reject</button>
+          <button type="button" class="viz-btn viz-btn--primary review-confirm" data-id="${esc(r.id)}">Confirm</button>
+          <button type="button" class="viz-btn review-reject" data-id="${esc(r.id)}">Reject</button>
         </div>
       </li>`,
     )

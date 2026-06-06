@@ -337,33 +337,16 @@ li.review {
   margin: 0.4rem 0 0;
   font-size: 0.92rem;
 }
-textarea.review-note {
-  width: 100%;
-  box-sizing: border-box;
+/* WS2 PR3: the note is the EditableField primitive (.viz-field__input--multiline) and Confirm/Reject
+   are the Button primitive (.viz-btn[--primary]) — design-system.css owns their styling now. Only the
+   field-wrapper spacing + the action-row layout remain here. */
+.review-note-field {
+  display: flex;
   margin: 0.5rem 0;
-  background: var(--bg);
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.45rem 0.6rem;
-  font: inherit;
-  resize: vertical;
 }
 .review-actions {
   display: flex;
   gap: 0.5rem;
-}
-button.review-reject {
-  background: transparent;
-  color: var(--fg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.45rem 0.9rem;
-  cursor: pointer;
-}
-button.review-reject:hover {
-  border-color: var(--error);
-  color: var(--error);
 }
 button:disabled {
   opacity: 0.5;
