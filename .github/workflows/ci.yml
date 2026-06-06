@@ -165,10 +165,10 @@ jobs:
       - name: Package the app (the snapshot boots the real artifact, TEST-4)
         run: npm run package
       - name: Regenerate the design-system visual baseline(s) — linux, under xvfb
-        # Scoped to the design-system snapshot file: a full e2e run would also fire the macOS/Windows-
-        # targeted smokes on linux (unverified there) and fail before we commit. --update-snapshots
-        # writes (and passes on) the *-linux.png reference.
-        run: xvfb-run -a npm run test:e2e -- e2e/designSystem.e2e.ts --update-snapshots
+        # Scoped to the showcase snapshot file (DESIGN-SHOWCASE): a full e2e run would also fire the
+        # macOS/Windows-targeted smokes on linux (unverified there) and fail before we commit.
+        # --update-snapshots writes (and passes on) the *-linux.png reference.
+        run: xvfb-run -a npm run test:e2e -- e2e/showcase.e2e.ts --update-snapshots
       - name: Commit + push the regenerated *-linux.png baselines
         shell: bash
         run: |

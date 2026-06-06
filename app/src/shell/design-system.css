@@ -54,13 +54,16 @@
 .viz-ruled { border: 0; border-top: 1px solid var(--viz-rule); }   /* a structural rule, not a card edge */
 .viz-spine { border-left: 2px solid var(--viz-rule); }             /* the spine stations/strips hang off */
 .viz-no-chrome { border-radius: 0; box-shadow: none; background: transparent; } /* kill UI-kit card tells */
-.viz-focusable:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: 1px; } /* never the framework indigo */
+/* `.is-hover` / `.is-focus` are STATIC force-hooks (DESIGN-SHOWCASE §3): they share each interaction
+   pseudo's exact rule so the showcase gallery can pin :hover/:focus-visible in a snapshot without real
+   interaction. No new styling — they alias the pseudo. (Harmless on feature surfaces; only the gallery sets them.) */
+.viz-focusable:focus-visible, .viz-focusable.is-focus { outline: 2px solid var(--viz-ember); outline-offset: 1px; } /* never the framework indigo */
 
 /* Badge / chip base — uppercase signage, ruled, muted; state carried by glyph + hue + fill, never color alone (§3 DESIGN-4). */
 .viz-chip { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem; border: 1px solid var(--viz-rule); padding: 0.05rem 0.4rem; color: var(--viz-ink-muted); }
 /* Button base — the only rounding allowed off-structure is a ≤4px button radius; hover/active tint with state hues, not blue. */
 .viz-btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; background: transparent; color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 3px; padding: 0.25rem 0.7rem; cursor: pointer; }
-.viz-btn:hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-btn:hover, .viz-btn.is-hover { border-color: var(--viz-ember); color: var(--viz-ember); }
 .viz-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* State-semantics utilities (§3) — the canonical hue per state; pair with a glyph + fill at the call site. */
@@ -80,13 +83,13 @@
 /* --- Button variants (§3) — intent modifiers on the .viz-btn base above. ---------------------- */
 .viz-btn--sm { font-size: 0.62rem; padding: 0.12rem 0.5rem; } /* dense instrument rows */
 .viz-btn--primary { border-color: var(--viz-ink-muted); }     /* the one emphasized action in a group */
-.viz-btn--primary:hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-btn--primary:hover, .viz-btn--primary.is-hover { border-color: var(--viz-ember); color: var(--viz-ember); }
 /* danger — destructive: oxide BORDER, label stays --viz-ink (contract §2: oxide never colors normal text). */
 .viz-btn--danger { border-color: var(--viz-oxide); }
-.viz-btn--danger:hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
+.viz-btn--danger:hover, .viz-btn--danger.is-hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
 /* ghost — low-emphasis / inline (was button.link): muted label, no border, ember on hover. */
 .viz-btn--ghost { border-color: transparent; padding-left: 0; padding-right: 0; color: var(--viz-ink-muted); }
-.viz-btn--ghost:hover { color: var(--viz-ember); }
+.viz-btn--ghost:hover, .viz-btn--ghost.is-hover { color: var(--viz-ember); }
 /* busy / dispatching — opacity-only ember breathe (§3 states; VIZ-9). Reduced-motion zeroes it (below),
    and busy still reads via the ember hue + a static label, so nothing is lost. */
 .viz-btn--busy { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
@@ -96,7 +99,7 @@
    Ordering is meaningful (least→most). Two variants: neutral (plain choice) + clearance (egress temp). */
 .viz-seg { display: inline-flex; gap: 2px; }
 .viz-seg-opt { appearance: none; font: inherit; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; color: var(--viz-idle); font-size: 0.62rem; padding: 0.12rem 0.5rem; cursor: pointer; }
-.viz-seg-opt:hover:not([aria-checked='true']) { border-color: var(--viz-ink-muted); color: var(--viz-ink); }
+.viz-seg-opt:hover:not([aria-checked='true']), .viz-seg-opt.is-hover:not([aria-checked='true']) { border-color: var(--viz-ink-muted); color: var(--viz-ink); }
 /* neutral active — ink label on a ruled fill (steering choices: schedule, autonomy, cadence). */
 .viz-seg-opt[aria-checked='true'] { color: var(--viz-ink); border-color: var(--viz-ink-muted); background: var(--viz-rule); }
 /* clearance variant — the active rung fills in its egress TEMPERATURE (consequence = hue); reinforced by
@@ -122,11 +125,11 @@
 .viz-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
 .viz-field__label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
 .viz-field__input { background: var(--viz-field); color: var(--viz-ink); border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0; padding: 0.2rem 0.1rem; font: inherit; }
-.viz-field__input:focus-visible { border-bottom-color: var(--viz-ember); }
+.viz-field__input:focus-visible, .viz-field__input.is-focus { border-bottom-color: var(--viz-ember); }
 .viz-field__input--numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* tabular figures (EFFORT, #208) */
 /* multiline (the standing-orders box) — full ruled border + vertical resize, ember border on focus. */
 .viz-field__input--multiline { display: block; width: 100%; border: 1px solid var(--viz-rule); padding: 0.5rem 0.6rem; resize: vertical; }
-.viz-field__input--multiline:focus-visible { border-color: var(--viz-ember); }
+.viz-field__input--multiline:focus-visible, .viz-field__input--multiline.is-focus { border-color: var(--viz-ember); }
 /* invalid — oxide BOTTOM-RULE/border (≥3:1 graphic); the message + value text stay --viz-ink (§2). */
 .viz-field__input--invalid, .viz-field__input--invalid.viz-field__input--multiline { border-bottom-color: var(--viz-oxide); border-color: var(--viz-oxide); }
 

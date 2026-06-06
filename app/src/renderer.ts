@@ -12,10 +12,12 @@ import '@fontsource/ibm-plex-sans/400.css';
 import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
 import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
 import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" — folder-permission UX
+import './shell/views/showcase.css'; // DESIGN-SHOWCASE — dev-only primitive gallery layout (?showcase)
 import './index.css';
 import type { PathInspection } from './kb/types';
 import { esc, baseName } from './shell/html';
 import { mountShell } from './shell/shell';
+import { mountShowcase } from './shell/views/showcaseView';
 import { mountPermissionGate, icloudNoteHtml } from './shell/permissionGate';
 import { isLocalTccProtected, isICloudVault } from './kb/permissions';
 
@@ -106,7 +108,19 @@ async function onCreate(): Promise<void> {
   btn.textContent = 'Create KB';
 }
 
+/** Dev-only design-system showcase gate (design-system-showcase.md): reachable ONLY via `?showcase`
+ *  or `#showcase` — never in the user nav. Static, no IPC/pipeline/`active` dependency, so it renders
+ *  on any (or no) vault — that's what lets the HYBRID visual snapshot pin the primitives directly
+ *  (the parked #233 needed a git+pipeline harness). The e2e drives it by setting the hash post-boot. */
+function showcaseRequested(): boolean {
+  return new URLSearchParams(location.search).has('showcase') || location.hash.toLowerCase().includes('showcase');
+}
+
 async function init(): Promise<void> {
+  if (showcaseRequested()) {
+    mountShowcase(root);
+    return;
+  }
   const state = await window.kbApi.getState();
   if (state.activeVaultPath && state.vaultConfig) {
     mountShell(root, state.activeVaultPath, state.vaultConfig.name);
@@ -114,5 +128,10 @@ async function init(): Promise<void> {
     renderSetup();
   }
 }
+
+// Let the showcase be reached after boot (the e2e sets `location.hash = 'showcase'` — no reload, no IPC).
+window.addEventListener('hashchange', () => {
+  if (showcaseRequested()) mountShowcase(root);
+});
 
 void init();
