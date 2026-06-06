@@ -70,6 +70,68 @@
 .viz-state-settled { color: var(--viz-patina); }
 .viz-state-error { color: var(--viz-oxide); }
 
+/* ============================================================================================== */
+/* Component primitives (WS2 / DESIGN-SYS §3–§6) — the four canonical, surface-agnostic controls the
+   feature surfaces COMPOSE (Researchers/Jobs/Reviews/…) instead of re-deriving inline or reaching for
+   the generic look. Promoted from the proven Field-Desk inline controls (.rdesk-*) into one source of
+   truth, in "The Line" instrument language. Anatomy/variants/states/a11y per specs/design/_design-system.md.
+   Surface-specific ASSEMBLY (the strip layout, the ladder's labelling, the spine) stays in surface files. */
+
+/* --- Button variants (§3) — intent modifiers on the .viz-btn base above. ---------------------- */
+.viz-btn--sm { font-size: 0.62rem; padding: 0.12rem 0.5rem; } /* dense instrument rows */
+.viz-btn--primary { border-color: var(--viz-ink-muted); }     /* the one emphasized action in a group */
+.viz-btn--primary:hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+/* danger — destructive: oxide BORDER, label stays --viz-ink (contract §2: oxide never colors normal text). */
+.viz-btn--danger { border-color: var(--viz-oxide); }
+.viz-btn--danger:hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
+/* ghost — low-emphasis / inline (was button.link): muted label, no border, ember on hover. */
+.viz-btn--ghost { border-color: transparent; padding-left: 0; padding-right: 0; color: var(--viz-ink-muted); }
+.viz-btn--ghost:hover { color: var(--viz-ember); }
+/* busy / dispatching — opacity-only ember breathe (§3 states; VIZ-9). Reduced-motion zeroes it (below),
+   and busy still reads via the ember hue + a static label, so nothing is lost. */
+.viz-btn--busy { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
+
+/* --- SegmentedControl (§4) — a spatial exposure/choice scale; a role=radiogroup of ghosted segments,
+   ZERO radius (a ruled register, not a pill toggle). Replaces native <select> for small bounded enums.
+   Ordering is meaningful (least→most). Two variants: neutral (plain choice) + clearance (egress temp). */
+.viz-seg { display: inline-flex; gap: 2px; }
+.viz-seg-opt { appearance: none; font: inherit; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; color: var(--viz-idle); font-size: 0.62rem; padding: 0.12rem 0.5rem; cursor: pointer; }
+.viz-seg-opt:hover:not([aria-checked='true']) { border-color: var(--viz-ink-muted); color: var(--viz-ink); }
+/* neutral active — ink label on a ruled fill (steering choices: schedule, autonomy, cadence). */
+.viz-seg-opt[aria-checked='true'] { color: var(--viz-ink); border-color: var(--viz-ink-muted); background: var(--viz-rule); }
+/* clearance variant — the active rung fills in its egress TEMPERATURE (consequence = hue); reinforced by
+   position + label so it reads without color (§4 a11y). Higher specificity overrides the neutral fill. */
+.viz-seg-opt--clearance[aria-checked='true'][data-temp='local-only'] { background: var(--viz-patina); border-color: var(--viz-patina); color: var(--viz-field); }
+.viz-seg-opt--clearance[aria-checked='true'][data-temp='internal-tenant'] { background: var(--viz-brass); border-color: var(--viz-brass); color: var(--viz-field); }
+.viz-seg-opt--clearance[aria-checked='true'][data-temp='public-web'] { background: var(--viz-ember); border-color: var(--viz-ember); color: var(--viz-field); }
+
+/* --- ConfirmInline (§5) — the consequence-gate; expands in place under the trigger, framed by a left
+   hue rule (caution=brass default, danger=oxide). Message names what will happen; always dismissable
+   (#215). The confirm action is a danger/clearance Button, the dismiss a ghost Button. */
+.viz-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; border-left: 2px solid var(--viz-brass); padding-left: 0.6rem; }
+.viz-confirm--danger { border-left-color: var(--viz-oxide); }
+.viz-confirm__msg { flex: 1 1 100%; margin: 0; color: var(--viz-ink); } /* consequence text stays --viz-ink (§2) */
+/* WS1 #215 hidden-contract: the display:flex above wins over the UA `[hidden]` rule, so the primitive
+   MUST restore display:none when hidden — else a confirm toggled via the `hidden` attribute can't dismiss. */
+.viz-confirm[hidden] { display: none; }
+
+/* --- EditableField (§6) — inline value editor; a legible setting at rest that edits in place via a
+   bottom-rule affordance (no boxed input chrome) lighting ember on focus. Steering fields stay neutral
+   --viz-ink (axis-coloring rule, #208) — never a clearance hue. The ember .viz-focusable ring (at the
+   call site) reinforces the bottom-rule focus, so focus is never rule-only (§6 a11y). */
+.viz-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
+.viz-field__label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
+.viz-field__input { background: var(--viz-field); color: var(--viz-ink); border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0; padding: 0.2rem 0.1rem; font: inherit; }
+.viz-field__input:focus-visible { border-bottom-color: var(--viz-ember); }
+.viz-field__input--numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* tabular figures (EFFORT, #208) */
+/* multiline (the standing-orders box) — full ruled border + vertical resize, ember border on focus. */
+.viz-field__input--multiline { display: block; width: 100%; border: 1px solid var(--viz-rule); padding: 0.5rem 0.6rem; resize: vertical; }
+.viz-field__input--multiline:focus-visible { border-color: var(--viz-ember); }
+/* invalid — oxide BOTTOM-RULE/border (≥3:1 graphic); the message + value text stay --viz-ink (§2). */
+.viz-field__input--invalid, .viz-field__input--invalid.viz-field__input--multiline { border-bottom-color: var(--viz-oxide); border-color: var(--viz-oxide); }
+
+/* ============================================================================================== */
+
 /* Motion: the single ambient ember breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
    own active element (e.g. .viz-breathe .viz-cell-current). */
 @keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
