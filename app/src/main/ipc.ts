@@ -27,6 +27,8 @@ import {
   listResearcherRunsForActive,
 } from './pipeline';
 import { recall } from '../kb/recall';
+import { makeReadOnlyTools } from '../kb/recallTools';
+import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
@@ -291,6 +293,22 @@ export function registerIpc(): void {
     } catch {
       return { ok: false, reason: 'open-failed' };
     }
+  });
+
+  // SPEC-0039 EXPLORE: the read-only entity-neighborhood view. Reads the EVERGREEN graph at the active
+  // vault root (like recall/ask, NOT the staging worktree — EXPLORE-3: canonical state only), via the
+  // read-only recall tools — so it's read-only by construction (EXPLORE-1: no write path here).
+  ipcMain.handle('kb:exploreEntities', async (): Promise<ExploreEntityRef[]> => {
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) return [];
+    return listExploreEntities(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)));
+  });
+
+  ipcMain.handle('kb:exploreNeighborhood', async (_e, focus?: unknown): Promise<ExploreNeighborhood> => {
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) return { found: false, claims: [], neighbors: [], shown: 0, total: 0 };
+    const f = typeof focus === 'string' && focus.length > 0 ? focus : undefined;
+    return buildNeighborhood(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)), f);
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config
