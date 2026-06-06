@@ -5,9 +5,9 @@
 // the shell had no `prefers-color-scheme` override (the split-theme bug the Principal flagged).
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
-const css = readFileSync(fileURLToPath(new URL('./index.css', import.meta.url)), 'utf8');
+const css = readFileSync(path.join(__dirname, 'index.css'), 'utf8'); // CJS module target → __dirname, not import.meta
 
 describe('app shell theme cohesion (#214)', () => {
   it('defines a light-mode override so the shell tracks the OS (not hardcoded dark)', () => {
