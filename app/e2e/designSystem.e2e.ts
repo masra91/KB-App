@@ -60,6 +60,11 @@ async function seedShowcaseKb(userDataDir: string): Promise<string> {
 }
 
 test.describe('DESIGN-SYS — visual snapshot of the four canonical primitives (WS2 HYBRID guard)', () => {
+  // Visual baselines are platform-suffixed and generated on the ubuntu CI runner (the snapshots
+  // dispatch job, #235). Skip everywhere but linux so the macOS/Windows e2e matrix doesn't run this
+  // against a baseline that only exists for `-linux` (it would fail for lack of a `-darwin`/`-win32` ref).
+  test.skip(process.platform !== 'linux', 'design-system visual baseline is linux-only (generated on the ubuntu CI runner)');
+
   let app: ElectronApplication | null = null;
   let userDataDir: string | null = null;
   let vaultDir: string | null = null;
