@@ -8,6 +8,7 @@
 // research adapter takes the resolved `cliPath` as data. This module is the only bridge.
 import { resolveExecutable } from './resolvePath';
 import type { WebResearchOptions } from '../kb/researchWebAgent';
+import type { CodeResearchOptions } from '../kb/researchCodeAgent';
 import type { ResearchDepsOptions } from '../kb/researchInline';
 import type { DevLog } from '../kb/devlog';
 
@@ -25,11 +26,18 @@ export function webResearchOptions(log: DevLog): WebResearchOptions {
   return { cliPath: resolveCopilotCliPath(), log };
 }
 
+/** Code-researcher SDK options (RESEARCH-20): the resolved cliPath enables the live agentic local-repo
+ *  session; absent → the deterministic grep fallback (RESEARCH-14). The dev-log surfaces a session
+ *  failure before it degrades to grep (#160: never silent). */
+export function codeResearchOptions(log: DevLog): CodeResearchOptions {
+  return { cliPath: resolveCopilotCliPath(), log };
+}
+
 /**
  * The research `DispatchDeps` options the scheduler + Run-now share — wires the resolved copilot
  * cliPath (so the SDK starts in the packaged app) and the dev-log (so a failure is logged, not
- * swallowed) into the Web adapter behind the `ResearchFn` seam.
+ * swallowed) into the Web + Code adapters behind the `ResearchFn` seam.
  */
 export function researchDepsOptions(log: DevLog): ResearchDepsOptions {
-  return { web: webResearchOptions(log) };
+  return { web: webResearchOptions(log), code: codeResearchOptions(log) };
 }
