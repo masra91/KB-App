@@ -52,6 +52,7 @@ and a unique `key` here.
 | SPEC-0039 | EXPLORE | Explore & Visualization (entity-neighborhood view) | feature | draft | `features/` |
 | SPEC-0040 | RICHIN  | Rich Ingestion (formatted paste / multi-file drag / chat) | feature | draft | `features/` |
 | SPEC-0041 | INTAKE  | Proactive Intake                              | feature | draft | `features/` |
+| SPEC-0042 | EVAL    | Evals & Scenario Harness (seeded-KB cognition evaluation) | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
