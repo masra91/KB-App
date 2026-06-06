@@ -50,6 +50,7 @@ and a unique `key` here.
 | SPEC-0035 | HEALTH  | Knowledge Health & Structural Lint            | feature | draft | `features/` |
 | SPEC-0036 | CONTRA  | Contradiction Lifecycle                       | feature | draft | `features/` |
 | SPEC-0039 | EXPLORE | Explore & Visualization (entity-neighborhood view) | feature | draft | `features/` |
+| SPEC-0040 | RICHIN  | Rich Ingestion (formatted paste / multi-file drag / chat) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -59,7 +60,7 @@ assigned at creation time.
 | Likely key | Candidate title                  | Type    | Stage     | Notes |
 | ---------- | -------------------------------- | ------- | --------- | ----- |
 | QCAP       | Quick Capture                    | feature | Ingest    | hotkey bar + tray-sheet variant of CAPTURE (SPEC-0013) — calls SPEC-0008 |
-| RICHIN     | Rich Ingestion                   | feature | Ingest    | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
+| ~~RICHIN~~ | _written → SPEC-0040 (key RICHIN)_ | feature | Ingest  | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
 | INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
 | ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
