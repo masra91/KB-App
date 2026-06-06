@@ -67,6 +67,7 @@ Checked in as a living DESIGN spec (markdown; images/diagrams optional)
 | DESIGN-6 | should   | The **AI-patterns detector owns + authors its own rubric** (delegated, not prescribed here) — grounded in its baked knowledge **plus research of current AI-app visual conventions** (online trends), scoped to a **simple Electron desktop app**. A reusable per-design check that flags drift into the generic AI look | none-yet | VIZ-8 |
 | DESIGN-7 | should   | The visual language is **coherent across surfaces** — a shared design system emerges from the per-surface design specs over time | none-yet | PRIN-17,18 |
 | DESIGN-8 | must     | The detector governs the **app's UI surface/chrome ONLY** — **AI-generated KB _content_ is fine** (the knowledge can be AI; the *app* just shouldn't *look* generically AI). The concern is the product's visual identity, not the vault's contents | none-yet | VISION-12,13 |
+| DESIGN-9 | must     | **Visual/CSS PRs are verified by the HYBRID policy** (§6) — classify first, then apply the matching gate: token/structural fix → cheap CI file-content guard; net-new visual → Visual-Design-Lead review (no unit-regression boilerplate); blessed shared primitive → one-time e2e visual snapshot, reused by migration PRs | none-yet | TEST-2; PRIN-17 |
 
 ## 5. The design spec (what a checked-in design documents)
 
@@ -79,16 +80,37 @@ A design spec (one per surface, e.g. `specs/design/<surface>.md`) documents:
 - **Key user flows covered** — the flows the QA gate verified.
 - *(Optional)* mockups / ASCII / diagrams — allowed, not required.
 
-## 6. Out of scope (for now)
+## 6. Verifying visual & CSS PRs — the HYBRID gate policy (DESIGN-9)
+
+Principal ruling (2026-06-06): visual/CSS PRs are **not** all held to the same test bar, and the
+generic unit-regression boilerplate is the wrong instrument for pixels. Instead **classify the PR,
+then apply the matching gate** — one cheap, one human, one snapshot:
+
+| PR kind | Gate | Why |
+| --- | --- | --- |
+| **Token / structural CSS fix** (theme cohesion, a moved rule, a token swap) | a cheap **CI file-content guard** — assert the bad pattern is gone **and** the intended block exists (e.g. `themeCohesion.test.ts`, #216) | catches the specific regression without a brittle pixel snapshot |
+| **Net-new visual** (a new surface/component look) | **Visual-Design-Lead review** — no unit-regression boilerplate | a human design eye is the right gate for "does this look right + distinct"; a unit test can't judge it |
+| **Blessed shared primitive** (a WS2/DESIGN-SYS component landing) | a **one-time e2e visual snapshot**, authored when the primitive lands; **migration PRs reuse it** (no per-PR guard) | the canonical form is pinned once; downstream migrations onto it inherit the coverage |
+
+Operating notes:
+- **A primitive isn't "done" until it ships {spec + the once-authored snapshot + Design-Lead sign-off}**
+  together — the blessed form, its reference snapshot, and the visual sign-off land as one unit.
+- The e2e snapshot is **opt-in / e2e** (it does not CI-gate per the ruling); migration PRs may land on
+  their **component-tier composition + a11y unit assertions** while the snapshot is authored alongside.
+- Logic fixes that merely touch incidental styling stay under the standing **regression-test rule**, not
+  this policy — classify by the PR's *primary* change.
+
+## 7. Out of scope (for now)
 
 - **A specific surface's design** — those are the per-surface design specs (the **first is
   SPEC-0032 Pipeline Visualization**).
 - **Implementation / component library** — dev work downstream of the design spec.
 - **The AI-patterns-detector internals** — its rubric is defined separately (DESIGN-6).
 
-## 7. Open questions
+## 8. Open questions
 
-- [ ] **Where design specs live** — `specs/design/<surface>.md`? Confirm the folder.
+- [x] **Where design specs live** — RESOLVED: **`specs/design/<surface>.md`** (confirmed; four specs
+      now live there — pipeline-visualization, researchers-manage, macos-permission, _design-system).
 - [x] **AI-patterns-detector rubric** — RESOLVED: **the detector authors its own** (DESIGN-6),
       researching current AI-app visual conventions; scope is the **app UI surface, not KB
       content** (DESIGN-8).
@@ -96,7 +118,7 @@ A design spec (one per surface, e.g. `specs/design/<surface>.md`) documents:
 - [ ] **Gate ordering / blocking** — both gates must pass to land; who arbitrates a tie/conflict
       (Product Lead on intent, Principal on identity).
 
-## 8. Changelog
+## 9. Changelog
 
 - 2026-06-02 — created (draft). Stands up the **visual-design workflow**: design runs **in
   parallel** (PM-enabled), authored by the **Visual-Design-Lead**, gated by the **AI-patterns
@@ -110,5 +132,11 @@ A design spec (one per surface, e.g. `specs/design/<surface>.md`) documents:
   **deliberate, gated artifact**: `specs/design/_design-system.md` (`design: DESIGN-SYS`) promotes
   the first four primitives — **Button · SegmentedControl · ConfirmInline+Dialog · EditableField** —
   into one canonical kit surfaces compose. Authored per this process (GATE 1 distinctiveness →
-  GATE 2 flow coverage); the **component-library *code*** stays downstream (§6 unchanged). New
+  GATE 2 flow coverage); the **component-library *code*** stays downstream (§7 unchanged). New
   primitives still emerge per DESIGN-7 as a 2nd surface needs them.
+- 2026-06-06 — **HYBRID visual/CSS verification policy captured** (Principal ruling, via KB-Lead/PM —
+  follow-up to the WS2 author pass, which missed folding it in). New **§6** + **DESIGN-9**: classify a
+  visual/CSS PR, then gate it — token/structural → CI file-content guard · net-new visual →
+  Visual-Design-Lead review · blessed primitive → one-time e2e snapshot reused by migrations; a
+  primitive is "done" only as {spec + snapshot + sign-off}. Renumbered Out-of-scope/Open-questions/
+  Changelog → §7/§8/§9; resolved the "where design specs live" open question (`specs/design/`).

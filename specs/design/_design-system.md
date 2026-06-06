@@ -3,14 +3,14 @@ design: DESIGN-SYS
 implements: SPEC-0033
 title: Design System — Shared Primitives ("The Line" instrument kit)
 type: design
-status: draft   # awaiting SPEC-0033 gates: GATE 1 (AI-Detector / distinctiveness) + GATE 2 (KB-QD / flow coverage)
+status: active   # both SPEC-0033 gates cleared 2026-06-06 → merged #223; implemented #225, migrations #226/#227
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-06
 updated: 2026-06-06
 related: [SPEC-0033, SPEC-0032, SPEC-0028, SPEC-0027, SPEC-0017, SPEC-0018]
 gates:
-  ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
-  qa-flow-coverage: pending # GATE 2 — KB-Quality-Driver (all key flows of the migrating surfaces)
+  ai-patterns: approved      # GATE 1 — KB-AI-Detector, 2026-06-06 ("strongest anti-generic artifact in the corpus")
+  qa-flow-coverage: approved # GATE 2 — KB-Quality-Driver, 2026-06-06 (cleared on the #223 merge)
 stage: Cross-cutting
 ---
 
@@ -167,6 +167,10 @@ egress to the public web"), never a bare "Confirm?".
   reduced-motion → instant appear. No slide/bounce.
 - **A11y** — dialog is `role="dialog"` `aria-modal="true"` with a labelled heading; focus moves to the
   confirm on open; inline variant is an `aria-live="polite"` region so the consequence is announced.
+- **Distinctiveness** — the default is an **inline, hue-ruled consequence-gate that expands in place**,
+  not a generic centered modal-over-scrim (and never the native `confirm()` dialog). The consequence is
+  worded and the gate stays in the flow of the control it guards — the opposite of the AI-app habit of a
+  rounded card popping over a dimmed app for every confirm.
 
 ## 6. Primitive: **EditableField**
 
@@ -202,6 +206,10 @@ caption (e.g. `calls / pass`) and an inline save (`primary` Button, appears on d
 - **A11y** — a real labelled form control (`<label for>` / wrapping label, not a loose input); the unit
   caption is associated via `aria-describedby`; numeric uses `inputmode="numeric"`; focus order is
   natural; the bottom-rule focus state is reinforced by the ember `.viz-focusable` ring (not rule-only).
+- **Distinctiveness** — a value that **reads as a legible setting at rest and edits in place on a single
+  bottom-rule**, not a boxed input sitting in a generic settings row/card. No filled input wells, no
+  framework form chrome; the rule lights ember on focus. The setting *is* the readout — you see the value
+  spatially (signage label + tabular figures) without opening a form.
 
 ## 7. The composition boundary (shared vs surface)
 
@@ -273,3 +281,16 @@ Each primitive's a11y contract (keyboard, focus, non-color-only state) is part o
   reduced-motion · a11y · distinctiveness per primitive, the shared/surface boundary (§7), the migration
   map (§8), and the flows GATE 2 covers (§9). **WS2 gates WS3** (researcher editors compose
   EditableField + SegmentedControl). Awaiting GATE 1 (AI-Detector) + GATE 2 (KB-QD) before `active`.
+- 2026-06-06 — **both gates cleared → `active`** (merged as #223). GATE 1 (KB-AI-Detector) passed with a
+  strong distinctiveness verdict ("strongest anti-generic artifact in the corpus"); GATE 2 (KB-QD)
+  cleared on merge. Implemented in **#225** (the four primitives hoisted into `design-system.css` +
+  Researchers migrated), then consumed by **#226** (WS3 editable budget/timeout on EditableField,
+  closing RESEARCH-15/18) and **#227** (Reviews migrated onto Button + EditableField).
+- 2026-06-06 — **gate-1 nit + design sign-off** (follow-up): added the labelled **distinctiveness** line
+  to ConfirmInline (§5) and EditableField (§6) for parity with Button/SegmentedControl (KB-AI-Detector
+  non-blocking note). **Retroactive Design-Lead sign-off of the #225 implementation: PASS** — the
+  `.viz-btn--*`, `.viz-seg-opt(--clearance)`, `.viz-confirm`, `.viz-field__*` classes are faithful to
+  this spec, honor the §2 contrast contract + the #208 axis rule, and even caught the #215 hidden-
+  dismissability edge. **Deferred-to-surface (not drift):** the Confirm **`dialog`** variant and an
+  explicit **`clearance-tinted` Button** modifier are surface-composed for now; promote to the shared
+  layer when a 2nd surface needs them.
