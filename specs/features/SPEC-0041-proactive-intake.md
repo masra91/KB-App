@@ -44,11 +44,16 @@ calls the Ingest pipeline for each.*
   enabled, config}` (a SPEC-0023 `intake` job type).
 - **Pulling** new items from a feed on a recurring cadence (JOBS named presets), preserving
   each as a **primary source** via the INGEST spine.
-- **Built-in connector templates:** **RSS/Atom** (public, no-auth) and **M365 mail +
-  calendar** (internal-tenant, reusing the SPEC-0028 M365 OAuth-MCP BYOA substrate).
+- **Built-in connector templates (Slice 1):** **RSS/Atom** (public, no-auth) and **M365 mail**
+  (internal-tenant, reusing the SPEC-0028 M365 OAuth-MCP BYOA substrate).
 - **Recurring-item dedup / idempotency** — never re-archive an item already pulled.
 - **Connector-default classification** (scope + sensitivity, SCOPE-14) at ingestion.
 - **Control-Panel management** (add/configure/enable/run-now/last-run) — a Sources surface.
+
+**Deferred to Slice 2:**
+- **M365 calendar** — the mutable-event-snapshot semantics (events move/cancel → new source
+  vs. update vs. contradiction) are real complexity; v1 stays clean as RSS + M365-mail
+  (KB-Lead product ruling, 2026-06-06).
 
 **Out of scope (for now):**
 - **Preservation / classify / catalog / enqueue** — that is the INGEST spine (SPEC-0008);
@@ -132,9 +137,9 @@ single-flight/promotion; the SPEC-0008 Ingest spine; and the SPEC-0028 connector
 ## 4. User flows / feature surface
 
 **Primary flow — subscribe a feed:**
-1. Control Panel → Sources → **Add intake connector** → pick a template (RSS / M365 mail /
-   M365 calendar).
-2. Configure: feed URL (RSS) or tenant/surface + folder/query (M365); **scope + sensitivity
+1. Control Panel → Sources → **Add intake connector** → pick a template (RSS / M365 mail;
+   M365 calendar arrives in Slice 2).
+2. Configure: feed URL (RSS) or tenant + mail folder/query (M365 mail); **scope + sensitivity
    defaults**; **cadence** (JOBS preset: a few times/day · hourly · daily · off); an initial
    **backfill window**; enable.
 3. **Run now** to test → the connector pulls new items → each is archived as a primary source
@@ -150,8 +155,9 @@ single-flight/promotion; the SPEC-0008 Ingest spine; and the SPEC-0028 connector
 - **Feed unreachable / fetch error:** the pass degrades gracefully — already-archived items
   stay preserved; the failure is audited and surfaced; the cursor is not advanced past
   unfetched items (INTAKE-12).
-- **Item updated upstream** (e.g. a calendar event moves): the new snapshot arrives as a new
-  immutable primary source (append-only), deduped on `external-id + last-modified`.
+- **Item revised upstream** (e.g. an RSS item is edited under the same GUID): the new snapshot
+  arrives as a new immutable primary source (append-only), deduped on `external-id +
+  last-modified`. (Calendar's richer move/cancel semantics are a Slice-2 concern.)
 
 ## 5. Requirements
 
@@ -161,7 +167,7 @@ single-flight/promotion; the SPEC-0008 Ingest spine; and the SPEC-0028 connector
 | INTAKE-2   | must     | **Boundary vs RESEARCH:** INTAKE produces **primary** sources (subscription/time-driven, the item itself); RESEARCH produces **secondary** cited sources (request/topic-driven corroboration). The test: an item is INTAKE iff it enters as a primary source the KB is built on, **not** a citation about an existing topic | none-yet | DATA-1,2; RESEARCH-5 |
 | INTAKE-3   | must     | Every pulled item flows through the **SPEC-0008 Ingest spine** (archive immutable primary source + commit **before** processing → classify → catalog → enqueue Enrich); INTAKE is an **arrival surface**, not a new pipeline, and does not reimplement preservation | none-yet | INGEST-1,2,6; LIFE-2 |
 | INTAKE-4   | must     | A **connector registry** records each subscription as a per-vault job `{id, type, schedule, enabled, config}` with a typed per-template `config` block; the Principal enables/disables and sets cadence | none-yet | JOBS-1,14; VISION-11 |
-| INTAKE-5   | must     | **Connector set v1** ships **RSS/Atom** (public, no-auth) and **M365 mail + calendar** (internal-tenant, reusing the SPEC-0028 M365 OAuth-MCP substrate); the connector core is **generic** so further templates are additive | none-yet | RESEARCH-16; VISION-7 |
+| INTAKE-5   | must     | **Connector set v1 (Slice 1)** ships **RSS/Atom** (public, no-auth) and **M365 mail** (internal-tenant, reusing the SPEC-0028 M365 OAuth-MCP substrate); **M365 calendar is Slice 2** (mutable-event semantics); the connector core is **generic** so further templates are additive | none-yet | RESEARCH-16; VISION-7 |
 | INTAKE-6   | must     | **BYOA / no stored secrets:** INTAKE authenticates exactly as RESEARCH-9 (M365 MCP OAuth, owned by the main process, never in the renderer, redacted in logs; RSS is unauthenticated public). **KB-App stores no credentials.** A connector that cannot authenticate without app-managed secrets **does not ship** | none-yet | RESEARCH-9; AUTO-11; PRIN-19 |
 | INTAKE-7   | must     | **Read-only w.r.t. the world** (AUTO-6): INTAKE only **reads/polls** feeds; it **MUST NOT** mutate the remote — no mark-as-read, no delete, no send, no RSVP, no ack. The **only** state it keeps is its own **local** cursor + dedup ledger | none-yet | AUTO-6; RESEARCH-10 |
 | INTAKE-8   | must     | **Recurring-item dedup / idempotency:** a durable per-connector **cursor + dedup ledger** keyed on the feed's **stable external item ID** (RSS GUID / RFC-5322 Message-ID / Graph item id), **content-hash fallback**; a previously-ingested item is **never re-archived**. Ledger lives in the connector's per-job journal (`.kb/jobs/<job>/journal.jsonl`), versioned on `staging`, **never promoted** | none-yet | JOBS-7; INGEST(open-q: dedup) |
@@ -227,13 +233,14 @@ single-flight/promotion; the SPEC-0008 Ingest spine; and the SPEC-0028 connector
 substrate** (do not fold). Distinguished by source kind (primary vs secondary) + trigger
 (subscription vs request/topic), per §3. *Confidence: high — folding breaks DATA-1/2.*
 
-**F2 — Connector set v1.** → **RECOMMEND: RSS/Atom + M365 (mail + calendar) for v1; defer
-raw IMAP/CalDAV.** Rationale: RSS is public/no-auth (lowest risk, easiest to live-validate)
-and M365 reuses the *already-designed* OAuth-MCP BYOA substrate. **Raw IMAP/CalDAV need
-username+password or app-passwords → an app-managed secret store, which RESEARCH-9/AUTO-11
-forbid** ("KB-App stores no secrets"). They ship only if/when a BYOA-compatible auth path
-exists (e.g. OAuth-IMAP via the provider). *Confidence: high on the principle; the exact v1
-cut is KB-Lead/Principal's call.*
+**F2 — Connector set v1.** → **RESOLVED (KB-Lead product ruling, 2026-06-06): Slice 1 = RSS/Atom
++ M365 mail; M365 calendar → Slice 2; defer raw IMAP/CalDAV.** Rationale: RSS is public/no-auth
+(lowest risk, easiest to live-validate) and M365 reuses the *already-designed* OAuth-MCP BYOA
+substrate. **M365 calendar is deferred** because mutable-event-snapshot semantics (events
+move/cancel → new source vs. update vs. contradiction) add real complexity that would muddy a
+clean v1. **Raw IMAP/CalDAV need username+password or app-passwords → an app-managed secret
+store, which RESEARCH-9/AUTO-11 forbid** ("KB-App stores no secrets"); they ship only if/when a
+BYOA-compatible auth path exists (e.g. OAuth-IMAP via the provider).
 
 **F3 — Recurring-item dedup.** → **RECOMMEND: durable per-connector cursor + stable-external-ID
 ledger (content-hash fallback) in the JOBS journal** (INTAKE-8). Reuses existing storage; no
@@ -249,16 +256,16 @@ high.*
 
 ## 8. Open questions
 
-- [ ] **Exact v1 connector cut** — RSS + M365(mail+calendar) recommended (F2); does the
-      Principal want calendar in v1 or mail-only first? (calendar adds the mutable-event
-      snapshot semantics, INTAKE-8.)
+- [x] **Exact v1 connector cut** — RESOLVED (KB-Lead, 2026-06-06): **Slice 1 = RSS + M365-mail;
+      M365 calendar → Slice 2** (mutable-event-snapshot semantics).
 - [ ] **Backfill window default** — "from now" (recommended, safest) vs a bounded lookback;
       and per-connector configurability.
 - [ ] **Large/binary enclosures** (podcast audio, PDF attachments) — store in-vault vs
       pointer + extracted text. **Defer to the shared SPEC-0008 open question** (same concern,
       same answer); INTAKE should not fork it.
-- [ ] **Calendar event identity** — confirm dedup key `event-id + last-modified` and that a
-      moved/cancelled event arrives as a new append-only snapshot (not an edit).
+- [ ] **Calendar event identity (Slice 2)** — deferred with the calendar connector: dedup key
+      `event-id + last-modified`, and whether a moved/cancelled event is a new append-only
+      snapshot vs. a contradiction (SPEC-0036). Resolve when Slice 2 is specced.
 - [ ] **Cadence floor** — JOBS named presets (few-times/day/hourly/daily) — is hourly fine for
       mail, or does any feed need finer? (Likely fine; raw-cron is the JOBS-2 escape hatch.)
 - [ ] **Per-connector autonomy posture** — INTAKE is additive/reversible (Guarded default,
@@ -267,6 +274,12 @@ high.*
 
 ## 9. Changelog
 
+- 2026-06-06 — **product review (KB-Lead): APPROVED, both forks ratified.** F1 (boundary vs
+  RESEARCH) ratified — separate specs over a shared substrate, primary-vs-secondary is the
+  correct invariant. F2 ratified with a refinement: **Slice 1 = RSS + M365-mail; M365 calendar
+  → Slice 2** (mutable-event-snapshot semantics), raw IMAP/CalDAV stay deferred on the
+  no-stored-secret rule. Renumbered SPEC-0037 → **SPEC-0041** per the PM allocation of record
+  (0037 = WATCH). Scope/INTAKE-5/F2/§8 updated to mail-only v1.
 - 2026-06-06 — created (draft). **Proactive Intake** modeled as an **arrival surface** that
   composes SPEC-0023 JOBS (scheduler, as an `intake` job type) + SPEC-0008 INGEST (preserve
   spine) + the SPEC-0028 connector/BYOA substrate, producing **primary** sources. **Must-resolve
