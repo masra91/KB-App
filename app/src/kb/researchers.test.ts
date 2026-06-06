@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   dedupKeyFor,
   normalizeTerm,
+  researchWhatFor,
   isSafeResearcherId,
   isEligible,
   TEMPLATE_DEFAULT_EGRESS,
@@ -55,6 +56,24 @@ describe('normalizeTerm + dedupKeyFor (D2)', () => {
     expect(dedupKeyFor({ what: 'x', by: { entityId: 'E1', sourceId: 'S1' } })).toContain('E1');
     expect(dedupKeyFor({ what: 'x', by: { sourceId: 'S1' } })).toContain('S1');
     expect(dedupKeyFor({ what: 'x', by: {} })).toBe('x'); // no subject → bare normalized term
+  });
+});
+
+describe('researchWhatFor — outbound topic for a standing / run-now pass (WS1 #6)', () => {
+  it('prefers an explicit topic, then label, then the id', () => {
+    expect(researchWhatFor(researcher({ id: 'prior-art', label: 'Prior art', topics: ['quantum batteries'] }))).toBe('quantum batteries');
+    expect(researchWhatFor(researcher({ id: 'prior-art', label: 'Prior art', topics: [] }))).toBe('Prior art');
+    expect(researchWhatFor(researcher({ id: 'prior-art', label: undefined, topics: undefined }))).toBe('prior-art');
+  });
+
+  it('REGRESSION (#6): never degenerates to the generic template word — a bare code researcher queries its real name (id), not "code"', () => {
+    // The old `?? r.template` default made the run-now confirm say "dispatch code now" and the outbound
+    // query degenerate to "code"; the fallback must land on the researcher's real name instead.
+    const bare = researcher({ id: 'azure-sdk-repo', template: 'code', label: undefined, topics: undefined });
+    expect(researchWhatFor(bare)).toBe('azure-sdk-repo');
+    expect(researchWhatFor(bare)).not.toBe('code');
+    const bareWeb = researcher({ id: 'press-releases', template: 'web', label: undefined, topics: [] });
+    expect(researchWhatFor(bareWeb)).not.toBe('web');
   });
 });
 

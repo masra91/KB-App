@@ -170,6 +170,17 @@ export function normalizeTerm(s: string): string {
 }
 
 /**
+ * The outbound topic a researcher researches when no explicit per-request `what` exists — i.e. a
+ * standing/scheduled pass or a Control-Panel "Run now" (WS1 #6). Falls back topic → label → **id**,
+ * NEVER to `template`: the template is a generic kind word ("code"/"web"), so the old `?? r.template`
+ * default degenerated the query (and the run-now confirm) to "code" instead of the researcher's real
+ * name. The `id` is the slugified name the Principal gave it, so it's a meaningful query + label.
+ */
+export function researchWhatFor(r: Pick<ResearcherConfig, 'topics' | 'label' | 'id'>): string {
+  return r.topics?.[0] ?? r.label ?? r.id;
+}
+
+/**
  * Deterministic dedup key for a request (D2): the normalized `what` + the subject it's about
  * (entity preferred, else source, else none). Two requests about the same term+subject collapse, so
  * a busy Decompose can't fan the same research out repeatedly.

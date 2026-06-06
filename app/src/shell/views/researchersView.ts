@@ -24,6 +24,7 @@ import {
   EGRESS_TIER_LABELS,
   defaultEgressFor,
   researcherOutcomeLabel,
+  researcherRunEligibility,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS } from '../../kb/researchers';
 import { navigateTo } from '../nav';
@@ -125,6 +126,7 @@ function reachReadout(r: ResearcherView): string {
 /** One researcher strip — a briefed instrument (design §2). */
 function strip(r: ResearcherView): string {
   const armed = r.enabled;
+  const elig = researcherRunEligibility(r); // WS1 #2: honest run-eligibility — "Off" ≠ won't run
   const fields = [
     r.template === 'code' ? field('repo', 'researcher-repopath', r.repoPath, '/absolute/path/to/local/repo') : '',
     r.template === 'code' ? field('PRs (read-only)', 'researcher-prrepo', r.prRepo, 'owner/name') : '',
@@ -154,6 +156,7 @@ function strip(r: ResearcherView): string {
         ${segmented('researcher-schedule', 'schedule', SCHEDULE_OPTIONS.map((p) => ({ value: p, text: schedulePresetLabel(p) })), r.schedule)}
         ${segmented('researcher-posture', 'autonomy', POSTURE_OPTIONS.map((p) => ({ value: p, text: POSTURE_LABEL[p] })), r.posture)}
       </div>
+      <p class="rdesk-eligibility researcher-eligibility viz-body" data-will-run="${elig.willRun ? 'true' : 'false'}">${esc(elig.note)}</p>
       <div class="rdesk-footer viz-ruled">
         ${reportLine(r)}
         <button type="button" class="viz-btn rdesk-run researcher-run" data-clearance="${esc(r.egressTier)}">▷ Run</button>
@@ -232,6 +235,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     let revert: (() => void) | null = null;
     const hideConfirm = (): void => {
       confirm.hidden = true;
+      confirmMsg.textContent = ''; // WS1 #1: clear the prompt on dismiss so a stale message can't linger
       pending = null;
       revert = null;
     };

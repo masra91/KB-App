@@ -103,7 +103,10 @@ export function buildResearcherViews(
   return registry.map((r) => ({
     id: r.id,
     template: r.template,
-    label: r.label ?? r.template,
+    // WS1 #6: fall back to the researcher's real name (id), NEVER the generic template word — the strip
+    // shows the id, and the run-now confirm + outbound query read this label; `?? r.template` made both
+    // say "code"/"web" instead of the researcher's name. The id is the slugified name the Principal gave it.
+    label: r.label ?? r.id,
     prompt: r.prompt,
     repoPath: typeof r.config?.repoPath === 'string' ? r.config.repoPath : '',
     tenantId: typeof r.config?.tenantId === 'string' ? r.config.tenantId : '',
@@ -118,6 +121,21 @@ export function buildResearcherViews(
     allowedTools: r.allowedTools ?? [],
     lastRun: lastRunFromEvent(lastEventByResearcherId[r.id]),
   }));
+}
+
+/**
+ * Honest run-eligibility for a researcher (WS1 #2). The ENABLED switch — NOT the schedule — is the true
+ * run/don't-run gate: the inline dispatcher (`runInlineResearch`) runs EVERY *enabled* researcher on
+ * pending `research-request`s REGARDLESS of schedule, while the scheduler (`isResearcherDue`) only adds a
+ * standing cadence for enabled + scheduled researchers. So an enabled researcher with schedule `off` is
+ * NOT paused — it still runs on demand when your KB raises a question (which is why a "schedule: Off"
+ * researcher legitimately shows a recent last run). Only a disabled researcher truly won't run. This
+ * derives the honest one-line surface so "Off" can't masquerade as "won't run".
+ */
+export function researcherRunEligibility(r: Pick<ResearcherView, 'enabled' | 'schedule'>): { willRun: boolean; note: string } {
+  if (!r.enabled) return { willRun: false, note: "Paused — won't run until enabled" };
+  if (r.schedule === 'off') return { willRun: true, note: 'Runs on demand (no schedule)' };
+  return { willRun: true, note: `Runs ${schedulePresetLabel(r.schedule).toLowerCase()} + on demand` };
 }
 
 /**

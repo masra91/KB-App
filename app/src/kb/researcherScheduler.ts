@@ -16,7 +16,7 @@ import { readResearcherRegistry } from './researcherRegistry';
 import { readEvents } from './activityIndex';
 import { runResearcher } from './researchRun';
 import { runInlineResearchSweep, selectResearchFn, type ResearchDepsOptions } from './researchInline';
-import { dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
+import { dedupKeyFor, researchWhatFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { ulid } from './ulid';
 import { Mutex } from './stageLock';
 import { noopDevLog, type DevLog } from './devlog';
@@ -34,7 +34,7 @@ export async function isResearcherDue(root: string, r: ResearcherConfig, now: nu
 
 /** The synthetic standing request a scheduled researcher runs against (its topic/label/prompt). */
 export function standingRequest(r: ResearcherConfig, id: string, ts: string): ResearchRequest {
-  const what = r.topics?.[0] ?? r.label ?? r.template;
+  const what = researchWhatFor(r); // WS1 #6 class: real name, never the generic template word
   // A standing pass is a chain ROOT (depth 1) — its cadence, not a depth limit, is what bounds it.
   return { id, ts, by: { stage: 'scheduler' }, what, why: 'scheduled standing research', context: '', dedupKey: dedupKeyFor({ what, by: {} }), depth: 1 };
 }

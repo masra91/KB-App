@@ -189,6 +189,51 @@ describe('Field Desk — confirm gate (RESEARCH-8/15)', () => {
     expect(c.querySelector<HTMLElement>('.researcher-confirm')!.hidden).toBe(false);
     expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/autonomous/i);
   });
+
+  // WS1 #1: cancelling/confirming must DISMISS the confirm box and CLEAR its message. (The CSS `[hidden]`
+  // guard that lets `hidden` actually hide it is asserted in confirmDismissCss.test.ts — happy-dom
+  // applies no stylesheet, so the renderer contract verified here is the `hidden` attribute + cleared text.)
+  it('REGRESSION (#1): cancelling the confirm hides it AND clears the stale prompt text', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.rdesk-arm')!.click();
+    const confirm = c.querySelector<HTMLElement>('.researcher-confirm')!;
+    expect(confirm.hidden).toBe(false);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).not.toBe('');
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-cancel')!.click();
+    expect(confirm.hidden).toBe(true);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toBe(''); // no lingering message
+  });
+});
+
+describe('Field Desk — WS1 fixes (#2 honest eligibility, #6 real-name confirm)', () => {
+  it("REGRESSION (#2): an enabled researcher with schedule 'off' surfaces that it still runs on demand", async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, enabled: true, schedule: 'off' as const }]);
+    setApi();
+    const c = await mount();
+    const elig = c.querySelector('.researcher-eligibility');
+    expect(elig?.getAttribute('data-will-run')).toBe('true');
+    expect(elig?.textContent).toMatch(/on demand/i);
+    expect(elig?.textContent).not.toMatch(/won't run/i);
+  });
+
+  it('a disabled (PAUSED) researcher surfaces that it will not run', async () => {
+    const c = await mount(); // webRow is enabled:false
+    const elig = c.querySelector('.researcher-eligibility');
+    expect(elig?.getAttribute('data-will-run')).toBe('false');
+    expect(elig?.textContent).toMatch(/won't run|paused/i);
+  });
+
+  it("REGRESSION (#6): the run-now confirm names the researcher, not the generic template word", async () => {
+    // A bare code researcher whose name (id) the panel surfaced as the label — the confirm must say its
+    // name, never "code". (webRow-style row with a code template + name-as-label.)
+    listResearchers = vi.fn(async () => [{ ...codeRow, label: 'azure-sdk-repo' }]);
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-run')!.click();
+    const msg = c.querySelector('.researcher-confirm-msg')?.textContent ?? '';
+    expect(msg).toContain('azure-sdk-repo');
+    expect(msg).not.toMatch(/“code”|"code"/); // not the generic template word
+  });
 });
 
 describe('Field Desk — dispatch → typed report (RESEARCH-15; #160/#180)', () => {

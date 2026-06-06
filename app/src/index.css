@@ -406,6 +406,9 @@ button:disabled {
 
 /* Shared confirm/button styling (also used by the Settings replay flow). */
 .confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+/* WS1 #1: the `display: flex` above (and on `.rdesk-confirm`) wins over the default `[hidden]` rule
+   (display: none), so toggling the `hidden` attribute couldn't dismiss the box. Restore that contract. */
+.confirm[hidden], .rdesk-confirm[hidden] { display: none; }
 .confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
 .btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
 .btn:hover { background: rgba(255, 255, 255, 0.06); }
@@ -539,6 +542,9 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-confirm-go { color: var(--viz-ink); border-color: var(--viz-oxide); }
 .rdesk-confirm-go:hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
 .rdesk-status { margin: 0.4rem 0 0; font-size: 0.8rem; min-height: 1em; color: var(--viz-ink-muted); }
+/* WS1 #2: honest run-eligibility line — muted at-rest; a paused (won't-run) researcher reads slightly dimmer. */
+.rdesk-eligibility { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); }
+.rdesk-eligibility[data-will-run='false'] { font-style: italic; }
 
 /* Add-dock — named template tiles (glyph + label), not a <select>; the chosen tile lights ember. */
 .rdesk-add { margin-top: 1.4rem; padding-top: 0.9rem; border-top: 1px solid var(--viz-rule); }

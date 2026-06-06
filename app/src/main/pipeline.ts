@@ -54,7 +54,7 @@ import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgress
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { isSafeGhRepo } from '../kb/ghRead';
-import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -762,7 +762,7 @@ export async function runActiveResearcherNow(id: string): Promise<RunResearcherR
   const root = active.stagingWt;
   const r = (await readResearcherRegistry(root)).find((x) => x.id === id);
   if (!r) return { ran: false, reason: 'not-found' };
-  const what = r.topics?.[0] ?? r.label ?? r.template;
+  const what = researchWhatFor(r); // WS1 #6: the researcher's real name, never the generic template word ("code")
   const req: ResearchRequest = {
     id: ulid(),
     ts: new Date().toISOString(),
