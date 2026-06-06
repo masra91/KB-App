@@ -388,17 +388,32 @@ button:disabled {
   color: var(--muted);
 }
 
-.job-list { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.85rem; }
-.job { border: 1px solid var(--border); border-radius: 8px; padding: 0.85rem; }
-.job-head { display: flex; align-items: center; gap: 0.5rem; }
-.job-label { font-weight: 600; }
-.job-toggle { margin-left: auto; font-size: 0.9rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; }
-.job-desc { margin: 0.4rem 0 0.6rem; font-size: 0.9rem; }
-.job-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
-.job-controls label { font-size: 0.85rem; color: var(--muted); }
-.job-controls select { font: inherit; margin-left: 0.3rem; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.2rem 0.35rem; }
-.job-lastrun { margin: 0.6rem 0 0; font-size: 0.82rem; }
-.job-status { margin: 0.35rem 0 0; font-size: 0.82rem; min-height: 1em; }
+/* WS2: the Jobs view reads in "The Line" instrument language — flat ruled strips composing the shared
+   design-system primitives (Button / SegmentedControl / ConfirmInline; design-system.css). NO card
+   chrome (§6); the spine + arm switch light patina when a job is enabled. */
+.jobs-view { padding: 0.25rem 0; }
+.job-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
+.job-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 60ch; }
+.job-empty { color: var(--viz-ink-muted); padding: 1rem 0; }
+.job-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+.job { padding: 0.5rem 0 0.75rem 0.9rem; border-left: 2px solid var(--viz-idle); }
+.job[data-armed='true'] { border-left-color: var(--viz-patina); }
+.job-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.job-label { font-size: 0.95rem; color: var(--viz-ink); font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.04em; }
+.job-badge { margin-left: 0.1rem; }
+/* Arm switch (enable) — graphite ○ PAUSED at rest, patina ◉ ENABLED when armed; a surface-specific stateful switch. */
+.job-enabled { margin-left: auto; background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.1rem 0.5rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--viz-idle); cursor: pointer; }
+.job[data-armed='true'] .job-enabled { color: var(--viz-patina); border-color: currentColor; }
+.job-desc { margin: 0.4rem 0 0.6rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
+.job-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem 1.5rem; }
+.job-field { display: inline-flex; align-items: center; gap: 0.4rem; }
+.job-field-label { font-size: 0.62rem; color: var(--viz-ink-muted); }
+.job-run { margin-left: auto; align-self: center; }
+.job-lastrun { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
+/* The confirm box composes the ConfirmInline primitive (.viz-confirm; design-system.css §5; incl. its
+   own [hidden] guard); only the top margin is a surface delta. */
+.job-confirm { margin-top: 0.6rem; }
+.job-status { margin: 0.35rem 0 0; font-size: 0.82rem; min-height: 1em; color: var(--viz-ink-muted); }
 
 .badge { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; }
 

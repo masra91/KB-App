@@ -64,9 +64,9 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     expect(root.querySelector('h1')?.textContent).toContain('Jobs');
     expect(root.querySelectorAll('.job')).toHaveLength(2);
     expect(li(root, 'reflect').querySelector('.job-label')?.textContent).toBe('Reflect');
-    // The non-production reference job is badged; the production one is not.
-    expect(li(root, 'example').querySelector('.badge')).toBeTruthy();
-    expect(li(root, 'reflect').querySelector('.badge')).toBeNull();
+    // The non-production reference job is badged (a viz-chip); the production one is not.
+    expect(li(root, 'example').querySelector('.job-badge')).toBeTruthy();
+    expect(li(root, 'reflect').querySelector('.job-badge')).toBeNull();
     expect(li(root, 'example').querySelector('.job-lastrun')?.textContent).toContain('1 applied, 2 deferred');
     expect(li(root, 'reflect').querySelector('.job-lastrun')?.textContent).toContain('Never run');
   });
@@ -83,9 +83,9 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     await mountJobs(root);
 
     const row = li(root, 'reflect');
-    const toggle = row.querySelector<HTMLInputElement>('.job-enabled')!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    const arm = row.querySelector<HTMLButtonElement>('.job-enabled')!; // arm switch (role=switch), not a checkbox
+    expect(arm.getAttribute('aria-checked')).toBe('false');
+    arm.click();
 
     // Confirm is revealed; nothing persisted yet.
     expect(row.querySelector<HTMLElement>('.job-confirm')!.hidden).toBe(false);
@@ -102,14 +102,14 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     await mountJobs(root);
 
     const row = li(root, 'reflect');
-    const toggle = row.querySelector<HTMLInputElement>('.job-enabled')!;
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+    const arm = row.querySelector<HTMLButtonElement>('.job-enabled')!;
+    arm.click();
     row.querySelector<HTMLButtonElement>('.job-confirm-cancel')!.click();
     await tick();
 
     expect(setJobConfig).not.toHaveBeenCalled();
-    expect(toggle.checked).toBe(false); // reverted
+    // the switch never flips until an apply re-renders, so a cancelled change needs no revert
+    expect(arm.getAttribute('aria-checked')).toBe('false');
     expect(row.querySelector<HTMLElement>('.job-confirm')!.hidden).toBe(true);
   });
 
@@ -118,9 +118,8 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     setApi({ listJobs: vi.fn(async () => [job({ id: 'reflect' })]), setJobConfig, runJobNow: vi.fn() });
     await mountJobs(root);
 
-    const sched = li(root, 'reflect').querySelector<HTMLSelectElement>('.job-schedule')!;
-    sched.value = 'daily';
-    sched.dispatchEvent(new Event('change', { bubbles: true }));
+    const daily = li(root, 'reflect').querySelector<HTMLButtonElement>('.job-schedule .viz-seg-opt[data-value="daily"]')!;
+    daily.click();
     await tick();
     expect(setJobConfig).toHaveBeenCalledWith({ id: 'reflect', type: 'reflect', schedule: 'daily' });
   });
@@ -131,9 +130,8 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     await mountJobs(root);
 
     const row = li(root, 'reflect');
-    const posture = row.querySelector<HTMLSelectElement>('.job-posture')!;
-    posture.value = 'autonomous';
-    posture.dispatchEvent(new Event('change', { bubbles: true }));
+    const auto = row.querySelector<HTMLButtonElement>('.job-posture .viz-seg-opt[data-value="autonomous"]')!;
+    auto.click();
     expect(row.querySelector<HTMLElement>('.job-confirm')!.hidden).toBe(false);
     expect(setJobConfig).not.toHaveBeenCalled();
 
@@ -190,6 +188,73 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     await mountJobs(root);
     expect(root.querySelector('.load-error')?.textContent).toContain('Couldn’t load'); // retryable fallback (#145)
     expect(root.querySelector('.load-retry')).toBeTruthy();
+  });
+});
+
+describe('Jobs view · WS2 — composes the shared design-system primitives (no generic chrome)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  const oneJob = (): JobsApi => ({
+    listJobs: vi.fn(async () => [job({ id: 'reflect', schedule: 'off', posture: 'guarded' })]),
+    setJobConfig: vi.fn(),
+    runJobNow: vi.fn(),
+  });
+
+  it('uses NO native <select> anywhere — schedule + autonomy are SegmentedControls (the generic-look fix)', async () => {
+    setApi(oneJob());
+    await mountJobs(root);
+    expect(root.querySelectorAll('select')).toHaveLength(0);
+    // schedule + autonomy are .viz-seg radiogroups of .viz-seg-opt radios
+    const groups = Array.from(root.querySelectorAll('.viz-seg[role="radiogroup"]'));
+    expect(groups.length).toBe(2);
+    const sched = li(root, 'reflect').querySelector('.job-schedule')!;
+    expect(sched.classList.contains('viz-seg')).toBe(true);
+    expect(sched.getAttribute('role')).toBe('radiogroup');
+    const opt = sched.querySelector('.viz-seg-opt')!;
+    expect(opt.getAttribute('role')).toBe('radio');
+    expect(opt.hasAttribute('aria-checked')).toBe(true);
+    // the active schedule (off) reads via aria-checked, not color alone
+    expect(sched.querySelector('.viz-seg-opt[data-value="off"]')?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('enable is a role=switch arm (not a raw checkbox) reflecting the enabled state', async () => {
+    setApi({ ...oneJob(), listJobs: vi.fn(async () => [job({ id: 'reflect', enabled: true })]) });
+    await mountJobs(root);
+    const arm = li(root, 'reflect').querySelector('.job-enabled')!;
+    expect(arm.tagName).toBe('BUTTON');
+    expect(arm.getAttribute('role')).toBe('switch');
+    expect(arm.getAttribute('aria-checked')).toBe('true');
+    expect(li(root, 'reflect').getAttribute('data-armed')).toBe('true'); // the strip carries armed state for the spine
+  });
+
+  it('Run now is a .viz-btn; the confirm composes .viz-confirm with a .viz-btn--danger confirm action', async () => {
+    setApi(oneJob());
+    await mountJobs(root);
+    const row = li(root, 'reflect');
+    expect(row.querySelector('.job-run')?.classList.contains('viz-btn')).toBe(true);
+    expect(row.querySelector('.job-confirm')?.classList.contains('viz-confirm')).toBe(true);
+    expect(row.querySelector('.job-confirm-msg')?.classList.contains('viz-confirm__msg')).toBe(true);
+    const go = row.querySelector('.job-confirm-go')!;
+    expect(go.classList.contains('viz-btn')).toBe(true);
+    expect(go.classList.contains('viz-btn--danger')).toBe(true);
+  });
+
+  it('Run now toggles .viz-btn--busy while in-flight (then clears on completion)', async () => {
+    type RunOk = { ran: true; outcome: 'advanced'; applied: number; deferred: number };
+    let resolveRun!: (v: RunOk) => void;
+    const runJobNow = vi.fn((): Promise<RunOk> => new Promise<RunOk>((res) => (resolveRun = res)));
+    setApi({ ...oneJob(), runJobNow });
+    await mountJobs(root);
+    li(root, 'reflect').querySelector<HTMLButtonElement>('.job-run')!.click();
+    li(root, 'reflect').querySelector<HTMLButtonElement>('.job-confirm-go')!.click();
+    await tick();
+    expect(li(root, 'reflect').querySelector('.job-run')?.classList.contains('viz-btn--busy')).toBe(true);
+    resolveRun({ ran: true, outcome: 'advanced', applied: 1, deferred: 0 });
+    await tick();
+    expect(li(root, 'reflect').querySelector('.job-run')?.classList.contains('viz-btn--busy')).toBe(false);
   });
 });
 
