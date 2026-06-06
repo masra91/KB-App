@@ -31,6 +31,7 @@ export const AUDIT_ACTORS = [
   'replay',
   'panel',
   'researcher',
+  'intake',
   'output',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
@@ -45,6 +46,8 @@ export interface AuditSubjects {
   /** Researcher id + the research-request it answered (SPEC-0028). */
   researcherId?: string;
   requestId?: string;
+  /** Intake connector id — the proactive feed pull a pass belongs to (SPEC-0041). */
+  intakeId?: string;
   /** Connect keys its work by canonical block key, not a single entity id. */
   blockKey?: string;
 }
@@ -364,6 +367,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // reaches outside the KB + produces immutable secondary sources
     carriesWhy: true, // records the request (what + why) + citations behind each finding
     traces: ['AUDIT-1', 'AUDIT-2', 'RESEARCH-6'],
+  },
+  {
+    actor: 'intake',
+    what: 'Proactive Intake pass (SPEC-0041): a scheduled feed pull (RSS / M365-mail) that brings new external items into the KB as immutable PRIMARY sources via the ingest spine — records what feed was inspected, which external items were pulled (their ids/links) and the source ids produced (`intook`), an audited `no-new-items` no-op, and a distinct `intake-failed` when the fetch/auth errors (failed ≠ empty, so a broken feed is never a silent no-op; OBS-4). Read-only w.r.t. the world (INTAKE-7) — no remote mutation. Emitted via appendAuditEvent into the cross-cutting control log.',
+    emitters: ['intakeRun'],
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true, // brings external items in as immutable primary sources (promoted to main)
+    carriesWhy: true, // records the connector, the items pulled (ids/links), and why (scheduled feed pull)
+    traces: ['AUDIT-1', 'AUDIT-2', 'INTAKE-10', 'INTAKE-12'],
   },
   {
     actor: 'output',
