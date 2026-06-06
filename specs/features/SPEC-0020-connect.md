@@ -482,6 +482,11 @@ appends JSONL. Structure in the envelope, freedom in the payload.
   Obsidian links, not a parallel link store the graph can't see. Regenerate-whole (like the
   claims block) keeps links correct across merges/renames and replay-safe. Rich typed-edge
   metadata, if ever needed, layers on without removing the wikilinks (§7).
+- **Producer contract:** link-promotion consumes Claims' `relatesTo` hints (`readLinkQueue` is
+  fed *only* by claims carrying `relatesTo`). Its input depends on **CLAIMS-10's mandatory
+  `relatesTo` extraction** — if Claims emits no hints (e.g. the prompt frames `relatesTo` as
+  optional), the queue starves and the graph stays edgeless despite this requirement being
+  correctly implemented. That producer obligation is now mandatory (SPEC-0016 CLAIMS-10).
 - **Traces:** DATA-8, LIFE-3
 - **Verify:** test:connectStage.test.ts, connectPipeline.test.ts
 
@@ -585,6 +590,15 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
 
 ## 9. Changelog
 
+- 2026-06-06 — **CONNECT-12 producer-contract annotation (Connect link-promotion not firing).**
+  Link-promotion (`readLinkQueue`/`linkOne`) was correct but **starved**: it consumes Claims'
+  `relatesTo` hints, and the Claims prompt framed `relatesTo` as optional, so live runs emitted
+  none → empty link queue → edgeless graph. No `connectStage.ts` change; the fix is upstream —
+  **SPEC-0016 CLAIMS-10 made `relatesTo` extraction mandatory** for explicitly-named entities, and
+  the Claims prompt strengthened to match. CONNECT-12's rationale now documents the producer
+  contract so the dependency is explicit. Regression lives in `connectPipeline.test.ts`, driving
+  the **real Claims agent decider** (not hand-injected `relatesTo`) end-to-end to a rendered
+  `[[wikilink]]`.
 - 2026-06-02 — **#136 robustness:** a **blank** `existingNodeId` (and blank `mergeExistingNodeIds`
   entries) in the agent verdict — `""`/whitespace, the agent's way of saying "no existing node to
   fold into" — is now **coerced to absent** in `parseConnectDecision` rather than rejected, so the

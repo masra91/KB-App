@@ -27,7 +27,7 @@ import { ConnectStage, readCandidates } from './connectStage';
 import { LINKS_BLOCK_START } from './connectDoc';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider } from './connectAgent';
-import type { ClaimsDecider } from './claimsAgent';
+import { makeClaimsDecider, type ClaimsDecider, type CopilotRunner } from './claimsAgent';
 
 function gitInstalledSync(): boolean {
   try {
@@ -339,6 +339,81 @@ describe.skipIf(!gitAvailable)('Visible Enrich — deduped entities promote to m
       const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
       expect(steveMd).toContain(LINKS_BLOCK_START);
       expect(steveMd).toContain(`[[${appleRel}|`); // wikilink (alias form, VAULT-12) rendered on main via the auto-poke alone
+      expect((await simpleGit(root).status()).isClean()).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  // REGRESSION ("Connect link-promotion not firing", CLAIMS-10/CONNECT-12): the bug was NOT in
+  // connectStage — link-promotion was STARVED. It only fires on claims carrying `relatesTo`, and
+  // the production Claims prompt framed `relatesTo` as optional ("MAY … soft hint"), so live agent
+  // runs omitted it → empty link queue (`readLinkQueue`) → edgeless graph. The two tests above pass
+  // only because their hand-rolled deciders INJECT `relatesTo` directly — which is exactly what
+  // masked the prompt gap in production. This test drives the REAL production decider
+  // (`makeClaimsDecider`, the same path pipeline.ts wires) with a *prompt-faithful* fake copilot: an
+  // instruction-following agent that extracts the explicitly-named entity into `relatesTo` IFF the
+  // BUILT PROMPT mandates it. Before the prompt fix the mandate is absent → no `relatesTo` → no
+  // wikilink → this FAILS; after it (CLAIMS-10 strengthened) → the link renders on `main`.
+  it('link-promotion fires end-to-end through the REAL Claims agent path — the prompt must mandate relatesTo (regression; CLAIMS-10/CONNECT-12)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      const promoteEvergreen = async (): Promise<void> => {
+        await promote(root);
+      };
+      const orch = new Orchestrator(stagingWt, deterministicDecider, lock, promoteEvergreen);
+
+      await orch.capture('s1', [{ kind: 'text', text: 'Steve co-founded Apple in 1976.' }]);
+      await orch.poke();
+      for (const srcRel of await readDecomposeQueue(stagingWt)) {
+        await decomposeOne(stagingWt, srcRel, decompDeciderTwo);
+      }
+
+      const connect = new ConnectStage(stagingWt, connectDeciderEach, lock, undefined, promoteEvergreen);
+      await connect.poke();
+      expect((await findEntityFiles(root)).length).toBe(2);
+
+      // A prompt-faithful fake copilot — NOT a decider that hand-injects relatesTo. It models an
+      // instruction-following agent: for the Steve entity (whose source statement explicitly names
+      // "Apple") it emits a claim, and includes `relatesTo:["Apple"]` ONLY when the built prompt
+      // MANDATES extracting explicitly-named entities (the strengthened CLAIMS-10 instruction).
+      // Pre-fix the mandate is absent → it omits relatesTo, reproducing the live starvation. Apple's
+      // claims stay empty so the asserted Steve → [[Apple]] link is deterministic. The prompt+parse
+      // path is the real one: `makeClaimsDecider` calls `run(buildClaimsPrompt(input))`.
+      const promptFaithfulCopilot: CopilotRunner = async (prompt) => {
+        const entityId = /entityId:\s*(\S+)/.exec(prompt)?.[1] ?? '';
+        const name = /entity\.name:\s*(.+)/.exec(prompt)?.[1]?.trim() ?? '';
+        const mandatesExtraction = /\bMUST\b[^.]*relatesTo/i.test(prompt); // present only after the CLAIMS-10 prompt fix
+        if (name === 'Steve') {
+          const relatesTo = mandatesExtraction ? ',"relatesTo":["Apple"]' : '';
+          return `{"entityId":"${entityId}","claims":[{"statement":"Co-founded Apple in 1976.","status":"fact","confidence":0.95,"mentions":["Steve co-founded Apple in 1976"]${relatesTo}}]}`;
+        }
+        return `{"entityId":"${entityId}","claims":[]}`;
+      };
+      const realDecider = makeClaimsDecider({ available: true, run: promptFaithfulCopilot });
+
+      // Wire Claims EXACTLY as pipeline.ts does: afterDrain promotes claims, then pokes Connect so
+      // the link-promotion pass turns the (now-emitted) relatesTo hint into a real [[wikilink]].
+      let linkDrain: Promise<void> = Promise.resolve();
+      const claims = new ClaimsStage(stagingWt, realDecider, lock, undefined, async () => {
+        await promoteEvergreen();
+        linkDrain = connect.poke();
+      });
+      await claims.poke();
+      await linkDrain;
+
+      const ents = await findEntityFiles(root);
+      const steveRel = ents.find((r) => r.includes(`${path.sep}person${path.sep}`));
+      const appleRel = ents.find((r) => r.includes(`${path.sep}organization${path.sep}`));
+      expect(steveRel).toBeTruthy();
+      expect(appleRel).toBeTruthy();
+      const steveMd = await fs.readFile(path.join(root, steveRel as string), 'utf8');
+      expect(steveMd).toContain(LINKS_BLOCK_START);
+      expect(steveMd).toContain(`[[${appleRel}|`); // wikilink rendered because the REAL prompt mandated relatesTo extraction
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     } finally {
       await rmTempDir(dir);

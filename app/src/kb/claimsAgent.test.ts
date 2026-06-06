@@ -23,10 +23,12 @@ describe('buildClaimsPrompt (CLAIMS-3/5/8/10)', () => {
     expect(buildClaimsPrompt(input())).toContain('fact, interpretation, hypothesis');
   });
 
-  it('frames claims as single-subject and relatesTo as a soft, non-asserted hint (CLAIMS-10)', () => {
+  it('MANDATES relatesTo extraction of explicitly-named entities, still NOT a typed link (CLAIMS-10)', () => {
     const p = buildClaimsPrompt(input());
     expect(p).toMatch(/single-subject/i);
-    expect(p).toMatch(/soft hints/i);
+    expect(p).toMatch(/MUST list those names verbatim/); // mandatory extraction — feeds Connect link-promotion (CONNECT-12)
+    expect(p).toMatch(/relatesTo/);
+    expect(p).toMatch(/not a claim of any typed relationship/i); // extraction ≠ asserted relation (CLAIMS-10 stays intact)
     expect(p).toMatch(/do not assert relationships as fact/i);
   });
 });

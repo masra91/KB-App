@@ -333,7 +333,7 @@ inside the entity node so its substance reads in place:
 | CLAIMS-7   | must     | **`status` (fact/interpretation/hypothesis) is a per-claim attribute** (alongside `confidence` + evidence); entity **nodes** remain status-free — resolving SPEC-0007 §8 and DECOMP-15 | test:claimDoc.test.ts, claims.test.ts | DATA-7; PRIN-3 |
 | CLAIMS-8   | must     | Claim `status` is a **closed** validated set `{fact, interpretation, hypothesis}` (distinct from the *open* `kind`/signal-`type` vocabularies); an invalid status fails validation | test:claims.test.ts | DATA-7; PRIN-3 |
 | CLAIMS-9   | must     | The orchestrator maintains a **delimited, regenerable, idempotent "claims" block** inside the entity node (the hybrid back-link); canonical claim data lives in `claims/`, not the node | test:claimDoc.test.ts, claimsStage.test.ts | DATA-3; VAULT (Obsidian-native) |
-| CLAIMS-10  | should   | Claims are **single-subject**; a claim **may** name other entities in prose or carry a soft `relatesTo` hint, but **does not establish a typed cross-entity link** — that is Connect's, fed by these hints | test:claims.test.ts, claimsAgent.test.ts | DATA-8; LIFE-3,6 |
+| CLAIMS-10  | must     | Claims are **single-subject**; when a claim's statement **explicitly names** other entities, Claims **MUST** extract those names into a `relatesTo` hint (extraction of mentioned names — a textual fact), but **MUST NOT** establish a typed cross-entity link, resolve identity, or assert relations — that is Connect's, fed by these hints (CONNECT-12) | test:claims.test.ts, claimsAgent.test.ts, connectPipeline.test.ts | DATA-8; LIFE-3,6 |
 | CLAIMS-11  | must     | Claims **never mutates the immutable source, nor the Decompose-authored identity** of the entity node (id/kind/name/provenance/heading); it only writes `claims/` and the generated block | test:claimsStage.test.ts, claimDoc.test.ts | DATA-2; LIFE-2 |
 | CLAIMS-12  | must     | The agent decision is **validated against a schema** (incl. `entityId` match + closed `status`); an invalid decision never loses the entity — it is flagged and retried, then set aside after K | test:claims.test.ts, claimsAgent.test.ts, claimsStage.test.ts | ORCH-12; INGEST-8 |
 | CLAIMS-13  | must     | The agent may emit optional **signals** (typed freeform `{type, note, refs?}`, open vocab) routed to the **audit log only**, never into the KB | test:claimsStage.test.ts, claims.test.ts | DATA-10; AUTO-8 |
@@ -389,18 +389,24 @@ inside the entity node so its substance reads in place:
 - **Verify:** none-yet
 
 ### CLAIMS-10 — Single-subject claims; relations hinted, not established
-- **Status:** draft · **Priority:** should
-- **Statement:** A claim's `subject` **MUST** be exactly one entity (the work item). A
-  claim **MAY** reference other entities in its `statement` and **MAY** carry a soft
-  `relatesTo` hint, but Claims **MUST NOT** create typed cross-entity links, resolve
+- **Status:** draft · **Priority:** must
+- **Statement:** A claim's `subject` **MUST** be exactly one entity (the work item). When a
+  claim's `statement` **explicitly names** other entities, Claims **MUST** list those names
+  verbatim in a `relatesTo` hint — this is **extraction of the names the statement mentions**
+  (a textual fact), the producer seam that feeds Connect's link-promotion (CONNECT-12). It is
+  **NOT** a typed relationship: Claims **MUST NOT** create typed cross-entity links, resolve
   identity, or assert relations as graph truth. Establishing reconciled typed links is
   **Connect's** responsibility, fed by these hints.
 - **Rationale:** The Principal's "between the two": capture the relational *signal* a single
   source contains without prematurely committing a graph edge that needs cross-source
   identity resolution to be trustworthy. Keeps Claims zero-resolution (like Decompose) and
-  leaves Connect a clean, well-fed seam.
+  leaves Connect a clean, well-fed seam. The **extraction half is mandatory** (not optional):
+  framed as a soft "may", the agent omits `relatesTo` for conciseness → Connect's link queue
+  starves → the graph never connects (the link-promotion-not-firing regression). Mandatory
+  extraction of *explicitly-named* entities — still never an asserted relation — reliably
+  feeds Connect while keeping Claims zero-resolution.
 - **Traces:** DATA-8, LIFE-3, LIFE-6
-- **Verify:** none-yet
+- **Verify:** test:claimsAgent.test.ts, connectPipeline.test.ts
 
 ### CLAIMS-11 — Derive only; never mutate source or node identity
 - **Status:** draft · **Priority:** must
@@ -527,6 +533,17 @@ sources/ ─→ queue/decompose/ ─[DECOMPOSE]→ entities/ (nodes)            
 
 ## 8. Changelog
 
+- 2026-06-06 — **CLAIMS-10 strengthened: `relatesTo` extraction is now MANDATORY** (priority
+  `should → must`). Root cause of "Connect link-promotion not firing": the Claims prompt framed
+  `relatesTo` as a doubly-optional "MAY … optional soft hint", so live agent runs omitted it →
+  Connect's link queue (`readLinkQueue`, fed only by claims carrying `relatesTo`) stayed empty →
+  the entity graph never connected (edgeless EXPLORE). Fix: Claims **MUST** extract the entities a
+  statement **explicitly names** into `relatesTo` — *extraction of mentioned names* (a textual
+  fact), NOT an asserted relation, so CLAIMS-10's "hint, don't establish" boundary stays intact;
+  Connect remains the sole link resolver (CONNECT-12). Prompt updated (`claimsAgent.ts`); the
+  regression exercises the **real agent decider path** (not hand-injected `relatesTo`) end-to-end:
+  named-entity statement → Claims emits `relatesTo` → Connect promotes → `[[wikilink]]` renders.
+  `Verify` graduated `none-yet → test:claimsAgent.test.ts, connectPipeline.test.ts`.
 - 2026-06-03 — **CLAIMS-21 implemented (#197)** — `parseEntityNode` now returns ALL `derivedFrom`
   sources; `claimsOne` processes one pending (entity × source) pair per call and the drain re-queues
   the entity until every source is terminal; each claim carries its single source as provenance; the
