@@ -1,7 +1,7 @@
 // Control Panel · Researchers — pure view-model logic (SPEC-0028 RESEARCH-15). DOM-free +
 // side-effect-free (SHELL-6 / TEST-5): the main process gathers the fs-backed inputs (registry +
 // last-run audit events) and hands them here; the renderer renders the result. Mirrors jobsPanel.
-import { EGRESS_TIERS, RESEARCHER_TEMPLATES, TEMPLATE_DEFAULT_EGRESS, type ResearcherConfig, type EgressTier, type ResearcherTemplate } from './researchers';
+import { EGRESS_TIERS, RESEARCHER_TEMPLATES, TEMPLATE_DEFAULT_EGRESS, DEFAULT_RESEARCHER_BUDGET, resolveTimeoutMs, type ResearcherConfig, type EgressTier, type ResearcherTemplate } from './researchers';
 import { DEFAULT_POSTURE } from './jobs';
 import { schedulePresetLabel, SCHEDULE_OPTIONS } from './jobsPanel';
 import type { AuditEvent, AuditEventInput } from './audit';
@@ -118,6 +118,7 @@ export function buildResearcherViews(
     posture: r.posture,
     topics: r.topics ?? [],
     budget: { maxToolCalls: r.budget.maxToolCalls, maxDepth: r.budget.maxDepth },
+    timeoutMs: resolveTimeoutMs(r), // RESEARCH-18: persisted value or the default (WS3 editable)
     allowedTools: r.allowedTools ?? [],
     lastRun: lastRunFromEvent(lastEventByResearcherId[r.id]),
   }));
@@ -178,7 +179,7 @@ const RESEARCHER_AUDIT_WHY = 'Principal change via Control Panel';
  * (egress `local-only`), so e.g. creating a public-web researcher records local-only→public-web.
  */
 export function researcherConfigAuditEvents(
-  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier' | 'scope' | 'prompt' | 'config'> | undefined,
+  prior: Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'egressTier' | 'scope' | 'prompt' | 'budget' | 'timeoutMs' | 'config'> | undefined,
   patch: ResearcherConfigPatch,
 ): AuditEventInput[] {
   const priorRepoPath = typeof prior?.config?.repoPath === 'string' ? prior.config.repoPath : '';
@@ -207,6 +208,22 @@ export function researcherConfigAuditEvents(
       eventType: 'researcher-config-change',
       subjects: { researcherId: patch.id },
       payload: { field, from: base[field], to, why: RESEARCHER_AUDIT_WHY },
+    });
+  }
+  // The editable spend/backstop controls (RESEARCH-15/18, WS3): a change to the per-pass budget or the
+  // session timeout is behavior-relevant → audited from→to (validated/applied values only). `maxToolCalls`
+  // lives under `budget`; `timeoutMs` is top-level with the default as its base.
+  const numericChanges: Array<{ field: 'maxToolCalls' | 'timeoutMs'; from: number; to: number | undefined }> = [
+    { field: 'maxToolCalls', from: prior?.budget?.maxToolCalls ?? DEFAULT_RESEARCHER_BUDGET.maxToolCalls, to: patch.maxToolCalls },
+    { field: 'timeoutMs', from: resolveTimeoutMs({ timeoutMs: prior?.timeoutMs }), to: patch.timeoutMs },
+  ];
+  for (const { field, from, to } of numericChanges) {
+    if (to === undefined || to === from) continue;
+    events.push({
+      actor: 'panel',
+      eventType: 'researcher-config-change',
+      subjects: { researcherId: patch.id },
+      payload: { field, from, to, why: RESEARCHER_AUDIT_WHY },
     });
   }
   return events;

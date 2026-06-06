@@ -517,7 +517,10 @@ option { background: var(--card); color: var(--fg); }
 /* The ladder (.rdesk-ladder) + rungs (.rdesk-rung) now compose the shared SegmentedControl primitive
    (.viz-seg / .viz-seg-opt--clearance, design-system.css §4) — layout + temperatures live there. */
 
-.rdesk-reach { font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.45rem 0 0; }
+/* WS3: the reach readout is now a row of editable fields (reads/pass + timeout) + a read-only tail. */
+.rdesk-reach { font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.45rem 0 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.9rem; }
+.rdesk-reach-field .viz-field__input { width: 4.5rem; }
+.rdesk-reach-ro { align-self: center; }
 
 .rdesk-orders { margin-top: 0.55rem; }
 .rdesk-seg-label { font-size: 0.62rem; color: var(--viz-ink-muted); }

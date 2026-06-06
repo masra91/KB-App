@@ -273,11 +273,13 @@ export interface ResearcherView {
   schedule: SchedulePreset;
   posture: AutonomyPosture;
   topics: string[];
-  /** Per-pass retrieval/chain bounds (RESEARCH-11) — surfaced read-only in the "reach readout" so the
-   *  Principal can see a researcher's spend ceiling without opening anything. Editor deferred (§10). */
+  /** Per-pass retrieval/chain bounds (RESEARCH-11). `maxToolCalls` is now EDITABLE (RESEARCH-15, WS3);
+   *  `maxDepth` stays read-only (safety bound, editor deferred to Slice-2). */
   budget: { maxToolCalls: number; maxDepth: number };
-  /** The researcher's tool/MCP allowlist (RESEARCH-12) — surfaced read-only in the reach readout so a
-   *  researcher's reach is always legible. Empty = the template's default surface. Editor deferred. */
+  /** Effective per-pass session timeout in ms (RESEARCH-18) — the persisted value or the default; EDITABLE (WS3). */
+  timeoutMs: number;
+  /** The researcher's tool/MCP allowlist (RESEARCH-12) — surfaced READ-ONLY in the reach readout so a
+   *  researcher's reach is always legible. It is a SECURITY surface and stays non-editable (WS3). */
   allowedTools: string[];
   lastRun: ResearcherLastRun | null; // null = never run
 }
@@ -301,6 +303,10 @@ export interface ResearcherConfigPatch {
   schedule?: SchedulePreset;
   posture?: AutonomyPosture;
   topics?: string[];
+  /** Editable per-pass retrieval budget (RESEARCH-15, WS3) — clamped/validated at the IPC boundary. */
+  maxToolCalls?: number;
+  /** Editable per-pass session timeout in ms (RESEARCH-18, WS3) — clamped/validated at the IPC boundary. */
+  timeoutMs?: number;
 }
 
 /** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;

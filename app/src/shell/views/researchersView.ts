@@ -26,7 +26,7 @@ import {
   researcherOutcomeLabel,
   researcherRunEligibility,
 } from '../../kb/researchersPanel';
-import { EGRESS_TIERS } from '../../kb/researchers';
+import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS } from '../../kb/researchers';
 import { navigateTo } from '../nav';
 import { VIEW_REVIEWS } from '../views';
 import type { EgressTier } from '../../kb/researchers';
@@ -117,10 +117,24 @@ function reportLine(r: ResearcherView): string {
   return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>${open}`;
 }
 
-/** The always-visible reach readout (§2/§6) — budget + tool allowlist, mono/tabular, read-only in v1. */
+/** The reach readout (§2/§6). WS3 (RESEARCH-15/18): `reads/pass` (maxToolCalls) + `timeout` are now
+ *  EDITABLE on the WS2 EditableField primitive (`viz-field`); `maxDepth` (safety bound) + the tool
+ *  allowlist (SECURITY surface) stay READ-ONLY. Edits persist via setResearcherConfig (clamped at IPC). */
 function reachReadout(r: ResearcherView): string {
   const tools = r.allowedTools.length ? r.allowedTools.join(' · ') : 'template default';
-  return `<p class="rdesk-reach viz-numeric">budget ${r.budget.maxToolCalls} calls/pass · depth ≤ ${r.budget.maxDepth} · tools: ${esc(tools)}</p>`;
+  const timeoutMin = Math.max(1, Math.round(r.timeoutMs / 60_000));
+  return `
+    <div class="rdesk-reach viz-numeric">
+      <label class="viz-field rdesk-reach-field">
+        <span class="viz-field__label">reads / pass</span>
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxcalls viz-focusable" min="${MIN_TOOL_CALLS}" max="${MAX_TOOL_CALLS}" step="1" value="${r.budget.maxToolCalls}" aria-label="Max retrieval calls per pass" />
+      </label>
+      <label class="viz-field rdesk-reach-field">
+        <span class="viz-field__label">timeout (min)</span>
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-timeout viz-focusable" min="${Math.ceil(MIN_SESSION_TIMEOUT_MS / 60_000)}" max="${Math.round(MAX_SESSION_TIMEOUT_MS / 60_000)}" step="1" value="${timeoutMin}" aria-label="Session timeout in minutes" />
+      </label>
+      <span class="rdesk-reach-ro">depth ≤ ${r.budget.maxDepth} · tools: ${esc(tools)}</span>
+    </div>`;
 }
 
 /** One researcher strip — a briefed instrument (design §2). */
@@ -223,6 +237,8 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const prRepoEl = li.querySelector<HTMLInputElement>('.researcher-prrepo'); // code only
     const tenantEl = li.querySelector<HTMLInputElement>('.researcher-tenant'); // m365 only
     const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
+    const maxCallsEl = li.querySelector<HTMLInputElement>('.researcher-maxcalls')!; // WS3 editable budget
+    const timeoutEl = li.querySelector<HTMLInputElement>('.researcher-timeout')!; // WS3 editable session timeout
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const reviewLink = li.querySelector<HTMLButtonElement>('.rdesk-review-link'); // only on an escalated last-run
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
@@ -303,6 +319,20 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     // Standing orders + scope — steering, saved on an explicit button, no confirm. The backend keeps the
     // prior value on a blank save, so a stray empty save can't wipe a researcher's instructions.
     saveBtn.addEventListener('click', () => void apply({ id, prompt: promptEl.value, scope: scopeEl.value, ...(repoPathEl ? { repoPath: repoPathEl.value } : {}), ...(prRepoEl ? { prRepo: prRepoEl.value } : {}), ...(tenantEl ? { tenantId: tenantEl.value } : {}) }));
+
+    // Editable budget + timeout (WS3, RESEARCH-15/18) — steering, applies directly on change (no confirm).
+    // The IPC clamps/validates; the re-render reflects the persisted (clamped) value, so an out-of-range
+    // entry round-trips back to the pinned bound. A blank/non-numeric entry is dropped (field unchanged).
+    maxCallsEl.addEventListener('change', () => {
+      const n = Number(maxCallsEl.value);
+      if (Number.isFinite(n)) void apply({ id, maxToolCalls: n });
+      else void render(container); // restore the field to its persisted value
+    });
+    timeoutEl.addEventListener('change', () => {
+      const min = Number(timeoutEl.value);
+      if (Number.isFinite(min)) void apply({ id, timeoutMs: Math.round(min * 60_000) });
+      else void render(container);
+    });
 
     runBtn.addEventListener('click', () => {
       askConfirm(

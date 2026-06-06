@@ -81,6 +81,38 @@ export const RESEARCH_INSTANCE_CEILING = 100;
 /** The rolling window the per-Instance ceiling counts passes over (24h). Tunable with the ceiling. */
 export const RESEARCH_INSTANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// Editable-bounds for the user-editable controls (RESEARCH-15/18, WS3). Validated + clamped at the
+// `setResearcherConfig` IPC boundary so the renderer can't persist a runaway value.
+//   - maxToolCalls: a per-pass read/fetch cap; ≥1, and ≤ the per-Instance pass ceiling (a single pass
+//     can't out-call the whole Instance's pass budget — a sane upper bound, tunable).
+//   - timeoutMs: the stuck-session backstop; ≥30s (below that a real deep pass false-fails) and ≤60min
+//     (a generous wedged-session ceiling — finite only to release the global copilot slot, ORCH-23).
+export const MIN_TOOL_CALLS = 1;
+export const MAX_TOOL_CALLS = RESEARCH_INSTANCE_CEILING;
+export const MIN_SESSION_TIMEOUT_MS = 30_000;
+export const MAX_SESSION_TIMEOUT_MS = 60 * 60_000;
+
+/** Sanitize an editable `maxToolCalls` from untrusted IPC input (WS3): a positive INTEGER, CLAMPED to
+ *  [MIN_TOOL_CALLS, MAX_TOOL_CALLS]. Non-numeric / non-integer / ≤0 ⇒ `undefined` (rejected → field left
+ *  unchanged, fail-safe). So 9999 → 100 (clamped to the ceiling); 0 / -3 / 1.5 / "x" → rejected. */
+export function clampToolCalls(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) return undefined;
+  return Math.min(Math.max(v, MIN_TOOL_CALLS), MAX_TOOL_CALLS);
+}
+
+/** Sanitize an editable session `timeoutMs` from untrusted IPC input (WS3): a positive number, CLAMPED to
+ *  [MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS]. Non-finite / ≤0 ⇒ `undefined` (rejected → unchanged).
+ *  So 99h → 60min (clamped); 5ms → 30s (clamped); 0 / -1 / "x" / NaN → rejected. */
+export function clampTimeoutMs(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return undefined;
+  return Math.min(Math.max(v, MIN_SESSION_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+}
+
+/** The effective session timeout for a researcher (RESEARCH-18): its persisted `timeoutMs`, else the default. */
+export function resolveTimeoutMs(r: Pick<ResearcherConfig, 'timeoutMs'>): number {
+  return clampTimeoutMs(r.timeoutMs) ?? DEFAULT_RESEARCH_SESSION_TIMEOUT_MS;
+}
+
 /** Max researchers a single `research-request` may fan out to (RESEARCH-4 max-fan-out). */
 export const DEFAULT_MAX_FANOUT = 4;
 
@@ -104,6 +136,9 @@ export interface ResearcherConfig {
   scope: string;
   /** Bounds (RESEARCH-11). */
   budget: ResearcherBudget;
+  /** Per-pass live-SDK session timeout in ms (RESEARCH-18) — a stuck-session backstop, user-editable
+   *  (RESEARCH-15). Absent ⇒ {@link DEFAULT_RESEARCH_SESSION_TIMEOUT_MS}. Clamped at the IPC boundary. */
+  timeoutMs?: number;
   /** Cadence for the scheduled path (reuses JOBS presets; `off` = inline/on-demand only). */
   schedule: SchedulePreset;
   /** Autonomy posture (reuses JOBS posture; guarded = findings route to Review by default). */

@@ -13,7 +13,7 @@ import { ghRead as ghReadImpl, isSafeGhRepo, type GhReadOp, type GhReadResult, t
 import { azRead as azReadImpl, isSafeAzTarget, type AzReadOp, type AzReadResult, type AzReadOptions, type AzdoTarget } from './azRead';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import { noopDevLog, type DevLog } from './devlog';
-import { DEFAULT_RESEARCH_SESSION_TIMEOUT_MS, type ResearcherConfig, type ResearchRequest } from './researchers';
+import { resolveTimeoutMs, type ResearcherConfig, type ResearchRequest } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
 // VALUE import of the SDK is a dynamic `import()` inside liveCodeSdkSession (mirrors researchWebAgent).
 import type { SessionConfig, SystemMessageConfig } from '@github/copilot-sdk';
@@ -66,6 +66,7 @@ export type CodeSdkSession = (input: {
   prompt: string;
   query: string;
   maxToolCalls: number;
+  timeoutMs: number;
   candidates: string[];
   read: CodeRepoReader;
 }) => Promise<{ note: string; citations: string[] }>;
@@ -265,7 +266,7 @@ export function makeCodeRepoReader(workspace: string, gitOpts: CodeGitOptions = 
  * (which inject `opts.session`) never load it; the live path is exercised in CI/e2e (BYOA).
  */
 function liveCodeSdkSession(opts: CodeResearchOptions): CodeSdkSession {
-  return async ({ skill, prompt, query, maxToolCalls, candidates, read }) => {
+  return async ({ skill, prompt, query, maxToolCalls, timeoutMs, candidates, read }) => {
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     let submitted: { note: string; citations: string[] } | null = null;
     let usedReads = 0; // RESEARCH-11 hard budget — count read-tool calls, refuse past maxToolCalls
@@ -326,7 +327,7 @@ function liveCodeSdkSession(opts: CodeResearchOptions): CodeSdkSession {
       try {
         await session.sendAndWait(
           `${prompt}\n\nResearch this in the repo, then call submitFindings exactly once:\n${query}\n\nThe grep-hit files for the term (your starting seed): ${candidates.length ? candidates.join(', ') : '(none — search with grep_repo)'}\n\nUse up to ${maxToolCalls} read calls — read several seed files in depth and follow the code; capture the specific files/functions/definitions/snippets, each attributed inline as \`path:line\` (a thin summary or a bare grep dump is a defect). Cite only files you actually read.`,
-          DEFAULT_RESEARCH_SESSION_TIMEOUT_MS, // RESEARCH-18 stuck-backstop, not a cost cap
+          timeoutMs, // RESEARCH-18 stuck-backstop (WS3 per-researcher editable), not a cost cap
         );
       } finally {
         await session.disconnect();
@@ -545,7 +546,7 @@ async function localReadPart(root: string, r: ResearcherConfig, repoSource: stri
     try {
       const trackedFiles = await reader.listFiles();
       const candidates = buildCandidateSet(grepStdout, trackedFiles);
-      const out = await runSession({ skill: CODE_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, candidates, read: reader });
+      const out = await runSession({ skill: CODE_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, timeoutMs: resolveTimeoutMs(r), candidates, read: reader });
       const note = out.note.trim();
       if (note.length > 0) {
         // Citations validated to REAL tracked files (fabrication guard; the path:line analog of the Web allowlist).
