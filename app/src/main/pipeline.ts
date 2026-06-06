@@ -136,6 +136,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // into every stage so each per-item `stage.run` span + its `copilot.invoke` child are recorded;
   // the perf index (perfIndex.ts) aggregates them. Spans also mirror to the dev log at `debug`.
   const tracer = createVaultTracer(vaultPath, { log });
+  const startedAt = Date.now();
   let stagingWt: string;
   try {
     stagingWt = await ensureStagingWorktree(vaultPath); // working surface (on `staging`)
@@ -143,12 +144,6 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     log.child({ scope: 'pipeline' }).error('startup.worktree-provision-failed', { itemId: vaultPath, err });
     throw err; // unchanged behavior — but no longer silent
   }
-  // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
-  // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
-  // poison-loop's leak that degraded staging + wedged the Jobs UI). Best-effort — never block startup.
-  await reapEphemeralWorktrees(stagingWt, log.child({ scope: 'pipeline' })).catch((err) =>
-    log.child({ scope: 'pipeline' }).warn('startup.worktree-reap-failed', { itemId: vaultPath, err }),
-  );
   // The shared serialized canonical writer for this vault (§5). The watchdog logs a loud `lock.stuck`
   // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
   // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
@@ -209,6 +204,27 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // shared seam (#160 / BUG #65): without cliPath the packaged app can't spawn copilot → the SDK throws.
   const researchers = new ResearcherScheduler(stagingWt, researchDepsOptions(log), lock, log);
   active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock, log };
+  const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
+  // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
+  // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
+  // poison-loop's leak that degraded staging + wedged the Jobs UI). Best-effort. Runs AFTER `active`
+  // is set — so the read-only IPC (listJobs, getState) is live immediately and the reap no longer
+  // strands the Jobs UI behind an O(leaked-N) sequence of git spawns — but BEFORE startActiveStages,
+  // so live stages can't race the cleanup by spawning fresh ephemeral worktrees mid-sweep.
+  const reapStartedAt = Date.now();
+  const reaped = await reapEphemeralWorktrees(stagingWt, log.child({ scope: 'pipeline' })).catch((err) => {
+    log.child({ scope: 'pipeline' }).warn('startup.worktree-reap-failed', { itemId: vaultPath, err });
+    return { worktrees: 0, branches: 0 };
+  });
+  // OBS: startup latency, split so a slow reap (its O(leaked-N) git spawns) is attributable and never
+  // misread as a slow vault open. `readyMs` is the UI-live time; `reapMs` is the off-UI-path cleanup.
+  log.child({ scope: 'pipeline' }).info('startup.ready', {
+    itemId: vaultPath,
+    readyMs,
+    reapMs: Date.now() - reapStartedAt,
+    reapedWorktrees: reaped.worktrees,
+    reapedBranches: reaped.branches,
+  });
   startActiveStages(active); // single source of truth for which loops run (shared with fullReplay)
   return orch;
 }
