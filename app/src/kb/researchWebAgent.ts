@@ -22,7 +22,7 @@ import { makeGatedFetch } from './researchFetch';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import { noopDevLog, type DevLog } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
-import { DEFAULT_RESEARCH_SESSION_TIMEOUT_MS } from './researchers';
+import { resolveTimeoutMs } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK. The
 // VALUE import of the SDK is a dynamic `import()` inside liveSdkSession, keeping that lazy property.
 import type { SessionConfig, SystemMessageConfig } from '@github/copilot-sdk';
@@ -237,7 +237,7 @@ export interface WebResearchOptions {
   log?: DevLog;
   /** Injected session runner — production uses the SDK; tests/Slice-1a inject a fake. Returns the
    *  agent's note + raw cited URLs for one bounded research pass over `query`. */
-  session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
+  session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; timeoutMs: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
 }
 
 /**
@@ -258,7 +258,7 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
     }
     const allowedDomains = allowedDomainsOf(r);
     try {
-      const out = await runSession({ skill: WEB_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, allowedDomains });
+      const out = await runSession({ skill: WEB_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, timeoutMs: resolveTimeoutMs(r), allowedDomains });
       const citations = filterCitations(out.citations, allowedDomains);
       const note = out.note.trim();
       return { found: note.length > 0, note, citations, query };
@@ -290,7 +290,7 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
  * The system message is the untrusted-content skill (RESEARCH-12); the outbound query is request-only.
  */
 function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOptions['session']> {
-  return async ({ skill, prompt, query, maxToolCalls, allowedDomains }) => {
+  return async ({ skill, prompt, query, maxToolCalls, timeoutMs, allowedDomains }) => {
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     const gatedFetch = makeGatedFetch({ allowedDomains });
     let submitted: { note: string; citations: string[] } | null = null;
@@ -344,9 +344,10 @@ function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOption
       try {
         await session.sendAndWait(
           `${prompt}\n\nResearch this and then call submitFindings exactly once:\n${query}\n\nUse up to ${maxToolCalls} tool calls — read several sources in depth and capture the specific facts/figures/dates/quotes they contain, each attributed to its source URL (a thin summary is a defect). Cite only pages you actually fetched.`,
-          // Generous stuck-backstop, not a cost cap (the budget bounds spend): a deep multi-fetch pass
-          // routinely exceeds the SDK's 60s default and would otherwise false-fail with a session.idle timeout.
-          DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
+          // Per-researcher stuck-backstop (RESEARCH-18, WS3 editable), not a cost cap (the budget bounds
+          // spend): a deep multi-fetch pass routinely exceeds the SDK's 60s default and would otherwise
+          // false-fail with a session.idle timeout.
+          timeoutMs,
         );
       } finally {
         await session.disconnect();

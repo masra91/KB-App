@@ -54,7 +54,7 @@ import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgress
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { isSafeGhRepo } from '../kb/ghRead';
-import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -703,6 +703,12 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   // prRepo is owner/name — validated at the boundary (drop a flag-like/garbage value, never store it).
   if (typeof patch.prRepo === 'string' && isSafeGhRepo(patch.prRepo.trim())) clean.prRepo = patch.prRepo.trim();
   if (Array.isArray(patch.topics)) clean.topics = patch.topics;
+  // Editable budget/timeout (RESEARCH-15/18, WS3): clamp valid numbers to the sane range; reject garbage
+  // (non-numeric / ≤0 / non-integer calls) by dropping it (field unchanged). The allowlist is NOT editable.
+  const cleanMaxCalls = clampToolCalls(patch.maxToolCalls);
+  if (cleanMaxCalls !== undefined) clean.maxToolCalls = cleanMaxCalls;
+  const cleanTimeout = clampTimeoutMs(patch.timeoutMs);
+  if (cleanTimeout !== undefined) clean.timeoutMs = cleanTimeout;
 
   let prior: ResearcherConfig | undefined;
   let applied = false;
@@ -718,6 +724,9 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         ...(clean.prompt !== undefined ? { prompt: clean.prompt } : {}),
         ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
         ...(clean.topics !== undefined ? { topics: clean.topics } : {}),
+        // WS3: maxToolCalls merges into the existing budget (preserve maxDepth); timeoutMs is top-level.
+        ...(clean.maxToolCalls !== undefined ? { budget: { ...prior.budget, maxToolCalls: clean.maxToolCalls } } : {}),
+        ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
         // Template config: merge repoPath (Code) / tenantId (M365) into the existing config,
         // preserving other config keys.
         ...(clean.repoPath !== undefined || clean.tenantId !== undefined || clean.prRepo !== undefined
@@ -743,7 +752,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         prompt: clean.prompt ?? `Research ${template} sources relevant to the request.`,
         egressTier,
         scope: clean.scope ?? 'global',
-        budget: DEFAULT_RESEARCHER_BUDGET,
+        budget: clean.maxToolCalls !== undefined ? { ...DEFAULT_RESEARCHER_BUDGET, maxToolCalls: clean.maxToolCalls } : DEFAULT_RESEARCHER_BUDGET,
+        ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
         schedule: clean.schedule ?? 'off',
         posture: clean.posture ?? DEFAULT_POSTURE,
         enabled: clean.enabled ?? false,

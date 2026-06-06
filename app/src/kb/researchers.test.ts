@@ -7,6 +7,13 @@ import {
   isSafeResearcherId,
   isEligible,
   TEMPLATE_DEFAULT_EGRESS,
+  clampToolCalls,
+  clampTimeoutMs,
+  resolveTimeoutMs,
+  MAX_TOOL_CALLS,
+  MIN_SESSION_TIMEOUT_MS,
+  MAX_SESSION_TIMEOUT_MS,
+  DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
   type ResearcherConfig,
   type ResearchRequest,
 } from './researchers';
@@ -56,6 +63,30 @@ describe('normalizeTerm + dedupKeyFor (D2)', () => {
     expect(dedupKeyFor({ what: 'x', by: { entityId: 'E1', sourceId: 'S1' } })).toContain('E1');
     expect(dedupKeyFor({ what: 'x', by: { sourceId: 'S1' } })).toContain('S1');
     expect(dedupKeyFor({ what: 'x', by: {} })).toBe('x'); // no subject → bare normalized term
+  });
+});
+
+describe('clampToolCalls / clampTimeoutMs — editable-bounds at the IPC boundary (WS3, RESEARCH-15/18)', () => {
+  it('clampToolCalls: keeps a valid integer; CLAMPS out-of-range to the ceiling; REJECTS garbage', () => {
+    expect(clampToolCalls(30)).toBe(30); // in-range valid
+    expect(clampToolCalls(1)).toBe(1); // min
+    expect(clampToolCalls(9999)).toBe(MAX_TOOL_CALLS); // clamped to the per-Instance ceiling (100)
+    // rejected (→ undefined → field left unchanged): non-positive, non-integer, non-number
+    for (const bad of [0, -3, 1.5, NaN, Infinity, '12', null, undefined]) expect(clampToolCalls(bad as unknown)).toBeUndefined();
+  });
+
+  it('clampTimeoutMs: keeps a valid ms; CLAMPS below the floor / above the ceiling; REJECTS garbage', () => {
+    expect(clampTimeoutMs(20 * 60_000)).toBe(20 * 60_000); // 20 min in-range
+    expect(clampTimeoutMs(5)).toBe(MIN_SESSION_TIMEOUT_MS); // 5ms → clamped up to the 30s floor
+    expect(clampTimeoutMs(99 * 60 * 60_000)).toBe(MAX_SESSION_TIMEOUT_MS); // 99h → clamped to the 60min ceiling
+    for (const bad of [0, -1, NaN, Infinity, '600000', null, undefined]) expect(clampTimeoutMs(bad as unknown)).toBeUndefined();
+  });
+
+  it('resolveTimeoutMs: persisted value (clamped) or the default when absent/invalid', () => {
+    expect(resolveTimeoutMs({ timeoutMs: 20 * 60_000 })).toBe(20 * 60_000);
+    expect(resolveTimeoutMs({ timeoutMs: undefined })).toBe(DEFAULT_RESEARCH_SESSION_TIMEOUT_MS);
+    expect(resolveTimeoutMs({ timeoutMs: 99 * 60 * 60_000 })).toBe(MAX_SESSION_TIMEOUT_MS); // clamps a runaway persisted value
+    expect(resolveTimeoutMs({ timeoutMs: -5 })).toBe(DEFAULT_RESEARCH_SESSION_TIMEOUT_MS); // invalid → default
   });
 });
 

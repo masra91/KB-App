@@ -139,7 +139,7 @@ export async function upsertResearcher(root: string, researcher: ResearcherConfi
 export async function patchResearcher(
   root: string,
   id: string,
-  patch: Partial<Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'prompt' | 'egressTier' | 'scope' | 'budget' | 'topics' | 'allowedTools' | 'config'>>,
+  patch: Partial<Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'prompt' | 'egressTier' | 'scope' | 'budget' | 'timeoutMs' | 'topics' | 'allowedTools' | 'config'>>,
 ): Promise<ResearcherConfig[]> {
   if (!isSafeResearcherId(id)) throw new Error(`refusing to patch researcher with unsafe id: ${JSON.stringify(id)}`);
   const researchers = await readResearcherRegistry(root);
@@ -152,6 +152,7 @@ export async function patchResearcher(
     if (patch.egressTier !== undefined) r.egressTier = patch.egressTier;
     if (patch.scope !== undefined) r.scope = patch.scope;
     if (patch.budget !== undefined) r.budget = patch.budget;
+    if (patch.timeoutMs !== undefined) r.timeoutMs = patch.timeoutMs;
     if (patch.topics !== undefined) r.topics = patch.topics;
     if (patch.allowedTools !== undefined) r.allowedTools = patch.allowedTools;
     if (patch.config !== undefined) r.config = patch.config;

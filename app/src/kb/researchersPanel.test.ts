@@ -38,6 +38,13 @@ describe('buildResearcherViews (RESEARCH-15)', () => {
     expect(views[0].prompt).toBe('p'); // instructions exposed for the Manage view (RESEARCH-17)
     expect(views[0].scope).toBe('global');
   });
+
+  it('surfaces the editable timeoutMs (WS3): persisted value when set, the default when absent', () => {
+    const views = buildResearcherViews([web({ id: 'a', timeoutMs: 20 * 60_000 }), web({ id: 'b' })], {});
+    expect(views[0].timeoutMs).toBe(20 * 60_000); // persisted
+    expect(views[1].timeoutMs).toBe(15 * 60_000); // default (RESEARCH-18)
+    expect(views[0].budget.maxToolCalls).toBe(8); // budget still surfaced (now editable)
+  });
 });
 
 describe(`researcherRunEligibility — honest "Off" is not "won't run" (WS1 #2)`, () => {
@@ -202,5 +209,21 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     expect(events).toHaveLength(1);
     expect(events[0].payload).toMatchObject({ field: 'tenantId', from: 'contoso.onmicrosoft.com', to: 'fabrikam.onmicrosoft.com' });
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', tenantId: 'contoso.onmicrosoft.com' })).toEqual([]); // no-op re-assert
+  });
+
+  it('audits an editable maxToolCalls change from→to (WS3 — spend ceiling change is never silent)', () => {
+    const prior = web({ budget: { maxToolCalls: 8, maxDepth: 2 } });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', maxToolCalls: 30 });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'maxToolCalls', from: 8, to: 30 });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', maxToolCalls: 8 })).toEqual([]); // no-op re-assert
+  });
+
+  it('audits an editable timeoutMs change from→to, with the default as the base when none was persisted (WS3)', () => {
+    const events = researcherConfigAuditEvents(web(), { id: 'web-1', timeoutMs: 20 * 60_000 });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'timeoutMs', from: 15 * 60_000, to: 20 * 60_000 }); // base = default
+    const prior = web({ timeoutMs: 20 * 60_000 });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', timeoutMs: 20 * 60_000 })).toEqual([]); // no-op re-assert
   });
 });

@@ -26,7 +26,7 @@
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
-import { DEFAULT_RESEARCH_SESSION_TIMEOUT_MS } from './researchers';
+import { resolveTimeoutMs } from './researchers';
 // Type-only — erased at compile, so unit tests (which inject `opts.session`) never load the SDK.
 import type { SessionConfig, SystemMessageConfig, MCPServerConfig } from '@github/copilot-sdk';
 
@@ -136,7 +136,7 @@ export interface M365ResearchOptions {
   mcpServer?: (input: { tenantId: string; surfaces: M365Surface[] }) => { server: MCPServerConfig; readTools: string[] };
   /** Injected session runner — production uses the SDK (below); tests inject a deterministic fake.
    *  Returns the agent's note + cited references for one bounded research pass over `query`. */
-  session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; tenantId: string; surfaces: M365Surface[] }) => Promise<{ note: string; citations: string[] }>;
+  session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; timeoutMs: number; tenantId: string; surfaces: M365Surface[] }) => Promise<{ note: string; citations: string[] }>;
 }
 
 /**
@@ -157,7 +157,7 @@ export function makeM365ResearchFn(opts: M365ResearchOptions = {}): ResearchFn {
     if (!tenantId) return { found: false, note: '', citations: [], query }; // unconfigured → no-finding
     const surfaces = allowedSurfacesOf(r);
     try {
-      const out = await runSession({ skill: M365_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, tenantId, surfaces });
+      const out = await runSession({ skill: M365_RESEARCH_SKILL, prompt: r.prompt, query, maxToolCalls: r.budget.maxToolCalls, timeoutMs: resolveTimeoutMs(r), tenantId, surfaces });
       const citations = filterCitations(out.citations);
       const note = out.note.trim();
       return { found: note.length > 0, note, citations, query };
@@ -182,7 +182,7 @@ export function makeM365ResearchFn(opts: M365ResearchOptions = {}): ResearchFn {
  * The system message is the untrusted-content skill (RESEARCH-12); the query is request-only.
  */
 function liveSdkSession(opts: M365ResearchOptions): NonNullable<M365ResearchOptions['session']> {
-  return async ({ skill, prompt, query, maxToolCalls, tenantId, surfaces }) => {
+  return async ({ skill, prompt, query, maxToolCalls, timeoutMs, tenantId, surfaces }) => {
     if (!opts.mcpServer) return { note: '', citations: [] }; // no concrete Graph MCP wired yet (env-gated)
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     const { server, readTools } = opts.mcpServer({ tenantId, surfaces });
@@ -218,9 +218,9 @@ function liveSdkSession(opts: M365ResearchOptions): NonNullable<M365ResearchOpti
       try {
         await session.sendAndWait(
           `${prompt}\n\nResearch this across your configured M365 surfaces (${surfaces.join(', ')}), then call submitFindings exactly once:\n${query}\n\nUse at most ${maxToolCalls} tool calls. Cite only items you actually read.`,
-          // Generous stuck-backstop, not a cost cap (the budget bounds spend): a multi-surface pass can
-          // exceed the SDK's 60s default and would otherwise false-fail with a session.idle timeout.
-          DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
+          // Per-researcher stuck-backstop (RESEARCH-18, WS3 editable), not a cost cap (the budget bounds
+          // spend): a multi-surface pass can exceed the SDK's 60s default and would otherwise false-fail.
+          timeoutMs,
         );
       } finally {
         await session.disconnect();

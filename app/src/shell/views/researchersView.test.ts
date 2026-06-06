@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, allowedTools: [], lastRun: null };
+const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, timeoutMs: 15 * 60_000, allowedTools: [], lastRun: null };
 const webRow: ResearcherView = { ...base, id: 'web-1', template: 'web', label: 'Prior art', egressTier: 'public-web' };
 const codeRow: ResearcherView = { ...base, id: 'code-1', template: 'code', label: 'Repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', egressTier: 'local-only', topics: [] };
 
@@ -47,7 +47,8 @@ describe('Field Desk — render (RESEARCH-15)', () => {
     expect(c.querySelector('.rdesk-id')?.textContent).toBe('web-1');
     expect(c.querySelector('.rdesk-kind')?.textContent).toContain('Public Web'); // named kind + glyph
     expect(c.querySelectorAll('.rdesk-rung')).toHaveLength(3); // clearance ladder: local · internal · public
-    expect(c.querySelector('.rdesk-reach')?.textContent).toContain('budget 8 calls/pass'); // reach readout
+    expect(c.querySelector<HTMLInputElement>('.rdesk-reach .researcher-maxcalls')?.value).toBe('8'); // editable budget (WS3)
+    expect(c.querySelector('.rdesk-reach-ro')?.textContent).toContain('depth ≤ 2'); // read-only tail
   });
 
   it('the clearance ladder lights the active tier rung (public-web here), others ghosted', async () => {
@@ -369,5 +370,48 @@ describe('Field Desk — XSS safety', () => {
     setApi();
     const c = await mount();
     expect(c.querySelector('img')).toBeNull();
+  });
+});
+
+describe('Field Desk — WS3 editable budget + timeout (RESEARCH-15/18)', () => {
+  it('renders editable reads/pass + timeout fields seeded from the view-model', async () => {
+    const c = await mount(); // webRow: budget.maxToolCalls 8, timeoutMs 15min
+    const calls = c.querySelector<HTMLInputElement>('.researcher-maxcalls');
+    const timeout = c.querySelector<HTMLInputElement>('.researcher-timeout');
+    expect(calls?.value).toBe('8');
+    expect(timeout?.value).toBe('15'); // 15 min
+    // They use the WS2 EditableField primitive (viz-field__input), not bespoke chrome.
+    expect(calls?.classList.contains('viz-field__input')).toBe(true);
+    expect(timeout?.classList.contains('viz-field__input')).toBe(true);
+  });
+
+  it('editing reads/pass persists via setResearcherConfig({maxToolCalls})', async () => {
+    const c = await mount();
+    const calls = c.querySelector<HTMLInputElement>('.researcher-maxcalls')!;
+    calls.value = '40';
+    calls.dispatchEvent(new Event('change'));
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', maxToolCalls: 40 });
+  });
+
+  it('editing timeout persists via setResearcherConfig({timeoutMs}) — minutes → ms', async () => {
+    const c = await mount();
+    const timeout = c.querySelector<HTMLInputElement>('.researcher-timeout')!;
+    timeout.value = '25';
+    timeout.dispatchEvent(new Event('change'));
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', timeoutMs: 25 * 60_000 });
+  });
+
+  it('the tool allowlist + maxDepth stay READ-ONLY — only reads/pass + timeout are editable (security/scope)', async () => {
+    listResearchers = vi.fn(async () => [{ ...webRow, allowedTools: ['fetch', 'web_search'], budget: { maxToolCalls: 8, maxDepth: 2 } }]);
+    setApi();
+    const c = await mount();
+    // Exactly TWO editable number inputs in the reach readout (reads/pass + timeout) — nothing for tools/depth.
+    expect(c.querySelectorAll('.rdesk-reach input').length).toBe(2);
+    const ro = c.querySelector('.rdesk-reach-ro');
+    expect(ro?.textContent).toMatch(/tools: fetch · web_search/); // allowlist shown as read-only text
+    expect(ro?.textContent).toMatch(/depth ≤ 2/); // maxDepth read-only (Slice-2 deferral)
+    expect(ro?.querySelector('input')).toBeNull(); // no editable control for tools/depth
   });
 });
