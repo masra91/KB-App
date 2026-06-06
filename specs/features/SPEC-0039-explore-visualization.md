@@ -1,5 +1,5 @@
 ---
-spec: SPEC-0037
+spec: SPEC-0039
 key: EXPLORE
 title: Explore & Visualization (the knowledge, navigable)
 type: feature
@@ -200,6 +200,7 @@ the neighborhood, and keep re-center/expand interactions responsive.
 
 ## 9. Changelog
 
+- 2026-06-06 — **renumbered SPEC-0037 → SPEC-0039** to deconflict a concurrent 4-way 0037 collision (WATCH/RICHIN/INTAKE also grabbed 0037 off a main that ended at 0036); allocation by ascending PR# posted on `control`. Key `EXPLORE` and all requirement IDs unchanged.
 - 2026-06-06 — created (draft). Drafted by KB-Developer-4 on PM dispatch; → KB-Lead (product
   review) + KB-Quality-Driver-2 (spec gate-2). Defines the **Explore** stage's feature surface:
   an **in-app, read-only** view over the evergreen `entities/` graph. **v1 sliced hard to the
