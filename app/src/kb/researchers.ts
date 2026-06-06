@@ -53,6 +53,15 @@ export interface ResearcherBudget {
 // total egress regardless of per-researcher budgets.
 export const DEFAULT_RESEARCHER_BUDGET: ResearcherBudget = { maxToolCalls: 15, maxDepth: 2 };
 
+// Per-pass session timeout for the live SDK research session (the `sendAndWait` idle wait). This is a
+// STUCK-SESSION BACKSTOP, not a cost bound: the agent bills tokens/tools — bounded by `maxToolCalls`
+// (RESEARCH-11) and the global per-Instance egress ceiling — never wall-clock time, so a clock-based
+// cap can only ever be a guess at "too long for real work." We make it generous (15 min, vs the SDK's
+// 60s default) so a legitimately deep multi-fetch pass never false-fails, and finite ONLY so a wedged
+// session eventually releases the one global copilot slot it holds for its lifetime (ORCH-23) instead
+// of starving the pipeline. User-editable per researcher (RESEARCH-15), alongside the budget.
+export const DEFAULT_RESEARCH_SESSION_TIMEOUT_MS = 15 * 60_000;
+
 /** Per-DISPATCH burst cap: total researcher passes one `dispatchResearch` fan-out will run, across all
  *  researchers, regardless of per-researcher budgets (RESEARCH-11). Bounds a single inline sweep's burst;
  *  the cross-dispatch/standing backstop is {@link RESEARCH_INSTANCE_CEILING}. */

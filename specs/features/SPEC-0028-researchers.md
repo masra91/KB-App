@@ -103,10 +103,11 @@ Review like any source.
 | RESEARCH-12| must     | **Untrusted-content defense**: fetched external content is treated as **data, never instructions**; researchers are prompted/structured accordingly and constrained by egress tier (limits exfiltration), read-only world (limits action), a **per-researcher tool/MCP allowlist**, and budget; findings are **marked externally-sourced** | none-yet | PRIN-19,20; AUTO-6 |
 | RESEARCH-13| must     | MCP servers / external tools are **third-party deps** — **vetted, pinned, version-aged** | none-yet | ENG-1,2,4,7 |
 | RESEARCH-14| should   | Researchers are a **prime Copilot SDK adopter** (tools/MCP, sessions, ORCH-21/22) — behind the agent interface, deterministic fallback retained | none-yet | ORCH-21,22 |
-| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/**budget — incl. an editable per-pass `maxToolCalls`, default 15**/MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations | none-yet | PANEL-1; VISION-11 |
+| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/**budget — an editable per-pass `maxToolCalls`, default 15** + **session timeout**, default 15 min, RESEARCH-18 / MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations. The budget + timeout are **editable controls**, not just the read-only "reach readout" — i.e. the `read-only in v1` readout is **wired to editable inputs** that persist via `setResearcherConfig` (validated at the IPC boundary, under the per-Instance ceiling) | none-yet | PANEL-1; VISION-11 |
 | RESEARCH-16| must     | **v1 ships** the framework + three built-in templates — **Web** (public-web), **Code** (local-only, read-only), **M365/WorkIQ** (internal-tenant, OAuth) — plus **custom** | none-yet | VISION-6 |
 | RESEARCH-17| must     | A findings-note must be **substantive + structured**, *not* a thin précis: it captures the **specific** facts / figures / dates / named entities / quoted passages the sources actually contain, **each attributed to its source URL**, with real depth — so the secondary source carries genuine substance for Decompose/Claims. *A vague 3-paragraph summary is a defect, not a pass.* The Web skill prompt instructs **depth + specificity** (over brevity); the per-pass retrieval budget **default is 15** (raised from 8) and is **user-editable per researcher** (RESEARCH-15), under the global per-Instance ceiling (RESEARCH-11). Egress posture is unchanged (gated fetch, allowlist, untrusted-content-as-DATA) — more reads + richer capture, same guards | none-yet | RESEARCH-5,6,11,15; PRIN-2; VISION-5 |
-| RESEARCH-17| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
+| RESEARCH-19| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
+| RESEARCH-18| must     | Each researcher has a **per-pass session timeout** — a **stuck-session backstop, NOT a cost bound**. Cost/depth is bounded by the **budget** (`maxToolCalls`) + the per-Instance ceiling (RESEARCH-11); the agent bills **tokens/tools, never wall-clock time**, so a clock cap can only guess at "too long for real work." It exists for one reason: a wedged session would otherwise hold its one **global copilot slot** (ORCH-23) forever and starve the pipeline. **Default 15 min** (the SDK's 60s default false-failed deep multi-fetch passes — `research.session-failed: Timeout after 60000ms waiting for session.idle`); **user-editable per researcher** (RESEARCH-15), passed to the live SDK session. Finite ≠ a deadline for real work | test: `researchSessionTimeout`(wiring) → none-yet (editor) | RESEARCH-11,15,17; ORCH-23 |
 
 ## 6. User flows / surface
 
@@ -200,6 +201,17 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
 
 ## 9. Changelog
 
+- 2026-06-04 — **RESEARCH-18: session timeout is a stuck-backstop, not a budget — and both it + the
+  budget are user-editable** (Principal, from a live `Run now` failure: `research.session-failed:
+  Timeout after 60000ms waiting for session.idle`). Root cause: the live SDK sessions used the Copilot
+  SDK's **60s `sendAndWait` default**, which the #209 budget bump (8 → 15 deep reads) routinely
+  exceeds. **Ruling (Principal):** the agent bills **tokens/tools, not time**, so a clock timeout is the
+  wrong cost control — it's only a backstop to recover a *wedged* session (and its held global copilot
+  slot, ORCH-23). Make it **generous (default 15 min)** and **user-editable per researcher**, alongside
+  the **budget**, which must also become a real editable control (today the view shows budget *read-only*
+  — RESEARCH-15 was specced as editable but never wired). **Interim shipped (#213):** fixed 15-min
+  default passed to both live tiers (web + M365) + regression test, to stop the false-fails now. **Still
+  open:** persist a per-researcher `timeoutMs` (+ wire the editable budget/timeout controls).
 - 2026-06-03 — **RESEARCH-17: substantive researcher output + user-editable budget** (Principal —
   live-test observation that researchers returned a thin ~3-paragraph summary + links). The findings-note
   must now be **substantive/structured** (specific facts/figures/dates/quotes, each source-attributed,
