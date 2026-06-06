@@ -35,7 +35,12 @@ on:
     branches: [main]
     # `labeled` so adding the `e2e` label re-triggers the workflow and runs the opt-in e2e job.
     types: [opened, synchronize, reopened, labeled]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      update_snapshots:
+        description: 'Regenerate + commit the e2e visual-snapshot baselines (linux) — runs ONLY the snapshots job'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -106,8 +111,11 @@ jobs:
 
   e2e:
     name: e2e (packaged smoke) — phased / opt-in
-    # OPT-IN until stable (TEST-11): manual dispatch, or add the `e2e` label to a PR.
-    if: ${{ github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'e2e') }}
+    # OPT-IN until stable (TEST-11): manual dispatch, or add the `e2e` label to a PR. A
+    # snapshot-update dispatch (update_snapshots=true) runs ONLY the `snapshots` job below, not this
+    # one — the macOS/Windows runners can't produce the linux baseline and would just fail on the new
+    # design-system snapshot for lack of a *-darwin/-win32 reference.
+    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.update_snapshots) || contains(github.event.pull_request.labels.*.name, 'e2e') }}
     strategy:
       fail-fast: false
       matrix:
@@ -125,3 +133,55 @@ jobs:
         run: npm run package
       - name: Playwright e2e — packaged boot smoke (TEST-4)
         run: npm run test:e2e
+
+  # Visual-snapshot baseline generator (SPEC-0033 §6 / DESIGN-9 HYBRID gate). The WS2 design-system
+  # snapshot (e2e/designSystem.e2e.ts, #233) compares the packaged app's render against a *-linux.png
+  # reference. Playwright names baselines per-platform, so the reference MUST be generated on the SAME
+  # OS that runs the gating e2e — linux. This job is the one-time/maintenance path: dispatch with
+  # `update_snapshots=true` on the branch, it regenerates the linux baseline(s) under xvfb and commits
+  # them BACK to the branch, so the (future-gating) e2e run has a real reference to diff against. It is
+  # dispatch-only + opt-in (never runs on a normal push/PR) and is the ONLY job that runs on a
+  # snapshot-update dispatch (the e2e job is skipped — see its `if`).
+  snapshots:
+    name: e2e visual snapshots — regenerate linux baselines (dispatch-only)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_snapshots }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # commit the regenerated *-linux.png baselines back to the dispatched branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }} # the branch the dispatch targeted (so the push lands back on it)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      # Electron (chromium-based) needs the same system libs Playwright installs for chromium, plus a
+      # virtual display (xvfb) to launch the packaged app headlessly on linux.
+      - name: Install Playwright system deps (Electron GUI libs)
+        run: npx playwright install-deps chromium
+      - name: Package the app (the snapshot boots the real artifact, TEST-4)
+        run: npm run package
+      - name: Regenerate the design-system visual baseline(s) — linux, under xvfb
+        # Scoped to the design-system snapshot file: a full e2e run would also fire the macOS/Windows-
+        # targeted smokes on linux (unverified there) and fail before we commit. --update-snapshots
+        # writes (and passes on) the *-linux.png reference.
+        run: xvfb-run -a npm run test:e2e -- e2e/designSystem.e2e.ts --update-snapshots
+      - name: Commit + push the regenerated *-linux.png baselines
+        shell: bash
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Stage ONLY new/changed linux snapshot PNGs — never anything else the run may have touched.
+          mapfile -t pngs < <(git ls-files --others --modified --exclude-standard -- '*-linux.png')
+          if [ ${#pngs[@]} -eq 0 ]; then
+            echo "No *-linux.png baseline changes to commit (already current)."
+            exit 0
+          fi
+          printf 'Committing baseline(s):\n%s\n' "${pngs[@]}"
+          git add -- "${pngs[@]}"
+          # [skip ci] so the baseline commit doesn't re-trigger the workflow (no loop).
+          git commit -m "ci(e2e): regenerate design-system visual baselines (linux) [skip ci]"
+          git push origin "HEAD:${{ github.ref_name }}"
