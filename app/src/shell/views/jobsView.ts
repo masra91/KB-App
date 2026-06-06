@@ -108,6 +108,7 @@ function wire(container: HTMLElement, jobs: JobView[]): void {
 
     const hideConfirm = (): void => {
       confirm.hidden = true;
+      confirmMsg.textContent = ''; // WS1 #1: clear the prompt on dismiss so a stale message can't linger
       pending = null;
       revert = null;
     };

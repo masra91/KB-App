@@ -9,6 +9,7 @@ import {
   isResearcherTemplate,
   defaultEgressFor,
   researcherConfigAuditEvents,
+  researcherRunEligibility,
   RESEARCHER_TEMPLATE_OPTIONS,
 } from './researchersPanel';
 import type { ResearcherConfig } from './researchers';
@@ -29,9 +30,39 @@ describe('buildResearcherViews (RESEARCH-15)', () => {
     expect(views[0]).toMatchObject({ label: 'Prior art', egressTier: 'public-web', enabled: true });
     expect(views[0].lastRun).toMatchObject({ eventType: 'researched', what: 'Project Atlas', sourceId: 'SRC1', citations: 2 });
     expect(views[1].lastRun).toBeNull(); // never run
-    expect(views[1].label).toBe('web'); // falls back to template
+    // WS1 #6: with no explicit label, fall back to the researcher's real NAME (id) — never the generic
+    // template word. `?? r.template` previously made this "web", which leaked into the run-now confirm
+    // ("dispatch web/code now") and the outbound query.
+    expect(views[1].label).toBe('web-2');
+    expect(views[1].label).not.toBe('web'); // not the template kind
     expect(views[0].prompt).toBe('p'); // instructions exposed for the Manage view (RESEARCH-17)
     expect(views[0].scope).toBe('global');
+  });
+});
+
+describe(`researcherRunEligibility — honest "Off" is not "won't run" (WS1 #2)`, () => {
+  it('a disabled researcher truly will not run (the ENABLED switch is the real gate)', () => {
+    const e = researcherRunEligibility({ enabled: false, schedule: 'off' });
+    expect(e.willRun).toBe(false);
+    expect(e.note).toMatch(/paused|won't run/i);
+    // even a scheduled-but-disabled researcher won't run
+    expect(researcherRunEligibility({ enabled: false, schedule: 'daily' }).willRun).toBe(false);
+  });
+
+  it("REGRESSION (#2): an ENABLED researcher with schedule 'off' STILL runs on demand — not paused", () => {
+    // The inline dispatcher runs every enabled researcher regardless of schedule, so "schedule: Off"
+    // must NOT read as won't-run (which is why such a researcher legitimately shows a recent last run).
+    const e = researcherRunEligibility({ enabled: true, schedule: 'off' });
+    expect(e.willRun).toBe(true);
+    expect(e.note).toMatch(/on demand/i);
+    expect(e.note).not.toMatch(/won't run|paused/i);
+  });
+
+  it('an enabled + scheduled researcher runs on its cadence AND on demand', () => {
+    const e = researcherRunEligibility({ enabled: true, schedule: 'hourly' });
+    expect(e.willRun).toBe(true);
+    expect(e.note).toMatch(/hourly/i);
+    expect(e.note).toMatch(/on demand/i);
   });
 });
 
