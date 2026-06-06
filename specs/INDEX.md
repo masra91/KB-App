@@ -51,6 +51,7 @@ and a unique `key` here.
 | SPEC-0036 | CONTRA  | Contradiction Lifecycle                       | feature | draft | `features/` |
 | SPEC-0039 | EXPLORE | Explore & Visualization (entity-neighborhood view) | feature | draft | `features/` |
 | SPEC-0040 | RICHIN  | Rich Ingestion (formatted paste / multi-file drag / chat) | feature | draft | `features/` |
+| SPEC-0041 | INTAKE  | Proactive Intake                              | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -62,7 +63,7 @@ assigned at creation time.
 | QCAP       | Quick Capture                    | feature | Ingest    | hotkey bar + tray-sheet variant of CAPTURE (SPEC-0013) — calls SPEC-0008 |
 | ~~RICHIN~~ | _written → SPEC-0040 (key RICHIN)_ | feature | Ingest  | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
 | WATCH      | Folder-Watch Ingestion           | feature | Ingest    | programmatic ingress |
-| INTAKE     | Proactive Intake                 | feature | Ingest    | email/news/calendar on schedule (automated) |
+| ~~INTAKE~~ | _written → SPEC-0041 (key INTAKE)_ | feature | Ingest  | Proactive Intake — scheduled pull of email/news/calendar as **primary** sources (vs RESEARCH's secondary corroboration); composes SPEC-0023 JOBS + SPEC-0008 INGEST |
 | ~~CATALOG~~ | _written → SPEC-0015 (key DECOMP)_ | feature | Enrich  | Decompose (Enrich v1) — entity extraction |
 | ~~CLAIMS~~ | _written → SPEC-0016 (key CLAIMS)_ | feature | Enrich  | Claims (Enrich v2) — internal substance about entities |
 | ~~RESEARCH~~ | _written → SPEC-0028 (key RESEARCH)_ | feature | Enrich  | Researchers: parallel registry (Web/Code/M365 + custom), invoked inline/scheduled/on-demand |
