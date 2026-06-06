@@ -53,6 +53,7 @@ import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRe
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
+import { IntakeScheduler } from '../kb/intakeScheduler';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
@@ -86,6 +87,7 @@ interface ActivePipeline {
   claims: ClaimsStage;
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
+  intake: IntakeScheduler; // SPEC-0041: wakes proactive-intake connectors (feed pulls → primary sources)
   lock: Mutex;
   log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
 }
@@ -102,6 +104,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.claims.start();
   a.jobs.start(); // SPEC-0023: the autonomous-job scheduler tick (named-preset cadence)
   a.researchers.start(); // SPEC-0028: the scheduled-researcher tick (standing external research)
+  a.intake.start(); // SPEC-0041: the proactive-intake tick (scheduled feed pulls → primary sources)
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -112,6 +115,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.claims.stop();
   a.jobs.stop();
   a.researchers.stop();
+  a.intake.stop();
 }
 
 /**
@@ -203,7 +207,13 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // Wire the resolved BYOA copilot cliPath + the dev-log into BOTH researcher entry points via the one
   // shared seam (#160 / BUG #65): without cliPath the packaged app can't spawn copilot → the SDK throws.
   const researchers = new ResearcherScheduler(stagingWt, researchDepsOptions(log), lock, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, lock, log };
+  // SPEC-0041 INTAKE: the proactive-intake tick. Each tick pulls every due connector's feed (RSS in
+  // Slice 1; M365-mail in Slice 2) and writes new items as immutable PRIMARY sources via the ingest
+  // path (origin:'external') — reusing the JOBS scheduling shape but NOT the JobBehavior write-sink
+  // (the researcherScheduler seam; JOBS-10 intact). Read-only w.r.t. the world (INTAKE-7). Inert
+  // until the Principal registers + enables a connector in `.kb/intake/registry.json`.
+  const intake = new IntakeScheduler(stagingWt, {}, log);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, lock, log };
   const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
   // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
   // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the

@@ -46,6 +46,12 @@ export interface CapturedMeta {
   surface: string;
   captureBatch: string; // links payloads from one capture gesture (CAPTURE-14)
   origin?: 'principal' | 'external' | 'secondary'; // who produced it; defaults to principal (DATA-2/5). `secondary` = a researcher finding (SPEC-0028 RESEARCH-5)
+  // Connector-supplied classification hint (SCOPE-14 / SPEC-0041 INTAKE-9): a high-confidence
+  // scope/sensitivity signal the producing surface declares (e.g. an intake connector's defaults).
+  // The archivist's decider prefers these over its conservative fallback so a connector's
+  // `confidential` default lands on the source rather than being silently down-classified.
+  scope?: string;
+  sensitivity?: string;
   originalName?: string;
   mimeType?: string;
   bytes?: number;
@@ -60,6 +66,9 @@ export interface CapturedMeta {
 export interface CaptureOpts {
   origin?: CapturedMeta['origin'];
   research?: ResearchProvenance;
+  /** Connector-supplied classification hint (SCOPE-14 / INTAKE-9) — the archivist decider prefers it. */
+  scope?: string;
+  sensitivity?: string;
   /** Override the git block-timeout (#163); defaults to boundedGit's standard bound. Tests drive it fast. */
   timeoutMs?: number;
 }
@@ -120,6 +129,8 @@ export async function captureToInbox(
         mimeType: 'text/markdown',
         ...(clip ? { clip } : {}),
         ...(opts.origin ? { origin: opts.origin } : {}),
+        ...(opts.scope ? { scope: opts.scope } : {}),
+        ...(opts.sensitivity ? { sensitivity: opts.sensitivity } : {}),
         ...(opts.research ? { research: opts.research } : {}),
       };
     } else {
@@ -137,6 +148,8 @@ export async function captureToInbox(
         mimeType: mimeForName(p.name),
         bytes: p.data.byteLength,
         ...(opts.origin ? { origin: opts.origin } : {}),
+        ...(opts.scope ? { scope: opts.scope } : {}),
+        ...(opts.sensitivity ? { sensitivity: opts.sensitivity } : {}),
         ...(opts.research ? { research: opts.research } : {}),
       };
     }

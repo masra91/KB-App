@@ -9,8 +9,11 @@ import type { SpanCtx } from './tracing';
 export interface ArchiveDecision {
   kind: 'text' | 'file';
   class: 'primary' | 'secondary';
-  scope: 'global';
-  sensitivity: 'internal';
+  /** Conservative default `global`/`internal` (CAPTURE-10), but a producing surface may declare a
+   *  higher-confidence classification (SCOPE-14 / INTAKE-9 connector defaults) which the decider
+   *  honors — so the field is a string, not the bare default literal. */
+  scope: string;
+  sensitivity: string;
   /** Provenance of the decision itself — see AgentTrace (ORCH-16). */
   agent?: AgentTrace;
 }
@@ -34,12 +37,20 @@ export interface AgentTrace {
 export type ArchivistDecider = (meta: CapturedMeta, ctx?: SpanCtx) => ArchiveDecision | Promise<ArchiveDecision>;
 
 /**
- * v1 deterministic decision. Conservative defaults only (CAPTURE-10): everything captured
- * by the Principal is a `primary` source, `global`/`internal`. Real classification +
- * Review routing are Enrich's job, deferred.
+ * v1 deterministic decision. Conservative defaults (CAPTURE-10): everything captured by the
+ * Principal is a `primary` source, `global`/`internal` — UNLESS the producing surface declared a
+ * higher-confidence classification (SCOPE-14 / SPEC-0041 INTAKE-9: an intake connector's configured
+ * scope/sensitivity), which is preferred so a `confidential` feed isn't silently down-classified.
+ * Richer LLM classification + Review routing remain Enrich's job, deferred.
  */
 export function deterministicDecide(meta: CapturedMeta): ArchiveDecision {
-  return { kind: meta.kind, class: 'primary', scope: 'global', sensitivity: 'internal', agent: { via: 'deterministic' } };
+  return {
+    kind: meta.kind,
+    class: 'primary',
+    scope: meta.scope ?? 'global',
+    sensitivity: meta.sensitivity ?? 'internal',
+    agent: { via: 'deterministic' },
+  };
 }
 
 /** The injectable decider the orchestrator feeds per item (Phase B swaps in a Copilot
