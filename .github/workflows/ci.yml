@@ -115,7 +115,7 @@ jobs:
     # snapshot-update dispatch (update_snapshots=true) runs ONLY the `snapshots` job below, not this
     # one — the macOS/Windows runners can't produce the linux baseline and would just fail on the new
     # design-system snapshot for lack of a *-darwin/-win32 reference.
-    if: ${{ (github.event_name == 'workflow_dispatch' && !inputs.update_snapshots) || contains(github.event.pull_request.labels.*.name, 'e2e') }}
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.update_snapshots != 'true') || contains(github.event.pull_request.labels.*.name, 'e2e') }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,7 +144,7 @@ jobs:
   # snapshot-update dispatch (the e2e job is skipped — see its `if`).
   snapshots:
     name: e2e visual snapshots — regenerate linux baselines (dispatch-only)
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.update_snapshots }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.update_snapshots == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write # commit the regenerated *-linux.png baselines back to the dispatched branch
