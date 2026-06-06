@@ -107,6 +107,8 @@
 .viz-seg-opt--clearance[aria-checked='true'][data-temp='local-only'] { background: var(--viz-patina); border-color: var(--viz-patina); color: var(--viz-field); }
 .viz-seg-opt--clearance[aria-checked='true'][data-temp='internal-tenant'] { background: var(--viz-brass); border-color: var(--viz-brass); color: var(--viz-field); }
 .viz-seg-opt--clearance[aria-checked='true'][data-temp='public-web'] { background: var(--viz-ember); border-color: var(--viz-ember); color: var(--viz-field); }
+/* disabled — the group dims to 0.5 (§4). Disable each segment (`<button disabled>`); mirrors .viz-btn:disabled. */
+.viz-seg-opt:disabled { opacity: 0.5; cursor: default; }
 
 /* --- ConfirmInline (§5) — the consequence-gate; expands in place under the trigger, framed by a left
    hue rule (caution=brass default, danger=oxide). Message names what will happen; always dismissable
@@ -132,6 +134,8 @@
 .viz-field__input--multiline:focus-visible, .viz-field__input--multiline.is-focus { border-color: var(--viz-ember); }
 /* invalid — oxide BOTTOM-RULE/border (≥3:1 graphic); the message + value text stay --viz-ink (§2). */
 .viz-field__input--invalid, .viz-field__input--invalid.viz-field__input--multiline { border-bottom-color: var(--viz-oxide); border-color: var(--viz-oxide); }
+/* disabled — dims to 0.5 (§6); mirrors .viz-btn:disabled. */
+.viz-field__input:disabled { opacity: 0.5; cursor: default; }
 
 /* ============================================================================================== */
 

@@ -18,8 +18,9 @@
 .showcase-cap { font-size: 0.6rem; color: var(--viz-ink-muted); letter-spacing: 0; line-height: 1.3; }
 .showcase-note { font-size: 0.7rem; color: var(--viz-ink-muted); }
 
-/* GAP flag — a spec'd state with no shipped class. Per the §2 contract, oxide colors the BORDER + the
-   ⚠ glyph (graphics, ≥3:1), NOT the small caption text (which stays --viz-ink-muted at AA). */
-.showcase-cell--gap { border-color: var(--viz-oxide); border-left-width: 3px; }
-.showcase-cap--gap { color: var(--viz-ink); }
-.showcase-cap--gap::first-letter { color: var(--viz-oxide); } /* the ⚠ glyph carries the oxide */
+/* NOTE cell — an INTENTIONAL state (surface-composed or deferred, per KB-Design-Lead), not a gap. Per
+   the §2 contract, brass (caution, not error) colors the BORDER + the ℹ glyph (graphics, ≥3:1), NOT the
+   small caption text (which stays --viz-ink-muted at AA). */
+.showcase-cell--note { border-color: var(--viz-brass); border-left-width: 3px; }
+.showcase-cap--note { color: var(--viz-ink); }
+.showcase-cap--note::first-letter { color: var(--viz-brass); } /* the ℹ glyph carries the brass */

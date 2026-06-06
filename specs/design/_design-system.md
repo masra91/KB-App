@@ -90,7 +90,7 @@ ground. No gradient, no drop shadow, no filled-indigo default.
 | `primary` | the one emphasized action in a group | ink label, `--viz-ink-muted` border | ember border + ember label |
 | `danger` | irreversible / destructive | ink label, **`--viz-oxide` border** (text stays ink — contract §2) | label → oxide on hover |
 | `ghost` | low-emphasis / inline (was `button.link`) | `--viz-ink-muted` label, no border | ember label, no fill |
-| `clearance-tinted` | a button whose meaning carries the active egress temperature (e.g. arm/run on an armed strip) | label/border take the strip's clearance hue (`patina`/`brass`/`ember`) | intensify |
+| `clearance-tinted` | **surface-composed, not a shared Button variant yet** — Researchers tints arm/Run via `.rdesk-*` in its surface CSS. Promote to a shared `.viz-btn--clearance` (mirroring `.viz-seg-opt--clearance`) when a **2nd** surface needs clearance-colored buttons. | label/border take the strip's clearance hue (`patina`/`brass`/`ember`) | intensify |
 
 - **Sizes** — `sm` (0.62rem signage, dense instrument rows), `md` (0.72rem, default). No `lg`; the
   language is dense, not chunky.
@@ -152,7 +152,7 @@ egress to the public web"), never a bare "Confirm?".
 | Variant | Presentation | Use |
 | --- | --- | --- |
 | `inline` | expands **in place** beneath the triggering control, framed by a left **2px hue rule** (brass = caution, oxide = destructive). No overlay. | the default — keeps context, no modal trap (Field Desk arm/run; #215) |
-| `dialog` | a centered overlay on a scrim, same internals | only when the action leaves no inline anchor, or must block all other interaction (rare) |
+| `dialog` | **not yet implemented — inline `.viz-confirm` is the shipped form**; a centered overlay on a scrim, same internals | lands when a real flow has no inline anchor / must block all other interaction (rare) |
 
 - **Dismissal (a11y + #215)** — inline: `Esc` collapses it and returns focus to the trigger; dialog:
   `Esc` + scrim-click close, focus is **trapped** while open and **restored** to the trigger on close.
