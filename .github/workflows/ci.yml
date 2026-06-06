@@ -182,6 +182,9 @@ jobs:
           fi
           printf 'Committing baseline(s):\n%s\n' "${pngs[@]}"
           git add -- "${pngs[@]}"
-          # [skip ci] so the baseline commit doesn't re-trigger the workflow (no loop).
-          git commit -m "ci(e2e): regenerate design-system visual baselines (linux) [skip ci]"
+          # No [skip ci]: the baseline commit SHOULD get the normal quick/package gates so the PR HEAD
+          # carries its required check (else branch protection blocks the merge). It will NOT re-run the
+          # snapshots job — that's `workflow_dispatch` + update_snapshots only (see its `if`), so a push
+          # can never re-trigger it. No loop.
+          git commit -m "ci(e2e): regenerate design-system visual baselines (linux)"
           git push origin "HEAD:${{ github.ref_name }}"
