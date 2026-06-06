@@ -64,9 +64,16 @@ describe.skipIf(!gitAvailable)('IntakeScheduler (SPEC-0041)', () => {
     expect(await sched.tick(now + 1000)).toEqual([]); // just ran → not due
   });
 
-  it('selectIntakeFn: rss is supported; m365-mail surfaces as a thrown error (Slice 2, not silent)', async () => {
+  it('selectIntakeFn: rss + m365-mail are supported; m365-mail without a tenant throws (not silent)', async () => {
     expect(typeof selectIntakeFn(conn())).toBe('function');
+    // m365-mail with no tenantId configured → throws (→ intake-failed), never a silent empty.
     const m365 = selectIntakeFn(conn({ type: 'm365-mail' }));
-    await expect(m365(conn({ type: 'm365-mail' }), { maxItems: 25 })).rejects.toThrow(/Slice 2/);
+    await expect(m365(conn({ type: 'm365-mail' }), { maxItems: 25 })).rejects.toThrow(/tenantId/);
+    // m365-mail with a tenant + an injected session runs (the env-gated live wiring is bypassed in tests).
+    const withSession = selectIntakeFn(conn({ type: 'm365-mail', config: { tenantId: 't1' } }), {
+      m365Mail: { session: async () => [{ id: 'm1', subject: 'Hi', bodyText: 'body' }] },
+    });
+    const items = await withSession(conn({ type: 'm365-mail', config: { tenantId: 't1' } }), { maxItems: 25 });
+    expect(items.map((i) => i.externalId)).toEqual(['m1']);
   });
 });

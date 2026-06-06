@@ -13,6 +13,7 @@ import { readEvents } from './activityIndex';
 import { readIntakeRegistry } from './intakeRegistry';
 import { runIntakeConnector } from './intakeRun';
 import { makeRssIntakeFn, type RssIntakeOptions } from './rssConnector';
+import { makeM365MailIntakeFn, type M365MailIntakeOptions } from './m365MailConnector';
 import type { IntakeConnectorConfig, IntakeFetchFn } from './intakeConnectors';
 import { noopDevLog, type DevLog } from './devlog';
 
@@ -30,22 +31,22 @@ export async function isIntakeDue(root: string, c: IntakeConnectorConfig, now: n
 /** Injected cognition/IO for the scheduler — RSS options (production) and/or a fetch override (tests). */
 export interface IntakeDepsOptions {
   rss?: RssIntakeOptions;
+  /** M365-mail connector options (Slice 2) — cliPath + the env-gated Graph MCP factory; tests inject `session`. */
+  m365Mail?: M365MailIntakeOptions;
   /** Force one fetch fn for every connector (tests) — bypasses the per-type selection. */
   fetchOverride?: IntakeFetchFn;
 }
 
-/** Select the fetch behavior for a connector by `type`. A not-yet-shipped type returns a fn that
- *  THROWS, so a mis-configured connector surfaces as a distinct `intake-failed` (never a silent
- *  no-op) — Slice 1 ships RSS; `m365-mail` lands in Slice 2 (SPEC-0041 F2). */
+/** Select the fetch behavior for a connector by `type`. Slice 1 = RSS; Slice 2 = M365-mail (its live
+ *  Graph-MCP wiring is env-gated — `makeM365MailIntakeFn` THROWS when the tenant/MCP isn't configured,
+ *  surfacing a distinct `intake-failed`, never a silent no-op). An unknown type also throws. */
 export function selectIntakeFn(c: IntakeConnectorConfig, opts: IntakeDepsOptions = {}): IntakeFetchFn {
   if (opts.fetchOverride) return opts.fetchOverride;
   switch (c.type) {
     case 'rss':
       return makeRssIntakeFn(opts.rss);
     case 'm365-mail':
-      return async () => {
-        throw new Error('m365-mail intake is not yet available (SPEC-0041 Slice 2)');
-      };
+      return makeM365MailIntakeFn(opts.m365Mail);
     default:
       return async () => {
         throw new Error(`unknown intake connector type: ${(c as IntakeConnectorConfig).type}`);
