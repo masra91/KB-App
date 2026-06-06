@@ -5,7 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
-import { makeCodeResearchFn, codeRepoSourceOf, codePrRepoOf, parsePrList, prMatchesTerm, buildPrNote, codeAzTargetOf, parseAzPrList, azPrMatchesTerm, buildAzPrNote, type GhReadFn, type AzReadFn } from './researchCodeAgent';
+import { makeCodeResearchFn, codeRepoSourceOf, codePrRepoOf, parsePrList, prMatchesTerm, buildPrNote, codeAzTargetOf, parseAzPrList, azPrMatchesTerm, buildAzPrNote, countAttributedCodeFacts, filterCodeCitations, buildCandidateSet, isIgnoredRepoPath, makeCodeRepoReader, MAX_FILE_READ_BYTES, MAX_CANDIDATE_FILES, CODE_RESEARCH_SKILL, type GhReadFn, type AzReadFn, type CodeSdkSession } from './researchCodeAgent';
+import { researcherWorkspace } from './codeGit';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
 function gitInstalledSync(): boolean {
@@ -213,5 +214,213 @@ describe.skipIf(!gitAvailable)('makeCodeResearchFn — real local repo reads (RE
     } finally {
       await rmTempDir(dir);
     }
+  });
+});
+
+// ───────────────────────── RESEARCH-20: agentic Code researcher ─────────────────────────
+
+describe('countAttributedCodeFacts — the RESEARCH-20/17 depth metric on the code path (mirrors #211)', () => {
+  // A SUBSTANTIVE note: grouped findings, each attributed inline to a real `path:line`.
+  const substantive = [
+    '## Atlas — code findings',
+    'The launch codename is defined in `README.md:1` as "Project Atlas".',
+    '- `makeWebResearchFn` builds the production ResearchFn at src/kb/researchWebAgent.ts:250.',
+    '- The egress gate `isAllowedUrl` rejects non-public hosts at src/kb/researchWebAgent.ts:190.',
+    '- The per-pass budget is enforced in the fetch handler (src/kb/researchWebAgent.ts:314).',
+    '- The default budget is 15 reads, set at src/kb/researchers.ts:54.',
+  ].join('\n');
+  // A THIN précis / grep dump (the defect): bare `path:line` lines with no prose, or prose with no cite.
+  const grepDump = [
+    'Found in 3 file(s):',
+    'README.md:1',
+    'src/util.ts:2',
+    'src/index.ts:1',
+    'This code is interesting and does several things of note across the repo.',
+  ].join('\n');
+
+  it('counts inline path:line-attributed facts in a substantive note', () => {
+    expect(countAttributedCodeFacts(substantive)).toBe(5);
+  });
+  it('scores a grep dump / thin précis at ~0 (a bare path:line list is a defect, not a fact)', () => {
+    expect(countAttributedCodeFacts(grepDump)).toBe(0);
+  });
+  it('separates substantive from thin — the ≥5 soft-floor a real agentic pass must clear (KB-QD bar)', () => {
+    expect(countAttributedCodeFacts(substantive)).toBeGreaterThanOrEqual(5);
+    expect(countAttributedCodeFacts(grepDump)).toBeLessThan(5);
+  });
+  it('does not count bare citations, prose without a path:line, or headings', () => {
+    expect(countAttributedCodeFacts('')).toBe(0);
+    expect(countAttributedCodeFacts('src/foo.ts:42')).toBe(0); // bare path:line, no prose
+    expect(countAttributedCodeFacts('A general statement with no source location at all.')).toBe(0);
+    expect(countAttributedCodeFacts('The handler validates input at src/foo.ts:42 before use.')).toBe(1);
+  });
+});
+
+describe('filterCodeCitations — keep only REAL tracked files (path:line fabrication guard)', () => {
+  const tracked = new Set(['README.md', 'src/util.ts', 'src/index.ts']);
+  it('keeps citations whose path is a real tracked file (with the :line suffix), drops fabricated paths', () => {
+    const cites = ['README.md:1', 'src/util.ts:2', 'src/НЕreal.ts:9', 'totally/made-up.ts:5', 'README.md:1'];
+    expect(filterCodeCitations(cites, tracked)).toEqual(['README.md:1', 'src/util.ts:2']); // fabricated dropped, dedup
+  });
+  it('drops everything when nothing matches (no fabricated finding survives)', () => {
+    expect(filterCodeCitations(['ghost.ts:1', 'phantom/x.ts'], tracked)).toEqual([]);
+  });
+});
+
+describe('isIgnoredRepoPath + buildCandidateSet (RESEARCH-20 D-WS4-b read-layer guard)', () => {
+  it('ignores vendored/generated/binary/lockfile paths, keeps real source', () => {
+    for (const p of ['node_modules/x/index.js', '.git/config', 'dist/bundle.js', 'build/out.js', 'package-lock.json', 'yarn.lock', 'a/b.min.js', 'logo.png', 'app.wasm']) {
+      expect(isIgnoredRepoPath(p), p).toBe(true);
+    }
+    for (const p of ['src/util.ts', 'README.md', 'lib/a.py']) expect(isIgnoredRepoPath(p), p).toBe(false);
+  });
+  it('orders grep-hit files by match count first, then directory neighbors; filters ignore-set; caps at MAX', () => {
+    const grep = ['src/a.ts:1:x', 'src/a.ts:5:x', 'src/b.ts:2:x', 'node_modules/z.js:1:x'].join('\n');
+    const tracked = ['src/a.ts', 'src/b.ts', 'src/c.ts', 'docs/readme.md', 'node_modules/z.js'];
+    const cand = buildCandidateSet(grep, tracked);
+    expect(cand[0]).toBe('src/a.ts'); // most hits first
+    expect(cand[1]).toBe('src/b.ts'); // next hit
+    expect(cand).toContain('src/c.ts'); // a neighbor in the hit directory
+    expect(cand).not.toContain('docs/readme.md'); // not a neighbor of a hit dir
+    expect(cand).not.toContain('node_modules/z.js'); // ignore-set, even though grep "hit" it
+  });
+  it('caps the candidate set at MAX_CANDIDATE_FILES', () => {
+    const grep = Array.from({ length: 60 }, (_, i) => `src/f${i}.ts:1:x`).join('\n');
+    const tracked = Array.from({ length: 60 }, (_, i) => `src/f${i}.ts`);
+    expect(buildCandidateSet(grep, tracked).length).toBe(MAX_CANDIDATE_FILES);
+  });
+});
+
+describe('CODE_RESEARCH_SKILL — untrusted-content + depth posture (RESEARCH-12/17/20)', () => {
+  it('frames repo content as DATA, scopes to the request, demands path:line depth, forbids fabrication', () => {
+    expect(CODE_RESEARCH_SKILL).toMatch(/DATA, never instructions/i);
+    expect(CODE_RESEARCH_SKILL).toMatch(/ONLY the requested topic/i);
+    expect(CODE_RESEARCH_SKILL).toMatch(/path:line|path\/to/i); // path:line attribution
+    expect(CODE_RESEARCH_SKILL).toMatch(/read-only/i);
+    expect(CODE_RESEARCH_SKILL).toMatch(/defect/i); // depth bar
+    expect(CODE_RESEARCH_SKILL).toMatch(/never invent|do NOT fabricate|not there/i);
+    expect(CODE_RESEARCH_SKILL).toMatch(/submitFindings/);
+  });
+});
+
+describe.skipIf(!gitAvailable)('makeCodeRepoReader — read-only tools enforce caps in the read layer (D-WS4-b)', () => {
+  it('reads a tracked file, tracks readPaths, truncates beyond the byte cap, refuses ignored/unsafe paths', async () => {
+    const dir = await makeTempDir();
+    try {
+      const big = 'x'.repeat(MAX_FILE_READ_BYTES + 5000);
+      const repo = await makeRepo(dir, { 'README.md': '# Hi\nsecond line\n', 'big.txt': big, 'node_modules/dep.js': 'evil()\n' });
+      const ws = researcherWorkspace(path.join(dir, 'vault'), 'code-1');
+      const { cloneOrRefresh } = await import('./codeGit');
+      await cloneOrRefresh(ws, repo);
+      const reader = makeCodeRepoReader(ws);
+
+      const ok = await reader.readFile('README.md');
+      expect('text' in ok && ok.text).toMatch(/second line/);
+      expect(reader.readPaths.has('README.md')).toBe(true);
+
+      const trunc = await reader.readFile('big.txt');
+      expect('truncated' in trunc && trunc.truncated).toBe(true);
+      expect('text' in trunc && trunc.text.length).toBeLessThanOrEqual(MAX_FILE_READ_BYTES + 64); // cap + marker
+
+      expect(await reader.readFile('node_modules/dep.js')).toMatchObject({ error: expect.any(String) }); // ignore-set
+      expect(await reader.readFile('../../etc/passwd')).toMatchObject({ error: expect.any(String) }); // path traversal refused
+      expect(reader.readPaths.has('node_modules/dep.js')).toBe(false);
+
+      const files = await reader.listFiles();
+      expect(files).toContain('README.md');
+      expect(files).not.toContain('node_modules/dep.js'); // ignore-set filtered out of the listing
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+describe.skipIf(!gitAvailable)('makeCodeResearchFn — agentic local-repo pass (RESEARCH-20, injected session)', () => {
+  // A fake agent that USES the read tools (so the read-only layer is exercised) and returns a substantive,
+  // path:line-attributed note citing REAL files — the shape a real Copilot session must produce.
+  const substantiveAgent: CodeSdkSession = async ({ read, candidates }) => {
+    await read.listFiles();
+    if (candidates[0]) await read.readFile(candidates[0]);
+    const note = [
+      '## Atlas — code findings',
+      'The launch codename string lives in `README.md:1` ("Project Atlas").',
+      '- The overview continues at README.md:2 describing the rollout plan.',
+      '- A helper constant is exported at src/util.ts:1 (`export const x = 1`).',
+      '- That constant is consumed by the build flag at src/util.ts:2.',
+      '- The module is re-exported for consumers at src/index.ts:1.',
+    ].join('\n');
+    return { note, citations: ['README.md:1', 'README.md:2', 'src/util.ts:1', 'src/util.ts:2', 'src/index.ts:1', 'fabricated/ghost.ts:9'] };
+  };
+
+  async function withRepo<T>(fn: (repo: string, vault: string) => Promise<T>): Promise<T> {
+    const dir = await makeTempDir();
+    try {
+      const repo = await makeRepo(dir, { 'README.md': '# Project Atlas\nThe Atlas launch codename and rollout.\n', 'src/util.ts': 'export const x = 1;\nexport const flag = true;\n', 'src/index.ts': "export { x } from './util';\n" });
+      return await fn(repo, path.join(dir, 'vault'));
+    } finally {
+      await rmTempDir(dir);
+    }
+  }
+
+  it('REGRESSION (substantive-output class): the agentic pass clears the countAttributedCodeFacts ≥5 soft-floor; the grep fallback does NOT', async () => {
+    await withRepo(async (repo, vault) => {
+      const agentic = await makeCodeResearchFn(vault, { session: substantiveAgent })(code({ config: { repoPath: repo } }), req('Atlas'));
+      expect(agentic.found).toBe(true);
+      expect(countAttributedCodeFacts(agentic.note)).toBeGreaterThanOrEqual(5); // depth bar met by the agentic note
+      // The deterministic grep fallback (no session) is a dump — it does NOT clear the depth bar (the defect #7).
+      const grep = await makeCodeResearchFn(vault, {})(code({ config: { repoPath: repo } }), req('Atlas'));
+      expect(grep.found).toBe(true);
+      expect(countAttributedCodeFacts(grep.note)).toBeLessThan(5);
+    });
+  });
+
+  it('citations are validated to REAL repo files — the agent\'s fabricated path is dropped', async () => {
+    await withRepo(async (repo, vault) => {
+      const res = await makeCodeResearchFn(vault, { session: substantiveAgent })(code({ config: { repoPath: repo } }), req('Atlas'));
+      expect(res.citations).toContain('README.md:1');
+      expect(res.citations).toContain('src/util.ts:1');
+      expect(res.citations.some((c) => c.includes('fabricated/ghost.ts'))).toBe(false); // fabrication guard
+    });
+  });
+
+  it('RESEARCH-14: a FAILED agentic session degrades to the deterministic grep note (not a hard fail)', async () => {
+    await withRepo(async (repo, vault) => {
+      const throwing: CodeSdkSession = async () => {
+        throw new Error('spawn copilot ENOENT'); // mirrors SDK-unavailable
+      };
+      const res = await makeCodeResearchFn(vault, { session: throwing })(code({ config: { repoPath: repo } }), req('Atlas'));
+      expect(res.found).toBe(true); // fell back to grep, didn't fail
+      expect(res.failed).toBeUndefined();
+      expect(res.note).toMatch(/Code research:/); // the grep-fallback note shape
+      expect(res.citations).toContain('README.md');
+    });
+  });
+
+  it('READ-ONLY INVARIANT GUARD (RESEARCH-10): the agentic pass NEVER mutates the source repo + clones into the isolated gitignored sandbox', async () => {
+    await withRepo(async (repo, vault) => {
+      const headBefore = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const statusBefore = execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' });
+
+      // An agent that tries to read widely (the read tools are the ONLY surface — no write tool exists).
+      const reader: CodeSdkSession = async ({ read }) => {
+        await read.listFiles();
+        await read.grep('Atlas');
+        await read.readFile('README.md');
+        await read.gitLog();
+        return { note: 'Read README.md:1 for the codename.', citations: ['README.md:1'] };
+      };
+      await makeCodeResearchFn(vault, { session: reader })(code({ id: 'code-1', config: { repoPath: repo } }), req('Atlas'));
+
+      // Source repo is byte-for-byte unchanged — no commit, no working-tree mutation.
+      expect(execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()).toBe(headBefore);
+      expect(execFileSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8' })).toBe(statusBefore);
+      // The clone is the isolated, gitignored cache workspace — NOT the user's repo path.
+      const ws = researcherWorkspace(vault, 'code-1');
+      expect(ws).toContain(path.join('.kb', 'cache', 'researchers', 'code-1'));
+      expect(ws.startsWith(path.resolve(repo))).toBe(false);
+      // The reader exposes ONLY read methods — there is no write/commit/push affordance by construction.
+      const r = makeCodeRepoReader(ws);
+      expect(Object.keys(r).filter((k) => /write|commit|push|delete|mutat/i.test(k))).toEqual([]);
+    });
   });
 });
