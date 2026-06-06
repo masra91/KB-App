@@ -7,6 +7,24 @@
   --accent: #6c8cff;
   --border: #36363c;
   --error: #ff6b6b;
+  --hover: rgba(255, 255, 255, 0.06); /* raised/hover wash — flips with the scheme below */
+}
+
+/* Light mode (theme cohesion): the app shell was dark-only while the VIZ surfaces (Field Desk /
+   The Line, design-system.css) already followed `prefers-color-scheme` — so in OS Light mode the
+   chrome stayed dark behind paper panels. Give the shell a matching paper palette so the WHOLE app
+   tracks the OS: cohesive paper (light) or graphite (dark). Values align with the VIZ light tokens
+   (--viz-field #f4f1ea, --viz-ink #1c1b18, --viz-rule #cfc9bc) so chrome + panels read as one surface. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f1ea;
+    --card: #fff;
+    --fg: #1c1b18;
+    --muted: #6a6557;
+    --border: #cfc9bc;
+    --error: #b02a18;
+    --hover: rgba(0, 0, 0, 0.05);
+  }
 }
 
 * {
@@ -241,7 +259,7 @@ body.shell-active #app {
 }
 
 .sidebar .nav-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--hover);
 }
 
 .sidebar .nav-item[aria-current='page'] {
@@ -374,7 +392,7 @@ button:disabled {
 /* Save-as-Output (ASK-6) */
 .ask-save-row { margin-top: 0.5rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
 .ask-save { appearance: none; font: inherit; font-size: 0.85em; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.25rem 0.6rem; cursor: pointer; }
-.ask-save:hover { background: rgba(255, 255, 255, 0.06); }
+.ask-save:hover { background: var(--hover); }
 .ask-save:disabled { opacity: 0.5; cursor: default; }
 .ask-save-status.error { color: var(--error); }
 
@@ -408,7 +426,7 @@ button:disabled {
 .confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 .confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
 .btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
-.btn:hover { background: rgba(255, 255, 255, 0.06); }
+.btn:hover { background: var(--hover); }
 .btn-danger { appearance: none; font: inherit; border: 0; border-radius: 8px; background: var(--error); color: #1a1a1a; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: 600; }
 .btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
 
@@ -570,7 +588,7 @@ option { background: var(--card); color: var(--fg); }
   padding: 0.55rem 0.7rem;
   cursor: pointer;
 }
-.activity-entry-head:hover { background: rgba(255, 255, 255, 0.05); }
+.activity-entry-head:hover { background: var(--hover); }
 .activity-entry-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .activity-actor-badge { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; flex: none; }
 .activity-summary { flex: 1; }
