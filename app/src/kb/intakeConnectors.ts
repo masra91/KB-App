@@ -12,7 +12,10 @@
 // JobBehavior→JobFinding→write-sink flow — that sink is confined to entities/claims/outputs, whereas
 // INTAKE writes a `sources/` primary via `captureToInbox`. A JobBehavior and an intake connector are
 // distinct behavior shapes that share only scheduling (keeps JOBS-10 intact).
-import { createHash } from 'node:crypto';
+//
+// RENDERER-SAFE (STACK-6): types + constants + pure string helpers only — NO node builtins, so the
+// Sources view (renderer) can import the connector types/catalog. The node-`crypto` dedup-key lives
+// in `intakeRun.ts` (backend).
 
 /** The built-in connector templates. v1 Slice 1 ships RSS; M365-mail lands next (SPEC-0041 F2). */
 export const INTAKE_CONNECTOR_TYPES = ['rss', 'm365-mail'] as const;
@@ -92,13 +95,10 @@ export type IntakeFetchFn = (c: IntakeConnectorConfig, ctx: IntakeFetchContext) 
  *  feed gives no id. The fallback hashes the item's stable fields so a re-served identical item maps
  *  to the same key. Slice-1 keys on the id ALONE (no `last-modified`): a re-served item is skipped —
  *  the never-re-archive guarantee. Revision-snapshot semantics (re-ingesting an edited item under the
- *  same id) are deferred — see the dedup note in `intakeRun.ts` (feeds re-stamp timestamps, flood risk). */
-export function intakeDedupKey(item: IntakeItem): string {
-  const ext = item.externalId.trim();
-  if (ext) return `id:${ext}`;
-  const h = createHash('sha256').update(`${item.title}\n${item.link ?? ''}\n${item.contentMd}`).digest('hex');
-  return `hash:${h}`;
-}
+ *  same id) are deferred — see the dedup note in `intakeRun.ts` (feeds re-stamp timestamps, flood risk).
+ *  Implemented in `intakeRun.ts` (backend) — it uses node `crypto`, which must NOT enter the renderer
+ *  bundle (STACK-6): this module stays renderer-safe (types + constants only) so the Sources view can
+ *  import its connector types/catalog without dragging node builtins in. */
 
 /**
  * Render an item into the immutable primary-source body (INTAKE-10): a small provenance header
