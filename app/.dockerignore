@@ -1,0 +1,11 @@
+# SPEC-0042 EVAL container build context hygiene — keep the image reproducible (npm ci installs deps;
+# don't COPY a host node_modules over them) and small. Build context = app/.
+node_modules
+.git
+dist
+out
+.vite
+coverage
+*.log
+playwright-report
+test-results

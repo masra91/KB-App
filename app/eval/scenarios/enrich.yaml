@@ -1,0 +1,35 @@
+# SPEC-0042 EVAL Slice-1 — the one real end-to-end scenario (generalizes eval/enrichE2eDogfood).
+# Enrich flow: ingest a primary source → drain Decompose/Connect/Claims → recall over the enriched KB.
+# Exercises DECOMP-17 granularity (people/orgs are entities; roles/descriptors are NOT), CLAIMS
+# citations, CONNECT-12 wikilinks, and grounded+cited Recall (ASK-7). Deciders are the REAL BYOA
+# copilot (EVAL-2); ids/clock are seeded by the runner so the model output is the only measured variable.
+id: enrich-hopper
+capability: decompose
+seed:
+  kind: empty
+actions:
+  - ingest:
+      text: "Grace Hopper was a pioneer who worked on COBOL. She served in the US Navy as a rear admiral."
+  - ingest:
+      text: "Grace Hopper helped develop COBOL. She was a rear admiral in the US Navy."
+  - awaitDrain:
+      stages: [decompose, connect, claims]
+  - ask:
+      query: "What did Grace Hopper work on?"
+expect:
+  deterministic:
+    # Genuine entities are nodes; roles/descriptors are not (DECOMP-17).
+    - check: entitiesInclude
+      args: ["Grace Hopper", "US Navy"]
+    - check: entitiesExclude
+      args: ["rear admiral", "pioneer"]
+    # Claims carry citations back to their source (DATA-10 / CLAIMS).
+    - check: claimCitations
+      args: { required: true }
+    # A relatesTo hint (Hopper served in the Navy) became a real [[wikilink]] (CONNECT-12).
+    - check: wikilinkRendered
+      args: { from: "Grace Hopper", to: "US Navy" }
+    # Recall answered and grounded its answer in ≥1 cited claim (ASK-7).
+    - check: recallCites
+      args: { min: 1 }
+  # judge: []   # agent-judged rubric — deferred to Slice-2 (EVAL-4)
