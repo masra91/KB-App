@@ -32,6 +32,7 @@ export const AUDIT_ACTORS = [
   'panel',
   'researcher',
   'intake',
+  'watch',
   'output',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
@@ -48,6 +49,8 @@ export interface AuditSubjects {
   requestId?: string;
   /** Intake connector id — the proactive feed pull a pass belongs to (SPEC-0041). */
   intakeId?: string;
+  /** Folder-watch id — the watched-folder ingestion a pass belongs to (SPEC-0037). */
+  watchId?: string;
   /** Connect keys its work by canonical block key, not a single entity id. */
   blockKey?: string;
 }
@@ -376,6 +379,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // brings external items in as immutable primary sources (promoted to main)
     carriesWhy: true, // records the connector, the items pulled (ids/links), and why (scheduled feed pull)
     traces: ['AUDIT-1', 'AUDIT-2', 'INTAKE-10', 'INTAKE-12'],
+  },
+  {
+    actor: 'watch',
+    what: 'Folder-Watch Ingestion pass (SPEC-0037): a watched local folder whose stable files are COPIED (non-destructive, WATCH-4) into the KB as immutable PRIMARY sources via the ingest spine (`surface=watch:<folder-id>`) — records the folder inspected and the files ingested with their source ids (`watch-ingested`, carrying the prior-source link when a changed file supersedes a prior version), an audited `watch-no-new` no-op when contentHash dedup finds nothing changed, a distinct `watch-failed` on a read error (failed ≠ empty; OBS-4), and a `watch-refused` when the loop-guard rejects the folder (the vault/.kb/.git or an ancestor — never a silent skip; WATCH-10). Read-only w.r.t. the watched source (the original file is never moved/deleted in v1). Emitted via appendAuditEvent into the cross-cutting control log.',
+    emitters: ['watchRun'],
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true, // copies external files in as immutable primary sources (promoted to main)
+    carriesWhy: true, // records the folder, files ingested (+ prior-source link), and why (folder-watch arrival)
+    traces: ['AUDIT-1', 'AUDIT-2', 'WATCH-3', 'WATCH-4', 'WATCH-10'],
   },
   {
     actor: 'output',

@@ -32,6 +32,9 @@ const kbApi: KbApi = {
   setResearcherConfig: (patch) => ipcRenderer.invoke('kb:setResearcherConfig', patch),
   runResearcherNow: (id) => ipcRenderer.invoke('kb:runResearcherNow', id),
   listResearcherRuns: (id) => ipcRenderer.invoke('kb:listResearcherRuns', id),
+  listWatchFolders: () => ipcRenderer.invoke('kb:listWatchFolders'),
+  setWatchFolder: (patch) => ipcRenderer.invoke('kb:setWatchFolder', patch),
+  removeWatchFolder: (id) => ipcRenderer.invoke('kb:removeWatchFolder', id),
   exploreEntities: () => ipcRenderer.invoke('kb:exploreEntities'),
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
 };

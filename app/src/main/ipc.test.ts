@@ -36,6 +36,10 @@ const mocks = vi.hoisted(() => ({
   setResearcherConfig: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: true, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
   runResearcherNow: vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'secondary source SRC1' })),
   listResearcherRuns: vi.fn(async () => [{ ts: '2026-06-02T00:00:00.000Z', eventType: 'researched', what: 'Atlas', sourceId: 'SRC1', citations: 1 }]),
+  // SPEC-0037 WATCH pipeline helpers (the IPC handlers delegate to these).
+  listWatchFolders: vi.fn(async () => [{ id: 'drop', folderPath: '/abs/inbox', label: 'drop', enabled: false, scope: 'global', sensitivity: 'internal', ignoreGlobs: [], watching: false, lastEvent: null }]),
+  setWatchFolder: vi.fn(async () => [{ id: 'drop', folderPath: '/abs/inbox', label: 'drop', enabled: true, scope: 'global', sensitivity: 'internal', ignoreGlobs: [], watching: true, lastEvent: null }]),
+  removeWatchFolder: vi.fn(async () => []),
 }));
 
 vi.mock('electron', () => ({
@@ -58,6 +62,9 @@ vi.mock('./pipeline', () => ({
   setActiveResearcherConfig: mocks.setResearcherConfig,
   runActiveResearcherNow: mocks.runResearcherNow,
   listResearcherRunsForActive: mocks.listResearcherRuns,
+  listWatchFoldersForActive: mocks.listWatchFolders,
+  setActiveWatchFolder: mocks.setWatchFolder,
+  removeActiveWatchFolder: mocks.removeWatchFolder,
 }));
 
 vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
@@ -372,6 +379,24 @@ describe('SPEC-0028 Researchers — Control Panel IPC delegates to the pipeline 
     const views = await invoke<{ enabled: boolean }[]>('kb:setResearcherConfig', { id: 'web-1', enabled: true });
     expect(mocks.setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', enabled: true });
     expect(views[0].enabled).toBe(true);
+  });
+
+  it('kb:listWatchFolders returns the watched-folder views (SPEC-0037)', async () => {
+    const views = await invoke<{ id: string; watching: boolean }[]>('kb:listWatchFolders');
+    expect(mocks.listWatchFolders).toHaveBeenCalled();
+    expect(views[0].id).toBe('drop');
+  });
+
+  it('kb:setWatchFolder forwards the patch + returns the refreshed list', async () => {
+    const views = await invoke<{ enabled: boolean }[]>('kb:setWatchFolder', { id: 'drop', enabled: true });
+    expect(mocks.setWatchFolder).toHaveBeenCalledWith({ id: 'drop', enabled: true });
+    expect(views[0].enabled).toBe(true);
+  });
+
+  it('kb:removeWatchFolder forwards the id + returns the refreshed list', async () => {
+    const views = await invoke<unknown[]>('kb:removeWatchFolder', 'drop');
+    expect(mocks.removeWatchFolder).toHaveBeenCalledWith('drop');
+    expect(views).toEqual([]);
   });
 
   it('kb:runResearcherNow forwards the id + returns the run result', async () => {
