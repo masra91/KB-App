@@ -50,6 +50,7 @@ and a unique `key` here.
 | SPEC-0035 | HEALTH  | Knowledge Health & Structural Lint            | feature | draft | `features/` |
 | SPEC-0036 | CONTRA  | Contradiction Lifecycle                       | feature | draft | `features/` |
 | SPEC-0037 | WATCH   | Folder-Watch Ingestion (programmatic ingress) | feature | draft | `features/` |
+| SPEC-0038 | QCAP    | Quick Capture (frictionless global capture; macOS first) | feature | draft | `features/` |
 | SPEC-0039 | EXPLORE | Explore & Visualization (entity-neighborhood view) | feature | draft | `features/` |
 | SPEC-0040 | RICHIN  | Rich Ingestion (formatted paste / multi-file drag / chat) | feature | draft | `features/` |
 | SPEC-0041 | INTAKE  | Proactive Intake                              | feature | draft | `features/` |
@@ -62,7 +63,7 @@ assigned at creation time.
 
 | Likely key | Candidate title                  | Type    | Stage     | Notes |
 | ---------- | -------------------------------- | ------- | --------- | ----- |
-| QCAP       | Quick Capture                    | feature | Ingest    | hotkey bar + tray-sheet variant of CAPTURE (SPEC-0013) — calls SPEC-0008 |
+| ~~QCAP~~   | _written → SPEC-0038 (key QCAP)_  | feature | Ingest    | hotkey + tray-sheet variant of CAPTURE (SPEC-0013) — calls SPEC-0008; macOS first |
 | ~~RICHIN~~ | _written → SPEC-0040 (key RICHIN)_ | feature | Ingest  | richer text / drag files / chat (extends SPEC-0013; calls SPEC-0008) |
 | ~~WATCH~~  | _written → SPEC-0037 (key WATCH)_ | feature | Ingest    | programmatic ingress — connector onto INGEST (SPEC-0008) |
 | ~~INTAKE~~ | _written → SPEC-0041 (key INTAKE)_ | feature | Ingest  | Proactive Intake — scheduled pull of email/news/calendar as **primary** sources (vs RESEARCH's secondary corroboration); composes SPEC-0023 JOBS + SPEC-0008 INGEST |
