@@ -95,3 +95,6 @@ out/
 playwright-report/
 test-results/
 .playwright/
+
+# SPEC-0042 EVAL — last-known-good baselines are gitignored, never promoted (EVAL-8)
+eval/baselines/

@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import path from 'node:path';
 import { loadScenario } from './runner/loader';
-import { runScenario } from './runner/runScenario';
+import { runMatrix } from './runner/runMatrix';
 import { formatScorecard } from './runner/scorecard';
 import type { VaultSnapshot } from './runner/snapshot';
 
@@ -36,15 +36,21 @@ describe.skipIf(!ENABLED)('SPEC-0042 EVAL Slice-1 — enrich scenario end-to-end
     'drives eval/scenarios/enrich.yaml through the real pipeline, logs the state, and scores it',
     async () => {
       const scenario = await loadScenario(path.resolve(process.cwd(), 'eval/scenarios/enrich.yaml'));
-      const scorecard = await runScenario(scenario, { onSnapshot: logSnapshot });
-      // The scorecard IS the deliverable — print it for human judgment (quality is non-deterministic).
-      console.log('\n' + formatScorecard(scorecard) + '\n');
-      // Gross-failure guard: the harness ran the real pipeline end-to-end and scored every check. The
-      // individual deterministic results are surfaced above; non-determinism means we don't hard-fail the
-      // run on a single check here (that's the scorecard/baseline's job in Slice-2/3).
-      expect(scorecard.scenarioId).toBe('enrich-hopper');
-      expect(scorecard.total).toBe((scenario.expect.deterministic ?? []).length);
-      expect(scorecard.total).toBeGreaterThan(0);
+      // Slice-2: drive the full matrix (deterministic + agent-judge), diff vs baseline, emit a manifest.
+      // enrich.yaml declares no variant matrix → one 'default' run, through the full Slice-2 machinery.
+      const results = await runMatrix(scenario, { onSnapshot: logSnapshot });
+      for (const { scorecard, diff, manifest } of results) {
+        console.log('\n' + formatScorecard(scorecard));
+        console.log(`baseline: ${diff.regressions} regression(s), ${diff.improvements} improvement(s)`);
+        console.log(`manifest: sut=${manifest.sutModel} judge=${manifest.judgeModel} node=${manifest.node} @ ${manifest.at}\n`);
+      }
+      // Gross-failure guard: the matrix ran the real pipeline + judge end-to-end and scored every check.
+      // Non-determinism means we don't hard-fail on a single check (that's the scorecard/baseline's job).
+      expect(results).toHaveLength(1); // no variant matrix on enrich → single default run
+      const sc = results[0].scorecard;
+      expect(sc.scenarioId).toBe('enrich-hopper');
+      expect(sc.total).toBe((scenario.expect.deterministic ?? []).length);
+      expect(sc.judge.length).toBe((scenario.expect.judge ?? []).length);
     },
     TIMEOUT_MS,
   );

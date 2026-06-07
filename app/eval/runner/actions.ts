@@ -37,7 +37,7 @@ export interface ActionDriver {
  * capture→drain→recall flow. Verbs not needed by Slice-1's enrich scenario (runJob/dispatchResearcher/
  * setConfig) throw a clear per-slice error rather than silently no-op.
  */
-export async function makeInProcessDriver(opts: { root: string; cliPath?: string }): Promise<ActionDriver> {
+export async function makeInProcessDriver(opts: { root: string; cliPath?: string; recallMaxToolCalls?: number }): Promise<ActionDriver> {
   const root = opts.root;
   await createKb({ path: root, initGitIfNeeded: true });
   const stagingWt = await ensureStagingWorktree(root);
@@ -76,7 +76,10 @@ export async function makeInProcessDriver(opts: { root: string; cliPath?: string
       if (a.stages.includes('claims') && a.stages.includes('connect')) await connectPoke();
     },
     async ask(a) {
-      lastRecall = await recall(root, a.query, opts.cliPath ? { cliPath: opts.cliPath } : {});
+      lastRecall = await recall(root, a.query, {
+        ...(opts.cliPath ? { cliPath: opts.cliPath } : {}),
+        ...(opts.recallMaxToolCalls ? { maxToolCalls: opts.recallMaxToolCalls } : {}), // budget variant axis (EVAL-7)
+      });
       return lastRecall;
     },
     async runJob() {
