@@ -6,22 +6,34 @@
 // Watched-folders "arriving" section, and HTML escaping of untrusted connector fields.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountSources } from './sourcesView';
-import type { IntakeConnectorView, KbApi } from '../../kb/types';
+import type { IntakeConnectorView, WatchFolderView, KbApi } from '../../kb/types';
 
 const rss: IntakeConnectorView = {
   id: 'news', type: 'rss', typeLabel: 'RSS / Atom feed', label: 'news', enabled: false, schedule: 'off',
   scope: 'global', sensitivity: 'internal', maxItemsPerPass: 25, feedUrl: 'https://example.com/feed.xml', tenantId: '', folder: '', lastRun: null,
 };
+const folder: WatchFolderView = {
+  id: 'inbox', folderPath: '/Users/me/KB-Inbox', label: 'inbox', enabled: true, scope: 'global', sensitivity: 'internal',
+  ignoreGlobs: ['*.tmp'], watching: true, lastEvent: { ts: '2025-06-03T09:00:00Z', kind: 'watch-ingested', path: 'note.md' },
+};
 
 let listIntakeConnectors: ReturnType<typeof vi.fn>;
 let setIntakeConnectorConfig: ReturnType<typeof vi.fn>;
 let runIntakeConnectorNow: ReturnType<typeof vi.fn>;
+let listWatchFolders: ReturnType<typeof vi.fn>;
+let setWatchFolder: ReturnType<typeof vi.fn>;
+let removeWatchFolder: ReturnType<typeof vi.fn>;
+let pickFolder: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     listIntakeConnectors: listIntakeConnectors as unknown as KbApi['listIntakeConnectors'],
     setIntakeConnectorConfig: setIntakeConnectorConfig as unknown as KbApi['setIntakeConnectorConfig'],
     runIntakeConnectorNow: runIntakeConnectorNow as unknown as KbApi['runIntakeConnectorNow'],
+    listWatchFolders: listWatchFolders as unknown as KbApi['listWatchFolders'],
+    setWatchFolder: setWatchFolder as unknown as KbApi['setWatchFolder'],
+    removeWatchFolder: removeWatchFolder as unknown as KbApi['removeWatchFolder'],
+    pickFolder: pickFolder as unknown as KbApi['pickFolder'],
   };
 }
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -30,6 +42,10 @@ beforeEach(() => {
   listIntakeConnectors = vi.fn(async () => [rss]);
   setIntakeConnectorConfig = vi.fn(async () => [{ ...rss, enabled: true }]);
   runIntakeConnectorNow = vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'ok' }));
+  listWatchFolders = vi.fn(async () => [folder]);
+  setWatchFolder = vi.fn(async () => [folder]);
+  removeWatchFolder = vi.fn(async () => []);
+  pickFolder = vi.fn(async () => '/Users/me/Newsletters');
   setApi();
 });
 
@@ -54,11 +70,16 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(c.querySelector('select')).toBeNull(); // WS2: segmented control, never a native select
   });
 
-  it('shows both Feeds + Watched-folders sections (folders arriving)', async () => {
+  it('shows both Feeds + Watched-folders sections, each with live rows', async () => {
     const c = await mount();
     const heads = Array.from(c.querySelectorAll('.src-section-head')).map((h) => h.textContent);
     expect(heads).toEqual(['Feeds', 'Watched folders']);
-    expect(c.textContent).toContain('Arriving soon');
+    // a real watched-folder strip renders (not a placeholder)
+    const watch = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
+    expect(watch).toBeTruthy();
+    expect(watch.textContent).toContain('/Users/me/KB-Inbox');
+    expect(watch.querySelector('.watch-arm')!.textContent).toContain('WATCHING'); // enabled + watching
+    expect(watch.textContent).toContain('brought in a file'); // typed lastEvent, no raw slug
   });
 
   it('enabling a paused feed asks to confirm (it starts an outbound pull), then applies on confirm', async () => {
@@ -109,7 +130,7 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
 
   it('add-from-tile: RSS + M365 tiles, then naming + re-click creates a PAUSED connector', async () => {
     const c = await mount();
-    const tiles = Array.from(c.querySelectorAll<HTMLButtonElement>('.rdesk-tile'));
+    const tiles = Array.from(c.querySelectorAll<HTMLButtonElement>('.rdesk-tile[data-type]')); // feed tiles only
     expect(tiles.map((t) => t.dataset.type)).toEqual(['rss', 'm365-mail']);
     tiles[0].click(); // choose RSS
     (c.querySelector('.intake-add-id') as HTMLInputElement).value = 'Hacker News';
@@ -129,7 +150,59 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     listIntakeConnectors = vi.fn(async () => []);
     setApi();
     const c = await mount();
-    expect(c.querySelector('.rdesk-empty')!.textContent).toMatch(/No feeds yet/);
-    expect(c.querySelector('.rdesk-tile')).toBeTruthy(); // add-dock still present
+    expect(c.querySelector('.src-section .rdesk-empty')!.textContent).toMatch(/No feeds yet/);
+    expect(c.querySelector('.rdesk-tile[data-type]')).toBeTruthy(); // feed add-dock still present
+  });
+});
+
+describe('Sources view · Watched folders (WATCH-9)', () => {
+  it('toggling a watched folder applies directly (local read, no confirm)', async () => {
+    const c = await mount();
+    (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-arm') as HTMLButtonElement).click();
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', enabled: false }); // was enabled → toggled off
+  });
+
+  it('removing a watched folder confirms first, then calls removeWatchFolder', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
+    (strip.querySelector('.watch-remove') as HTMLButtonElement).click();
+    await flush();
+    expect((strip.querySelector('.watch-confirm') as HTMLElement).hidden).toBe(false);
+    expect(removeWatchFolder).not.toHaveBeenCalled(); // gated
+    (strip.querySelector('.watch-confirm-go') as HTMLButtonElement).click();
+    await flush();
+    expect(removeWatchFolder).toHaveBeenCalledWith('inbox');
+  });
+
+  it('add-folder: OS picker → setWatchFolder with the slugified basename, PAUSED', async () => {
+    setWatchFolder = vi.fn(async () => [folder, { ...folder, id: 'newsletters', folderPath: '/Users/me/Newsletters', label: 'newsletters', enabled: false }]);
+    setApi();
+    const c = await mount();
+    (c.querySelector('.watch-add-pick') as HTMLButtonElement).click();
+    await flush();
+    expect(pickFolder).toHaveBeenCalled();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'newsletters', folderPath: '/Users/me/Newsletters', enabled: false });
+  });
+
+  it('SECURITY: a loop-guard-refused folder is surfaced cleanly (no client-side bypass) — the folder is NOT shown', async () => {
+    // The backend refuses an in-vault folder by NOT persisting it → returns a list without the new id.
+    pickFolder = vi.fn(async () => '/Users/me/MyVault/.kb'); // a path the backend loop-guard refuses
+    setWatchFolder = vi.fn(async () => [folder]); // unchanged list — the refused folder is absent
+    setApi();
+    const c = await mount();
+    (c.querySelector('.watch-add-pick') as HTMLButtonElement).click();
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalled(); // the client sent it to the guarded backend (no client bypass)
+    expect(c.querySelector('.watch-add-status')!.textContent).toMatch(/Couldn.t watch that folder.*inside your knowledge base/i);
+    expect(c.querySelector('.rdesk-strip[data-watch-id="kb"]')).toBeNull(); // the refused folder never renders
+  });
+
+  it('a failed listWatchFolders degrades just that section; Feeds still render', async () => {
+    listWatchFolders = vi.fn(async () => { throw new Error('boom'); });
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.rdesk-strip[data-id="news"]')).toBeTruthy(); // feeds still render
+    expect(c.textContent).toMatch(/Couldn.t load watched folders/);
   });
 });

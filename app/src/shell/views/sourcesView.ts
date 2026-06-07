@@ -1,9 +1,9 @@
 // Control Panel · Sources — the unified Sources management view (SPEC-0027 PANEL-4: INTAKE-14 feed
 // connectors + WATCH-9 watched folders, ONE surface). Built on the WS2 design-system primitives
 // (shell/design-system.css `viz-*`), reusing the shared manage-view strip layout (`rdesk-*`, token-
-// based + generic) for visual consistency with Researchers/Jobs. The INTAKE feed section is live; the
-// WATCH watched-folders section consumes DEV-5's `kb:listWatchFolders` when the backend lands (shown as
-// "arriving" until then — graceful, never a broken canvas, PANEL-9).
+// based + generic) for visual consistency with Researchers/Jobs. Both halves are live: Feeds manage
+// INTAKE connectors; Watched folders manage WATCH folders (DEV-5's backend). Degrades gracefully — a
+// section whose IPC fails still renders the other (PANEL-9), never a broken canvas.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import {
@@ -14,11 +14,22 @@ import {
   intakeRunEligibility,
   intakeOutcomeLabel,
 } from '../../kb/intakeSourcingPanel';
-import type { IntakeConnectorView, IntakeConnectorConfigPatch } from '../../kb/types';
+import type { IntakeConnectorView, IntakeConnectorConfigPatch, WatchFolderView } from '../../kb/types';
 import type { IntakeConnectorConfig } from '../../kb/intakeConnectors';
 
 /** A glyph per connector type — never the dev slug; the typeLabel carries the words. */
 const TYPE_GLYPH: Record<string, string> = { rss: '📰', 'm365-mail': '✉' };
+
+/** Principal-facing labels for a watched-folder's last event (never the raw audit slug). */
+const WATCH_OUTCOME_LABELS: Record<string, string> = {
+  'watch-ingested': 'brought in a file',
+  'watch-no-new': 'no new files',
+  'watch-refused': 'a file was skipped',
+  'watch-failed': 'a file could not be read',
+};
+function watchOutcomeLabel(kind: string): string {
+  return WATCH_OUTCOME_LABELS[kind] ?? kind.replace(/-/g, ' ');
+}
 
 const HEADER = `<h1 class="rdesk-title viz-signage">Sources</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
 
@@ -28,17 +39,31 @@ export async function mountSources(container: HTMLElement): Promise<void> {
 }
 
 async function render(container: HTMLElement): Promise<void> {
-  let connectors: IntakeConnectorView[];
-  try {
-    // #145: bound the wait so a hung IPC can't leave an infinite spinner.
-    connectors = await withTimeout(window.kbApi.listIntakeConnectors());
-  } catch {
+  // #145: bound each read so a hung IPC can't leave an infinite spinner. Each section degrades
+  // independently — a failed feeds OR folders read renders that section's load note, not a dead view.
+  const [connectorsR, foldersR] = await Promise.allSettled([
+    withTimeout(window.kbApi.listIntakeConnectors()),
+    withTimeout(window.kbApi.listWatchFolders()),
+  ]);
+  // Only a TOTAL failure (both sections unreadable) is a full load error; otherwise render what we have.
+  if (connectorsR.status === 'rejected' && foldersR.status === 'rejected') {
     renderLoadError(container, HEADER, () => void render(container));
     return;
   }
-  const feeds = connectors.length
-    ? `<ul class="rdesk-roster">${connectors.map(strip).join('')}</ul>`
-    : `<p class="rdesk-empty viz-body">No feeds yet — add one from a template below.</p>`;
+  const connectors = connectorsR.status === 'fulfilled' ? connectorsR.value : null;
+  const folders = foldersR.status === 'fulfilled' ? foldersR.value : null;
+
+  const feeds = connectors === null
+    ? `<p class="rdesk-empty viz-body">Couldn’t load feeds — <button type="button" class="src-retry viz-btn viz-btn--sm">retry</button></p>`
+    : connectors.length
+      ? `<ul class="rdesk-roster">${connectors.map(strip).join('')}</ul>`
+      : `<p class="rdesk-empty viz-body">No feeds yet — add one from a template below.</p>`;
+  const watched = folders === null
+    ? `<p class="rdesk-empty viz-body">Couldn’t load watched folders — <button type="button" class="src-retry viz-btn viz-btn--sm">retry</button></p>`
+    : folders.length
+      ? `<ul class="rdesk-roster">${folders.map(watchStrip).join('')}</ul>`
+      : `<p class="rdesk-empty viz-body">No watched folders yet — add one below. Files dropped in are brought in as sources, kept verbatim.</p>`;
+
   container.innerHTML = `<div class="rdesk viz-surface">${HEADER}
     <section class="src-section">
       <h2 class="src-section-head viz-signage">Feeds</h2>
@@ -47,10 +72,13 @@ async function render(container: HTMLElement): Promise<void> {
     </section>
     <section class="src-section">
       <h2 class="src-section-head viz-signage">Watched folders</h2>
-      <p class="rdesk-empty viz-body">Drop files into a folder and they arrive as sources, kept verbatim. Arriving soon.</p>
+      ${watched}
+      ${watchAddDock()}
     </section>
   </div>`;
-  wire(container, connectors);
+  if (connectors) wire(container, connectors);
+  if (folders) wireWatch(container, folders);
+  for (const r of Array.from(container.querySelectorAll<HTMLButtonElement>('.src-retry'))) r.addEventListener('click', () => void render(container));
 }
 
 /** A segmented control (role=radiogroup of buttons — no native &lt;select&gt;, the WS2 SegmentedControl). */
@@ -174,7 +202,7 @@ function wire(container: HTMLElement, connectors: IntakeConnectorView[]): void {
     if (e.key === 'Enter' && chosenType) void addConnector(container, chosenType);
   });
 
-  for (const li of Array.from(container.querySelectorAll<HTMLElement>('.rdesk-strip'))) {
+  for (const li of Array.from(container.querySelectorAll<HTMLElement>('.rdesk-strip[data-id]'))) {
     const id = li.dataset.id!;
     const current = byId.get(id)!;
     const armEl = li.querySelector<HTMLButtonElement>('.intake-arm')!;
@@ -306,4 +334,138 @@ async function addConnector(container: HTMLElement, type: IntakeConnectorConfigP
 /** Slugify a friendly name into a canonical connector id ([a-z0-9-], no leading/trailing dashes). */
 function slugifyId(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+// ── Watched folders (WATCH-9) ──────────────────────────────────────────────────────────────────
+
+/** A watched folder's last-event report line — typed, jargon-free (never the raw audit slug). */
+function watchReportLine(w: WatchFolderView): string {
+  if (w.enabled && !w.watching) return `<span class="rdesk-report" data-state="paused"><span class="rdesk-report-flag" aria-hidden="true">◑</span> enabled, but not watching — the folder may be unavailable</span>`;
+  if (!w.lastEvent) return `<span class="rdesk-report" data-state="never"><span class="rdesk-report-flag" aria-hidden="true">·</span> ${w.watching ? 'watching — nothing seen yet' : 'paused'}</span>`;
+  const le = w.lastEvent!;
+  const when = new Date(le.ts).toLocaleString();
+  const detail = le.path ? ` — ${esc(le.path)}` : '';
+  return `<span class="rdesk-report" data-state="${le.kind === 'watch-failed' ? 'failed' : 'ok'}"><span class="rdesk-report-flag" aria-hidden="true">${le.kind === 'watch-failed' ? '✕' : '✓'}</span> last ${esc(when)} · ${esc(watchOutcomeLabel(le.kind))}${detail}</span>`;
+}
+
+function watchStrip(w: WatchFolderView): string {
+  const armed = w.enabled;
+  const armLabel = armed ? (w.watching ? '◉ WATCHING' : '◉ ENABLED') : '○ PAUSED';
+  const ignore = w.ignoreGlobs.length ? ` · ignoring ${esc(w.ignoreGlobs.join(', '))}` : '';
+  return `
+    <li class="rdesk-strip viz-no-chrome viz-spine" data-watch-id="${esc(w.id)}" data-armed="${armed ? 'true' : 'false'}">
+      <div class="rdesk-strip-head">
+        <span class="rdesk-id viz-numeric">${esc(w.label)}</span>
+        <button type="button" class="rdesk-arm watch-arm viz-signage viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}">${armLabel}</button>
+      </div>
+      <div class="rdesk-identity">
+        <span class="rdesk-kind viz-signage">📂 <span class="path">${esc(w.folderPath)}</span></span>
+      </div>
+      <div class="rdesk-config">
+        <span class="rdesk-reach-ro viz-body">scope ${esc(w.scope)} · ${esc(w.sensitivity)}${ignore}</span>
+      </div>
+      <div class="rdesk-footer viz-ruled">
+        ${watchReportLine(w)}
+        <button type="button" class="viz-btn watch-remove">Remove</button>
+      </div>
+      <div class="rdesk-confirm viz-confirm watch-confirm" hidden>
+        <p class="rdesk-confirm-msg viz-confirm__msg watch-confirm-msg viz-body"></p>
+        <button type="button" class="viz-btn watch-confirm-cancel">Cancel</button>
+        <button type="button" class="viz-btn viz-btn--danger watch-confirm-go">Remove</button>
+      </div>
+      <p class="rdesk-status watch-status viz-body" role="status" aria-live="polite"></p>
+    </li>`;
+}
+
+/** The add-folder dock — a folder picker (the OS dialog), not a free-text path. The backend loop-guard
+ *  validates the picked path; a refusal surfaces here cleanly (no client-side bypass, WATCH-6/10). */
+function watchAddDock(): string {
+  return `
+    <div class="rdesk-add">
+      <span class="rdesk-add-head viz-signage">Watch a folder</span>
+      <div class="rdesk-tiles" role="group" aria-label="Add a watched folder">
+        <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">📂</span><span class="rdesk-tile-label viz-signage">Choose a folder…</span></button>
+      </div>
+      <p class="watch-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
+    </div>`;
+}
+
+function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
+  const byId = new Map(folders.map((w) => [w.id, w]));
+
+  // Add a folder — OS picker → setWatchFolder. The backend loop-guard refuses an unsafe path by NOT
+  // persisting it (returns the unchanged list), so we detect refusal by the folder's absence and
+  // surface a clean reason — the security trace: the client can never bypass the guard (WATCH-6/10).
+  const pickBtn = container.querySelector<HTMLButtonElement>('.watch-add-pick');
+  const addStatus = container.querySelector<HTMLElement>('.watch-add-status');
+  pickBtn?.addEventListener('click', async () => {
+    if (!addStatus) return;
+    addStatus.textContent = 'Choosing…';
+    let folderPath: string | null;
+    try {
+      folderPath = await window.kbApi.pickFolder();
+    } catch {
+      addStatus.textContent = 'Could not open the folder chooser.';
+      return;
+    }
+    if (!folderPath) {
+      addStatus.textContent = '';
+      return;
+    }
+    const id = slugifyId(folderPath.split(/[\\/]/).filter(Boolean).pop() ?? 'folder');
+    addStatus.textContent = 'Adding…';
+    try {
+      const result = await window.kbApi.setWatchFolder({ id, folderPath, enabled: false });
+      if (!result.some((w) => w.id === id)) {
+        // Loop-guard refused (e.g. a folder inside your KB) — surfaced, never silently dropped.
+        addStatus.textContent = `Couldn’t watch that folder — it can’t be inside your knowledge base (it would re-ingest itself).`;
+        return;
+      }
+      await render(container);
+    } catch {
+      addStatus.textContent = 'Could not add that folder.';
+    }
+  });
+
+  for (const li of Array.from(container.querySelectorAll<HTMLElement>('.rdesk-strip[data-watch-id]'))) {
+    const id = li.dataset.watchId!;
+    const current = byId.get(id)!;
+    const armEl = li.querySelector<HTMLButtonElement>('.watch-arm')!;
+    const removeBtn = li.querySelector<HTMLButtonElement>('.watch-remove')!;
+    const confirm = li.querySelector<HTMLElement>('.watch-confirm')!;
+    const confirmMsg = li.querySelector<HTMLElement>('.watch-confirm-msg')!;
+    const confirmGo = li.querySelector<HTMLButtonElement>('.watch-confirm-go')!;
+    const confirmCancel = li.querySelector<HTMLButtonElement>('.watch-confirm-cancel')!;
+    const status = li.querySelector<HTMLElement>('.watch-status')!;
+
+    // Enable/disable — watching a folder is a LOCAL, non-destructive read (no egress) → applies directly.
+    armEl.addEventListener('click', async () => {
+      status.textContent = 'Saving…';
+      try {
+        await window.kbApi.setWatchFolder({ id, enabled: !current.enabled });
+        await render(container);
+      } catch {
+        status.textContent = 'Could not save the change.';
+      }
+    });
+
+    // Remove — confirm (it stops watching + forgets the folder; the already-ingested sources stay).
+    removeBtn.addEventListener('click', () => {
+      confirmMsg.textContent = `Stop watching “${current.folderPath}”? Files already brought in stay in your KB.`;
+      confirm.hidden = false;
+    });
+    confirmGo.addEventListener('click', async () => {
+      confirm.hidden = true;
+      status.textContent = 'Removing…';
+      try {
+        await window.kbApi.removeWatchFolder(id);
+        await render(container);
+      } catch {
+        status.textContent = 'Could not remove.';
+      }
+    });
+    confirmCancel.addEventListener('click', () => {
+      confirm.hidden = true;
+    });
+  }
 }
