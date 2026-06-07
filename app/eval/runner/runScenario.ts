@@ -6,7 +6,7 @@ import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { resolveCopilotCliPath } from '../../src/main/researchWiring';
 import { makeInProcessDriver, applyAction } from './actions';
-import { captureSnapshot } from './snapshot';
+import { captureSnapshot, type VaultSnapshot } from './snapshot';
 import { runDeterministicChecks } from './validators';
 import { buildScorecard, type Scorecard } from './scorecard';
 import type { Scenario } from './scenario';
@@ -14,6 +14,9 @@ import type { Scenario } from './scenario';
 export interface RunScenarioOptions {
   /** BYOA `copilot` cliPath; defaults to the login-shell-resolved path (so it spawns in dev + container). */
   cliPath?: string;
+  /** Inspect the post-drain snapshot before scoring — preserves the human-eyeball dogfood logging that
+   *  enrichE2eDogfood did, now off the SAME real-pipeline snapshot (KB-Lead: consolidate, don't fork). */
+  onSnapshot?: (snapshot: VaultSnapshot) => void;
 }
 
 /**
@@ -33,6 +36,7 @@ export async function runScenario(scenario: Scenario, opts: RunScenarioOptions =
     const driver = await makeInProcessDriver({ root, cliPath: opts.cliPath ?? resolveCopilotCliPath() });
     for (const action of scenario.actions) await applyAction(driver, action);
     const snap = await captureSnapshot(driver.rootPath, { recall: driver.lastRecall });
+    opts.onSnapshot?.(snap); // human-eyeball hook (consolidates enrichE2eDogfood's logging)
     const checks = runDeterministicChecks(snap, scenario.expect.deterministic ?? []);
     return buildScorecard(scenario.id, scenario.capability, checks);
   } finally {
