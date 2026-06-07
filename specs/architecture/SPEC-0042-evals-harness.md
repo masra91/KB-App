@@ -6,7 +6,7 @@ type: architecture
 status: draft
 owners: [KB-Lead, Principal]
 created: 2026-06-06
-updated: 2026-06-06
+updated: 2026-06-07
 related: [SPEC-0008, SPEC-0011, SPEC-0012, SPEC-0014, SPEC-0023, SPEC-0026, SPEC-0028, SPEC-0029]
 supersedes: null
 ---
@@ -80,7 +80,7 @@ variants:                        # optional matrix; omitted = the default config
 | EVAL-1   | must     | A **scenario is declarative data** (YAML/JSON), schema-validated: `seed` (empty/files/snapshot) + ordered `actions` using the KB's **real verbs** (`ingest`/`ask`/`runJob`/`dispatchResearcher`/`setConfig`/`awaitDrain`) + `expect` + optional `variants` + `meta` (capability tag). A malformed scenario fails fast with a clear error, never a partial run | none-yet | TEST; LANG |
 | EVAL-2   | must     | The runner exercises the **REAL cognition** (prompts/tools/model) end-to-end and **never mocks the model-under-test** — it measures actual model work. The *non-model* harness (seed, ids, time) is controlled/seeded for reproducibility (ULID/`Date.now` injection — SPEC-0011), so the model output is the single measured variable | none-yet | ORCH; ENG-5 |
 | EVAL-3   | must     | **Deterministic validators**: a named, parameterized check library asserting exactly over the resulting **vault state + audit + spans** — entities include/exclude, claim shape, citations present, wikilinks rendered (`relatesTo`→`[[link]]`), count bounds, recall contains/cites, audit events, span assertions. Exact pass/fail | none-yet | DATA; AUDIT; CONNECT-12; ASK-7 |
-| EVAL-4   | must     | **Agent-judge validators**: a **pinned evaluator model** (separate from the system-under-test, version-recorded) scores an output against a rubric → pass/fail or score + rationale; run **N times**, aggregate the distribution against a `threshold`. The judge prompt + rationale are logged for auditability | none-yet | AUTO; PRIN-2 |
+| EVAL-4   | must     | **Agent-judge validators**: a **pinned evaluator model** — distinct from the system-under-test (a hard guard refuses a run where the resolved judge == the resolved SUT model — it can't grade its own homework), version-recorded — scores an output against a rubric → a `[0,1]` score + rationale; run **N times** and aggregate as the **mean score vs the `threshold`** (pass iff `mean ≥ threshold`, default 0.8). The judge prompt + every rationale are logged for auditability | none-yet | AUTO; PRIN-2 |
 | EVAL-5   | must     | Each scenario runs in an **isolated, Dockerized clean-world container** (pinned deps + BYOA `copilot` CLI + git): a **fresh KB per run**, no host/global-state bleed, parallel-safe, reproducible. The image **pins everything** (deps, CLI version, env) so a result is re-runnable | none-yet | STACK; ENG (E1) |
 | EVAL-6   | must     | **Controlled egress** inside the container — researcher / external scenarios run against a **recorded-and-replayed** (VCR-style) or **allowlisted** network, never the uncontrolled live world, so external-cognition evals (RESEARCH) are **reproducible** and bounded. Recorded fixtures carry **no secrets/PII** | none-yet | RESEARCH-8,9; AUTO-6 |
 | EVAL-7   | must     | **Variant matrix**: the harness runs a scenario × a set of config variants `{model, promptVersion, toolConfig, budget}` as a cross-product and scores **per variant** — the headline "tweak-and-compare" loop (e.g. prompt v2 vs v3 across all scenarios) | none-yet | ORCH-16 |
@@ -129,6 +129,11 @@ variants:                        # optional matrix; omitted = the default config
 
 ## 7. Changelog
 
+- 2026-06-07 — **Slice-2 ratification pinned into EVAL-4** (KB-Lead): the judge aggregation is the **mean
+  score vs the threshold** (`mean ≥ threshold`, default 0.8) — *not* a per-run "pass-rate" (which would need
+  an unspecified per-run cutoff); and the judge≠SUT property is a **hard guard** (refuse a run where the
+  resolved judge model == the resolved SUT model), not just an audited note. Aligns the spec with
+  Slice-2's design + impl (#242).
 - 2026-06-06 — **Spec created** (Principal — wants a seeded-KB evals platform to evaluate model/prompt/tool
   work across disparate scenarios; deterministic *and* agent-judged validation). Principal chose
   **container-first** (clean-world Docker runner), **declarative YAML/JSON scenarios**, and **full-breadth
