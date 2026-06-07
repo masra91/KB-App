@@ -1,85 +1,174 @@
-# Enrich-quality eval (opt-in)
+# Evals & Scenario Harness (`eval/`)
 
-The **behavioral** check for the enrich-quality work (#34) — specifically **DECOMP-17** (Decompose
-node-vs-attribute granularity). Granularity is LLM-judged, so the deterministic CI tests prove the
-*mechanism* but not the *behavior*; this eval runs the real `decompose/v2` prompt over a curated
-golden set and asserts the behavior directly.
+The **quality** check for the KB's non-deterministic cognition (Decompose, Connect, Claims,
+Recall, Researchers, Reflect, Jobs). Unit/e2e tests (SPEC-0012) prove the *mechanism*
+deterministically; **EVAL measures the quality the mechanism can't** — "did Decompose pick the
+right granularity?", "is this finding substantive?", "did Recall answer correctly and ground it?".
 
-## Why it's opt-in (not CI)
+You give a **scenario** (a seeded KB + a script of real actions + validators); the harness
+provisions an isolated clean-world KB, drives the actions **through the real pipeline/cognition**
+(it never mocks the model-under-test), snapshots the result, scores it (deterministic *and/or*
+agent-judged), and diffs against a baseline. Spec: **SPEC-0042 (EVAL)**.
 
-It needs a real **BYOA `copilot` + network** and is **non-deterministic**, so — like the packaged
-Playwright e2e — it runs **on demand**, not in the `quick` gate. It's double-gated: it lives under
-`eval/` (the unit config's `include` is `src/**`, so the normal suite never collects it) **and** it
-skips unless `KB_EVAL=1`.
+> A case is **declarative data** — a YAML file + named checks. Authoring one needs **no harness
+> code** (EVAL-12). Add `eval/scenarios/<name>.yaml` and it's in the library.
 
-The CI gate stays the deterministic tests: `decomposeAgent.test.ts` (the prompt *policy* +
-version), `claimDedup.test.ts` (the dedup core), and `enrichEval.test.ts` (this eval's pure scoring
-logic).
+---
 
-## Run it
+## Authoring a case
+
+Create `eval/scenarios/<name>.yaml`. Five parts:
+
+```yaml
+id: my-case                   # unique id
+capability: recall            # ingest|decompose|connect|claims|recall|research|reflect|jobs
+seed:
+  kind: empty                 # empty | files | snapshot
+  # ref: my-fixture           # kind:files → seed from eval/fixtures/my-fixture/ (entities, .kb/
+                              #   researchers/registry.json, .kb/jobs/registry.json, sources, …)
+actions:                      # the KB's REAL verbs, in order, against real cognition
+  - ingest:     { text: "Python was created by Guido van Rossum and first released in 1991." }
+  - awaitDrain:  { stages: [decompose, connect, claims] }
+  - ask:        { query: "Who created Python?" }
+expect:
+  deterministic:              # exact pass/fail checks (the validator menu below)
+    - check: recallCites
+      args: { min: 1 }
+    - check: recallContains
+      args: { text: "Guido" }
+  judge:                      # fuzzy quality — a pinned judge model (≠ the SUT) scores [0,1]
+    - rubric: "Is the answer correct (Guido van Rossum), grounded in the KB, and cited? 1.0 only if all three."
+      runs: 3
+      threshold: 0.8          # passes iff mean(scores) ≥ threshold
+variants:                     # OPTIONAL — cross-product of config overrides, scored per variant
+  - { promptVersion: decompose/v2 }
+  - { promptVersion: decompose/v3 }
+```
+
+**Rule of thumb:** assert with a **deterministic** check anything you can name exactly (an entity
+exists, a citation is present, a count is bounded); use a **judge** rubric for the fuzzy quality a
+check can't capture. Most good cases use both. `recall.yaml` is the canonical template.
+
+### The action verbs (`actions:`)
+
+Each maps to the **real** pipeline/IPC path — the cognition is identical to production.
+
+| verb | args | does |
+| --- | --- | --- |
+| `ingest` | `{ text }` | capture a primary source onto the INGEST spine |
+| `awaitDrain` | `{ stages: [decompose, connect, claims] }` | block until the named stages quiesce |
+| `ask` | `{ query }` | run grounded recall; result lands in the snapshot (`recall`) |
+| `runJob` | `{ id }` | run one bounded pass of a seeded job through the real JOBS engine |
+| `dispatchResearcher` | `{ id }` | dispatch a seeded researcher (web research replays a cassette — see below) |
+
+(`runJob`/`dispatchResearcher` need the job/researcher seeded via `seed.kind: files`. `setConfig`
+is intentionally out of scope for the capability library.)
+
+### The deterministic check menu (`expect.deterministic:`)
+
+The named checks in `runner/validators.ts` (the `VALIDATORS` registry). An **unknown check name
+fails loud** — a typo can never read as a pass.
+
+| check | args | asserts |
+| --- | --- | --- |
+| `entitiesInclude` | `[names]` | every named thing became an entity node (DECOMP-17 recall) |
+| `entitiesExclude` | `[names]` | none of the named descriptors/roles leaked as a node (precision) |
+| `claimCitations` | `{ required? }` | every claim carries a source citation (DATA-10 / VAULT-13) |
+| `wikilinkRendered` | `{ from, to }` | a `relatesTo` hint became a real `[[link]]` (CONNECT-12) |
+| `recallCites` | `{ min }` | recall grounded its answer in ≥ `min` citations (ASK-7) |
+| `recallContains` | `{ text }` | the recall answer contains a required substring |
+| `countBounds` | `{ dir, min?, max? }` | file-count bound on `entities`/`claims`/`sources` (over/under-extraction) |
+| `fileExists` | `{ path }` | a vault file exists (suffix-matched) — job/research artifacts |
+| `fileContains` | `{ path, text }` | a vault file contains text — artifact content |
+| `sourcesContain` | `{ text }` | ≥1 source body contains text — a finding carrying its fact/origin (RESEARCH-6) |
+| `auditEvents` | `{ eventType, min }` | ≥ `min` audit events of a type fired |
+
+**Need a new check?** Add one function to the `VALIDATORS` registry in `runner/validators.ts` (+ a
+unit test in `runner/validators.test.ts`); it's then available to every scenario.
+
+### The agent-judge (`expect.judge:`)
+
+A **pinned evaluator model, distinct from the system-under-test** — a hard guard refuses any run
+where the resolved judge == the resolved SUT (it can't grade its own homework). Each rubric scores
+`[0,1]` × `runs` times; **passes iff the mean ≥ `threshold`** (default 0.8). The judge model is
+`DEFAULT_JUDGE_MODEL`, overridable via `KB_EVAL_JUDGE_MODEL`. Judge prompt + every rationale are
+logged for auditability.
+
+### Research / external scenarios (the egress cassette — EVAL-6)
+
+A research scenario's external fetches are **recorded once and replayed** (VCR-style) so scoring is
+reproducible and never hits the uncontrolled live web. See `research.yaml` + `cassettes/README.md`.
+To author one:
+
+1. Seed the researcher in `fixtures/<ref>/.kb/researchers/registry.json`, and **pin its fetch to one
+   allowlisted URL** (a free web-search picks varying URLs → cassette miss).
+2. Add `meta: { cassette: <name>.json }` to the scenario.
+3. Record the cassette once: `KB_EVAL=1 KB_EVAL_RECORD=1 npm run eval` (record wraps the real
+   `makeGatedFetch`, so the SSRF/allowlist gate runs on capture; replay errors on a miss).
+
+> ⚠️ **Committed cassettes are PUBLIC-WEB egress ONLY**, secret-scrubbed, fail-loud. **Never** record
+> an M365 / internal-tenant / private-data fetch into a committed cassette — the guard
+> (`assertCassetteClean`) refuses to write *or* replay a non-public-web or unscrubbed cassette. Private
+> tiers use hand-authored synthetic fixtures, never recorded real data.
+
+### Variants & baselines
+
+A `variants:` list runs the scenario × the cross-product of config overrides
+(`{model, promptVersion, toolConfig, budget}`) and scores **per variant** — the "tweak-and-compare"
+loop (e.g. prompt v2 vs v3 across all scenarios). Each run emits a structured scorecard diffed against
+the stored **baseline** (last-known-good) to surface regression/improvement deltas, plus a
+reproducibility manifest (model versions, prompt versions, seed hash, image/CLI versions). Results are
+gitignored, never promoted.
+
+---
+
+## When it runs
+
+Two distinct triggers — keep them separate:
+
+- **Every PR (CI `unit` job) — automatic, deterministic, no model.** The harness's own mechanism
+  unit tests (`eval/runner/**/*.test.ts`: loader, validators, cassette guard, judge≠SUT guard,
+  scorecard, baseline, variants) are in the main vitest `include`, so they gate every PR. This proves
+  the harness *works*; it does **not** run real cognition.
+- **On demand — opt-in, real cognition, scored.** The scenario suites (`eval/**/*.eval.ts`) run only
+  via the eval config and **self-skip unless `KB_EVAL=1`** (live BYOA `copilot` + network, slow,
+  non-deterministic). CI never runs these. This is where quality is actually measured:
 
 ```sh
 cd app
-KB_EVAL=1 npm run eval:enrich          # default 3 runs per fixture
-KB_EVAL=1 KB_EVAL_RUNS=5 npm run eval:enrich
+KB_EVAL=1 npm run eval                    # the full scenario library (library.eval.ts), real copilot, scored
+KB_EVAL=1 KB_EVAL_RECORD=1 npm run eval   # re-record research cassettes (--live)
 ```
 
-## The pass-bar (KB-QD)
+The intended loop: tweak a prompt / tool / model → `KB_EVAL=1 npm run eval` → read the scorecard
+(deterministic pass/fail + judge-score distribution per scenario × variant) diffed vs baseline →
+tell improvement from regression before shipping.
 
-Per curated fixture (`granularityFixtures.ts`):
+The harness never touches the Principal's real vault or credentials — eval KBs are ephemeral, with
+scoped eval creds only (EVAL-11).
 
-- **(a) must-be-node set** — the genuine entities ARE extracted (recall). **HARD**, must hold in
-  *every* run.
-- **(b) must-NOT-be-node set** — roles / descriptors / relationships do **not** become nodes
-  (precision; the dogfood `concept/first-computer-programmer`-type cases). **HARD**, every run.
-- **(c) total node count ≤ a loose upper bound** — the over-extraction regression guard. Reported
-  (median + range, and how many runs exceeded the bound) but **not** itself hard-failed —
-  ±tolerance applies only to raw totals.
+---
 
-The headline is the dogfood case: a 2-sentence bio that pre-DECOMP-17 yielded ~6 nodes (with "first
-computer programmer" promoted to its own `concept` node) should now yield ≤3 nodes, with the
-descriptor recorded as a *claim*, not a node.
+## File map
 
-## Output-quality dogfood (end-to-end) — `enrichE2eDogfood.eval.ts`
+- `scenarios/*.yaml` — the scenario library (one per capability; EVAL-10). Each has a header comment
+  documenting what it tests + the requirement it traces.
+- `fixtures/<ref>/` — seed material for `seed.kind: files` (entities, `.kb/` registries, sources).
+- `cassettes/` — recorded public-web egress fixtures + the guardrail README (EVAL-6).
+- `library.eval.ts` — the opt-in runner that drives **every** `scenarios/*.yaml` end-to-end (real
+  copilot), logs the snapshot for human eyeball, and scores it. **Supersedes** the old enrich-only
+  dogfood (the retired `enrichE2eDogfood.eval.ts` — consolidated here, one harness, per #241).
+- `runner/` — the engine: `loader.ts` (schema) · `actions.ts` (verb → real pipeline) · `snapshot.ts`
+  · `validators.ts` (deterministic check library) · `judge.ts` (agent-judge + judge≠SUT guard) ·
+  `variants.ts` · `baseline.ts` · `manifest.ts` · `scorecard.ts` · `runScenario.ts` / `runMatrix.ts`,
+  each with `*.test.ts` mechanism unit tests (the CI gate).
+- `Dockerfile` — the clean-world image (pinned deps + BYOA `copilot` CLI + git) for reproducible,
+  parallel-safe runs (EVAL-5).
+- `runner/DESIGN.md`, `DESIGN-slice2.md`, `DESIGN-slice3.md` — the per-slice design + fork decisions.
 
-A full **live** `capture→archive→decompose→connect→claims(→recall)` pass that judges the
-*user-facing output* (not plumbing), complementing the deterministic granularity eval above. It
-**logs** the actual entities + claims + link blocks + recall answer so a human judges quality; the
-assertions are gross-failure floors only (it's LLM-judged + non-deterministic).
+### Legacy enrich-quality eval (still present)
 
-```sh
-cd app
-KB_EVAL=1 npx vitest run --config eval/vitest.config.ts eval/enrichE2eDogfood.eval.ts
-# one case at a time (each is a slow live run):
-KB_EVAL=1 npx vitest run --config eval/vitest.config.ts eval/enrichE2eDogfood.eval.ts -t "recall"
-```
-
-Cases + what to eyeball in the log:
-- **e2e quality** — entity granularity (DECOMP-17: people/orgs are nodes, descriptors are claims),
-  wikilinks (CONNECT-12: `relatesTo` → `[[links]]`), per-claim `Source:` citation (VAULT-13).
-- **CLAIMS-19 dedup** — a single source whose relational fact is restated per-entity; the log prints
-  any exact within-source restatement dupes remaining (the LLM usually phrases each subject
-  distinctly, so this mostly observes the *relational-residual* pattern — distinct-subject claims
-  the dedup intentionally keeps).
-- **recall** — a grounded, cited answer over the built KB (`grounded:true` + citations resolve).
-
-Findings of record (first run, 2026-06-02): granularity/wikilinks/citations/recall all **good**;
-one real gap — **multi-source claims** (a Connect-merged entity gets claims from `derivedFrom[0]`
-only → other sources' facts dropped), filed as an issue + mapped to SPEC-0016 §7. `resolveCopilotCliPath()`
-supplies the recall SDK's `cliPath` so it works on a stripped PATH (#160/#165).
-
-## Files
-
-- `granularityFixtures.ts` — the golden set (reviewed by KB-QD; add precision-trap cases here).
-- `enrichQuality.eval.ts` — the opt-in granularity runner (real decider × N runs → `enrichEval` scoring).
-- `enrichE2eDogfood.eval.ts` — the opt-in end-to-end output-quality dogfood (above).
-- `vitest.config.ts` — opts these files in (the main config excludes them).
-- Scoring logic + its unit tests live in `src/kb/enrichEval.ts` / `enrichEval.test.ts`.
-
-## Follow-up
-
-Granularity (**DECOMP-17**) + the e2e dogfood now cover the headline axes. **CLAIMS-19** within-source
-dedup is hard to stress behaviorally (the LLM rarely emits verbatim within-source dupes) — its
-deterministic unit (`claimDedup.test.ts`) + Connect-drain integration test remain the real gate. The
-**multi-source-claims** gap (SPEC-0016 §7 "Entity-driven unit after Connect") is the open correctness
-item the dogfood surfaced; its fix is gated on the Principal's per-(entity×source) decision.
+`enrichQuality.eval.ts` + `granularityFixtures.ts` are the original opt-in **DECOMP-17 granularity**
+eval (node-vs-attribute), run via `npm run eval:enrich`. It predates the general harness and remains as
+a focused granularity check; new quality cases should be **scenarios** (`scenarios/*.yaml`) under the
+general framework above.
