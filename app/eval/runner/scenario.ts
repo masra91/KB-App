@@ -66,8 +66,13 @@ export interface Scenario {
 /** The single verb key an action object must carry. */
 const ACTION_VERBS = ['ingest', 'awaitDrain', 'ask', 'runJob', 'dispatchResearcher', 'setConfig'] as const;
 
-/** Validation outcome — fail-fast with a precise error (EVAL-1), never a partial scenario. */
-export type ScenarioParse = { ok: true; scenario: Scenario } | { ok: false; error: string };
+/** Validation outcome — fail-fast with a precise error (EVAL-1), never a partial scenario. On `ok`,
+ *  `scenario` is set; otherwise `error` explains the first violation. */
+export interface ScenarioParse {
+  ok: boolean;
+  scenario?: Scenario;
+  error?: string;
+}
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
