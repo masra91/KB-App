@@ -313,6 +313,43 @@ export interface ResearcherConfigPatch {
   timeoutMs?: number;
 }
 
+/** A watched folder's most-recent activity, folded into the view from the `watch` audit (SPEC-0037). */
+export interface WatchFolderLastEvent {
+  ts: string;
+  /** The audit event kind: 'watch-ingested' | 'watch-no-new' | 'watch-refused' | 'watch-failed'. */
+  kind: string;
+  /** A representative file the event concerns (an ingested file's name), when one applies. */
+  path?: string;
+}
+
+/** A watched-folder display row for the unified Sources view (SPEC-0037 WATCH-9). One `kb:listWatchFolders`
+ *  read per render carries the config + live `watching` flag + the folded `lastEvent` (no separate status read). */
+export interface WatchFolderView {
+  id: string;
+  folderPath: string;
+  /** Human label; falls back to the id. */
+  label: string;
+  enabled: boolean;
+  scope: string;
+  sensitivity: string;
+  ignoreGlobs: string[];
+  /** True iff a live watcher is currently active for this folder (enabled + loop-safe). */
+  watching: boolean;
+  lastEvent: WatchFolderLastEvent | null;
+}
+
+/** A Sources-view edit to a watched folder (SPEC-0037). `folderPath` (on create/change) is loop-guarded
+ *  + validated at the IPC boundary; an unsafe id is rejected by the registry guard. */
+export interface WatchFolderPatch {
+  id: string;
+  folderPath?: string;
+  enabled?: boolean;
+  scope?: string;
+  sensitivity?: string;
+  label?: string;
+  ignoreGlobs?: string[];
+}
+
 /** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;
  *  `ran:true` + `failed` means the pass ERRORED (e.g. packaged-app can't spawn copilot, #160); `ran:true`
  *  + `ceilingReached` means it was paused by the per-Instance rate-limit (RESEARCH-11) — both distinct
@@ -382,6 +419,11 @@ export interface KbApi {
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
   runResearcherNow(id: string): Promise<RunResearcherResult>;
   listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
+  // SPEC-0037 WATCH-9: the unified Sources view's watched-folder rows. One list read folds config +
+  // live `watching` + `lastEvent`; set (create/edit, loop-guarded at the IPC boundary) + remove.
+  listWatchFolders(): Promise<WatchFolderView[]>;
+  setWatchFolder(patch: WatchFolderPatch): Promise<WatchFolderView[]>;
+  removeWatchFolder(id: string): Promise<WatchFolderView[]>;
   // SPEC-0039 EXPLORE: the read-only entity-neighborhood view over the evergreen `entities/` graph.
   // `exploreEntities` feeds the search-to-focus picker; `exploreNeighborhood` returns the focused
   // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).

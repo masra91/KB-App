@@ -54,6 +54,11 @@ import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgress
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { IntakeScheduler } from '../kb/intakeScheduler';
+import { WatchScheduler } from '../kb/watchScheduler';
+import { readWatchRegistry, writeWatchRegistry, upsertWatchFolder, patchWatchFolder, watchRegistryPath } from '../kb/watchRegistry';
+import { checkWatchLoopSafe, isSafeWatchId, DEFAULT_WATCH_SCOPE, DEFAULT_WATCH_SENSITIVITY } from '../kb/watchConnectors';
+import { buildWatchFolderViews } from '../kb/watchPanel';
+import type { WatchFolderView, WatchFolderPatch } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
@@ -88,6 +93,7 @@ interface ActivePipeline {
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
   intake: IntakeScheduler; // SPEC-0041: wakes proactive-intake connectors (feed pulls → primary sources)
+  watch: WatchScheduler; // SPEC-0037: live folder watchers (stable files → primary sources, non-destructive)
   lock: Mutex;
   log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
 }
@@ -105,6 +111,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.jobs.start(); // SPEC-0023: the autonomous-job scheduler tick (named-preset cadence)
   a.researchers.start(); // SPEC-0028: the scheduled-researcher tick (standing external research)
   a.intake.start(); // SPEC-0041: the proactive-intake tick (scheduled feed pulls → primary sources)
+  a.watch.start(); // SPEC-0037: live folder watchers (startup reconcile + chokidar stable-file events)
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -116,6 +123,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.jobs.stop();
   a.researchers.stop();
   a.intake.stop();
+  a.watch.stop(); // SPEC-0037: close all live folder watchers
 }
 
 /**
@@ -213,7 +221,12 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // (the researcherScheduler seam; JOBS-10 intact). Read-only w.r.t. the world (INTAKE-7). Inert
   // until the Principal registers + enables a connector in `.kb/intake/registry.json`.
   const intake = new IntakeScheduler(stagingWt, {}, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, lock, log };
+  // SPEC-0037 WATCH: live folder watchers. Each enabled, loop-safe folder gets a startup reconcile +
+  // a chokidar watcher whose stable-file events drive a non-destructive copy → INGEST. The loop-guard
+  // checks watched folders against the REAL vault root (vaultPath), never staging. Inert until the
+  // Principal registers + enables a folder in `.kb/watch/registry.json`.
+  const watch = new WatchScheduler(stagingWt, vaultPath, log);
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, log };
   const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
   // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
   // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
@@ -669,6 +682,110 @@ export async function listAgentsForActive(): Promise<AgentView[]> {
     requestedModel: process.env.KB_COPILOT_MODEL || undefined,
     pipelineActive: active !== null,
   });
+}
+
+// --- Control Panel · Watched folders (SPEC-0037 WATCH-9; over the watch registry) ---
+
+/** List the active KB's watched folders for the unified Sources view (WATCH-9): config + the live
+ *  `watching` flag (from the scheduler) + each folder's newest `watch` audit folded as `lastEvent`.
+ *  Reads `staging` (registry + audit live there). No active KB → empty (PANEL-9 degrade). */
+export async function listWatchFoldersForActive(): Promise<WatchFolderView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  const registry = await readWatchRegistry(root, active.log);
+  const events = await readEvents(root, { actors: ['watch'] }); // newest-first
+  const lastByWatch: Record<string, (typeof events)[number] | undefined> = {};
+  for (const f of registry) lastByWatch[f.id] = events.find((e) => e.subjects.watchId === f.id);
+  return buildWatchFolderViews(registry, active.watch.watchingIds(), lastByWatch);
+}
+
+/**
+ * Apply a Sources-view edit to a watched folder (WATCH-9) + return the refreshed list. Untrusted IPC
+ * input is validated at this boundary; a `folderPath` being set/changed is **loop-guarded** against the
+ * REAL vault (WATCH-10) — a loop-unsafe folder (the vault/.kb/.git or an ancestor) is REFUSED and never
+ * persisted (the change is dropped, fail-safe). The write + git commit run under the shared lock
+ * (durability); a conforming `panel` audit records the change (AUDIT-2); then the scheduler re-syncs so a
+ * newly-enabled folder starts watching (and a disabled one stops).
+ */
+export async function setActiveWatchFolder(patch: WatchFolderPatch): Promise<WatchFolderView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  if (typeof patch.id !== 'string' || patch.id.length === 0) return listWatchFoldersForActive();
+
+  const clean: WatchFolderPatch = { id: patch.id };
+  if (typeof patch.enabled === 'boolean') clean.enabled = patch.enabled;
+  if (typeof patch.scope === 'string' && patch.scope.trim()) clean.scope = patch.scope.trim();
+  if (typeof patch.sensitivity === 'string' && patch.sensitivity.trim()) clean.sensitivity = patch.sensitivity.trim();
+  if (typeof patch.label === 'string') clean.label = patch.label;
+  if (Array.isArray(patch.ignoreGlobs)) clean.ignoreGlobs = patch.ignoreGlobs.filter((g): g is string => typeof g === 'string');
+  if (typeof patch.folderPath === 'string' && patch.folderPath.trim()) clean.folderPath = patch.folderPath.trim();
+
+  // WATCH-10 loop-guard at the IPC boundary: a folderPath set/change must be loop-safe vs the REAL vault,
+  // else REFUSE the whole change (never persist a folder that would re-ingest the vault into itself).
+  if (clean.folderPath !== undefined) {
+    const guard = await checkWatchLoopSafe(active.vaultPath, clean.folderPath);
+    if (!guard.ok) {
+      active.log.child({ scope: 'watch' }).warn('watch.config-refused', { watchId: clean.id, folderPath: clean.folderPath, reason: guard.reason });
+      await appendAuditEvent(root, { actor: 'panel', eventType: 'watch-config-change', subjects: { watchId: clean.id }, payload: { refused: true, folderPath: clean.folderPath, reason: guard.reason, why: 'folder-watch loop-guard refused the folder (WATCH-10)' } });
+      return listWatchFoldersForActive(); // fail-safe: nothing persisted
+    }
+  }
+
+  let applied = false;
+  await active.lock.run(async () => {
+    const existing = (await readWatchRegistry(root)).find((f) => f.id === clean.id);
+    if (existing) {
+      await patchWatchFolder(root, clean.id, {
+        ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}),
+        ...(clean.folderPath !== undefined ? { folderPath: clean.folderPath } : {}),
+        ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
+        ...(clean.sensitivity !== undefined ? { sensitivity: clean.sensitivity } : {}),
+        ...(clean.label !== undefined ? { label: clean.label } : {}),
+        ...(clean.ignoreGlobs !== undefined ? { ignoreGlobs: clean.ignoreGlobs } : {}),
+      });
+    } else {
+      // New watched folder requires a folderPath (already loop-guarded above).
+      if (clean.folderPath === undefined) return;
+      await upsertWatchFolder(root, {
+        id: clean.id,
+        folderPath: clean.folderPath,
+        enabled: clean.enabled ?? false,
+        scope: clean.scope ?? DEFAULT_WATCH_SCOPE,
+        sensitivity: clean.sensitivity ?? DEFAULT_WATCH_SENSITIVITY,
+        ...(clean.label !== undefined ? { label: clean.label } : {}),
+        ...(clean.ignoreGlobs !== undefined ? { ignoreGlobs: clean.ignoreGlobs } : {}),
+      });
+    }
+    applied = true;
+    await commitControlFile(root, watchRegistryPath(root), `watch ${clean.id} config change`);
+  }, 'watch-config:write');
+
+  if (applied) {
+    await appendAuditEvent(root, { actor: 'panel', eventType: 'watch-config-change', subjects: { watchId: clean.id }, payload: { ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}), ...(clean.folderPath !== undefined ? { folderPath: clean.folderPath } : {}), why: 'Principal edited a watched folder via Control Panel' } });
+    await active.watch.refresh(); // start/stop live watchers to match the new config
+  }
+  return listWatchFoldersForActive();
+}
+
+/** Remove a watched folder (WATCH-9): drop it from the registry, audit the removal, and stop its live
+ *  watcher. An unsafe id is a no-op (the registry guard would reject it anyway). */
+export async function removeActiveWatchFolder(id: string): Promise<WatchFolderView[]> {
+  if (!active) return [];
+  if (!isSafeWatchId(id)) return listWatchFoldersForActive();
+  const root = active.stagingWt;
+  let removed = false;
+  await active.lock.run(async () => {
+    const folders = await readWatchRegistry(root);
+    if (!folders.some((f) => f.id === id)) return;
+    await writeWatchRegistry(root, folders.filter((f) => f.id !== id));
+    removed = true;
+    await commitControlFile(root, watchRegistryPath(root), `watch ${id} removed`);
+  }, 'watch-config:remove');
+  if (removed) {
+    await appendAuditEvent(root, { actor: 'panel', eventType: 'watch-config-change', subjects: { watchId: id }, payload: { removed: true, why: 'Principal removed a watched folder via Control Panel' } });
+    await active.watch.refresh(); // tear down the removed folder's live watcher
+  }
+  return listWatchFoldersForActive();
 }
 
 // --- Control Panel · Researchers (SPEC-0028 RESEARCH-15; over the researcher registry) ---
