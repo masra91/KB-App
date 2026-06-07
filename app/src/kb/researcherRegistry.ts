@@ -74,6 +74,12 @@ function validResearcher(v: unknown): ResearcherConfig | null {
     enabled: o.enabled === true,
   };
   if (isNonEmptyString(o.label)) r.label = o.label;
+  // Carry the editable per-pass session timeout through the read (RESEARCH-18, WS3). Without this the
+  // persisted `timeoutMs` patchResearcher writes is dropped on the very next read → a user's edited
+  // timeout silently reverts to the default. Preserve a valid positive number; garbage falls away and
+  // `resolveTimeoutMs` supplies the default (and re-clamps on use). (maxToolCalls rides `budget`, which
+  // validBudget already preserves — timeoutMs is the top-level field that was being lost.)
+  if (typeof o.timeoutMs === 'number' && Number.isFinite(o.timeoutMs) && o.timeoutMs > 0) r.timeoutMs = o.timeoutMs;
   if (Array.isArray(o.topics)) r.topics = o.topics.filter(isNonEmptyString);
   if (Array.isArray(o.allowedTools)) r.allowedTools = o.allowedTools.filter(isNonEmptyString);
   if (o.config && typeof o.config === 'object') r.config = o.config as Record<string, unknown>;

@@ -62,6 +62,19 @@ describe('readResearcherRegistry', () => {
     });
   });
 
+  it('preserves the editable session timeoutMs across a write→read round-trip (WS3 / RESEARCH-18 regression)', async () => {
+    // Regression: validResearcher dropped the top-level `timeoutMs` on read, so a persisted edit reverted
+    // to the default on the very next read (the editable-timeout control silently didn't stick). A valid
+    // positive number survives; garbage is dropped (→ resolveTimeoutMs supplies the default).
+    await withTemp(async (root) => {
+      await writeResearcherRegistry(root, [web({ id: 'web-1', timeoutMs: 20 * 60_000 })]);
+      expect((await readResearcherRegistry(root)).find((r) => r.id === 'web-1')!.timeoutMs).toBe(20 * 60_000);
+      // Garbage timeoutMs is not carried (left undefined → default applies on use).
+      await writeResearcherRegistry(root, [{ ...web({ id: 'web-2' }), timeoutMs: -1 } as unknown as ResearcherConfig]);
+      expect((await readResearcherRegistry(root)).find((r) => r.id === 'web-2')!.timeoutMs).toBeUndefined();
+    });
+  });
+
   it('drops a row whose id is not a bare slug and surfaces it on devlog (#29 read guard)', async () => {
     await withTemp(async (root) => {
       await writeResearcherRegistry(root, [web({ id: 'web-1' }), web({ id: '../../tmp/evil' }), web({ id: '.kb' })]);
