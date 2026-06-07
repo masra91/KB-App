@@ -1,0 +1,16 @@
+[
+  {
+    "id": "cobol-history",
+    "template": "web",
+    "label": "COBOL history",
+    "prompt": "You research public web pages for factual background. For THIS task: fetch EXACTLY the single URL https://en.wikipedia.org/wiki/COBOL and report what that page says about COBOL — its name, purpose, the year it was developed, and notable contributors. Do NOT use web search and do NOT fetch any other URL; fetch only that one page. Then call submitFindings with a concise factual note and cite that exact URL.",
+    "egressTier": "public-web",
+    "scope": "global",
+    "budget": { "maxToolCalls": 3, "maxDepth": 1 },
+    "schedule": "off",
+    "posture": "guarded",
+    "enabled": true,
+    "topics": ["COBOL"],
+    "config": { "allowedDomains": ["en.wikipedia.org"] }
+  }
+]

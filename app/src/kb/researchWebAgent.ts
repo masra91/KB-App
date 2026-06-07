@@ -18,7 +18,7 @@
 // The live SDK session (like recallAgent) is exercised in CI/e2e, not unit tests; the pure security
 // helpers below (egress allowlist, skill prompt, citation extraction) ARE unit-tested.
 import { buildOutboundQuery, type ResearchFn, type ResearchFindings } from './researchRun';
-import { makeGatedFetch } from './researchFetch';
+import { makeGatedFetch, type GatedFetchResponse } from './researchFetch';
 import { acquireCopilotSlot } from './copilotConcurrency';
 import { noopDevLog, type DevLog } from './devlog';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
@@ -238,6 +238,12 @@ export interface WebResearchOptions {
   /** Injected session runner — production uses the SDK; tests/Slice-1a inject a fake. Returns the
    *  agent's note + raw cited URLs for one bounded research pass over `query`. */
   session?: (input: { skill: string; prompt: string; query: string; maxToolCalls: number; timeoutMs: number; allowedDomains: string[] }) => Promise<{ note: string; citations: string[] }>;
+  /** SPEC-0042 EVAL Slice-3 egress seam: build the live session's gated-fetch primitive from its
+   *  resolved `allowedDomains`. Production OMITS this → the session builds `makeGatedFetch` exactly as
+   *  before (gate unchanged). The eval harness injects a record/replay cassette that WRAPS
+   *  `makeGatedFetch` (record, so the SSRF/allowlist gate still runs) or serves pre-gated fixtures
+   *  (replay) — so research scenarios are reproducible + secret-free without touching the prod path. */
+  makeFetch?: (allowedDomains: readonly string[]) => (url: string) => Promise<GatedFetchResponse>;
 }
 
 /**
@@ -292,7 +298,9 @@ export function makeWebResearchFn(opts: WebResearchOptions = {}): ResearchFn {
 function liveSdkSession(opts: WebResearchOptions): NonNullable<WebResearchOptions['session']> {
   return async ({ skill, prompt, query, maxToolCalls, timeoutMs, allowedDomains }) => {
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
-    const gatedFetch = makeGatedFetch({ allowedDomains });
+    // EVAL Slice-3: when the harness injects `makeFetch` it WRAPS makeGatedFetch (record) or serves a
+    // pre-gated cassette (replay); production omits it → the unchanged live gate. The gate runs either way.
+    const gatedFetch = (opts.makeFetch ?? ((domains: readonly string[]) => makeGatedFetch({ allowedDomains: domains })))(allowedDomains);
     let submitted: { note: string; citations: string[] } | null = null;
     let usedFetches = 0; // RESEARCH-11 hard budget — count fetch tool calls, refuse past maxToolCalls
 

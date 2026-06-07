@@ -99,6 +99,32 @@ export const VALIDATORS: Record<string, Validator> = {
     const max = typeof a.max === 'number' ? a.max : Infinity;
     return count >= min && count <= max ? pass('countBounds', `${dir}=${count} in [${min}, ${max === Infinity ? '∞' : max}]`) : fail('countBounds', `${dir}=${count} outside [${min}, ${max === Infinity ? '∞' : max}]`);
   },
+  // A vault file at a path (suffix-matched across entities/claims/sources/outputs) exists: { path }.
+  // For evergreen job artifacts (e.g. the example job's census note) + research findings.
+  fileExists(snap, args) {
+    const rel = String((args as { path?: unknown } | undefined)?.path ?? '');
+    if (!rel) return fail('fileExists', 'args need { path }');
+    const all = [...snap.entities, ...snap.claims, ...snap.sources, ...snap.outputs];
+    return all.some((f) => f.path === rel || f.path.endsWith(rel)) ? pass('fileExists', `${rel} present`) : fail('fileExists', `no file matching ${rel}`);
+  },
+  // A vault file at `path` contains `text` (case-insensitive): { path, text }. Asserts a job/research
+  // artifact's content (e.g. the census note's count, or a finding citing its source).
+  fileContains(snap, args) {
+    const a = (args ?? {}) as { path?: unknown; text?: unknown };
+    if (typeof a.path !== 'string' || typeof a.text !== 'string') return fail('fileContains', 'args need { path, text }');
+    const all = [...snap.entities, ...snap.claims, ...snap.sources, ...snap.outputs];
+    const file = all.find((f) => f.path === a.path || f.path.endsWith(a.path as string));
+    if (!file) return fail('fileContains', `no file matching ${a.path}`);
+    return file.body.toLowerCase().includes((a.text as string).toLowerCase()) ? pass('fileContains', `${a.path} contains "${a.text}"`) : fail('fileContains', `${a.path} missing "${a.text}"`);
+  },
+  // At least one source body contains `text` (case-insensitive) — for a research finding citing its
+  // external origin / carrying the expected fact (RESEARCH-6): { text }.
+  sourcesContain(snap, args) {
+    const text = String((args as { text?: unknown } | undefined)?.text ?? '');
+    if (!text) return fail('sourcesContain', 'args need { text }');
+    const n = snap.sources.filter((s) => s.body.toLowerCase().includes(text.toLowerCase())).length;
+    return n > 0 ? pass('sourcesContain', `${n} source(s) contain "${text}"`) : fail('sourcesContain', `no source contains "${text}"`);
+  },
   // At least `min` audit events of `eventType` were emitted (AUDIT assertions).
   auditEvents(snap, args) {
     const a = (args ?? {}) as { eventType?: unknown; min?: unknown };

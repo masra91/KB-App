@@ -1,0 +1,18 @@
+# SPEC-0042 EVAL — capability: claims (EVAL-10). A fact-dense note → Decompose + Claims extract atomic
+# claims, each carrying a citation back to its source (CLAIMS / DATA-10). The citation invariant is the bar.
+id: claims-cited
+capability: claims
+seed:
+  kind: empty
+actions:
+  - ingest:
+      text: "The James Webb Space Telescope launched on 25 December 2021 from French Guiana aboard an Ariane 5 rocket."
+  - awaitDrain:
+      stages: [decompose, claims]
+expect:
+  deterministic:
+    - check: countBounds
+      args: { dir: claims, min: 1 }
+    # Every claim cites its source (CLAIMS / DATA-10 / VAULT-13) — no uncited assertion.
+    - check: claimCitations
+      args: { required: true }

@@ -1,0 +1,18 @@
+# SPEC-0042 EVAL — capability: jobs (EVAL-10). Run the deterministic `example` job (SPEC-0023) one bounded
+# pass through the REAL JOBS engine (runJobOnce: optimistic-advance + journal + posture), then promote the
+# evergreen census it maintains. Model-FREE + deterministic — the engine's end-to-end proof. The census is
+# written on the first run (entity count changed from n/a → 0) and lands under outputs/ (JOBS-12).
+id: jobs-example
+capability: jobs
+seed:
+  kind: files
+  ref: jobs-example
+actions:
+  - runJob:
+      id: example
+expect:
+  deterministic:
+    - check: fileExists
+      args: { path: outputs/example/entity-census.md }
+    - check: fileContains
+      args: { path: outputs/example/entity-census.md, text: "Entity census" }

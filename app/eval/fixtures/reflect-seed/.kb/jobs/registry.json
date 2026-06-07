@@ -1,0 +1,9 @@
+[
+  {
+    "id": "reflect",
+    "type": "reflect",
+    "schedule": "off",
+    "enabled": false,
+    "posture": "guarded"
+  }
+]

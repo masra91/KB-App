@@ -21,6 +21,9 @@ export interface VaultSnapshot {
   entities: VaultFile[];
   claims: VaultFile[];
   sources: VaultFile[];
+  /** Evergreen job/researcher artifacts (e.g. the example job's census note) promoted to `outputs/`
+   *  (Slice-3, for jobs scenarios). Missing dir → []. */
+  outputs: VaultFile[];
   /** The most recent `ask` result in the action script (if any), for recall validators. */
   recall: AskResult | null;
   /** The vault's audit events (newest-first), for audit/span validators. */
@@ -49,12 +52,12 @@ async function readTree(root: string, sub: string): Promise<VaultFile[]> {
 
 /** Capture the post-drain vault state (entities/claims/sources + the last recall + audit) for validation. */
 export async function captureSnapshot(root: string, opts: { recall?: AskResult | null } = {}): Promise<VaultSnapshot> {
-  const [entities, claims, sources] = await Promise.all([readTree(root, 'entities'), readTree(root, 'claims'), readTree(root, 'sources')]);
+  const [entities, claims, sources, outputs] = await Promise.all([readTree(root, 'entities'), readTree(root, 'claims'), readTree(root, 'sources'), readTree(root, 'outputs')]);
   let audit: AuditEvent[] = [];
   try {
     audit = await readEvents(root, {});
   } catch {
     audit = [];
   }
-  return { root, entities, claims, sources, recall: opts.recall ?? null, audit };
+  return { root, entities, claims, sources, outputs, recall: opts.recall ?? null, audit };
 }
