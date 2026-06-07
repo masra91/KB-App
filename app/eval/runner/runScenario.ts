@@ -9,6 +9,7 @@ import { makeInProcessDriver, applyAction } from './actions';
 import { captureSnapshot, type VaultSnapshot } from './snapshot';
 import { runDeterministicChecks } from './validators';
 import { buildScorecard, type Scorecard } from './scorecard';
+import { runJudgeCheck, type JudgeResult, type JudgeSession } from './judge';
 import type { Scenario } from './scenario';
 
 export interface RunScenarioOptions {
@@ -17,6 +18,14 @@ export interface RunScenarioOptions {
   /** Inspect the post-drain snapshot before scoring — preserves the human-eyeball dogfood logging that
    *  enrichE2eDogfood did, now off the SAME real-pipeline snapshot (KB-Lead: consolidate, don't fork). */
   onSnapshot?: (snapshot: VaultSnapshot) => void;
+  /** Budget variant axis (EVAL-7) — recall's per-pass tool-call cap for this run. */
+  recallMaxToolCalls?: number;
+  /** Scorecard variant label (EVAL-7 matrix); 'default' when omitted. */
+  variant?: string;
+  /** Injected agent-judge session (tests); production uses the live pinned-model SDK judge. */
+  judgeSession?: JudgeSession;
+  /** Run the scenario's agent-judge checks (EVAL-4). Default true; set false for deterministic-only runs. */
+  runJudge?: boolean;
 }
 
 /**
@@ -33,12 +42,19 @@ export async function runScenario(scenario: Scenario, opts: RunScenarioOptions =
   const dir = await makeTempDir();
   try {
     const root = path.join(dir, 'vault');
-    const driver = await makeInProcessDriver({ root, cliPath: opts.cliPath ?? resolveCopilotCliPath() });
+    const cliPath = opts.cliPath ?? resolveCopilotCliPath();
+    const driver = await makeInProcessDriver({ root, cliPath, ...(opts.recallMaxToolCalls ? { recallMaxToolCalls: opts.recallMaxToolCalls } : {}) });
     for (const action of scenario.actions) await applyAction(driver, action);
     const snap = await captureSnapshot(driver.rootPath, { recall: driver.lastRecall });
     opts.onSnapshot?.(snap); // human-eyeball hook (consolidates enrichE2eDogfood's logging)
     const checks = runDeterministicChecks(snap, scenario.expect.deterministic ?? []);
-    return buildScorecard(scenario.id, scenario.capability, checks);
+    // Agent-judge checks (EVAL-4) — the qualitative tier the deterministic validators can't cover.
+    const judge: JudgeResult[] = [];
+    const judgeChecks = scenario.expect.judge ?? [];
+    if (judgeChecks.length > 0 && (opts.runJudge ?? true)) {
+      for (const jc of judgeChecks) judge.push(await runJudgeCheck(jc, snap, { ...(opts.judgeSession ? { session: opts.judgeSession } : {}), ...(cliPath ? { cliPath } : {}) }));
+    }
+    return buildScorecard(scenario.id, scenario.capability, checks, opts.variant ?? 'default', judge);
   } finally {
     await rmTempDir(dir);
   }

@@ -32,4 +32,8 @@ expect:
     # Recall answered and grounded its answer in ≥1 cited claim (ASK-7).
     - check: recallCites
       args: { min: 1 }
-  # judge: []   # agent-judged rubric — deferred to Slice-2 (EVAL-4)
+  judge:
+    # Agent-judged qualitative tier (EVAL-4, Slice-2) — a pinned judge model scores the recall answer.
+    - rubric: "Is the recall answer to 'What did Grace Hopper work on?' correct (COBOL and/or the US Navy), grounded in the KB, and cited? Score 1.0 only if correct + grounded + cited."
+      runs: 3
+      threshold: 0.8

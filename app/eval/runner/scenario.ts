@@ -112,5 +112,14 @@ export function validateScenario(raw: unknown): ScenarioParse {
       }
     }
   }
+  const jud = (raw.expect as Record<string, unknown>).judge;
+  if (jud !== undefined && !Array.isArray(jud)) return { ok: false, error: 'scenario.expect.judge must be a list' };
+  if (Array.isArray(jud)) {
+    for (let i = 0; i < jud.length; i++) {
+      if (!isObj(jud[i]) || typeof (jud[i] as Record<string, unknown>).rubric !== 'string') {
+        return { ok: false, error: `expect.judge[${i}] must have a string 'rubric'` };
+      }
+    }
+  }
   return { ok: true, scenario: raw as unknown as Scenario };
 }

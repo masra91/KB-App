@@ -2,31 +2,36 @@
 // deterministic pass/fail) + a human-readable summary. Baseline diffing + the judge-score distribution
 // are Slice-2/3; Slice-1 lands the scorecard SHAPE over the deterministic checks. Pure, fork-independent.
 import type { CheckResult } from './validators';
+import type { JudgeResult } from './judge';
 
-/** A scenario's (single-variant, in Slice-1) deterministic scorecard. */
+/** A scenario's per-variant scorecard: deterministic checks (EVAL-3) + agent-judge results (EVAL-4). */
 export interface Scorecard {
   scenarioId: string;
   capability: string;
-  /** Config variant label (EVAL-7 matrix is Slice-2; 'default' until then). */
+  /** Config variant label (EVAL-7 matrix) — 'default' = the empty variant. */
   variant: string;
   checks: CheckResult[];
   passed: number;
   failed: number;
   total: number;
-  /** True iff EVERY deterministic check passed. */
+  /** Agent-judge results (EVAL-4; empty for deterministic-only scenarios). */
+  judge: JudgeResult[];
+  /** True iff EVERY deterministic check AND every judge rubric passed. */
   ok: boolean;
 }
 
-/** Build a scorecard from a scenario's check results. */
-export function buildScorecard(scenarioId: string, capability: string, checks: CheckResult[], variant = 'default'): Scorecard {
+/** Build a scorecard from a scenario's deterministic results (+ optional judge results, Slice-2). */
+export function buildScorecard(scenarioId: string, capability: string, checks: CheckResult[], variant = 'default', judge: JudgeResult[] = []): Scorecard {
   const passed = checks.filter((c) => c.pass).length;
   const failed = checks.length - passed;
-  return { scenarioId, capability, variant, checks, passed, failed, total: checks.length, ok: failed === 0 };
+  const judgeFailed = judge.filter((j) => !j.pass).length;
+  return { scenarioId, capability, variant, checks, passed, failed, total: checks.length, judge, ok: failed === 0 && judgeFailed === 0 };
 }
 
-/** A human-readable summary (EVAL-8) — `✓/✗ check — detail` lines under a scenario header. */
+/** A human-readable summary (EVAL-8) — `✓/✗ check — detail` lines + judge rubric scores under a header. */
 export function formatScorecard(sc: Scorecard): string {
-  const head = `${sc.ok ? '✓' : '✗'} ${sc.scenarioId} [${sc.capability} · ${sc.variant}] — ${sc.passed}/${sc.total} deterministic checks passed`;
-  const lines = sc.checks.map((c) => `    ${c.pass ? '✓' : '✗'} ${c.check} — ${c.detail}`);
-  return [head, ...lines].join('\n');
+  const head = `${sc.ok ? '✓' : '✗'} ${sc.scenarioId} [${sc.capability} · ${sc.variant}] — ${sc.passed}/${sc.total} deterministic${sc.judge.length ? ` · ${sc.judge.filter((j) => j.pass).length}/${sc.judge.length} judged` : ''}`;
+  const det = sc.checks.map((c) => `    ${c.pass ? '✓' : '✗'} ${c.check} — ${c.detail}`);
+  const jud = sc.judge.map((j) => `    ${j.pass ? '✓' : '✗'} judge[${j.model}] score=${j.aggregateScore.toFixed(2)}≥${j.threshold} — ${j.rubric}`);
+  return [head, ...det, ...jud].join('\n');
 }

@@ -3,8 +3,35 @@
 // on Scorecard objects regardless of how the deterministic/judge checks were produced) — so it's unit-
 // testable now and stable across the Slice-2 forks. Storage (gitignored JSON) + --update-baseline land
 // in the deep build; this is the diff core.
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import type { Scorecard } from './scorecard';
 import type { CheckResult } from './validators';
+
+/** Where last-known-good baselines live — GITIGNORED, never promoted (EVAL-8). */
+export const BASELINE_DIR = path.resolve(process.cwd(), 'eval/baselines');
+
+/** A filesystem-safe baseline filename for a scenario × variant. */
+function baselinePath(scenarioId: string, variant: string): string {
+  const slug = (s: string): string => s.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'x';
+  return path.join(BASELINE_DIR, `${slug(scenarioId)}__${slug(variant)}.json`);
+}
+
+/** Load the stored baseline scorecard for a scenario × variant, or null if none exists yet. */
+export async function loadBaseline(scenarioId: string, variant: string): Promise<Scorecard | null> {
+  try {
+    return JSON.parse(await fs.readFile(baselinePath(scenarioId, variant), 'utf8')) as Scorecard;
+  } catch {
+    return null; // no baseline yet (first run) → the diff marks everything 'new'
+  }
+}
+
+/** Persist a scorecard as the new baseline (EVAL-8) — only via an explicit `--update-baseline` caller,
+ *  never silently (so a worse run can't overwrite the last-known-good). */
+export async function saveBaseline(scorecard: Scorecard): Promise<void> {
+  await fs.mkdir(BASELINE_DIR, { recursive: true });
+  await fs.writeFile(baselinePath(scorecard.scenarioId, scorecard.variant), JSON.stringify(scorecard, null, 2) + '\n', 'utf8');
+}
 
 export type CheckState = 'pass' | 'fail' | 'absent';
 export type DeltaKind = 'regression' | 'improvement' | 'unchanged' | 'new' | 'removed';
