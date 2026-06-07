@@ -1,0 +1,9 @@
+[
+  {
+    "id": "example",
+    "type": "example",
+    "schedule": "off",
+    "enabled": false,
+    "posture": "guarded"
+  }
+]

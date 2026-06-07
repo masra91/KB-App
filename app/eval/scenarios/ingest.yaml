@@ -1,0 +1,20 @@
+# SPEC-0042 EVAL — capability: ingest (EVAL-10). Capture a primary note → archive it to sources/ and let
+# Decompose run, proving the capture→source→pipeline entry path. The source must materialize + the named
+# person becomes an entity.
+id: ingest-primary
+capability: ingest
+seed:
+  kind: empty
+actions:
+  - ingest:
+      text: "Ada Lovelace wrote the first algorithm intended for the Analytical Engine."
+  - awaitDrain:
+      stages: [decompose]
+expect:
+  deterministic:
+    # The captured note was archived as a primary source (ingest's job).
+    - check: countBounds
+      args: { dir: sources, min: 1 }
+    # …and entered the pipeline: the genuine entity is a node (DECOMP-17).
+    - check: entitiesInclude
+      args: ["Ada Lovelace"]

@@ -1,0 +1,36 @@
+# SPEC-0042 EVAL — capability: research (EVAL-10) + the egress cassette (EVAL-6). A seeded public-web
+# researcher (fixtures/research-web) is dispatched; its ONE fetch is served from the committed cassette
+# (cassettes/research-web.json) under REPLAY (deterministic, no live web) — the real copilot still does the
+# reasoning (EVAL-2), only the egress is replayed. The produced secondary source must carry the fact + cite
+# its external origin (RESEARCH-6). `--live` / KB_EVAL_RECORD=1 re-records the cassette.
+#
+# The seeded researcher's prompt PINS the fetch to one allowlisted URL so replay is deterministic (a free
+# web-search would pick varying URLs → cassette miss). The cassette wraps makeGatedFetch on record, so the
+# SSRF/allowlist gate ran when it was captured.
+id: research-web
+capability: research
+seed:
+  kind: files
+  ref: research-web
+meta:
+  cassette: research-web.json
+actions:
+  - dispatchResearcher:
+      id: cobol-history
+  - awaitDrain:
+      stages: [decompose, connect, claims]
+expect:
+  deterministic:
+    # The research pass produced a secondary source (the finding re-entered the pipeline).
+    - check: countBounds
+      args: { dir: sources, min: 1 }
+    # The finding carries the fact from the fetched page…
+    - check: sourcesContain
+      args: { text: "COBOL" }
+    # …and cites its external origin (RESEARCH-6) — the request-only URL it actually fetched.
+    - check: sourcesContain
+      args: { text: "en.wikipedia.org/wiki/COBOL" }
+  judge:
+    - rubric: "Does the research finding accurately reflect what the cited page says about COBOL, and cite the source URL it fetched? Score 1.0 only if grounded in the fetched page + cited; 0 if it fabricated beyond the page."
+      runs: 2
+      threshold: 0.8

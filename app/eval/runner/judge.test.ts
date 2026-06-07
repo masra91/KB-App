@@ -5,7 +5,7 @@ import { aggregateJudge, resolveJudgeModel, resolveSutModel, assertJudgeDistinct
 import type { VaultSnapshot } from './snapshot';
 import type { AskResult } from '../../src/kb/recall';
 
-const snap = (over: Partial<VaultSnapshot> = {}): VaultSnapshot => ({ root: '/v', entities: [], claims: [], sources: [], recall: null, audit: [], ...over });
+const snap = (over: Partial<VaultSnapshot> = {}): VaultSnapshot => ({ root: '/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], ...over });
 const ask = (over: Partial<AskResult> = {}): AskResult => ({ question: 'q', answer: 'a', citations: [], grounded: false, toolCalls: 0, truncated: false, ...over });
 
 describe('aggregateJudge (mean of run distribution vs threshold)', () => {

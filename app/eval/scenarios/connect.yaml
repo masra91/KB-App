@@ -1,0 +1,20 @@
+# SPEC-0042 EVAL — capability: connect (EVAL-10). Two notes about the same people/place → Decompose +
+# Connect resolve them into shared entities and render a relatesTo hint as a real [[wikilink]] (CONNECT-12).
+id: connect-wikilink
+capability: connect
+seed:
+  kind: empty
+actions:
+  - ingest:
+      text: "Marie Curie conducted her research at the University of Paris."
+  - ingest:
+      text: "Marie Curie won the Nobel Prize in Physics. She worked at the University of Paris."
+  - awaitDrain:
+      stages: [decompose, connect, claims]
+expect:
+  deterministic:
+    - check: entitiesInclude
+      args: ["Marie Curie", "University of Paris"]
+    # The relatesTo hint (Curie worked at the university) became a real [[wikilink]] (CONNECT-12).
+    - check: wikilinkRendered
+      args: { from: "Marie Curie", to: "University of Paris" }

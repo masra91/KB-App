@@ -9,7 +9,7 @@ import type { VaultSnapshot } from './snapshot';
 import type { AskResult } from '../../src/kb/recall';
 
 function snap(over: Partial<VaultSnapshot> = {}): VaultSnapshot {
-  return { root: '/v', entities: [], claims: [], sources: [], recall: null, audit: [], ...over };
+  return { root: '/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], ...over };
 }
 const ask = (over: Partial<AskResult> = {}): AskResult => ({ question: 'q', answer: 'a', citations: [], grounded: false, toolCalls: 0, truncated: false, ...over });
 

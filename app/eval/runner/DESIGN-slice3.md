@@ -62,3 +62,26 @@ model unless a pure-replay assertion exists.
 - **After KB-Lead ratifies (deep):** `cassette.ts` (record/replay + scrub) + `egress.ts` (seam wrap +
   `dispatchResearcher` wiring) + the 8 capability scenarios + committed cassettes for the research one +
   the CI smoke subset + tests (cassette record/replay + scrub pure logic; per-scenario), full validate → PR.
+
+## BUILT (ratified S3-A/B/C — closes SPEC-0042)
+
+- **Egress cassette (S3-A/B, EVAL-6):** `cassette.ts` (scrub + fail-loud `assertCassetteClean` +
+  record/replay), `cassetteStore.ts` (committed JSON load/save, asserts clean), `egress.ts` (the
+  `EgressController`: replay-default / record-with-`--live`). Seam: a new `WebResearchOptions.makeFetch`
+  factory — RECORD wraps the real `makeGatedFetch` (gate runs on record), REPLAY serves pre-gated fixtures
+  + errors on a miss; **production omits it → the live gate, unchanged.** Committed cassettes are
+  **public-web only**, secret-scrubbed, fail-loud — guardrail in `eval/cassettes/README.md`.
+- **Verbs wired (in `actions.ts`):** `dispatchResearcher` (run-now-style request → `runResearcher` on
+  staging, through the cassette) + `runJob` (the real JOBS engine via `runJobOnce` + promote). `reflect`
+  runs AS a reflect-kind job, so wiring `runJob` once covers BOTH the `jobs` and `reflect` capabilities.
+  Plus `seed.kind: 'files'` (fixture-seeded KBs: a researcher/job registry, pre-existing entities).
+- **Scenario library (S3-C, EVAL-10):** 8 scenarios — `ingest`/`connect`/`claims`/`recall` (existing
+  verbs), `decompose` (the existing `enrich.yaml`), `research` (seeded web researcher + committed cassette,
+  replay), `jobs` (the deterministic `example` job, model-free), `reflect` (the real reflect job + judge).
+  Run via `eval/library.eval.ts` (opt-in `KB_EVAL`), which **supersedes** the enrich-only
+  `scenario.eval.ts` (consolidate, don't fork — one harness, the whole `eval/scenarios/` dir).
+- **CI smoke (S3-C, EVAL-11):** the cassette/egress/scrub + new-validator + scenario-library **unit tests**
+  (`eval/runner/*.test.ts`) are deterministic, model-free, and already collected by the main CI config —
+  they gate every push. The full scenario library (live copilot; research under cassette replay) stays
+  opt-in (`KB_EVAL`), never a default CI gate. Research replay is deterministic only while the pinned
+  prompt makes the agent fetch the recorded URL; a drift errors loudly → refresh with `--live`.

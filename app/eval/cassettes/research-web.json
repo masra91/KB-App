@@ -1,0 +1,11 @@
+{
+  "tier": "public-web",
+  "entries": [
+    {
+      "url": "https://en.wikipedia.org/wiki/COBOL",
+      "status": 200,
+      "truncated": false,
+      "text": "COBOL (Common Business-Oriented Language) is a compiled English-like computer programming language designed for business use. It is an imperative, procedural language. COBOL was developed in 1959 by the Conference on Data Systems Languages (CODASYL) and was partly based on the FLOW-MATIC language designed by Grace Hopper, a United States Navy rear admiral who was a key figure in its creation and promotion. COBOL was intended to be a common business language that could run on many different computers. It became one of the most widely used programming languages and remains in use today in legacy financial, administrative, and government systems. The COBOL standard has been revised several times, with later versions adding structured and object-oriented features."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+# SPEC-0042 EVAL — capability: reflect (EVAL-10). Reflect runs as a JOB (SPEC-0024) on the JOBS engine.
+# Over a small seeded KB of related entities (fixtures/reflect-seed) the Reflect pass ruminates and either
+# proposes a sensible structural improvement (additive→auto / risky→Review) or correctly finds nothing —
+# never fabricating (REFLECT-4/5/6). The deterministic floor: the run completes WITHOUT destroying the
+# seeded graph; the judge scores the rumination quality (the qualitative call deterministic checks can't).
+id: reflect-rumination
+capability: reflect
+seed:
+  kind: files
+  ref: reflect-seed
+actions:
+  - runJob:
+      id: reflect
+expect:
+  deterministic:
+    # The reflect pass left the seeded entities intact (it's additive/Review, never destructive auto-apply).
+    - check: entitiesInclude
+      args: ["Alan Turing", "Bletchley Park"]
+  judge:
+    - rubric: "Given a small KB of related entities, did the Reflect pass produce a reasonable, grounded outcome — either a sensible additional connection/structure proposal or correctly finding nothing actionable, with no fabricated facts? Score 1.0 for a reasonable grounded outcome, 0 for fabrication or nonsense."
+      runs: 2
+      threshold: 0.6
