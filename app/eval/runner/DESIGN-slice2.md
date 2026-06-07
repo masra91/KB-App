@@ -52,10 +52,12 @@ improve) + judge-score **distribution shifts** vs the baseline; an explicit `--u
 refreshes it (so a baseline is never silently overwritten by a worse run). A run without its manifest
 (EVAL-9) is invalid.
 
-**Fork S2-C — judge run-count + threshold → RECOMMEND: N=3 default, aggregate pass-rate vs scenario
-`threshold` (default 0.8), per-run rationale logged.** The judge is itself non-deterministic, so a single
-call isn't trustworthy: run N (scenario-overridable, default 3), aggregate (pass-rate or mean score) against
-the scenario's `threshold` (default 0.8 per the SPEC example), and **log every judge prompt + rationale**
+**Fork S2-C — judge run-count + threshold → RESOLVED (KB-Lead): N=3 default, aggregate MEAN SCORE vs
+scenario `threshold` (default 0.8), per-run rationale logged.** The judge is itself non-deterministic, so a
+single call isn't trustworthy: run N (scenario-overridable, default 3), aggregate the run distribution as
+the **mean score** ≥ the scenario's `threshold` (default 0.8) — KB-Lead accepted mean-of-scores as the
+cleaner, parameter-free bar (the earlier "pass-rate" wording was imprecise) — and **log every judge prompt
++ rationale**
 (EVAL-4 auditability). Mirrors the deterministic-validators' "report + score", not a hard single-shot.
 
 ## What's drafted now vs after ratification

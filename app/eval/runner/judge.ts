@@ -18,6 +18,25 @@ export function resolveJudgeModel(): string {
   return process.env.KB_EVAL_JUDGE_MODEL || DEFAULT_JUDGE_MODEL;
 }
 
+/** The resolved system-under-test model (KB_COPILOT_MODEL, read by every decider + recall), or the SDK default. */
+export function resolveSutModel(): string {
+  return process.env.KB_COPILOT_MODEL || 'copilot-default';
+}
+
+/**
+ * HARD integrity guard (EVAL-4, KB-Lead-required): the judge model MUST differ from the system-under-test
+ * model — a model cannot grade its own homework. Refuses to run on resolved-string equality (e.g. an
+ * explicit `KB_COPILOT_MODEL=claude-opus-4` colliding with the judge default). A hard refuse beats
+ * audit-after-the-fact; both ids are still recorded in the EVAL-9 manifest.
+ */
+export function assertJudgeDistinctFromSut(): void {
+  const judge = resolveJudgeModel();
+  const sut = resolveSutModel();
+  if (judge === sut) {
+    throw new Error(`EVAL judge model (${judge}) must differ from the system-under-test model (${sut}) — a model cannot grade its own homework. Set KB_EVAL_JUDGE_MODEL to a distinct model.`);
+  }
+}
+
 /** One judge run's verdict — a [0,1] quality score + the model's rationale (logged for auditability). */
 export interface JudgeRun {
   score: number;
@@ -72,6 +91,7 @@ export function renderJudgeOutput(snap: VaultSnapshot): string {
  * rationale is returned in `runs` for the scorecard log (EVAL-4 auditability).
  */
 export async function runJudgeCheck(check: JudgeCheck, snap: VaultSnapshot, opts: { session?: JudgeSession; cliPath?: string } = {}): Promise<JudgeResult> {
+  assertJudgeDistinctFromSut(); // refuse before running — the judge can't be the SUT (KB-Lead-required)
   const model = resolveJudgeModel();
   const threshold = check.threshold ?? 0.8;
   const n = Math.max(1, check.runs ?? 3);

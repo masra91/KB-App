@@ -1,7 +1,7 @@
 // SPEC-0042 EVAL Slice-2 — agent-judge (EVAL-4). Pure/deterministic — aggregation + model resolution +
 // runJudgeCheck driven by an INJECTED session (the live pinned-model SDK path is opt-in/e2e). Runs in CI.
 import { describe, it, expect, afterEach } from 'vitest';
-import { aggregateJudge, resolveJudgeModel, runJudgeCheck, renderJudgeOutput, DEFAULT_JUDGE_MODEL, type JudgeSession } from './judge';
+import { aggregateJudge, resolveJudgeModel, resolveSutModel, assertJudgeDistinctFromSut, runJudgeCheck, renderJudgeOutput, DEFAULT_JUDGE_MODEL, type JudgeSession } from './judge';
 import type { VaultSnapshot } from './snapshot';
 import type { AskResult } from '../../src/kb/recall';
 
@@ -31,6 +31,26 @@ describe('resolveJudgeModel', () => {
     expect(resolveJudgeModel()).toBe(DEFAULT_JUDGE_MODEL);
     process.env.KB_EVAL_JUDGE_MODEL = 'some-other-model';
     expect(resolveJudgeModel()).toBe('some-other-model');
+  });
+});
+
+describe('assertJudgeDistinctFromSut — judge ≠ SUT hard guard (EVAL-4, KB-Lead-required)', () => {
+  afterEach(() => {
+    delete process.env.KB_COPILOT_MODEL;
+    delete process.env.KB_EVAL_JUDGE_MODEL;
+  });
+  it('REFUSES when the resolved judge model equals the resolved SUT model (the opus-4 collision)', () => {
+    process.env.KB_COPILOT_MODEL = DEFAULT_JUDGE_MODEL; // SUT collides with the judge default
+    expect(resolveSutModel()).toBe(DEFAULT_JUDGE_MODEL);
+    expect(() => assertJudgeDistinctFromSut()).toThrow(/cannot grade its own homework/);
+  });
+  it('allows distinct models (default judge vs SDK-default SUT)', () => {
+    delete process.env.KB_COPILOT_MODEL;
+    expect(() => assertJudgeDistinctFromSut()).not.toThrow();
+  });
+  it('runJudgeCheck refuses to run on a judge==SUT collision (hard fail, not a 0-score run)', async () => {
+    process.env.KB_COPILOT_MODEL = DEFAULT_JUDGE_MODEL;
+    await expect(runJudgeCheck({ rubric: 'r' }, snap(), { session: async () => ({ score: 1, rationale: 'x' }) })).rejects.toThrow(/grade its own homework/);
   });
 });
 
