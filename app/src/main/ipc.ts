@@ -28,6 +28,9 @@ import {
   listWatchFoldersForActive,
   setActiveWatchFolder,
   removeActiveWatchFolder,
+  listIntakeConnectorsForActive,
+  setActiveIntakeConnectorConfig,
+  runActiveIntakeConnectorNow,
 } from './pipeline';
 import { recall } from '../kb/recall';
 import { makeReadOnlyTools } from '../kb/recallTools';
@@ -74,6 +77,9 @@ import type {
   RunResearcherResult,
   WatchFolderView,
   WatchFolderPatch,
+  IntakeConnectorView,
+  IntakeConnectorConfigPatch,
+  RunIntakeConnectorResult,
 } from '../kb/types';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
@@ -391,6 +397,19 @@ export function registerIpc(): void {
   ipcMain.handle('kb:listWatchFolders', async (): Promise<WatchFolderView[]> => listWatchFoldersForActive());
   ipcMain.handle('kb:setWatchFolder', async (_e, patch: WatchFolderPatch): Promise<WatchFolderView[]> => setActiveWatchFolder(patch));
   ipcMain.handle('kb:removeWatchFolder', async (_e, id: string): Promise<WatchFolderView[]> => removeActiveWatchFolder(id));
+
+  // SPEC-0027 PANEL-4 · Sources (INTAKE-14): manage intake feed connectors + on-demand run.
+  ipcMain.handle('kb:listIntakeConnectors', async (): Promise<IntakeConnectorView[]> => listIntakeConnectorsForActive());
+
+  ipcMain.handle('kb:setIntakeConnectorConfig', async (_e, patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]> => setActiveIntakeConnectorConfig(patch));
+
+  ipcMain.handle('kb:runIntakeConnectorNow', async (_e, id: string): Promise<RunIntakeConnectorResult> => {
+    try {
+      return await runActiveIntakeConnectorNow(id);
+    } catch {
+      return { ran: false, reason: 'not-found' };
+    }
+  });
 }
 
 /** Deterministic recall result for the CI e2e happy-path (KB_ASK_E2E_STUB). Never used in prod. */

@@ -8,6 +8,7 @@
 import type { ExploreEntityRef, ExploreNeighborhood } from './explorePanel';
 import type { SchedulePreset, AutonomyPosture } from './jobs';
 import type { EgressTier, ResearcherTemplate } from './researchers';
+import type { IntakeConnectorType } from './intakeConnectors';
 import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
@@ -358,6 +359,63 @@ export type RunResearcherResult =
   | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string; ceilingReached?: boolean }
   | { ran: false; reason: 'not-found' | 'no-kb' };
 
+// --- Control Panel · Sources (SPEC-0027 PANEL-4 — INTAKE-14 + WATCH-9, the unified Sources view) ---
+
+/** A connector's last pull, derived from its newest `intake` audit event (or null = never run). */
+export interface IntakeConnectorLastRun {
+  ts: string; // ISO timestamp of the last pass
+  eventType: string; // 'intook' | 'no-new-items' | 'intake-failed'
+  count: number; // items ingested this pass (0 for a no-op / failure)
+  error?: string; // present on an `intake-failed` event (failed≠empty surfaced)
+}
+
+/** One manageable INTAKE connector as the Sources view needs it (INTAKE-4/14): config + last run. */
+export interface IntakeConnectorView {
+  id: string;
+  type: IntakeConnectorType;
+  /** Catalog label for the connector's type (e.g. "RSS / Atom feed"), Principal-facing. */
+  typeLabel: string;
+  /** Principal-facing label, falling back to the id. */
+  label: string;
+  enabled: boolean;
+  schedule: SchedulePreset;
+  scope: string;
+  sensitivity: string;
+  /** Max items pulled per bounded pass (INTAKE-11) — editable. */
+  maxItemsPerPass: number;
+  /** Type-specific config the Principal steers: RSS `feedUrl`; M365 `tenantId`/`folder`. Empty when unset. */
+  feedUrl: string;
+  tenantId: string;
+  folder: string;
+  lastRun: IntakeConnectorLastRun | null; // null = never run
+}
+
+/** A config change from the Sources view (INTAKE-14). Omitted fields are left unchanged. A new
+ *  connector = include `type`. `id` must be a bare slug (registry-guarded). */
+export interface IntakeConnectorConfigPatch {
+  id: string;
+  type?: IntakeConnectorType;
+  label?: string;
+  enabled?: boolean;
+  schedule?: SchedulePreset;
+  scope?: string;
+  sensitivity?: string;
+  maxItemsPerPass?: number;
+  /** RSS: the feed URL (merged into `config.feedUrl`). */
+  feedUrl?: string;
+  /** M365-mail: the tenant id (merged into `config.tenantId`). */
+  tenantId?: string;
+  /** M365-mail: the mail folder (merged into `config.folder`). */
+  folder?: string;
+}
+
+/** Outcome of a manual INTAKE connector "Run now" (INTAKE-14). `ran:false` carries why; `ran:true` +
+ *  `failed` means the pull ERRORED (e.g. unreachable feed / unconfigured M365) — distinct from a legit
+ *  "no new items" (failed≠empty). */
+export type RunIntakeConnectorResult =
+  | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string }
+  | { ran: false; reason: 'not-found' | 'no-kb' };
+
 // --- Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5) ---
 
 /** Editable per-Instance settings surfaced in Settings (PANEL-5 / AUTO-12). */
@@ -424,6 +482,10 @@ export interface KbApi {
   listWatchFolders(): Promise<WatchFolderView[]>;
   setWatchFolder(patch: WatchFolderPatch): Promise<WatchFolderView[]>;
   removeWatchFolder(id: string): Promise<WatchFolderView[]>;
+  // SPEC-0027 PANEL-4 · Sources (INTAKE-14): manage intake feed connectors + on-demand run.
+  listIntakeConnectors(): Promise<IntakeConnectorView[]>;
+  setIntakeConnectorConfig(patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]>;
+  runIntakeConnectorNow(id: string): Promise<RunIntakeConnectorResult>;
   // SPEC-0039 EXPLORE: the read-only entity-neighborhood view over the evergreen `entities/` graph.
   // `exploreEntities` feeds the search-to-focus picker; `exploreNeighborhood` returns the focused
   // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).
