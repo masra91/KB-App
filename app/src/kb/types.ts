@@ -317,6 +317,8 @@ export interface ResearcherConfigPatch {
   maxToolCalls?: number;
   /** Editable per-pass session timeout in ms (RESEARCH-18, WS3) — clamped/validated at the IPC boundary. */
   timeoutMs?: number;
+  /** Editable chain-depth safety bound (RESEARCH-11, WS3 Slice-2) — clamped/validated at the IPC boundary. */
+  maxDepth?: number;
 }
 
 /** A watched folder's most-recent activity, folded into the view from the `watch` audit (SPEC-0037). */

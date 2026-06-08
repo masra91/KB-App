@@ -87,10 +87,16 @@ export const RESEARCH_INSTANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 //     can't out-call the whole Instance's pass budget — a sane upper bound, tunable).
 //   - timeoutMs: the stuck-session backstop; ≥30s (below that a real deep pass false-fails) and ≤60min
 //     (a generous wedged-session ceiling — finite only to release the global copilot slot, ORCH-23).
+//   - maxDepth: the research→finding→research-request CHAIN-depth limit (RESEARCH-11); ≥1 and ≤ a small
+//     hard cap — a deep chain fans out egress geometrically, so the editable ceiling is tight (the
+//     per-Instance pass ceiling still backstops TOTAL egress regardless of per-researcher depth). It is
+//     the SAFETY bound (not a quality knob), so the bound is conservative (WS3 Slice-2, RESEARCH-15).
 export const MIN_TOOL_CALLS = 1;
 export const MAX_TOOL_CALLS = RESEARCH_INSTANCE_CEILING;
 export const MIN_SESSION_TIMEOUT_MS = 30_000;
 export const MAX_SESSION_TIMEOUT_MS = 60 * 60_000;
+export const MIN_MAX_DEPTH = 1;
+export const MAX_MAX_DEPTH = 10; // a research chain ≥10 deep is a runaway; the per-Instance ceiling also backstops
 
 /** Sanitize an editable `maxToolCalls` from untrusted IPC input (WS3): a positive INTEGER, CLAMPED to
  *  [MIN_TOOL_CALLS, MAX_TOOL_CALLS]. Non-numeric / non-integer / ≤0 ⇒ `undefined` (rejected → field left
@@ -106,6 +112,14 @@ export function clampToolCalls(v: unknown): number | undefined {
 export function clampTimeoutMs(v: unknown): number | undefined {
   if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return undefined;
   return Math.min(Math.max(v, MIN_SESSION_TIMEOUT_MS), MAX_SESSION_TIMEOUT_MS);
+}
+
+/** Sanitize an editable `maxDepth` (the chain-depth safety bound, RESEARCH-11) from untrusted IPC input
+ *  (WS3 Slice-2): a positive INTEGER, CLAMPED to [MIN_MAX_DEPTH, MAX_MAX_DEPTH]. Non-numeric / non-integer
+ *  / ≤0 ⇒ `undefined` (rejected → field left unchanged, fail-safe). So 99 → 10 (clamped); 0 / -1 / 1.5 → rejected. */
+export function clampMaxDepth(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) return undefined;
+  return Math.min(Math.max(v, MIN_MAX_DEPTH), MAX_MAX_DEPTH);
 }
 
 /** The effective session timeout for a researcher (RESEARCH-18): its persisted `timeoutMs`, else the default. */

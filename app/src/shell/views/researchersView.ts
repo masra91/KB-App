@@ -26,7 +26,7 @@ import {
   researcherOutcomeLabel,
   researcherRunEligibility,
 } from '../../kb/researchersPanel';
-import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS } from '../../kb/researchers';
+import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS, MIN_MAX_DEPTH, MAX_MAX_DEPTH } from '../../kb/researchers';
 import { navigateTo } from '../nav';
 import { VIEW_REVIEWS } from '../views';
 import type { EgressTier } from '../../kb/researchers';
@@ -117,9 +117,10 @@ function reportLine(r: ResearcherView): string {
   return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>${open}`;
 }
 
-/** The reach readout (§2/§6). WS3 (RESEARCH-15/18): `reads/pass` (maxToolCalls) + `timeout` are now
- *  EDITABLE on the WS2 EditableField primitive (`viz-field`); `maxDepth` (safety bound) + the tool
- *  allowlist (SECURITY surface) stay READ-ONLY. Edits persist via setResearcherConfig (clamped at IPC). */
+/** The reach readout (§2/§6). WS3: `reads/pass` (maxToolCalls), `timeout` (RESEARCH-15/18), and now
+ *  `depth` (maxDepth — the chain-depth safety bound, RESEARCH-11, Slice-2) are EDITABLE on the WS2
+ *  EditableField primitive (`viz-field`); the tool allowlist (SECURITY surface) stays READ-ONLY. Edits
+ *  persist via setResearcherConfig (clamped at the IPC boundary). */
 function reachReadout(r: ResearcherView): string {
   const tools = r.allowedTools.length ? r.allowedTools.join(' · ') : 'template default';
   const timeoutMin = Math.max(1, Math.round(r.timeoutMs / 60_000));
@@ -133,7 +134,11 @@ function reachReadout(r: ResearcherView): string {
         <span class="viz-field__label">timeout (min)</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-timeout viz-focusable" min="${Math.ceil(MIN_SESSION_TIMEOUT_MS / 60_000)}" max="${Math.round(MAX_SESSION_TIMEOUT_MS / 60_000)}" step="1" value="${timeoutMin}" aria-label="Session timeout in minutes" />
       </label>
-      <span class="rdesk-reach-ro">depth ≤ ${r.budget.maxDepth} · tools: ${esc(tools)}</span>
+      <label class="viz-field rdesk-reach-field">
+        <span class="viz-field__label">depth ≤</span>
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxdepth viz-focusable" min="${MIN_MAX_DEPTH}" max="${MAX_MAX_DEPTH}" step="1" value="${r.budget.maxDepth}" aria-label="Max research chain depth" />
+      </label>
+      <span class="rdesk-reach-ro">tools: ${esc(tools)}</span>
     </div>`;
 }
 
@@ -239,6 +244,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const saveBtn = li.querySelector<HTMLButtonElement>('.researcher-save')!;
     const maxCallsEl = li.querySelector<HTMLInputElement>('.researcher-maxcalls')!; // WS3 editable budget
     const timeoutEl = li.querySelector<HTMLInputElement>('.researcher-timeout')!; // WS3 editable session timeout
+    const maxDepthEl = li.querySelector<HTMLInputElement>('.researcher-maxdepth')!; // WS3 Slice-2 editable chain-depth bound
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const reviewLink = li.querySelector<HTMLButtonElement>('.rdesk-review-link'); // only on an escalated last-run
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
@@ -332,6 +338,11 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       const min = Number(timeoutEl.value);
       if (Number.isFinite(min)) void apply({ id, timeoutMs: Math.round(min * 60_000) });
       else void render(container);
+    });
+    maxDepthEl.addEventListener('change', () => {
+      const n = Number(maxDepthEl.value);
+      if (Number.isFinite(n)) void apply({ id, maxDepth: n });
+      else void render(container); // restore the field to its persisted value
     });
 
     runBtn.addEventListener('click', () => {
