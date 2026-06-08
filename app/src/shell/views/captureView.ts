@@ -37,8 +37,8 @@ function renderStagedFiles(container: HTMLElement): void {
   // RICHIN-6: per-item manifest — name · size, with a soft "large" flag (RICHIN-11), removable.
   el.innerHTML = stagedFiles
     .map((f, i) => {
-      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="warn">⚠️ large</span>' : '';
-      return `<li>${esc(f.name)} <span class="muted">· ${humanSize(f.data.byteLength)}</span>${big} <button class="link" data-rm="${i}">remove</button></li>`;
+      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="capture-flag">⚠️ large</span>' : '';
+      return `<li>${esc(f.name)} <span class="capture-size">· ${humanSize(f.data.byteLength)}</span>${big} <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-rm="${i}" aria-label="Remove ${esc(f.name)}">remove</button></li>`;
     })
     .join('');
   el.querySelectorAll<HTMLButtonElement>('button[data-rm]').forEach((b) =>
@@ -203,17 +203,20 @@ export function mountCapture(container: HTMLElement, vaultPathArg: string, name:
   container.innerHTML = `
     <div class="card">
       <h1>📚 ${esc(name)}</h1>
-      <p class="muted path">${esc(vaultPath)}</p>
-      <textarea id="captureText" class="capture" rows="4"
-        placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept"></textarea>
-      <label class="muted toggle"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
-      <div id="dropzone" class="dropzone">Drop files here to capture them</div>
+      <p class="path">${esc(vaultPath)}</p>
+      <label class="viz-field capture-field">
+        <span class="viz-field__label">Capture</span>
+        <textarea id="captureText" class="capture viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="4"
+          placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept" aria-label="Capture"></textarea>
+      </label>
+      <label class="capture-toggle"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
+      <div id="dropzone" class="dropzone viz-focusable" role="button" tabindex="0" aria-label="Drop files here to capture them">Drop files here to capture them</div>
       <ul id="staged" class="staged"></ul>
       <div class="row">
-        <button id="capture" class="primary">Capture</button>
-        <span id="captureNote" class="muted"></span>
+        <button id="capture" class="viz-btn viz-btn--primary viz-focusable">Capture</button>
+        <span id="captureNote" class="capture-note"></span>
       </div>
-      <p id="pipeline" class="muted status"></p>
+      <p id="pipeline" class="capture-note status"></p>
     </div>`;
 
   container.querySelector('#capture')!.addEventListener('click', () => void onCapture(container));

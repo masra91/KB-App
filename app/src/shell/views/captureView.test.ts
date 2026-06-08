@@ -176,3 +176,77 @@ describe('captureView — RICHIN rich ingestion (SPEC-0040)', () => {
     expect(root.querySelector('#captureNote')!.textContent).toContain('large file');
   });
 });
+
+// WS3 migration (DESIGN-LEGACY-VIEWS §6): the Capture view moved off the legacy off-system primitives
+// (.muted, button.primary, button.link, an unlabeled textarea, an un-announced dropzone) onto The
+// Line's blessed .viz-* primitives + the a11y baseline. The headline fixes are the textarea's real
+// accessible name (placeholder ≠ label) and the announced dropzone. Fails-before/passes-after on the CLASS.
+describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 — onto The Line)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    setApi(OK);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+  afterEach(() => {
+    // Drain the module-global staged state via the remove buttons so it never leaks into the next test.
+    let b: HTMLButtonElement | null;
+    while ((b = root.querySelector<HTMLButtonElement>('#staged button[data-rm]'))) b.click();
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Capture button as a blessed .viz-btn--primary (was button.primary)', () => {
+    mountCapture(root, '/v', 'KB');
+    const btn = root.querySelector<HTMLButtonElement>('#capture')!;
+    expect(btn.classList.contains('viz-btn')).toBe(true);
+    expect(btn.classList.contains('viz-btn--primary')).toBe(true);
+    expect(btn.classList.contains('primary')).toBe(false); // legacy indigo class gone
+  });
+
+  it('gives the textarea a real accessible name — a .viz-field__label + aria-label, not just a placeholder (§6 a11y)', () => {
+    mountCapture(root, '/v', 'KB');
+    const ta = root.querySelector<HTMLTextAreaElement>('#captureText')!;
+    expect(ta.closest('.viz-field')).not.toBeNull(); // wrapped in the blessed field primitive
+    expect(ta.closest('.viz-field')!.querySelector('.viz-field__label')?.textContent).toBe('Capture');
+    expect(ta.getAttribute('aria-label')).toBe('Capture'); // accessible name (placeholder is NOT one)
+    expect(ta.classList.contains('viz-field__input--multiline')).toBe(true);
+  });
+
+  it('announces + makes the dropzone reachable — role + aria-label + tabindex (§6 a11y)', () => {
+    mountCapture(root, '/v', 'KB');
+    const dz = root.querySelector<HTMLElement>('#dropzone')!;
+    expect(dz.getAttribute('role')).toBe('button');
+    expect(dz.getAttribute('aria-label')).toBe('Drop files here to capture them');
+    expect(dz.getAttribute('tabindex')).toBe('0'); // keyboard-reachable / announced
+  });
+
+  it('restyles the keep-formatting toggle to the WS2 muted-signage label (off legacy .muted)', () => {
+    mountCapture(root, '/v', 'KB');
+    const toggle = root.querySelector('#keepFormatting')!.closest('label')!;
+    expect(toggle.classList.contains('capture-toggle')).toBe(true);
+    expect(toggle.classList.contains('muted')).toBe(false);
+    expect(root.querySelector('#keepFormatting')).not.toBeNull(); // checkbox + native label wrap preserved
+  });
+
+  it('renders the staged-file remove action as a .viz-btn--ghost naming its file (was button.link)', async () => {
+    mountCapture(root, '/v', 'KB');
+    drop(root.querySelector('#dropzone') as HTMLElement, [new File([new Uint8Array([1])], 'note.pdf', { type: 'application/pdf' })]);
+    await flush();
+    const rm = root.querySelector<HTMLButtonElement>('#staged button[data-rm]')!;
+    expect(rm.classList.contains('viz-btn')).toBe(true);
+    expect(rm.classList.contains('viz-btn--ghost')).toBe(true);
+    expect(rm.classList.contains('link')).toBe(false); // legacy button.link gone
+    expect(rm.getAttribute('aria-label')).toBe('Remove note.pdf'); // "remove" alone is ambiguous to AT
+    expect(rm.dataset.rm).toBe('0'); // the remove handler hook is preserved
+  });
+
+  it('carries NO legacy off-system primitives (.muted / button.link / button.primary) on any render path', async () => {
+    mountCapture(root, '/v', 'KB');
+    drop(root.querySelector('#dropzone') as HTMLElement, [new File([new Uint8Array([1])], 'f.bin', { type: 'application/octet-stream' })]);
+    await flush(); // exercise the staged-files render path too
+    expect(root.querySelector('.muted')).toBeNull(); // path / toggle / note / pipeline / size all migrated
+    expect(root.querySelector('button.link')).toBeNull(); // remove → .viz-btn--ghost
+    expect(root.querySelector('button.primary')).toBeNull(); // Capture → .viz-btn--primary
+  });
+});

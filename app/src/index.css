@@ -150,34 +150,31 @@ ul.checks li {
   margin: 0.5rem 0;
 }
 
-/* --- Simple Capture panel (SPEC-0013) --- */
-textarea.capture {
-  display: block;
-  width: 100%;
-  margin-top: 1rem;
-  padding: 0.6rem 0.7rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
-}
+/* --- Simple Capture panel (SPEC-0013) — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §6). The
+   textarea is the blessed EditableField multiline primitive (.viz-field__input--multiline,
+   design-system.css), wrapped in a .viz-field with a real .viz-field__label (placeholder ≠ an
+   accessible name, §6 a11y). Secondary text on --viz-ink-muted (was legacy .muted); the dropzone is an
+   announced, reachable region (role/aria-label/tabindex). No bespoke textarea chrome — it would
+   out-specify and override the primitive. No new tokens/components (DESIGN-7). --- */
+.capture-field { display: flex; flex-direction: column; width: 100%; margin-top: 1rem; gap: 0.3rem; }
+.capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; font-family: var(--viz-font-signage); letter-spacing: 0.02em; color: var(--viz-ink-muted); font-size: 0.9rem; }
+.capture-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+.capture-size { color: var(--viz-ink-muted); }
+.capture-flag { color: var(--viz-brass); } /* a soft, non-blocking large-capture caution (RICHIN-11) */
 
 .dropzone {
   margin-top: 0.75rem;
   padding: 1rem;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--viz-rule);
   border-radius: 8px;
   text-align: center;
-  color: var(--muted);
+  color: var(--viz-ink-muted);
   font-size: 0.9rem;
 }
 
 .dropzone.over {
-  border-color: var(--accent);
-  color: var(--fg);
+  border-color: var(--viz-ember);
+  color: var(--viz-ink);
 }
 
 ul.staged {
