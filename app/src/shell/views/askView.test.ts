@@ -4,8 +4,10 @@
 // happy-dom via per-file env; the node tier stays the default). The IPC is mocked
 // (`window.kbApi.ask`); we assert the rendered DOM and the request shape (incl. multi-turn history).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountAsk, linkifyCitationMarkers } from './askView';
-import type { AskResult, KbApi } from '../../kb/types';
+import type { AskResult, Citation, KbApi } from '../../kb/types';
 
 const GROUNDED: AskResult = {
   question: 'Who was Ada Lovelace?',
@@ -220,11 +222,24 @@ describe('Ask view · sanitized markdown rendering (#93)', () => {
 });
 
 describe('linkifyCitationMarkers (ASK-14, pure)', () => {
-  it('wraps each [n] in a class-tagged, href-less anchor carrying the 1-based index', () => {
-    const out = linkifyCitationMarkers('Ada [1] and Grace [2].', 3);
-    expect(out).toContain('<a class="cite-link" role="button" tabindex="0" data-turn="3" data-cite="1">[1]</a>');
-    expect(out).toContain('data-cite="2">[2]</a>');
+  const CITES: Citation[] = [
+    { kind: 'entity', ref: 'entities/ada.md', label: 'Ada Lovelace' },
+    { kind: 'claim', ref: 'claims/bug.md', label: 'coined bug' },
+  ];
+  it('wraps each [n] in an href-less role=link anchor with the 1-based index + a source-naming aria-label (§5)', () => {
+    const out = linkifyCitationMarkers('Ada [1] and Grace [2].', 3, CITES);
+    expect(out).toContain('class="cite-link viz-focusable"');
+    expect(out).toContain('role="link"'); // a11y: it IS a link (deep-link), not a generic button
+    expect(out).not.toContain('role="button"'); // the wrong role is gone
+    expect(out).toContain('tabindex="0"');
+    expect(out).toContain('data-turn="3"');
+    expect(out).toContain('data-cite="1"');
+    expect(out).toContain('aria-label="Citation 1: Ada Lovelace"'); // names the source, not an anonymous anchor
+    expect(out).toContain('aria-label="Citation 2: coined bug"');
     expect(out).not.toContain('href'); // the obsidian:// scheme never enters the DOM (built in main)
+  });
+  it('falls back to a bare "Citation n" label when a marker outruns citations[] (malformed output)', () => {
+    expect(linkifyCitationMarkers('See [5].', 0, [])).toContain('aria-label="Citation 5"');
   });
   it('leaves non-citation text untouched', () => {
     expect(linkifyCitationMarkers('no markers here', 0)).toBe('no markers here');
@@ -309,7 +324,7 @@ describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
     expect(open).toHaveBeenCalledWith('entities/person/ada-lovelace.md'); // citations[0].ref
   });
 
-  it('opens on keyboard (Enter) for a11y — anchors are role=button/tabindex=0', async () => {
+  it('opens on keyboard (Enter) for a11y — anchors are role=link/tabindex=0', async () => {
     const open = vi.fn(async () => ({ ok: true }));
     setApi(open);
     mountAsk(root);
@@ -328,5 +343,67 @@ describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
     (root.querySelector('.cite-link') as HTMLElement).click();
     await tick();
     expect(root.querySelector('.ask-cite-status.error')?.textContent).toContain('Obsidian');
+  });
+});
+
+// WS3 migration (DESIGN-LEGACY-VIEWS §5): the Ask view moved off the legacy off-system primitives
+// (.muted text, the framework-indigo button.primary, role=button on href-less citation anchors) onto
+// The Line's blessed .viz-* primitives + the a11y baseline. Fails-before/passes-after guards on the CLASS.
+describe('WS3 design-system migration (DESIGN-LEGACY-VIEWS §5 — onto The Line)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  const CITED: AskResult = {
+    ...GROUNDED,
+    answer: 'Ada [1] pioneered computing.',
+    citations: [{ kind: 'entity', ref: 'entities/person/ada-lovelace.md', label: 'Ada Lovelace' }],
+  };
+  async function askOnce(): Promise<void> {
+    type(root, 'q');
+    submit(root);
+    await tick();
+  }
+
+  it('renders the Ask submit button as a blessed .viz-btn--primary (was button.primary)', () => {
+    setAsk(vi.fn(async () => GROUNDED));
+    mountAsk(root);
+    const btn = root.querySelector<HTMLButtonElement>('#askBtn')!;
+    expect(btn.classList.contains('viz-btn')).toBe(true);
+    expect(btn.classList.contains('viz-btn--primary')).toBe(true);
+    expect(btn.classList.contains('primary')).toBe(false); // legacy indigo class gone
+  });
+
+  it('gives inline + reference citation links role=link + a source-naming aria-label, keyboard-reachable (§5 a11y)', async () => {
+    setAsk(vi.fn(async () => CITED));
+    mountAsk(root);
+    await askOnce();
+    const inline = root.querySelector<HTMLElement>('.ask-answer .cite-link')!;
+    expect(inline.getAttribute('role')).toBe('link'); // was role=button
+    expect(inline.getAttribute('href')).toBeNull(); // scheme stays out of the DOM
+    expect(inline.getAttribute('aria-label')).toBe('Citation 1: Ada Lovelace');
+    expect(inline.getAttribute('tabindex')).toBe('0');
+    expect(inline.classList.contains('viz-focusable')).toBe(true); // ember focus ring
+    const ref = root.querySelector<HTMLElement>('.ask-citations .cite-ref')!;
+    expect(ref.getAttribute('role')).toBe('link');
+    expect(ref.getAttribute('aria-label')).toBe('Citation 1: Ada Lovelace');
+  });
+
+  it('carries NO legacy off-system primitives (.muted / button.primary) on any render path', async () => {
+    setAsk(vi.fn(async () => CITED));
+    mountAsk(root);
+    await askOnce(); // exercises header, transcript, answer, citations, save-row
+    expect(root.querySelector('.muted')).toBeNull(); // header note / "You" / flags / saved-row / refs label migrated
+    expect(root.querySelector('button.primary')).toBeNull(); // Ask + Save are .viz-btn now
+  });
+
+  // The long-token wrap (§5) is CSS-only — happy-dom applies no stylesheet, so assert the CSS SOURCE
+  // (the same guard pattern as confirmDismissCss.test.ts).
+  it('wraps long unbroken answer tokens — .ask-answer carries overflow-wrap in the CSS source (§5)', () => {
+    const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+    const m = indexCss.match(/\.ask-answer\s*\{([^}]*)\}/);
+    expect(m).not.toBeNull();
+    expect(m![1]).toMatch(/overflow-wrap\s*:\s*anywhere/);
   });
 });

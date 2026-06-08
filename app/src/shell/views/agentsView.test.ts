@@ -58,6 +58,56 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
     expect(root.textContent).toContain('open a Knowledge Base');
   });
 
+  // WS3 migration (DESIGN-LEGACY-VIEWS §4): the Agents view moved off the legacy off-system primitives
+  // (.muted text + a hard-coded #7ad17a status hue) onto The Line — the status chip is the blessed
+  // .viz-chip primitive and the status-* family carries state via the canonical hue TOKENS, never hex.
+  // These are the fails-before/passes-after guards on the CLASS.
+  describe('WS3 design-system migration (DESIGN-LEGACY-VIEWS §4 — onto The Line)', () => {
+    it('renders the status chip as a blessed .viz-chip carrying its status-* state class', async () => {
+      setApi(vi.fn(async () => AGENTS));
+      await mountAgents(root);
+      await tick();
+      const chip = root.querySelector<HTMLElement>('.agent[data-key="decompose"] .agent-status')!;
+      expect(chip.classList.contains('viz-chip')).toBe(true); // shape/hue from design-system.css, not hex
+      expect(chip.classList.contains('status-running')).toBe(true);
+      // State is never color-alone (§3 DESIGN-4) — the text label carries the meaning too.
+      expect(chip.textContent).toBe('running');
+    });
+
+    it('keeps the .viz-chip primitive on the in-place status poll refresh (regression: className rebuild)', async () => {
+      vi.useFakeTimers();
+      try {
+        // running → idle on the second call, so the poll rewrites the chip className in place (PANEL-9).
+        const listAgents = vi
+          .fn<KbApi['listAgents']>()
+          .mockResolvedValueOnce(AGENTS)
+          .mockResolvedValue([{ ...AGENTS[0], status: 'idle' }, AGENTS[1]]);
+        setApi(listAgents);
+        await mountAgents(root);
+        await vi.advanceTimersByTimeAsync(5000); // one poll → refreshStatus rewrites the chip class
+        const chip = root.querySelector<HTMLElement>('.agent[data-key="decompose"] .agent-status')!;
+        expect(chip.textContent).toBe('idle'); // status updated in place
+        expect(chip.classList.contains('viz-chip')).toBe(true); // chip primitive NOT stripped by the rebuild
+        expect(chip.classList.contains('status-idle')).toBe(true);
+        expect(chip.classList.contains('status-running')).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('carries NO legacy off-system primitives (.muted) on any render path', async () => {
+      setApi(vi.fn(async () => AGENTS));
+      await mountAgents(root);
+      await tick();
+      expect(root.querySelector('.muted')).toBeNull(); // header note + role text migrated to --viz-ink-muted
+      // empty state too
+      setApi(vi.fn(async () => []));
+      await mountAgents(root);
+      await tick();
+      expect(root.querySelector('.muted')).toBeNull();
+    });
+  });
+
   it('pauses the status poll while its view is hidden, resumes when shown (efficiency — PANEL-9)', async () => {
     vi.useFakeTimers();
     try {

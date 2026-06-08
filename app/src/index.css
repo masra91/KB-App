@@ -150,34 +150,31 @@ ul.checks li {
   margin: 0.5rem 0;
 }
 
-/* --- Simple Capture panel (SPEC-0013) --- */
-textarea.capture {
-  display: block;
-  width: 100%;
-  margin-top: 1rem;
-  padding: 0.6rem 0.7rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
-}
+/* --- Simple Capture panel (SPEC-0013) — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §6). The
+   textarea is the blessed EditableField multiline primitive (.viz-field__input--multiline,
+   design-system.css), wrapped in a .viz-field with a real .viz-field__label (placeholder ≠ an
+   accessible name, §6 a11y). Secondary text on --viz-ink-muted (was legacy .muted); the dropzone is an
+   announced, reachable region (role/aria-label/tabindex). No bespoke textarea chrome — it would
+   out-specify and override the primitive. No new tokens/components (DESIGN-7). --- */
+.capture-field { display: flex; flex-direction: column; width: 100%; margin-top: 1rem; gap: 0.3rem; }
+.capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; font-family: var(--viz-font-signage); letter-spacing: 0.02em; color: var(--viz-ink-muted); font-size: 0.9rem; }
+.capture-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+.capture-size { color: var(--viz-ink-muted); }
+.capture-flag { color: var(--viz-brass); } /* a soft, non-blocking large-capture caution (RICHIN-11) */
 
 .dropzone {
   margin-top: 0.75rem;
   padding: 1rem;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--viz-rule);
   border-radius: 8px;
   text-align: center;
-  color: var(--muted);
+  color: var(--viz-ink-muted);
   font-size: 0.9rem;
 }
 
 .dropzone.over {
-  border-color: var(--accent);
-  color: var(--fg);
+  border-color: var(--viz-ember);
+  color: var(--viz-ink);
 }
 
 ul.staged {
@@ -296,7 +293,7 @@ dl.settings {
 
 dl.settings dt {
   font-size: 0.8rem;
-  color: var(--muted);
+  color: var(--viz-ink-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-top: 0.9rem;
@@ -306,6 +303,13 @@ dl.settings dd {
   margin: 0.25rem 0 0;
   font-size: 0.95rem;
 }
+
+/* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §3): secondary text on --viz-ink-muted (was the
+   legacy global .muted); a label + SegmentedControl share one baseline-aligned row (the autonomy +
+   dev-log controls). The seg / confirm / button visuals come from the blessed primitives
+   (design-system.css) — no new tokens/components (DESIGN-7). */
+.settings-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+.settings-control { display: flex; align-items: center; gap: 0.6rem; margin: 0.6rem 0; flex-wrap: wrap; }
 
 /* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
 ul.review-list {
@@ -353,30 +357,37 @@ button:disabled {
   cursor: default;
 }
 
-/* Ask view (SPEC-0026) */
+/* Ask view (SPEC-0026) — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §5): repointed off the
+   legacy palette/accent (--border/--accent/#d66) onto --viz-* tokens; secondary text on
+   --viz-ink-muted (was legacy .muted); the Ask + Save buttons compose the blessed .viz-btn primitive
+   (design-system.css). No new tokens/components (DESIGN-7). */
 .ask-view .ask-transcript { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.75rem; }
-.ask-turn { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 0.75rem; }
+.ask-turn { border: 1px solid var(--viz-rule); border-radius: 8px; padding: 0.75rem; }
 .ask-q { font-weight: 600; margin-bottom: 0.4rem; }
-.ask-answer { white-space: pre-wrap; }
-.ask-answer.error { color: #d66; }
+.ask-who { color: var(--viz-ink-muted); font-size: 0.7rem; }
+/* Long unbroken tokens (URLs, hashes, IDs) in a recall answer wrap instead of forcing horizontal
+   scroll (§5). The render path already sanitizes (marked + DOMPurify) — presentation only. */
+.ask-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-answer.error { color: var(--viz-oxide); }
+/* Secondary/helper text — the WS2 muted token (was the legacy global .muted). */
+.ask-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
 .ask-citations { margin-top: 0.5rem; font-size: 0.9em; }
+.ask-ref-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
 .ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
-.ask-flags { margin-top: 0.4rem; font-size: 0.85em; }
-/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. */
-.cite-link { color: var(--accent, #6ab); text-decoration: none; cursor: pointer; font-weight: 600; }
-.cite-link:hover, .cite-link:focus { text-decoration: underline; }
-.cite-ref { color: inherit; text-decoration: none; cursor: pointer; }
-.cite-ref:hover, .cite-ref:focus { text-decoration: underline; }
-.cite-ref .cite-num { color: var(--accent, #6ab); font-weight: 600; }
-.cite-ref .cite-kind { color: var(--muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
+.ask-flags { margin-top: 0.4rem; font-size: 0.85em; color: var(--viz-ink-muted); }
+/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. The accent is
+   the ember heat (the "lead back to source"), never the framework indigo (design-system §6). */
+.cite-link { color: var(--viz-ember); text-decoration: none; cursor: pointer; font-weight: 600; }
+.cite-link:hover, .cite-link:focus-visible { text-decoration: underline; }
+.cite-ref { color: var(--viz-ink); text-decoration: none; cursor: pointer; }
+.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-ember); text-decoration: underline; }
+.cite-ref .cite-num { color: var(--viz-ember); font-weight: 600; }
+.cite-ref .cite-kind { color: var(--viz-ink-muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
 .ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--error); }
 .ask-form { display: flex; gap: 0.5rem; }
 .ask-input { flex: 1; }
-/* Save-as-Output (ASK-6) */
+/* Save-as-Output (ASK-6) — the action composes .viz-btn--sm (design-system.css). */
 .ask-save-row { margin-top: 0.5rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
-.ask-save { appearance: none; font: inherit; font-size: 0.85em; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.25rem 0.6rem; cursor: pointer; }
-.ask-save:hover { background: var(--hover); }
-.ask-save:disabled { opacity: 0.5; cursor: default; }
 .ask-save-status.error { color: var(--error); }
 
 /* --- Explore view (SPEC-0039 EXPLORE) — the read-only entity-neighborhood graph, in "The Line"
@@ -467,32 +478,38 @@ button:disabled {
 /* Retryable load-failure fallback (#145) — the Retry button reuses .btn; just space it from the text. */
 .load-error .load-retry { margin-left: 0.5rem; font-size: 0.85em; padding: 0.2rem 0.6rem; }
 
-/* Shared confirm/button styling (also used by the Settings replay flow). */
-.confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-/* WS1 #1: the `display: flex` above wins over the default `[hidden]` rule (display: none), so toggling
-   the `hidden` attribute couldn't dismiss the box. Restore that contract. (The Field-Desk `.rdesk-confirm`
-   now composes the `.viz-confirm` primitive, whose own `[hidden]` guard lives in design-system.css.) */
-.confirm[hidden] { display: none; }
-.confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
+/* The Retry fallback button (renderLoadError, loadGuard.ts) is the last consumer of the legacy .btn.
+   The legacy .confirm / .btn-danger were retired in the WS3 migration: Settings (their final consumer)
+   now composes the blessed .viz-confirm / .viz-btn--danger primitives, as Jobs already does. */
 .btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
 .btn:hover { background: var(--hover); }
-.btn-danger { appearance: none; font: inherit; border: 0; border-radius: 8px; background: var(--error); color: #1a1a1a; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: 600; }
-.btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled { opacity: 0.5; cursor: default; }
 
 /* --- Control Panel: Agents / Sources / Settings autonomy (SPEC-0027 slice 2) --- */
+/* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §4): the status chip is the blessed .viz-chip
+   primitive (shape/signage/muted base from design-system.css); the status-* family carries STATE via
+   the canonical hue tokens — never a hard-coded hex (was #7ad17a/#2f5c2f). State also reads via the
+   text label (never color-alone, §3 DESIGN-4). Secondary text on --viz-ink-muted (was legacy .muted). */
 .agent-list, .source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.agent { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+.agent { border: 1px solid var(--viz-rule); border-radius: 8px; padding: 0.75rem; }
 .agent-head { display: flex; align-items: center; gap: 0.5rem; }
 .agent-label { font-weight: 600; }
-.agent-status { margin-left: auto; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.4rem; color: var(--muted); }
-.agent-status.status-running { color: #7ad17a; border-color: #2f5c2f; }
-.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; }
+/* Layout only — shape/signage/border/muted color come from .viz-chip (design-system.css). */
+.agent-status { margin-left: auto; }
+/* State tokens (§4): running → ember, idle → idle, blocked → brass, error → oxide. The hue colors the
+   glyph/label + ties the border via currentColor (≥3:1). Exception: oxide MUST NOT color small text
+   (contract §2) → error carries the hue on the BORDER only, label stays --viz-ink-muted. */
+.agent-status.status-running { color: var(--viz-state-running); border-color: currentColor; }
+.agent-status.status-idle { color: var(--viz-state-idle); }
+.agent-status.status-blocked { color: var(--viz-state-blocked); border-color: currentColor; }
+.agent-status.status-error { border-color: var(--viz-state-error); }
+.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
 .agent-meta { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.82rem; }
-.agent-meta dt { color: var(--muted); }
+.agent-meta dt { color: var(--viz-ink-muted); }
 .agent-meta dd { margin: 0; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
-.autonomy-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
-.autonomy-row select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.4rem; }
+/* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
+   controls are SegmentedControls now, laid out by .settings-control above.) */
 
 /* --- Reviews "needs you" count badge on the rail (SPEC-0027 PANEL-8) --- */
 .sidebar .nav-item .nav-badge {

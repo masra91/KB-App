@@ -8,7 +8,7 @@ import { withTimeout, renderLoadError } from '../loadGuard';
 import type { AgentView } from '../../kb/types';
 
 export async function mountAgents(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="muted">Loading…</p></div>`;
+  container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="agent-note">Loading…</p></div>`;
   await render(container);
   const timer = setInterval(() => {
     if (!document.contains(container)) {
@@ -32,9 +32,9 @@ async function render(container: HTMLElement): Promise<void> {
     renderLoadError(container, '<h1>🤖 Agents</h1>', () => void render(container));
     return;
   }
-  const header = `<h1>🤖 Agents</h1><p class="muted">The librarian agents that run your pipeline. Observe-only — configuration is coming.</p>`;
+  const header = `<h1>🤖 Agents</h1><p class="agent-note">The librarian agents that run your pipeline. Observe-only — configuration is coming.</p>`;
   if (agents.length === 0) {
-    container.innerHTML = `<div class="card">${header}<p class="muted">No agents to show — open a Knowledge Base.</p></div>`;
+    container.innerHTML = `<div class="card">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
     return;
   }
   container.innerHTML = `<div class="card">${header}<ul class="agent-list">${agents.map(agentItem).join('')}</ul></div>`;
@@ -45,9 +45,9 @@ function agentItem(a: AgentView): string {
     <li class="agent" data-key="${esc(a.key)}">
       <div class="agent-head">
         <span class="agent-label">${esc(a.label)}</span>
-        <span class="agent-status status-${esc(a.status)}">${esc(a.status)}</span>
+        <span class="agent-status viz-chip status-${esc(a.status)}">${esc(a.status)}</span>
       </div>
-      <p class="muted agent-role">${esc(a.role)}</p>
+      <p class="agent-role">${esc(a.role)}</p>
       <dl class="agent-meta">
         <dt>Model</dt><dd>${esc(a.model)}</dd>
         <dt>Instructions</dt><dd><span class="path">${esc(a.instructions)}</span></dd>
@@ -67,7 +67,9 @@ async function refreshStatus(container: HTMLElement): Promise<void> {
     const el = container.querySelector<HTMLElement>(`.agent[data-key="${a.key}"] .agent-status`);
     if (el) {
       el.textContent = a.status;
-      el.className = `agent-status status-${a.status}`;
+      // Keep the blessed .viz-chip primitive on the in-place status refresh (PANEL-9) — a bare
+      // `agent-status status-*` here would strip the chip styling on the first poll.
+      el.className = `agent-status viz-chip status-${a.status}`;
     }
   }
 }
