@@ -236,6 +236,14 @@ describe('Sources view · Slice-2 per-folder rules (WATCH-12/14)', () => {
     expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', maxDepth: 32 }); // clamped
   });
 
+  it('WATCH-16: the add-folder flow makes drain-by-default clear (KB-Lead — files move at creation)', async () => {
+    const c = await mount();
+    const hint = c.querySelector('.watch-add-hint')!;
+    expect(hint.textContent).toMatch(/drains like an inbox/i);
+    expect(hint.textContent).toMatch(/\.kb-processed/);
+    expect(hint.textContent).toMatch(/never deleted/i);
+  });
+
   it('WATCH-16: a folder DRAINS by default — the toggle reads "leave originals: off"', async () => {
     const c = await mount();
     const toggle = c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement;

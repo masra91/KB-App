@@ -396,6 +396,7 @@ function watchAddDock(): string {
       <div class="rdesk-tiles" role="group" aria-label="Add a watched folder">
         <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">📂</span><span class="rdesk-tile-label viz-signage">Choose a folder…</span></button>
       </div>
+      <p class="watch-add-hint rdesk-add-hint viz-body">A watched folder <strong>drains like an inbox</strong> — after each file is brought in, the original moves to “.kb-processed/” inside the folder (a copy is kept in your KB first; files are never deleted), so the folder empties. Switch any folder to <em>leave originals in place</em> to keep the source untouched.</p>
       <p class="watch-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
     </div>`;
 }
