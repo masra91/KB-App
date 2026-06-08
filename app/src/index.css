@@ -357,7 +357,9 @@ button:disabled {
 .ask-view .ask-transcript { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.75rem; }
 .ask-turn { border: 1px solid var(--border, #2a2a2a); border-radius: 8px; padding: 0.75rem; }
 .ask-q { font-weight: 600; margin-bottom: 0.4rem; }
-.ask-answer { white-space: pre-wrap; }
+/* DESIGN-LEGACY-VIEWS §5: long unbroken tokens (URLs, hashes) in a rendered answer must wrap
+   instead of forcing horizontal scroll. Content is already sanitized (marked+DOMPurify) — CSS only. */
+.ask-answer { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .ask-answer.error { color: #d66; }
 .ask-citations { margin-top: 0.5rem; font-size: 0.9em; }
 .ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }

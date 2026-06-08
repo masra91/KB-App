@@ -5,7 +5,7 @@
 // (`window.kbApi.ask`); we assert the rendered DOM and the request shape (incl. multi-turn history).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountAsk, linkifyCitationMarkers } from './askView';
-import type { AskResult, KbApi } from '../../kb/types';
+import type { AskResult, Citation, KbApi } from '../../kb/types';
 
 const GROUNDED: AskResult = {
   question: 'Who was Ada Lovelace?',
@@ -220,11 +220,22 @@ describe('Ask view · sanitized markdown rendering (#93)', () => {
 });
 
 describe('linkifyCitationMarkers (ASK-14, pure)', () => {
-  it('wraps each [n] in a class-tagged, href-less anchor carrying the 1-based index', () => {
-    const out = linkifyCitationMarkers('Ada [1] and Grace [2].', 3);
-    expect(out).toContain('<a class="cite-link" role="button" tabindex="0" data-turn="3" data-cite="1">[1]</a>');
+  const CITES: Citation[] = [
+    { kind: 'entity', ref: 'entities/person/ada.md', label: 'Ada Lovelace' },
+    { kind: 'claim', ref: 'claims/grace/bug.md', label: 'coined bug' },
+  ];
+  it('wraps each [n] in a class-tagged, href-less role=link anchor with a source-naming aria-label (§5/§7)', () => {
+    const out = linkifyCitationMarkers('Ada [1] and Grace [2].', 3, CITES);
+    expect(out).toContain(
+      '<a class="cite-link" role="link" tabindex="0" aria-label="Citation 1: Ada Lovelace" data-turn="3" data-cite="1">[1]</a>',
+    );
+    expect(out).toContain('aria-label="Citation 2: coined bug"');
     expect(out).toContain('data-cite="2">[2]</a>');
     expect(out).not.toContain('href'); // the obsidian:// scheme never enters the DOM (built in main)
+    expect(out).not.toContain('role="button"'); // migrated off the legacy button role → link semantics
+  });
+  it('falls back to a bare "Citation n" aria-label when no matching citation is present', () => {
+    expect(linkifyCitationMarkers('orphan [5] marker', 0)).toContain('aria-label="Citation 5"');
   });
   it('leaves non-citation text untouched', () => {
     expect(linkifyCitationMarkers('no markers here', 0)).toBe('no markers here');
@@ -309,7 +320,7 @@ describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
     expect(open).toHaveBeenCalledWith('entities/person/ada-lovelace.md'); // citations[0].ref
   });
 
-  it('opens on keyboard (Enter) for a11y — anchors are role=button/tabindex=0', async () => {
+  it('opens on keyboard (Enter) for a11y — anchors are role=link/tabindex=0', async () => {
     const open = vi.fn(async () => ({ ok: true }));
     setApi(open);
     mountAsk(root);
@@ -328,5 +339,68 @@ describe('Ask view · citation deep-links (SPEC-0026 ASK-14)', () => {
     (root.querySelector('.cite-link') as HTMLElement).click();
     await tick();
     expect(root.querySelector('.ask-cite-status.error')?.textContent).toContain('Obsidian');
+  });
+});
+
+// WS3 migration (DESIGN-LEGACY-VIEWS §5/§7): Ask moved off the legacy `.primary` button + role=button
+// citation anchors onto the blessed `.viz-btn--primary` + role=link semantics with source-naming
+// aria-labels. These are the fails-before/passes-after guards on the CLASS — a regression to `.primary`,
+// a dropped aria-label, or role=button reappearing all trip here.
+describe('Ask view · WS3 design-system migration (DESIGN-LEGACY-VIEWS §5/§7)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+
+  const CITED_INLINE: AskResult = {
+    question: 'q',
+    answer: 'Ada [1] pioneered computing.',
+    citations: [{ kind: 'entity', ref: 'entities/person/ada-lovelace.md', label: 'Ada Lovelace' }],
+    grounded: true,
+    toolCalls: 1,
+    truncated: false,
+  };
+
+  it('the Ask button is the blessed .viz-btn--primary, not the legacy .primary (§5 swap)', () => {
+    setAsk(vi.fn(async () => GROUNDED));
+    mountAsk(root);
+    const btn = root.querySelector<HTMLButtonElement>('#askBtn')!;
+    expect(btn.classList.contains('viz-btn')).toBe(true);
+    expect(btn.classList.contains('viz-btn--primary')).toBe(true);
+    expect(btn.classList.contains('primary')).toBe(false); // legacy primitive gone
+  });
+
+  it('no legacy button.primary survives anywhere in the rendered view (no-legacy-primitives sweep)', async () => {
+    setAsk(vi.fn(async () => CITED_INLINE));
+    mountAsk(root);
+    type(root, 'q');
+    submit(root);
+    await tick();
+    expect(root.querySelector('button.primary')).toBeNull();
+  });
+
+  it('inline citation markers render as href-less role=link with a source-naming aria-label (§7)', async () => {
+    setAsk(vi.fn(async () => CITED_INLINE));
+    mountAsk(root);
+    type(root, 'q');
+    submit(root);
+    await tick();
+    const marker = root.querySelector<HTMLElement>('.ask-answer .cite-link')!;
+    expect(marker.getAttribute('role')).toBe('link');
+    expect(marker.getAttribute('tabindex')).toBe('0');
+    expect(marker.getAttribute('aria-label')).toBe('Citation 1: Ada Lovelace'); // names the source, not bare "[1]"
+    expect(marker.getAttribute('href')).toBeNull();
+  });
+
+  it('References entries are role=link (citation links navigate to a source) — no leftover role=button (§7)', async () => {
+    setAsk(vi.fn(async () => CITED_INLINE));
+    mountAsk(root);
+    type(root, 'q');
+    submit(root);
+    await tick();
+    const ref = root.querySelector<HTMLElement>('.ask-citations .cite-ref')!;
+    expect(ref.getAttribute('role')).toBe('link');
+    expect(root.querySelector('.ask-citations [role="button"]')).toBeNull();
   });
 });

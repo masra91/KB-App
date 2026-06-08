@@ -31,12 +31,19 @@ function renderMarkdown(md: string): string {
  * DOMPurify's default URL allowlist stays untouched (ASK-15/#93). `n` is a bare integer from the
  * regex, so nothing untrusted reaches the attribute; wrapping it also stops markdown from
  * reinterpreting a bare `[1]` as a link-reference. Pure + exported for unit testing.
+ *
+ * A11y (DESIGN-LEGACY-VIEWS §5/§7): the marker is an href-less anchor that navigates (opens the
+ * source in Obsidian), so it carries `role="link"` + keyboard activation (Enter/Space, via the
+ * delegated keydown handler) + an `aria-label` naming the source — its only visible text is the bare
+ * `[n]`, which is meaningless to a screen reader on its own. The label is built from the matching
+ * citation when present (`Citation n: <source name>`), else falls back to `Citation n`.
  */
-export function linkifyCitationMarkers(answer: string, turnIndex: number): string {
-  return answer.replace(
-    /\[(\d+)\]/g,
-    (_m, n: string) => `<a class="cite-link" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}">[${n}]</a>`,
-  );
+export function linkifyCitationMarkers(answer: string, turnIndex: number, citations: Citation[] = []): string {
+  return answer.replace(/\[(\d+)\]/g, (_m, n: string) => {
+    const c = citations[Number(n) - 1];
+    const label = c ? `Citation ${n}: ${refDisplayName(c)}` : `Citation ${n}`;
+    return `<a class="cite-link" role="link" tabindex="0" aria-label="${esc(label)}" data-turn="${turnIndex}" data-cite="${n}">[${n}]</a>`;
+  });
 }
 
 interface Turn {
@@ -62,7 +69,7 @@ export function mountAsk(container: HTMLElement): void {
       <ul class="ask-transcript" id="askTranscript"></ul>
       <form class="ask-form" id="askForm">
         <input id="askInput" class="ask-input" type="text" autocomplete="off" placeholder="Ask a question…" aria-label="Ask a question" />
-        <button id="askBtn" class="primary" type="submit">Ask</button>
+        <button id="askBtn" class="viz-btn viz-btn--primary viz-focusable" type="submit">Ask</button>
       </form>
     </div>`;
   const form = container.querySelector<HTMLFormElement>('#askForm');
@@ -87,7 +94,7 @@ export function mountAsk(container: HTMLElement): void {
       void openCitation(container, Number(cite.dataset.turn), Number(cite.dataset.cite));
     }
   });
-  // Keyboard parity (ASK-14): citation anchors are role=button/tabindex=0 — open on Enter/Space.
+  // Keyboard parity (ASK-14 / §7): citation anchors are href-less role=link/tabindex=0 — open on Enter/Space.
   transcript?.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const cite = (e.target as HTMLElement).closest<HTMLElement>('.cite-link, .cite-ref');
@@ -206,7 +213,7 @@ function renderReferences(citations: Citation[], turnIndex: number): string {
     .map((c, i) => {
       const n = i + 1;
       const kind = CITATION_KIND_LABEL[c.kind] ?? c.kind;
-      return `<li><a class="cite-ref" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
+      return `<li><a class="cite-ref" role="link" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
     })
     .join('');
   return `<div class="ask-citations"><span class="muted">References</span><ul>${items}</ul></div>`;
@@ -218,7 +225,8 @@ function renderAnswer(r: AskResult, turnIndex: number, citeError?: string): stri
   if (r.truncated) flags.push('partial — retrieval budget reached');
   const flagHtml = flags.length ? `<div class="ask-flags muted">${flags.map(esc).join(' · ')}</div>` : '';
   // ASK-14: linkify the inline `[n]` BEFORE sanitizing, so each marker is a clickable deep-link.
-  const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex));
+  // Pass citations so each marker gets an aria-label naming its source (§5 a11y).
+  const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex, r.citations));
   const citeErr = citeError ? `<div class="ask-cite-status error">${esc(citeError)}</div>` : '';
   return `<div class="ask-answer">${answerHtml}</div>${renderReferences(r.citations, turnIndex)}${citeErr}${flagHtml}`;
 }
