@@ -75,6 +75,12 @@ export interface Tracer {
   flush(): Promise<void>;
 }
 
+/** Rotate the active spans file at this many bytes. Default 8 MB — comfortably larger than the
+ *  perfIndex recent-window (5000 spans ≈ <2 MB), so the window always fits in the active file. */
+export const DEFAULT_SPANS_MAX_BYTES = 8 * 1024 * 1024;
+/** Keep this many rotated spans files (`.1`..`.N`); older are dropped. Default 3. */
+export const DEFAULT_SPANS_MAX_FILES = 3;
+
 export interface TracerOptions {
   /** Directory the spans file lives in (created on first write). */
   dir: string;
@@ -86,6 +92,12 @@ export interface TracerOptions {
   mintId?: () => string;
   /** Dev log to mirror each span to at `debug` (OBS-12 "emit to the dev log"). Default noop. */
   log?: DevLog;
+  /** Rotate the active spans file when it would exceed this many bytes. Default 8 MB.
+   *  Bounds the file so a long run can't grow it without limit (#256: an unrotated spans file the
+   *  status poll fully re-read drove the heap to OOM). 0 disables rotation. */
+  maxBytes?: number;
+  /** Keep this many rotated files (`.1`..`.N`). Default 3. */
+  maxFiles?: number;
 }
 
 /** The per-vault spans file: `<vault>/.kb/cache/spans.jsonl` — gitignored, never promoted (OBS-2/12). */
@@ -99,19 +111,48 @@ interface Sink {
   now: () => Date;
   mintId: () => string;
   log: DevLog;
+  maxBytes: number;
+  maxFiles: number;
+  bytes: number | null; // active-file size; null until first stat
   tail: Promise<void>; // serialized, self-swallowing write chain
+}
+
+/** Rotate `spans.jsonl` → `.1` → `.2` … dropping the oldest beyond maxFiles (mirrors devlog). The
+ *  perfIndex aggregates only the *recent* window, so dropping old rotated spans is by design. */
+async function rotateSpans(sink: Sink): Promise<void> {
+  const base = path.join(sink.dir, sink.file);
+  await fs.rm(`${base}.${sink.maxFiles}`, { force: true });
+  for (let i = sink.maxFiles - 1; i >= 1; i--) {
+    await fs.rename(`${base}.${i}`, `${base}.${i + 1}`).catch(() => {});
+  }
+  await fs.rename(base, `${base}.1`).catch(() => {});
+  sink.bytes = 0;
+}
+
+async function writeSpanLine(sink: Sink, line: string): Promise<void> {
+  await fs.mkdir(sink.dir, { recursive: true });
+  const p = path.join(sink.dir, sink.file);
+  if (sink.bytes === null) {
+    sink.bytes = await fs
+      .stat(p)
+      .then((s) => s.size)
+      .catch(() => 0);
+  }
+  const size = Buffer.byteLength(line);
+  // #256: bound the spans file — an unrotated, ever-growing spans.jsonl that the status poll
+  // fully re-read (perfIndex.readSpans) drove the heap to OOM over a long run. Rotate like devlog.
+  if (sink.maxBytes > 0 && sink.maxFiles > 0 && sink.bytes > 0 && sink.bytes + size > sink.maxBytes) {
+    await rotateSpans(sink);
+  }
+  await fs.appendFile(p, line);
+  sink.bytes = (sink.bytes ?? 0) + size;
 }
 
 function appendSpan(sink: Sink, span: Span): void {
   const line = JSON.stringify(span) + '\n';
   sink.log.debug('span', { ...span });
   // Serialize + swallow: tracing must never reject into the caller's path.
-  sink.tail = sink.tail
-    .then(async () => {
-      await fs.mkdir(sink.dir, { recursive: true });
-      await fs.appendFile(path.join(sink.dir, sink.file), line);
-    })
-    .catch(() => {});
+  sink.tail = sink.tail.then(() => writeSpanLine(sink, line)).catch(() => {});
 }
 
 class ActiveSpanImpl implements ActiveSpan {
@@ -180,6 +221,9 @@ export function createTracer(opts: TracerOptions): Tracer {
     now: opts.now ?? ((): Date => new Date()),
     mintId: opts.mintId ?? ulid,
     log: opts.log ?? noopDevLog,
+    maxBytes: opts.maxBytes ?? DEFAULT_SPANS_MAX_BYTES,
+    maxFiles: opts.maxFiles ?? DEFAULT_SPANS_MAX_FILES,
+    bytes: null,
     tail: Promise.resolve(),
   };
   return new TracerImpl(sink);
