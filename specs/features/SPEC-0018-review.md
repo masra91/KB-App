@@ -242,6 +242,7 @@ SHELL-5):
 | REVIEW-13  | should   | Park/resume is **idempotent / restartable** on the harness: a parked item stays parked across restart; an answered one re-enters the queue exactly once | test:claimsStage.test.ts | ORCH-4,13 |
 | REVIEW-14  | should   | The agent raises a review via the **decision channel** (`reviews[]`), so any thin-agent stage gains it with no bespoke wiring; v1 demonstrates via Claims | test:claims.test.ts, claimsAgent.test.ts | ORCH-7; AUTO-2 |
 | REVIEW-15  | may      | Open reviews drive **batched notifications** (dock/tray) — deferred; the derived queue + view is the v1 surface | none-yet | AUTO-10 |
+| REVIEW-16  | must     | **A disambiguation review carries decision-grade per-candidate context + working links** — bare names are not enough to decide. For a "same entity?" / "are these related?" review (CONNECT-15), each candidate MUST carry a **human distinguishing gloss** — what makes *this* one this one (its source context / strongest claim / timeframe), e.g. *"Benton — from the fishing-trip notes (May 2026)"* vs *"Benton — Dave's wedding guest list"* — **authored by the raising agent** (which has both sources' content in hand), and the **`question` itself uses the glosses**, not bare names. Each candidate also carries a **working click-to-open-in-Obsidian link** to its source/note (reuse the established `kb:openCitation` / `obsidianOpenUri` affordance EXPLORE already uses) so the Principal can dig in for more context before answering. The Reviews view (REVIEW-10) renders each candidate as a row: **gloss + open-link** (no longer plain non-clickable text). *(Today the review carries only `subject.refs` bare names — `connectStage.ts` — rendered as plain text in `reviewsView.ts`; the Principal can't tell the candidates apart or open them.)* | none-yet | REVIEW-3,10; CONNECT-15; SPEC-0039; SPEC-0031 |
 
 ### REVIEW-2 — Boolean questions only
 - **Status:** draft · **Priority:** must
@@ -347,6 +348,17 @@ Inherits SPEC-0014 §5 / SPEC-0016 §5:
 
 ## 8. Changelog
 
+- 2026-06-08 — **REVIEW-16: disambiguation reviews get decision-grade per-candidate context + working
+  links** (Principal). The "are these two the same?" review (the elevated coalesce/merge review) asked the
+  Principal to decide with only **bare candidate names** (`subject.refs`, rendered as plain non-clickable
+  text) — no way to tell the two apart, no way to open them. REVIEW-16: each candidate carries an
+  **agent-authored distinguishing gloss** ("Benton — from the fishing trip" vs "Benton — Dave's wedding"),
+  the **question uses the glosses**, and each candidate gets a **working open-in-Obsidian link** (reusing
+  the existing `kb:openCitation`/`obsidianOpenUri` affordance from EXPLORE). **Good news for impl:** the
+  Obsidian-open machinery already exists and the distinguishing context already exists on the candidates
+  (`sourceId` + verbatim `mentions`) — it just doesn't flow into the review. Two-part dispatch: dev enriches
+  the Connect→Review payload (`connectStage.ts` populates per-candidate context + the agent prompt asks for
+  the gloss); Design-Lead renders the candidate rows + links in `reviewsView.ts`.
 - 2026-05-31 — created (draft). Builds AUTO-10 (the "needs you" queue) + LIFE-6/7 (Review
   stage; responses as primary sources). A review is a **boolean question + expandable
   context**, raised by any thin-agent stage via a `reviews[]` decision channel (v1: Claims),
