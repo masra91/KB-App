@@ -1,0 +1,145 @@
+---
+spec: SPEC-0046
+key: COMPOSE
+title: Encyclopedic Entity Pages (Compose — the human-readable top layer)
+type: feature
+status: draft
+owners: [KB-Lead, Principal]
+created: 2026-06-08
+updated: 2026-06-08
+related: [SPEC-0002, SPEC-0007, SPEC-0016, SPEC-0019, SPEC-0020, SPEC-0024, SPEC-0026, SPEC-0031]
+stage: Enrich
+supersedes: null
+---
+
+# Encyclopedic Entity Pages (Compose)
+
+> Make the top-level entity pages read like **Wikipedia**, not a metadata dump: a **Title-Case
+> human name**, **prose with section headers**, **inline `[1][2]` citations** → a References
+> section, and **entity links woven into the prose** — while keeping the structured links/claims
+> blocks **below** for RAG. **Grounded**: every prose sentence is synthesized from the entity's
+> existing **cited claims** — no new facts, no egress, fully traceable. (Principal: entity pages
+> are "ugly and bland"; ties to the human-readable theme, PRIN-24.)
+
+## 1. Intent (the why)
+
+Today an entity page (`connectDoc.ts`) is **frontmatter + an H1 + a links block + a claims block** —
+no prose. Opened in Obsidian it reads as a machine manifest: a blob of `[[claim-ULID]]` rows, not a
+page a human *reads*. And the **filename is a kebab-slug** (`steve-jobs.md`) — part of the same
+ugly-IDs problem (PRIN-24). The Principal wants to glance at an entity and **understand it** —
+encyclopedically — without clicking through every claim and source.
+
+The KB already has everything needed: **Claims** (SPEC-0016) carry substance + citations; **Connect**
+links entities. What's missing is the **human layer** — a stage that **composes** the cited claims
+into readable prose. This is a presentation/synthesis layer over grounded data, not new knowledge.
+
+## 2. Target shape
+
+```markdown
+---
+id: 01J…                 # ULID stays internal (identity/alias) — NEVER the filename or display
+name: Steve Jobs
+kind: person
+[…provenance, tags…]
+---
+
+# Steve Jobs                                    ← filename is "Steve Jobs.md" (Title-Case, PRIN-24/CANON-6)
+
+Steve Jobs co-founded [[Apple]] in 1976[^1] and led its product vision through the
+2000s[^2]. He was known for an uncompromising design philosophy[^1].
+
+## Founding Apple
+In 1976 Jobs started Apple with [[Steve Wozniak]] in his family garage[^1]…
+
+## Leadership
+…served as CEO[^2], championed the original Macintosh[^3]…
+
+## References
+[^1]: [[Apple keynote notes (2026-05-30)]]      ← human source TITLE, not a ULID
+[^2]: [[Q3 board memo (2026-05-31)]]
+[^3]: …
+
+<!-- kb:links:start (generated) -->                ← structured blocks KEPT below, for RAG
+- founded [[entities/organization/Apple.md|Apple]]
+<!-- kb:links:end -->
+<!-- kb:claims:start (generated) -->
+- … (each claim, status, confidence, cited source)
+<!-- kb:claims:end -->
+```
+
+Two layers, both intact: a **human prose layer** on top (the encyclopedia), the **structured
+links/claims blocks** below (the machine/RAG layer). The prose is the read; the blocks are the index.
+
+## 3. Grounding (the non-negotiable)
+
+The prose is **synthesis, not generation**: every sentence is composed **only** from the entity's
+existing **cited claims** (SPEC-0016). The Compose agent **may not introduce a fact that isn't
+already a claim** — it structures, orders, and phrases what's there. So:
+- every prose statement **traces to a claim → a source** (PRIN-2, PRIN-10);
+- the inline `[n]` citations map to those sources (the References section);
+- a prose sentence with **no citation is a defect** (an un-grounded claim);
+- **no new egress** — Compose reads internal claims only (unlike Research).
+
+This keeps PRIN-1/9 intact (AI is operator not authority; the prose is a *derived* presentation of
+cited evidence, never a new source of truth) and makes the encyclopedic page as trustworthy as the
+claims under it.
+
+## 4. The Compose stage
+
+A **new final Enrich stage, after Claims** (KB-Lead lean — fork in §7): `Decompose → Connect →
+Claims → **Compose**`. It reads an entity + its cited claims and **(re)writes the prose body** (the
+region above the structured blocks), idempotently regenerated when the claims change. Behind the
+agent seam (ORCH-21), with a **deterministic fallback** (Compose-unavailable → the page is the
+structured blocks alone — today's behavior — never a hard failure). Works on `staging`, promotes via
+the gate (CANON). Bounded + audited like every stage.
+
+## 5. Requirements
+
+| ID | Priority | Statement (short) | Verify | Traces |
+| -- | -------- | ----------------- | ------ | ------ |
+| COMPOSE-1 | must | Entity pages carry a **human-readable prose body** — an intro/lede + **section headers** + the entity's substance in flowing prose — *not* a bare links+claims dump. Reads encyclopedically in Obsidian | none-yet | PRIN-13; VAULT; VISION |
+| COMPOSE-2 | must | **Inline citations + References:** prose statements carry inline `[n]`/`[^n]` markers; a **References** section maps each to its **source (human title, never a ULID)**, de-duplicated. Mirrors the cited-query style (SPEC-0026 ASK) | none-yet | PRIN-2,10; ASK-7; PRIN-24 |
+| COMPOSE-3 | must | **Grounded — synthesis, not generation:** the prose is composed **only from the entity's existing cited claims** (SPEC-0016); Compose **may not introduce a fact that isn't a claim**; every prose sentence **traces to a claim → a source**; an un-cited prose statement is a **defect**; **no new egress** | test: every prose sentence resolves to a claim/source | PRIN-1,2,9,10; CLAIMS |
+| COMPOSE-4 | must | **Links woven into the prose** — entity cross-links (`[[Other Entity]]`) appear **in the prose where they're mentioned**, not only as a block at the top; the page reads as connected text | none-yet | CONNECT-12; VAULT |
+| COMPOSE-5 | must | **Keep the structured blocks for RAG** — the delimited `kb:links` / `kb:claims` blocks remain (**below** the prose) so the machine/retrieval layer is intact; the prose is the human layer, the blocks the index. Both regenerate idempotently | none-yet | DATA; ASK; CONNECT-12; CLAIMS-9 |
+| COMPOSE-6 | must | **Human Title-Case filenames** (honor CANON-6 + PRIN-24): entity files are the **natural name** (`Steve Jobs.md`), spaces + real case — **not** a kebab-slug (`steve-jobs.md`); the ULID stays `id:` + alias (links survive renames). The kebab-slug `slugify` (connectDoc.ts) is the change point | none-yet | CANON-6,7; PRIN-24; DATA-5 |
+| COMPOSE-7 | must | A new **"Compose" Enrich stage** (after Claims) (re)writes the prose body from the entity's cited claims — **idempotent** (regenerated on claim change), behind the agent seam with a **deterministic fallback** (Compose-unavailable → structured blocks alone, never a hard failure); works on `staging`, promotes via the gate; bounded + audited | none-yet | ORCH-9,21; CANON-1,3; SPEC-0024 |
+| COMPOSE-8 | should | **Sources surface a human title too** (PRIN-24 reach): a source's `source.md` carries a human title (derived if absent) so a `[[…]]` reference + the References section read as titles, never `sources/<shard>/<ULID>` | none-yet | PRIN-24; VAULT; SPEC-0031 |
+
+## 6. User flow
+
+- Open an entity in Obsidian → a **readable page**: a lede, sections, prose with inline citations,
+  links to related entities woven in, References at the bottom — then the structured blocks.
+- Hover/click a `[n]` → the source (by title). Click `[[Apple]]` → Apple's page (equally readable).
+- The graph view shows **named** entities (Title-Case), connected — not ULID-slug dots.
+
+## 7. Forks (one for the Principal)
+
+- **Separate "Compose" stage vs. extend Connect/Claims → KB-Lead lean: a separate final stage**
+  (clean separation: Connect owns identity+links, Claims owns substance, Compose owns the *human
+  presentation* of that substance; it re-runs when claims change without disturbing them). Extending
+  Claims would conflate substance-extraction with prose-authoring. *Principal can override.*
+- **Title-Case filenames (COMPOSE-6) — confirm.** My lean: yes (it's the kebab half of PRIN-24).
+  Risk: filenames with spaces/punctuation need careful path handling (already partly there — the
+  ULID is the identity, the filename cosmetic). The `slugify` was a deliberate grep/quick-switcher
+  convenience; Obsidian handles spaces fine, so the human name wins.
+
+## 8. Out of scope
+
+- **Inventing facts / pulling new sources** — that's Research (SPEC-0028); Compose is internal
+  synthesis of existing cited claims only (§3).
+- **Editing the prose by hand** — the body is generated (regenerated on claim change); Principal edits
+  flow through the normal capture→claim path, not by editing the page (the structured blocks already
+  say "edit via Connect/Claims, not here").
+- **A full Wikipedia-grade article** (infoboxes, images) — v1 is grounded prose + sections + citations.
+
+## 9. Changelog
+
+- 2026-06-08 — created (draft), Principal greenlight ("entities like Wikipedia pages… not so ugly and
+  bland… goes to the human-readable stuff"). A **Compose** Enrich stage that synthesizes the entity's
+  **cited claims** into **grounded encyclopedic prose** (sections + inline citations + References +
+  woven links), keeping the structured links/claims blocks below for RAG, with **Title-Case human
+  filenames** (CANON-6 + PRIN-24). Grounding is the non-negotiable (COMPOSE-3): synthesis of cited
+  evidence, never new facts, no egress. Two forks for the Principal in §7 (separate stage [lean];
+  Title-Case filenames [lean yes]). Spec-first; impl + tests → PM. Ties the entity-pages ask to PRIN-24
+  (the kebab-slug + ULID-surfacing is the same human-readable problem).
