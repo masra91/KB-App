@@ -618,6 +618,12 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-add-id { display: block; margin-top: 0.6rem; background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.35rem 0.5rem; min-width: 28ch; }
 .rdesk-add-status { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--viz-ink-muted); }
 
+/* Sources view (SPEC-0027 PANEL-4) — two sections (Feeds · Watched folders) over the shared rdesk
+   strip layout. Only the section divider is Sources-specific; everything else reuses the WS2 primitives. */
+.src-section { margin-top: 1.6rem; }
+.src-section:first-of-type { margin-top: 0.6rem; }
+.src-section-head { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--viz-ink-muted); margin: 0 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--viz-rule); }
+
 /* 5. Activity feed — the entry rows were default UA <button>s (light boxes clashing with the dark
    theme) and the raw JSON a light <pre>. Make them theme-native. */
 .activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }

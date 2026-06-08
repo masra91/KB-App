@@ -53,12 +53,16 @@ import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRe
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
-import { IntakeScheduler } from '../kb/intakeScheduler';
+import { IntakeScheduler, selectIntakeFn } from '../kb/intakeScheduler';
 import { WatchScheduler } from '../kb/watchScheduler';
 import { readWatchRegistry, writeWatchRegistry, upsertWatchFolder, patchWatchFolder, watchRegistryPath } from '../kb/watchRegistry';
 import { checkWatchLoopSafe, isSafeWatchId, DEFAULT_WATCH_SCOPE, DEFAULT_WATCH_SENSITIVITY } from '../kb/watchConnectors';
 import { buildWatchFolderViews } from '../kb/watchPanel';
-import type { WatchFolderView, WatchFolderPatch } from '../kb/types';
+import { readIntakeRegistry, upsertIntakeConnector, patchIntakeConnector, intakeRegistryPath } from '../kb/intakeRegistry';
+import { runIntakeConnector } from '../kb/intakeRun';
+import { DEFAULT_INTAKE_SCOPE, DEFAULT_INTAKE_SENSITIVITY, type IntakeConnectorConfig } from '../kb/intakeConnectors';
+import { buildIntakeConnectorViews, isIntakeConnectorType, clampMaxItems, intakeConfigAuditEvents } from '../kb/intakeSourcingPanel';
+import type { WatchFolderView, WatchFolderPatch, IntakeConnectorView, IntakeConnectorConfigPatch, RunIntakeConnectorResult } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
@@ -949,6 +953,119 @@ export async function listResearcherRunsForActive(id: string): Promise<Researche
   if (!active) return [];
   const events = await readEvents(active.stagingWt, { actors: ['researcher'], subjectId: id });
   return events.map((e) => lastRunFromEvent(e)).filter((x): x is ResearcherLastRun => x !== null);
+}
+
+// --- Control Panel · Sources — INTAKE feed connectors (SPEC-0027 PANEL-4 / INTAKE-14) ---
+
+/** The intake connector registry as the Sources view needs it, with each connector's last pull. */
+export async function listIntakeConnectorsForActive(): Promise<IntakeConnectorView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  const registry = await readIntakeRegistry(root);
+  const events = await readEvents(root, { actors: ['intake'] }); // newest-first
+  const lastByConnector: Record<string, AuditEvent | undefined> = {};
+  for (const c of registry) lastByConnector[c.id] = events.find((e) => e.subjects.intakeId === c.id);
+  return buildIntakeConnectorViews(registry, lastByConnector);
+}
+
+/**
+ * Apply a Sources-view connector config change (INTAKE-14) + return the refreshed list. Untrusted IPC
+ * input is validated at this boundary (type/schedule dropped unless known enums; `maxItemsPerPass`
+ * clamped; an unsafe `id` is rejected by the registry guard). The write + git commit run under the
+ * shared lock; then a conforming `panel` audit event records the change (PANEL-7-style).
+ */
+export async function setActiveIntakeConnectorConfig(patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]> {
+  if (!active) return [];
+  const root = active.stagingWt;
+  if (typeof patch.id !== 'string' || patch.id.length === 0) return listIntakeConnectorsForActive();
+
+  // Validate untrusted IPC into a `clean` patch (drop unknown enums; clamp the item cap). apply + audit
+  // both use `clean`, so a dropped-invalid field is never recorded as applied (mirrors researchers #81).
+  const clean: IntakeConnectorConfigPatch = { id: patch.id };
+  if (isIntakeConnectorType(patch.type)) clean.type = patch.type;
+  if (typeof patch.label === 'string') clean.label = patch.label;
+  if (typeof patch.enabled === 'boolean') clean.enabled = patch.enabled;
+  if (isSchedulePreset(patch.schedule)) clean.schedule = patch.schedule;
+  if (typeof patch.scope === 'string' && patch.scope.trim()) clean.scope = patch.scope.trim();
+  if (typeof patch.sensitivity === 'string' && patch.sensitivity.trim()) clean.sensitivity = patch.sensitivity.trim();
+  const cleanMax = clampMaxItems(patch.maxItemsPerPass);
+  if (cleanMax !== undefined) clean.maxItemsPerPass = cleanMax;
+  if (typeof patch.feedUrl === 'string' && patch.feedUrl.trim()) clean.feedUrl = patch.feedUrl.trim();
+  if (typeof patch.tenantId === 'string' && patch.tenantId.trim()) clean.tenantId = patch.tenantId.trim();
+  if (typeof patch.folder === 'string' && patch.folder.trim()) clean.folder = patch.folder.trim();
+
+  let prior: IntakeConnectorConfig | undefined;
+  let applied = false;
+  await active.lock.run(async () => {
+    const registry = await readIntakeRegistry(root);
+    prior = registry.find((c) => c.id === clean.id);
+    if (prior) {
+      await patchIntakeConnector(root, clean.id, {
+        ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}),
+        ...(clean.schedule !== undefined ? { schedule: clean.schedule } : {}),
+        ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
+        ...(clean.sensitivity !== undefined ? { sensitivity: clean.sensitivity } : {}),
+        ...(clean.label !== undefined ? { label: clean.label } : {}),
+        ...(clean.maxItemsPerPass !== undefined ? { maxItemsPerPass: clean.maxItemsPerPass } : {}),
+        // Merge type-specific config (RSS feedUrl / M365 tenantId+folder), preserving other keys.
+        ...(clean.feedUrl !== undefined || clean.tenantId !== undefined || clean.folder !== undefined
+          ? {
+              config: {
+                ...(prior.config ?? {}),
+                ...(clean.feedUrl !== undefined ? { feedUrl: clean.feedUrl } : {}),
+                ...(clean.tenantId !== undefined ? { tenantId: clean.tenantId } : {}),
+                ...(clean.folder !== undefined ? { folder: clean.folder } : {}),
+              },
+            }
+          : {}),
+      });
+    } else {
+      // New connector: derive a safe config from the (validated) type + conservative defaults.
+      const type = clean.type ?? 'rss';
+      clean.type = type;
+      await upsertIntakeConnector(root, {
+        id: clean.id,
+        type,
+        ...(clean.label ? { label: clean.label } : {}),
+        enabled: clean.enabled ?? false,
+        schedule: clean.schedule ?? 'off',
+        scope: clean.scope ?? DEFAULT_INTAKE_SCOPE,
+        sensitivity: clean.sensitivity ?? DEFAULT_INTAKE_SENSITIVITY,
+        ...(clean.maxItemsPerPass !== undefined ? { maxItemsPerPass: clean.maxItemsPerPass } : {}),
+        ...(clean.feedUrl || clean.tenantId || clean.folder
+          ? { config: { ...(clean.feedUrl ? { feedUrl: clean.feedUrl } : {}), ...(clean.tenantId ? { tenantId: clean.tenantId } : {}), ...(clean.folder ? { folder: clean.folder } : {}) } }
+          : {}),
+      });
+    }
+    applied = true;
+    await commitControlFile(root, intakeRegistryPath(root), `intake ${clean.id} config change`);
+  }, 'intake-config:write');
+  if (applied) {
+    // Conforming `panel` audit: one event per changed behavior-relevant field (validated values only).
+    for (const event of intakeConfigAuditEvents(prior, clean)) await appendAuditEvent(root, event);
+  }
+  return listIntakeConnectorsForActive();
+}
+
+/**
+ * Manual "Run now" for an intake connector (INTAKE-14, "run-now to test") — a single on-demand pull
+ * via the real run-pass + the real per-type fetch (RSS = the SSRF-safe gated fetch; M365 = env-gated,
+ * surfaces a clear `intake-failed` until wired). Never ingests synthetic scaffolding. The Principal's
+ * trigger is audited as a `panel` event; the pull's own work is audited by the run-pass (actor `intake`).
+ */
+export async function runActiveIntakeConnectorNow(id: string): Promise<RunIntakeConnectorResult> {
+  if (!active) return { ran: false, reason: 'no-kb' };
+  const root = active.stagingWt;
+  const c = (await readIntakeRegistry(root)).find((x) => x.id === id);
+  if (!c) return { ran: false, reason: 'not-found' };
+  const res = await runIntakeConnector(root, c, { fetch: selectIntakeFn(c) });
+  await appendAuditEvent(root, {
+    actor: 'panel',
+    eventType: 'intake-run-now',
+    subjects: { intakeId: id },
+    payload: { outcome: res.failed ? 'failed' : res.sourceIds.length > 0 ? 'intook' : 'no-new-items', why: 'Principal manual run via Control Panel' },
+  });
+  return { ran: true, sourceIds: res.sourceIds, note: res.note, ...(res.failed ? { failed: true, ...(res.error ? { error: res.error } : {}) } : {}) };
 }
 
 /** Commit a job-registry change on `staging` — the durability record (audit is a separate `panel` event). */

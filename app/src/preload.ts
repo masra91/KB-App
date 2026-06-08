@@ -35,6 +35,9 @@ const kbApi: KbApi = {
   listWatchFolders: () => ipcRenderer.invoke('kb:listWatchFolders'),
   setWatchFolder: (patch) => ipcRenderer.invoke('kb:setWatchFolder', patch),
   removeWatchFolder: (id) => ipcRenderer.invoke('kb:removeWatchFolder', id),
+  listIntakeConnectors: () => ipcRenderer.invoke('kb:listIntakeConnectors'),
+  setIntakeConnectorConfig: (patch) => ipcRenderer.invoke('kb:setIntakeConnectorConfig', patch),
+  runIntakeConnectorNow: (id) => ipcRenderer.invoke('kb:runIntakeConnectorNow', id),
   exploreEntities: () => ipcRenderer.invoke('kb:exploreEntities'),
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
 };

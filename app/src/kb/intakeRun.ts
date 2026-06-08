@@ -16,17 +16,27 @@
 //   capture commits independently), and the ledger only records items actually ingested.
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { captureToInbox } from './ingest';
 import { appendAuditEvent } from './audit';
 import {
   DEFAULT_MAX_ITEMS_PER_PASS,
-  intakeDedupKey,
   isSafeConnectorId,
   renderIntakeSourceBody,
   type IntakeConnectorConfig,
   type IntakeFetchFn,
   type IntakeItem,
 } from './intakeConnectors';
+
+/** The dedup key for an item (INTAKE-8): the stable external id, or a content-hash fallback when the
+ *  feed gives no id. Lives here (backend) — it uses node `crypto`, which must not enter the renderer
+ *  bundle (STACK-6); `intakeConnectors.ts` stays renderer-safe for the Sources view. */
+export function intakeDedupKey(item: IntakeItem): string {
+  const ext = item.externalId.trim();
+  if (ext) return `id:${ext}`;
+  const h = createHash('sha256').update(`${item.title}\n${item.link ?? ''}\n${item.contentMd}`).digest('hex');
+  return `hash:${h}`;
+}
 
 /** Absolute path to a connector's dedup ledger (INTAKE-8). The `id` is slug-validated before this is
  *  ever built (belt-and-suspenders over the registry guard) so it can never traverse `.kb/intake`. */
