@@ -27,9 +27,12 @@ const config: ForgeConfig = {
       NSDocumentsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Documents folder.',
       NSDesktopFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives on your Desktop.',
       NSDownloadsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Downloads folder.',
-      // SPEC-0038 QCAP-4/8: ship as a macOS accessory/menubar agent — no forced dock icon — so the
-      // global hotkey + capture sheet are always available, headless, without a window or dock presence.
-      LSUIElement: true,
+      // SPEC-0038 QCAP-8 (Principal revision 2026-06-08): the macOS DUAL-MODEL — present BOTH a Dock
+      // app AND a persistent tray agent ("do both"). `LSUIElement: false` so the **Dock icon shows**
+      // (Dock + Cmd-Tab + app menu) — the original accessory mode (`true`) hid the app from the Dock,
+      // which the Principal reported as "the app stopped showing up in the Dock". Tray/hotkey
+      // persistence is preserved by the don't-quit-on-window-all-closed lifecycle (main.ts, QCAP-8).
+      LSUIElement: false,
       // SPEC-0038 QCAP-7/9 (Slice 2): selection-capture posts a synthetic ⌘C through System Events,
       // which triggers the macOS Automation TCC prompt — this usage string is its honest rationale.
       // A denied/absent grant degrades to clipboard-only (never silently dead). Harmless when unsigned.
