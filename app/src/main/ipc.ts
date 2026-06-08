@@ -46,6 +46,7 @@ import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
+import { locateSourceRef } from '../kb/sourceOpen';
 import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
 import { buildFeed } from '../kb/activityDigest';
 import { traceLineage } from '../kb/lineage';
@@ -76,6 +77,7 @@ import type {
   AskResult,
   SaveRecallOutputResult,
   OpenCitationResult,
+  OpenSourceRefResult,
   JobView,
   JobConfigPatch,
   RunJobResult,
@@ -428,6 +430,34 @@ export function registerIpc(): void {
       return { ok: true };
     } catch {
       return { ok: false, reason: 'open-failed' };
+    }
+  });
+
+  // SPEC-0018 REVIEW-17 / PRIN-24: working-zone-aware open of a review candidate's source. A review
+  // can be raised MID-PIPELINE, so its source may be staging-only — not yet promoted to `main` (the
+  // user's Obsidian vault, where `obsidian://open` resolves). Firing the deep link anyway is "file not
+  // found". So resolve WHERE the `source.md` lives right now (`locateSourceRef`): open in Obsidian only
+  // when it's on `main`; otherwise hand the view a `staging`/`missing` status so it shows the in-app /
+  // "still processing" fallback — never a dead link. Like ASK-14 we never build the URI in the renderer.
+  ipcMain.handle('kb:openSourceRef', async (_e, ref: unknown): Promise<OpenSourceRefResult> => {
+    if (typeof ref !== 'string' || ref.trim().length === 0) return { status: 'invalid-ref' };
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) return { status: 'no-vault' };
+    const located = await locateSourceRef(path.resolve(cfg.activeVaultPath), activeStagingRoot(), ref);
+    switch (located.location) {
+      case 'main':
+        try {
+          await shell.openExternal(obsidianOpenUri(located.mainAbs!));
+          return { status: 'opened' };
+        } catch {
+          return { status: 'open-failed' };
+        }
+      case 'staging':
+        return { status: 'staging' };
+      case 'invalid':
+        return { status: 'invalid-ref' };
+      default:
+        return { status: 'missing' };
     }
   });
 
