@@ -81,6 +81,10 @@ const AUDIT_REL = path.join('connect', 'audit.jsonl');
 export const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default review rounds (parks) on one block before it is set aside (REVIEW-8 cascade cap). */
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
+/** In-pass retries for a link write that hits the bounded-git BLOCK TIMEOUT under bulk-writer
+ *  contention (CONNECT-12). A transient timeout must be retried, not silently dropped — else the
+ *  entity is left permanently unlinked. The lock is released between attempts so contention eases. */
+export const LINK_WRITE_MAX_ATTEMPTS = 3;
 
 // Terminal block markers (the block leaves the active queue). `setaside` is poison/recoverable
 // (CONNECT-14); `dismissed` is user-retired (OBS-17, never re-queued). Resolution itself is recorded
@@ -791,11 +795,10 @@ export async function readLinkQueue(root: string): Promise<string[]> {
  * it CONSUMES Claims' `relatesTo` output, so making it optimistic/concurrent with Claims is a
  * producer-consumer ordering concern that needs its own design (deferred slice-2 follow-up).
  */
-export async function linkOne(root: string, nodeRel: string): Promise<LinkOneResult> {
+export async function linkOne(root: string, nodeRel: string, log: DevLog = noopDevLog): Promise<LinkOneResult> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
   const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
-  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
   await wtGit.raw('clean', '-fd', 'entities', 'claims'); // drop stray files from a prior aborted run
 
@@ -913,7 +916,13 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
   await wtGit.commit(
     `connect: links ${nodeRel} → ${links.length} link(s)${toRaise.length ? `, ${toRaise.length} ambiguous→review` : ''}${unresolved.length ? `, ${unresolved.length} unresolved` : ''}`,
   );
-  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  // Serialized canonical advance through the SAME ORCH-27 discipline every other writer uses (#256
+  // second symptom): a raw `merge --ff-only` here bypassed the stale-`index.lock` self-heal +
+  // sidecar guard, so a stale lock (the #256 wedge) made every link advance throw `connect.link-error`
+  // — links never rendered — while decompose/connect self-healed. We're coarse-locked single-writer, so
+  // head === checkpoint and advanceOrCollide takes the guarded ff path (heal-then-advance).
+  const checkpoint = await canonicalHead(root);
+  await advanceOrCollide(root, WORK_BRANCH, checkpoint, undefined, log);
   return { nodeRel, changed: true, links: links.length, unresolved, reviewsRaised: toRaise.length };
 }
 
@@ -927,11 +936,10 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
  * canonical advance. A no-dupe vault is a byte-stable no-op. MUST be called serialized via the shared
  * canonical-writer lock. Returns the report (for the drain's audit/log) + whether it committed.
  */
-export async function dedupClaimsOnce(root: string): Promise<DedupReport & { committed: boolean }> {
+export async function dedupClaimsOnce(root: string, log: DevLog = noopDevLog): Promise<DedupReport & { committed: boolean }> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
   const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
-  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base);
   await wtGit.raw('clean', '-fd', 'entities', 'claims');
 
@@ -953,7 +961,10 @@ export async function dedupClaimsOnce(root: string): Promise<DedupReport & { com
   );
   await wtGit.raw('add', '-A');
   await wtGit.commit(`connect: dedup ${report.dropped} within-source duplicate claim(s)`);
-  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  // Serialized canonical advance through the ORCH-27 discipline (heal stale `index.lock` + sidecar
+  // guard), same as linkOne — a raw `merge --ff-only` here had the same #256-wedge blind spot.
+  const checkpoint = await canonicalHead(root);
+  await advanceOrCollide(root, WORK_BRANCH, checkpoint, undefined, log);
   return { ...report, committed: true };
 }
 
@@ -1072,11 +1083,24 @@ export class ConnectStage {
     // no-op when unchanged, so idle sweeps don't churn. Per-node failures are best-effort (a
     // later poke/sweep retries) and never abort the whole pass.
     for (const nodeRel of await readLinkQueue(this.root)) {
-      try {
-        const res = await this.lock.run(() => linkOne(this.root, nodeRel), 'connect:link');
-        if (res.changed) worked = true;
-      } catch (err) {
-        this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
+      // A link write that hits the bounded-git BLOCK TIMEOUT under bulk-writer contention must NOT be
+      // silently dropped — that leaves the entity permanently unlinked (no `[[wikilink]]` edge) until a
+      // re-derive. Retry the node a bounded number of times in-pass (the lock is released between
+      // attempts, so a transient contention spike eases); on exhaustion surface it LOUDLY (`error`, not
+      // a swallowed `warn`) so it's visible + reconcilable (REFLECT-3/4). The node stays in the derived
+      // link queue while unlinked, so the next sweep retries it once load drops.
+      for (let attempt = 1; attempt <= LINK_WRITE_MAX_ATTEMPTS; attempt++) {
+        try {
+          const res = await this.lock.run(() => linkOne(this.root, nodeRel, this.log), 'connect:link');
+          if (res.changed) worked = true;
+          break; // landed (or a byte-stable no-op) — done with this node
+        } catch (err) {
+          if (attempt < LINK_WRITE_MAX_ATTEMPTS) {
+            this.log.warn('connect.link-retry', { itemId: nodeRel, attempt, err }); // transient (e.g. block timeout) → retry
+          } else {
+            this.log.error('connect.link-error', { itemId: nodeRel, attempt, err }); // exhausted; stays queued for the next sweep
+          }
+        }
       }
     }
     // Within-source claim dedup (CLAIMS-19): collapse the "same assertion restated per-entity"
@@ -1085,7 +1109,7 @@ export class ConnectStage {
     // `main` via the deletion-aware gate), so set `worked` when it committed. Best-effort: a failure
     // is logged and a later poke/sweep retries — it never aborts the rest of the drain.
     try {
-      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root), 'connect:dedup');
+      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root, this.log), 'connect:dedup');
       if (dedup.committed) {
         worked = true;
         this.log.info('connect.claim-dedup', {
