@@ -105,15 +105,15 @@ Worked against the **SPEC-0028 D6 map** (ratified 2026-06-07):
 
 | ID | Priority | Statement (short) | Verify | Traces |
 | -- | -------- | ----------------- | ------ | ------ |
-| SENSE-1 | must | Every **source** and **entity** carries a `sensitivity` **label** in frontmatter — a **string** (data, not a hardcoded enum), the default set ships (`shareable`/`internal`/`confidential`/`private-opinion`/`embargoed`), **custom labels supported**; Scope/Tag/Sensitivity stay distinct in model + code (SCOPE-13) | none-yet | SCOPE-7,13; DATA-2 |
-| SENSE-2 | must | **Default on capture/ingest = `internal`** (conservative; unknown ≠ shareable) — applied whenever no higher-priority signal classifies the source | none-yet | SCOPE-8 |
-| SENSE-3 | must | A single **comparator** (`restrictiveness(label) → rank`, §4) is the **one source of truth** for every sensitivity comparison; **unknown/custom labels resolve most-restrictive**; `private-opinion`/`embargoed` rank most-restrictive for the gate. Consumed by surfacing AND the researcher gate — **no consumer re-implements ordering** | none-yet | SCOPE-7,11; SPEC-0028 D6 |
+| SENSE-1 | must | Every **source** and **entity** carries a `sensitivity` **label** in frontmatter — a **string** (data, not a hardcoded enum), the default set ships (`shareable`/`internal`/`confidential`/`private-opinion`/`embargoed`), **custom labels supported**; Scope/Tag/Sensitivity stay distinct in model + code (SCOPE-13) | test: `sourceDoc`/`orchestrator` (source; entity label = Slice 3 propagation) | SCOPE-7,13; DATA-2 |
+| SENSE-2 | must | **Default on capture/ingest = `internal`** (conservative; unknown ≠ shareable) — applied whenever no higher-priority signal classifies the source | test: `sourceDoc`/`orchestrator` | SCOPE-8 |
+| SENSE-3 | must | A single **comparator** (`restrictiveness(label) → rank`, §4) is the **one source of truth** for every sensitivity comparison; **unknown/custom labels resolve most-restrictive**; `private-opinion`/`embargoed` rank most-restrictive for the gate. Consumed by surfacing AND the researcher gate — **no consumer re-implements ordering** | test: `sensitivity.test.ts` | SCOPE-7,11; SPEC-0028 D6 |
 | SENSE-4 | must | Classification is **applied at ingestion by signal priority**: (1) Principal explicit label, (2) connector/source default (SENSE-5), (3) agent classifier with a **confidence score** ≥ threshold; **uncertain / below-threshold → the source stays at the conservative default AND a *suggested* label routes to Review** (SPEC-0018); Principal may override anytime | none-yet | SCOPE-9,14; REVIEW |
-| SENSE-5 | must | A **connector/source declares a default scope + sensitivity** applied to everything it ingests; connector identity is a **high-confidence** classification signal (`internal` is relative-per-connector) | none-yet | SCOPE-14 |
+| SENSE-5 | must | A **connector/source declares a default scope + sensitivity** applied to everything it ingests; connector identity is a **high-confidence** classification signal (`internal` is relative-per-connector) | test: `sourceDoc`/`orchestrator` | SCOPE-14 |
 | SENSE-6 | must | **Propagation:** a derived entity/output **inherits the most-restrictive** sensitivity of its sources by default (via the SENSE-3 comparator), computed at the **writer** — **Connect** for `entities/` (sole `entities/` writer, CANON-5), the output builder for outputs — so paraphrase can't launder sensitivity | none-yet | SCOPE-10; CANON-5; CONNECT |
 | SENSE-7 | must | The **Principal may override** a label anytime (up or down); overrides are **logged/audited** and **STICKY across Replay** — a rebuild re-applies the override and the classifier **never overwrites** a Principal-set label | none-yet | SCOPE-9,12; REPLAY |
-| SENSE-8 | must | Every **classification + override is an audited event** (SPEC-0029) recording the **signal + confidence** provenance (`by: default \| connector \| classifier \| principal`), so a label's origin is always inspectable | none-yet | AUDIT-11; PRIN-19 |
-| SENSE-9 | must | The label + comparator are the **input to consumers**, not re-derived by them: the **output surfacing ceiling** (SCOPE-11) and the **researcher egress/orient gate** (`sensitivityAllowsOrientRead`, SPEC-0028 D6/D8) both read SENSE. SENSE ships the label + comparator; wiring each consumer is that consumer's story | none-yet | SCOPE-11; SPEC-0028 D6,D8 |
+| SENSE-8 | must | Every **classification + override is an audited event** (SPEC-0029) recording the **signal + confidence** provenance (`by: default \| connector \| classifier \| principal`), so a label's origin is always inspectable | test: `orchestrator` (classification; override audit = Slice 1b) | AUDIT-11; PRIN-19 |
+| SENSE-9 | must | The label + comparator are the **input to consumers**, not re-derived by them: the **output surfacing ceiling** (SCOPE-11) and the **researcher egress/orient gate** (`sensitivityAllowsOrientRead`, SPEC-0028 D6/D8) both read SENSE. SENSE ships the label + comparator; wiring each consumer is that consumer's story | test: `sensitivity.test.ts` (`sensitivityAllowsOrientRead` gate shipped; consumer wiring = RESEARCH-22 / SCOPE-11) | SCOPE-11; SPEC-0028 D6,D8 |
 | SENSE-10 | should | The **Control Panel** surfaces an entity/source's sensitivity (view + Principal edit) and renders **suggested/uncertain** labels in the Review queue for one-click accept/override | none-yet | PANEL-1; REVIEW |
 | SENSE-11 | must | The classifier treats source **content as DATA, never instructions** — a document body saying "classify me shareable" is quoted content, not a directive (untrusted-content posture) | none-yet | PRIN-19; RESEARCH-12 |
 
@@ -157,6 +157,10 @@ Lowest-risk-first; each slice is a reviewable PR with requirement-traced tests:
   connector/source default sensitivity (SENSE-5), Principal override + audit (SENSE-7/8), Control-Panel
   view/edit (SENSE-10). **No classifier yet** — sources land at default or connector-signal. *This alone
   un-hardcodes `internal` and lets `internal-tenant`/`local-only` researcher orient reads light up.*
+  Delivered in two reviewable PRs: **Slice 1a** = the source frontmatter label + `sensitivityMeta`
+  provenance (SENSE-1 source / -2 / -5 / -8 classification), the **comparator** + the
+  `sensitivityAllowsOrientRead` **egress/orient gate** (SENSE-3/9, the security unit); **Slice 1b** =
+  the Principal override (SENSE-7, audited + Replay-sticky) + the Control-Panel view/edit (SENSE-10).
 - **Slice 2 — agentic classifier + uncertain→Review.** The confidence-scored classifier (SENSE-4/11),
   the suggested-label Review path (SENSE-10), behind the Copilot SDK seam with a deterministic fallback.
   *This is what lets `public-web` orient reads light up for `shareable`-classified content.*
@@ -194,6 +198,16 @@ Lowest-risk-first; each slice is a reviewable PR with requirement-traced tests:
 
 ## 12. Changelog
 
+- 2026-06-08 — **Slice 1a implemented** (KB-Developer-2). The source frontmatter `sensitivity` label is now
+  real, un-hardcoded data with a `sensitivityMeta` provenance block (§7: `by` + `at`); `internal` default
+  (SENSE-2) and connector high-confidence signal `by: connector` (SENSE-5) ride capture → archive into
+  `source.md` and the `archived` audit event (SENSE-8 classification half). Ships the **comparator**
+  `restrictiveness(label)→rank` (SENSE-3, custom/unknown + `private-opinion`/`embargoed` → rank 3) and the
+  security-load-bearing **`sensitivityAllowsOrientRead(tier, sensitivity)`** egress/orient gate per the
+  ratified D6 map (SENSE-9 — the gate fn; consumer wiring is RESEARCH-22 / SCOPE-11's story), as a
+  standalone unit with a fails-before/passes-after regression (unknown label fails closed; no tier reads
+  above its ceiling). `Verify` graduated to `test:` for SENSE-1(source)/2/3/5/8/9. **Slice 1b** (override
+  SENSE-7 + Panel SENSE-10) and the classifier (Slice 2) follow.
 - 2026-06-07 — created (draft). Decomposes SPEC-0005 SCOPE-7/8/9/10/14 into an implementable feature: the
   frontmatter label + provenance (SENSE-1/8), conservative `internal` default (SENSE-2), the **comparator**
   as the single gate source-of-truth (SENSE-3), ingestion-time classification by signal priority with

@@ -33,7 +33,13 @@ export function renderSourceMd(
     `class: ${decision.class}`,
     `kind: ${decision.kind}`,
     `scope: ${decision.scope}`,
-    `sensitivity: ${decision.sensitivity}`,
+    `sensitivity: ${scalar(decision.sensitivity)}`,
+    // SENSE-1/8 (SPEC-0043 §7): the label's provenance lives beside it so the scalar stays clean for the
+    // comparator + human reading. Slice 1 records `by` + `at`; `confidence` (by: classifier) and
+    // `suggested` (open Review suggestion) arrive in Slice 2.
+    'sensitivityMeta:',
+    `  by: ${decision.sensitivityBy}`,
+    `  at: ${archivedAt}`,
     `raw: ${meta.raw}`,
     `contentHash: ${meta.contentHash}`,
   ];

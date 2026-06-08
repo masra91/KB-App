@@ -36,7 +36,7 @@ describe('buildPrompt', () => {
 
 describe('parseDecision (ORCH-8)', () => {
   it('parses a clean JSON decision', () => {
-    expect(parseDecision(VALID, textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal' });
+    expect(parseDecision(VALID, textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal', sensitivityBy: 'default' });
   });
   it('extracts JSON embedded in surrounding prose', () => {
     const out = `Here is the classification:\n${VALID}\nThanks!`;

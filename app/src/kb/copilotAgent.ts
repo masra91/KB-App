@@ -81,7 +81,9 @@ export function parseDecision(stdout: string, meta: CapturedMeta): ArchiveDecisi
   if (obj.class !== 'primary' && obj.class !== 'secondary') throw new Error('copilot: invalid class');
   if (obj.scope !== 'global') throw new Error('copilot: invalid scope');
   if (obj.sensitivity !== 'internal') throw new Error('copilot: invalid sensitivity');
-  return { kind, class: obj.class, scope: 'global', sensitivity: 'internal' };
+  // v1 copilot stub asserts the conservative defaults; it does not classify sensitivity (that's SENSE
+  // Slice 2's classifier → `by: classifier`). So this path lands at the default with `by: default`.
+  return { kind, class: obj.class, scope: 'global', sensitivity: 'internal', sensitivityBy: 'default' };
 }
 
 export interface CopilotDeciderOptions {

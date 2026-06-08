@@ -31,8 +31,20 @@ const fileMeta: CapturedMeta = {
 
 describe('deterministicDecide (ORCH-7 / CAPTURE-10)', () => {
   it('returns conservative primary/global/internal defaults, echoing kind + a deterministic trace', () => {
-    expect(deterministicDecide(textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal', agent: { via: 'deterministic' } });
+    expect(deterministicDecide(textMeta)).toEqual({ kind: 'text', class: 'primary', scope: 'global', sensitivity: 'internal', sensitivityBy: 'default', agent: { via: 'deterministic' } });
     expect(deterministicDecide(fileMeta).kind).toBe('file');
+  });
+
+  it('SENSE-2: no signal → conservative `internal` default with provenance `by: default`', () => {
+    const d = deterministicDecide(textMeta);
+    expect(d.sensitivity).toBe('internal');
+    expect(d.sensitivityBy).toBe('default');
+  });
+
+  it('SENSE-5: a connector-declared sensitivity is honored as a high-confidence `by: connector` signal', () => {
+    const d = deterministicDecide({ ...textMeta, sensitivity: 'confidential' });
+    expect(d.sensitivity).toBe('confidential'); // NOT down-classified to internal
+    expect(d.sensitivityBy).toBe('connector');
   });
 });
 
@@ -69,6 +81,10 @@ describe('renderSourceMd (SPEC-0013 §3)', () => {
     expect(md).toContain('kind: text');
     expect(md).toContain('scope: global');
     expect(md).toContain('sensitivity: internal');
+    // SENSE-1/8 (§7): the provenance block beside the scalar label.
+    expect(md).toContain('sensitivityMeta:');
+    expect(md).toContain('  by: default');
+    expect(md).toContain('  at: 2026-05-30T18:22:09.000Z'); // = archivedAt
     expect(md).toContain('raw: raw.txt');
     expect(md).toContain('capturedAt: 2026-05-30T18:22:04.000Z');
     expect(md).toContain('archivedAt: 2026-05-30T18:22:09.000Z');
@@ -93,6 +109,19 @@ describe('renderSourceMd (SPEC-0013 §3)', () => {
     expect(renderSourceMd(textMeta, copilot, 'now', 'x')).toContain('archivedBy: copilot (default)');
     const det = deterministicDecide(textMeta);
     expect(renderSourceMd(textMeta, det, 'now', 'x')).toContain('archivedBy: deterministic');
+  });
+
+  it('SENSE-5: a connector-signalled source renders its label + `by: connector` provenance (§7)', () => {
+    const connMeta: CapturedMeta = { ...textMeta, sensitivity: 'confidential' };
+    const md = renderSourceMd(connMeta, deterministicDecide(connMeta), '2026-05-30T18:22:09.000Z', 'x');
+    expect(md).toContain('sensitivity: confidential');
+    expect(md).toContain('  by: connector');
+  });
+
+  it('SENSE-1: a custom/unknown label is preserved and YAML-quoted if needed (not coerced to the enum)', () => {
+    const customMeta: CapturedMeta = { ...textMeta, sensitivity: 'need to know: legal' };
+    const md = renderSourceMd(customMeta, deterministicDecide(customMeta), 'now', 'x');
+    expect(md).toContain('sensitivity: "need to know: legal"'); // quoted (colon) + preserved verbatim
   });
 
   it('quotes YAML-significant scalars (e.g. a name with a colon)', () => {
