@@ -141,19 +141,23 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
 /**
  * REVIEW-16 — the disambiguation candidate rows. A "same entity?" review's candidates usually share
  * a name, so the distinguishing **gloss** ("from the fishing trip" vs "Dave's wedding") is the star;
- * each row also offers a working "Open in Obsidian" link to that candidate's source when known. This
- * enriches the decision *context* only — the Confirm/Reject verdict (REVIEW-2) is unchanged.
+ * each row also offers a working Obsidian link whose TEXT is the source's human title (PRIN-24 — never
+ * the raw ULID), opening that candidate's `source.md` when known. This enriches the decision *context*
+ * only — the Confirm/Reject verdict (REVIEW-2) is unchanged.
  *
- * Returns '' for an ordinary review (no candidates) so nothing renders. Name/gloss/sourceRel are
- * AGENT-AUTHORED (LLM, untrusted) → every interpolation is esc()'d, including the `data-rel` the
+ * Returns '' for an ordinary review (no candidates) so nothing renders. Name/gloss/title/sourceRel are
+ * source-/agent-derived (untrusted) → every interpolation is esc()'d, including the `data-rel` the
  * click handler reads back (KB-QD-2's forward-flagged XSS).
  */
 function candidatesBlock(r: ReviewSummary): string {
   if (!r.candidates?.length) return '';
   const rows = r.candidates
     .map((c) => {
+      // REVIEW-16 link fix (PRIN-24): the link TEXT is the source's human title (never the raw ULID),
+      // opening the `source.md` FILE the data half now provides (a bare dir was "file not found"). `title`
+      // is required + source-derived → esc() it like name/gloss. No sourceRel → no link (title not shown).
       const link = c.sourceRel
-        ? `<button type="button" class="review-candidate-open viz-btn viz-btn--ghost viz-focusable" data-rel="${esc(c.sourceRel)}" title="Open this candidate's source in Obsidian">Open in Obsidian ↗</button>`
+        ? `<button type="button" class="review-candidate-open viz-btn viz-btn--ghost viz-focusable" data-rel="${esc(c.sourceRel)}" title="Open in Obsidian">${esc(c.title)} ↗</button>`
         : '';
       return `
         <li class="review-candidate viz-spine">
