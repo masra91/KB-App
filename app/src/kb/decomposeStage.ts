@@ -257,11 +257,20 @@ export class DecomposeStage {
   private readonly cap: number;
   private readonly log: DevLog;
   private readonly tracer: Tracer;
+  private readonly nowMs: () => number;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
   private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
+  // #256 circuit-breaker: a wedged canonical writer makes every drain fail; back the stage off
+  // (exponential, capped) instead of re-attempting on every sweep forever (which spins cognition +
+  // grows the spans file → the heap-exhaustion crash). A clean drain resets it; items are NOT set
+  // aside (they're recoverable, deferred until the writer heals — e.g. the #163 stale-lock fix).
+  private backoffUntilMs = 0;
+  private consecutiveDrainErrors = 0;
+  private sweepMs = 30_000; // base backoff = one sweep interval; set in start()
+  private static readonly DRAIN_BACKOFF_CAP_MS = 5 * 60_000;
 
   constructor(
     root: string,
@@ -271,6 +280,7 @@ export class DecomposeStage {
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
     tracer: Tracer = noopTracer,
+    nowMs: () => number = () => Date.now(),
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -279,10 +289,12 @@ export class DecomposeStage {
     this.cap = cap;
     this.log = log.child({ scope: 'decompose' });
     this.tracer = tracer;
+    this.nowMs = nowMs;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
   start(sweepMs = 30_000): void {
+    this.sweepMs = sweepMs;
     void this.poke();
     if (this.sweepTimer == null) {
       this.sweepTimer = setInterval(() => void this.poke(), sweepMs);
@@ -309,6 +321,10 @@ export class DecomposeStage {
 
   /** Drain the queue, coalescing concurrent pokes; resolves only once fully idle. */
   poke(): Promise<void> {
+    // #256: while backing off from a wedged canonical writer, a poke is a no-op (no queue read, no
+    // cognition, no spans) — draining can't make progress anyway. The backoff auto-expires so the
+    // stage retries (and resumes cleanly once the writer recovers).
+    if (this.nowMs() < this.backoffUntilMs) return this.current ?? Promise.resolve();
     this.pending = true;
     if (!this.draining) {
       this.draining = true;
@@ -319,10 +335,23 @@ export class DecomposeStage {
   }
 
   private async runDrains(): Promise<void> {
+    let errored = false;
     try {
       while (this.pending) {
         this.pending = false;
-        await this.drainOnce();
+        if (!(await this.drainOnce())) errored = true;
+      }
+      // #256 circuit-breaker: a drain that errored (e.g. the shared canonical writer is wedged so the
+      // advance throws for every item) backs the stage off exponentially (capped) instead of
+      // re-attempting on every 30s sweep forever; a clean drain resets it.
+      if (errored) {
+        this.consecutiveDrainErrors += 1;
+        const backoffMs = Math.min(DecomposeStage.DRAIN_BACKOFF_CAP_MS, this.sweepMs * 2 ** (this.consecutiveDrainErrors - 1));
+        this.backoffUntilMs = this.nowMs() + backoffMs;
+        this.log.warn('decompose.writer-backoff', { consecutiveDrainErrors: this.consecutiveDrainErrors, backoffMs });
+      } else {
+        this.consecutiveDrainErrors = 0;
+        this.backoffUntilMs = 0;
       }
     } finally {
       this.draining = false;
@@ -331,7 +360,9 @@ export class DecomposeStage {
     }
   }
 
-  private async drainOnce(): Promise<void> {
+  /** Drain the queue once. Returns false if the pass errored out (e.g. a wedged canonical writer) so
+   *  {@link runDrains} can back off, true on a clean pass. */
+  private async drainOnce(): Promise<boolean> {
     let queue = await readDecomposeQueue(this.root, this.maxAttempts);
     while (queue.length > 0) {
       // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
@@ -357,10 +388,11 @@ export class DecomposeStage {
           }),
         );
       } catch (err) {
-        this.log.error('decompose.drain-error', { err }); // unexpected — surface it, then let a later poke/sweep retry
-        return;
+        this.log.error('decompose.drain-error', { err }); // unexpected (e.g. wedged writer) — surface it, back off
+        return false;
       }
       queue = await readDecomposeQueue(this.root, this.maxAttempts);
     }
+    return true;
   }
 }

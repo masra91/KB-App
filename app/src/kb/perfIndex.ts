@@ -108,12 +108,40 @@ function percentile(sortedAsc: number[], q: number): number {
   return sortedAsc[idx];
 }
 
-/** Read + parse the spans file (newest-last on disk). Missing/unreadable → []. */
-export async function readSpans(root: string): Promise<Span[]> {
+/** Byte budget for the tail read (OBS-23). Comfortably larger than DEFAULT_SPAN_WINDOW spans (a
+ *  span line is a few hundred bytes), so reading only the tail still yields the full recent window. */
+export const DEFAULT_SPANS_TAIL_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Read + parse the MOST-RECENT spans, newest-last (OBS-23). Reads only the TAIL of the spans file
+ * (the last `tailBytes`, covering well over DEFAULT_SPAN_WINDOW spans) rather than the whole file,
+ * so a status poll is O(window) regardless of how large `spans.jsonl` has grown. The unbounded
+ * whole-file read + per-line parse here was what blew the 8000ms status `loadGuard` and timed out
+ * the Status view on a long run (#256). perfIndex only aggregates the recent window, so dropping
+ * older spans beyond the tail is by design. Missing/unreadable → [].
+ */
+export async function readSpans(root: string, opts: { tailBytes?: number } = {}): Promise<Span[]> {
   const file = vaultSpansPath(path.resolve(root));
+  const tailBytes = opts.tailBytes ?? DEFAULT_SPANS_TAIL_BYTES;
   let raw: string;
   try {
-    raw = await fs.readFile(file, 'utf8');
+    const { size } = await fs.stat(file);
+    if (size <= tailBytes) {
+      raw = await fs.readFile(file, 'utf8');
+    } else {
+      // Read ONLY the last `tailBytes` — O(window), not O(file). The first line is cut mid-record,
+      // so drop everything up to the first newline before parsing.
+      const fh = await fs.open(file, 'r');
+      try {
+        const buf = Buffer.alloc(tailBytes);
+        await fh.read(buf, 0, tailBytes, size - tailBytes);
+        const tail = buf.toString('utf8');
+        const nl = tail.indexOf('\n');
+        raw = nl >= 0 ? tail.slice(nl + 1) : '';
+      } finally {
+        await fh.close();
+      }
+    }
   } catch {
     return [];
   }

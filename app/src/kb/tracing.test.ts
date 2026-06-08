@@ -122,4 +122,31 @@ describe('tracing (SPEC-0030 OBS-12/13/16)', () => {
     await noopTracer.flush();
     expect(await pathExists(path.join(root, 'spans.jsonl'))).toBe(false);
   });
+
+  // REGRESSION (#256): an unrotated, ever-growing spans.jsonl that the status poll fully re-read
+  // (perfIndex.readSpans) drove the heap to OOM over a long run. The spans file MUST rotate (like
+  // devlog) so a long run can never grow the active file — and the heap allocation that reads it —
+  // without bound. Fails-before (no rotation → the active file grows past maxBytes unboundedly).
+  it('rotates the spans file at maxBytes so it stays bounded under a long run (#256)', async () => {
+    root = await makeTempDir('kb-trace-');
+    const maxBytes = 4 * 1024; // tiny cap for the test
+    const maxFiles = 2;
+    const tracer = createTracer({ dir: root, maxBytes, maxFiles });
+    // Emit far more spans than the cap can hold in one file (simulates a long run's continuous spans).
+    for (let i = 0; i < 2000; i++) {
+      tracer.record({ spanId: `s${i}`, op: 'stage.run', stage: 'decompose', itemId: `SRC${i}`, startTs: 't', endTs: 't', durationMs: 1, outcome: 'ok' });
+    }
+    await tracer.flush();
+
+    // The ACTIVE spans file is bounded by the rotation cap (was unbounded before the fix).
+    const activeSize = (await fs.stat(path.join(root, 'spans.jsonl'))).size;
+    expect(activeSize).toBeLessThanOrEqual(maxBytes);
+    // Rotation produced a `.1` history file, and never more than maxFiles rotated files.
+    expect(await pathExists(path.join(root, 'spans.jsonl.1'))).toBe(true);
+    expect(await pathExists(path.join(root, `spans.jsonl.${maxFiles + 1}`))).toBe(false);
+    // The most-recent spans are still readable from the active file (perfIndex's recent window).
+    const recent = await readSpansFile(root);
+    expect(recent.length).toBeGreaterThan(0);
+    expect(recent[recent.length - 1].itemId).toBe('SRC1999');
+  });
 });
