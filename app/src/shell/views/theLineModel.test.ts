@@ -15,6 +15,7 @@ import {
   STATION_GLYPH,
   OVERALL_GLYPH,
   MAX_CARRIAGES,
+  QUEUE_CONCERN_THRESHOLD,
 } from './theLineModel';
 import type { PipelineStatusView, ConversionCounts, InFlightItem } from '../../kb/pipelineStatusView';
 
@@ -56,14 +57,14 @@ describe('theLineModel — funnel unit logic (§2 / VIZ-3)', () => {
     expect(bucketFor('promote', CONV)).toBe(5);
   });
 
-  it('directionalDelta reads a reduction as −N deduped, a fan-out as +N (×ratio), no change as empty', () => {
+  it('directionalDelta reads a reduction as −N deduped, a fan-out as +N ×ratio fan-out, no change as empty (VIZ-10 role signifiers)', () => {
     expect(directionalDelta(30, 7)).toEqual({ text: '−23 deduped', kind: 'reduction' });
-    expect(directionalDelta(7, 22)).toEqual({ text: '+15 (×3.1)', kind: 'fanout' });
+    expect(directionalDelta(7, 22)).toEqual({ text: '+15 ×3.1 fan-out', kind: 'fanout' });
     expect(directionalDelta(10, 10)).toEqual({ text: '', kind: 'none' });
   });
 
-  it('directionalDelta fan-out from a zero base omits the (×ratio) (no divide-by-zero)', () => {
-    expect(directionalDelta(0, 12)).toEqual({ text: '+12', kind: 'fanout' });
+  it('directionalDelta fan-out from a zero base omits the ×ratio (no divide-by-zero) but keeps the fan-out signifier', () => {
+    expect(directionalDelta(0, 12)).toEqual({ text: '+12 fan-out', kind: 'fanout' });
   });
 
   it('completionRatio is promoted/captured · P%, with a 0/0 · 0% cold-start guard', () => {
@@ -72,14 +73,29 @@ describe('theLineModel — funnel unit logic (§2 / VIZ-3)', () => {
     expect(completionRatio(1, 3)).toBe('1/3 · 33%');
   });
 
-  it('buildFunnel: 6 rails; PROMOTE = completion ratio, CLAIMS = no caption (next crosses units), mid = deltas', () => {
+  it('buildFunnel: 6 rails; PROMOTE = completion ratio (complete), CLAIMS = no caption (next crosses units), mid = role-declaring → projections', () => {
     const rails = buildFunnel(CONV);
     expect(rails.map((r) => r.stage)).toEqual(['capture', 'archive', 'decompose', 'connect', 'claims', 'promote']);
-    expect(rails[5]).toMatchObject({ stage: 'promote', caption: '5/10 · 50%', captionKind: 'ratio' });
+    // PROMOTE: terminal ratio gets a `complete` signifier, no leading → (no next stage).
+    expect(rails[5]).toMatchObject({ stage: 'promote', caption: '5/10 · 50% complete', captionKind: 'ratio' });
     expect(rails[4]).toMatchObject({ stage: 'claims', caption: '', captionKind: 'none' }); // crosses units
-    expect(rails[2]).toMatchObject({ stage: 'decompose', caption: '−23 deduped', captionKind: 'reduction' }); // candidates(30)→entities(7)
-    expect(rails[3]).toMatchObject({ stage: 'connect', caption: '+15 (×3.1)', captionKind: 'fanout' }); // entities(7)→claims(22)
+    // mid stages: a leading → ties the projection to the next station so it never reads as a backlog.
+    expect(rails[2]).toMatchObject({ stage: 'decompose', caption: '→ −23 deduped', captionKind: 'reduction' }); // candidates(30)→entities(7)
+    expect(rails[3]).toMatchObject({ stage: 'connect', caption: '→ +15 ×3.1 fan-out', captionKind: 'fanout' }); // entities(7)→claims(22)
     expect(rails[0].caption).toBe(''); // capture→archive: same unit, no caption
+  });
+
+  it('buildFunnel carries each number-role its signifier: volume bucket noun + decode-on-hover titles (VIZ-10)', () => {
+    const rails = buildFunnel(CONV);
+    // role 1 — volume: every rail names its bucket noun + a title declaring what reached where.
+    expect(rails[3]).toMatchObject({ stage: 'connect', noun: 'entities', countTitle: '7 entities reached Linking' });
+    expect(rails[1]).toMatchObject({ stage: 'archive', noun: 'captured' }); // archive reads the captured bucket
+    expect(rails[5].noun).toBe('promoted');
+    // role 2 — projection: the title says it's a projection INTO the next stage, never waiting-here.
+    expect(rails[3].captionTitle).toBe('projected fan-out ×3.1 into Claim extraction');
+    expect(rails[2].captionTitle).toBe('projected reduction −23 deduped into Linking');
+    expect(rails[5].captionTitle).toBe('5 of 10 captured sources promoted to main');
+    expect(rails[4].captionTitle).toBe(''); // claims has no projection caption → no title
   });
 
   it('buildFunnel bars scale to the peak bucket (a fan-out reads as widening, not overflow)', () => {
@@ -118,6 +134,19 @@ describe('theLineModel — stations (§6, state never colour alone)', () => {
     expect(st.find((s) => s.stage === 'claims')!.slowest).toBe(true);
     expect(st.find((s) => s.stage === 'claims')!.latency).toBe('8200ms avg');
     expect(st.find((s) => s.stage === 'decompose')!.slowest).toBe(false);
+  });
+
+  it('flags the queue as concerning only once the real backlog crosses the threshold (§6 role 3 / VIZ-10)', () => {
+    const st = buildStations(
+      viewWith({
+        stages: [
+          { stage: 'decompose', state: 'running', queueDepth: 2, setAside: 0 }, // small churn → calm
+          { stage: 'connect', state: 'blocked', queueDepth: QUEUE_CONCERN_THRESHOLD, setAside: 0 }, // pile-up → brass-eligible
+        ],
+      }),
+    );
+    expect(st.find((s) => s.stage === 'decompose')!.queueConcerning).toBe(false);
+    expect(st.find((s) => s.stage === 'connect')!.queueConcerning).toBe(true);
   });
 
   it('slowestStage returns null when no stage has timing yet (cold start)', () => {

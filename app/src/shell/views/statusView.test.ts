@@ -131,11 +131,11 @@ describe('The Line — station spine + gauge-rails (§2/§6, VIZ-3/4)', () => {
     expect(h).toContain('line-station-glyph viz-state-error'); // its glyph carries oxide (large element — allowed)
   });
 
-  it('gauge-rail shows the directional conversion captions (−deduped reduction, +×ratio fan-out, completion ratio)', () => {
+  it('gauge-rail shows the role-declaring conversion projections (→ −deduped, → +×ratio fan-out, completion ratio · complete)', () => {
     const h = spine(); // conversion 10/30/7/22/6
-    expect(h).toContain('−23 deduped'); // decompose candidates(30) → connect entities(7)
-    expect(h).toContain('+15 (×3.1)'); // connect entities(7) → claims(22)
-    expect(h).toContain('6/10 · 60%'); // PROMOTE completion ratio
+    expect(h).toContain('→ −23 deduped'); // decompose candidates(30) → connect entities(7)
+    expect(h).toContain('→ +15 ×3.1 fan-out'); // connect entities(7) → claims(22)
+    expect(h).toContain('6/10 · 60% complete'); // PROMOTE completion ratio + complete signifier
   });
 
   it('the conversion captions are tabular numerics, never the oxide state class on small text', () => {
@@ -149,6 +149,51 @@ describe('The Line — station spine + gauge-rails (§2/§6, VIZ-3/4)', () => {
     const h = spine();
     expect(h).toContain('line-station-setaside line-badge-error'); // decompose has 1 set aside
     expect(h).toContain('set aside');
+  });
+});
+
+describe('The Line — funnel-caption legibility, each number declares its role (VIZ-10, Principal-reported)', () => {
+  const spine = (): string => spineHtml(buildStations(STALLED));
+
+  it('volume carries its bucket noun + a decode-on-hover title so a bare count self-describes (role 1)', () => {
+    const h = spine(); // connect (Linking) volume = entities(7)
+    expect(h).toContain('line-rail-noun viz-signage'); // the bucket-noun micro-unit renders
+    expect(h).toContain('>entities</span>'); // Linking's volume names its bucket
+    expect(h).toContain('title="7 entities reached Linking"'); // decode-on-hover
+  });
+
+  it('the conversion projection is tied to the NEXT stage (→ + signifier + title) so it can never read as a backlog (role 2)', () => {
+    const h = spine();
+    expect(h).toContain('→ +15 ×3.1 fan-out'); // Linking entities(7) → Claim extraction(22)
+    expect(h).toContain('title="projected fan-out ×3.1 into Claim extraction"'); // hover decodes it as flows-to-next
+  });
+
+  it('the real queue (the only actionable backlog) sits in its own live-state lane, visually + semantically apart from the projection (role 3)', () => {
+    const h = spine();
+    // the projection lives in the rail lane; the queue lives in the live-state cluster — distinct lanes.
+    expect(h).toContain('line-station-rail-lane');
+    expect(h).toContain('line-station-live');
+    expect(h).toContain('line-station-queue'); // connect has queueDepth 1
+    expect(h).toContain('title="1 waiting to be processed at Linking"'); // queue = waiting-here, not flowing
+  });
+
+  it('a queue past the concern threshold takes brass (needs-you) — never confusable with the muted projection (role 3)', () => {
+    const piled: PipelineStatusView = {
+      ...STALLED,
+      stages: [{ stage: 'connect', state: 'blocked', queueDepth: 25, setAside: 0 }],
+    };
+    const h = spineHtml(buildStations(piled));
+    expect(h).toContain('line-station-queue viz-body line-queue-concern'); // brass-eligible class on the real backlog
+    // the calm (sub-threshold) queue in STALLED does NOT get the concern class.
+    expect(spine()).not.toContain('line-queue-concern');
+  });
+
+  it('a once-per-spine legend decodes the caption grammar (progressive disclosure, not per-station clutter)', () => {
+    const h = spine();
+    expect(h).toContain('line-legend');
+    expect(h).toContain('Reading the numbers');
+    expect(h).toContain('vol = reached here · queue = waiting');
+    expect(h.match(/line-legend-body/g)?.length).toBe(1); // exactly once for the whole spine
   });
 });
 

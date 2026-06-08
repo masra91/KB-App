@@ -267,31 +267,55 @@ export function pivotHtml(active: Lens): string {
 }
 
 /** §2/§6: the station spine — six stations on one horizontal rule, each a glyph + signage + gauge-rail
- *  (volume bar + directional conversion caption). State = glyph + hue + fill (never colour alone). */
+ *  (volume bar + directional conversion caption). State = glyph + hue + fill (never colour alone).
+ *  VIZ-10: a once-per-spine legend decodes the caption grammar (progressive disclosure, not a banner). */
 export function spineHtml(stations: StationModel[]): string {
-  return `<section class="line-spine-wrap" aria-label="Pipeline stations"><ol class="line-spine">${stations.map(stationHtml).join('')}</ol></section>`;
+  return `<section class="line-spine-wrap" aria-label="Pipeline stations"><ol class="line-spine">${stations.map(stationHtml).join('')}</ol>${legendHtml()}</section>`;
+}
+
+/** VIZ-10 spine legend — one quiet, always-available key that decodes the dense caption grammar once,
+ *  so the engineered captions stay glanceable without cluttering every station. A `details` affordance
+ *  (progressive disclosure), never a loud banner (§6 / DESIGN-3). */
+function legendHtml(): string {
+  return `<details class="line-legend">
+    <summary class="line-legend-key viz-signage">Reading the numbers</summary>
+    <p class="line-legend-body viz-body"><span class="viz-numeric">→</span> fan-out/deduped projection to next · vol = reached here · queue = waiting · set aside = pulled off</p>
+  </details>`;
 }
 
 function stationHtml(st: StationModel): string {
   // Small text (the state word, counts, captions, queue, set-aside badge) stays ink/ink-muted; the
-  // state hue rides the glyph + the gauge-rail bar (large/graphic) only (§3 contrast rule).
-  const current = st.currentItem ? `<span class="line-station-current viz-body">▶ ${esc(st.currentItem)}</span>` : '';
-  const queue = st.queueDepth > 0 ? `<span class="line-station-queue viz-body">queue <span class="viz-numeric">${st.queueDepth}</span></span>` : '';
-  const setAside = st.setAside > 0 ? `<span class="line-station-setaside line-badge-error"><span class="viz-numeric">${st.setAside}</span> set aside</span>` : '';
-  const latency = st.slowest && st.latency ? `<span class="line-station-latency viz-numeric" title="Slowest station">slowest · ${esc(st.latency)}</span>` : '';
-  const caption = st.rail.caption
-    ? `<span class="line-rail-caption line-cap-${st.rail.captionKind} viz-numeric">${esc(st.rail.caption)}</span>`
+  // state hue rides the glyph + the gauge-rail bar (large/graphic) only (§3 contrast rule). VIZ-10
+  // separates two typographic lanes: the RAIL lane (volume + projection — flows-through) and the
+  // LIVE-STATE cluster (queue + current + set-aside — what's actually sitting here), so a projection
+  // can never read as a backlog.
+  const r = st.rail;
+  // Lane 1 — RAIL: volume (count + bucket noun, role 1) then the projection caption (role 2). Each
+  // carries a decode-on-hover `title=`.
+  const count = `<span class="line-rail-count viz-numeric" title="${esc(r.countTitle)}">${r.count} <span class="line-rail-noun viz-signage">${esc(r.noun)}</span></span>`;
+  const caption = r.caption
+    ? `<span class="line-rail-caption line-cap-${r.captionKind} viz-numeric"${r.captionTitle ? ` title="${esc(r.captionTitle)}"` : ''}>${esc(r.caption)}</span>`
     : '';
+  // Lane 2 — LIVE-STATE cluster: the real backlog (role 3, brass when concerning), current item, and
+  // the set-aside badge — the numbers that are actually *here*, not flowing through.
+  const queue =
+    st.queueDepth > 0
+      ? `<span class="line-station-queue viz-body${st.queueConcerning ? ' line-queue-concern' : ''}" title="${st.queueDepth} waiting to be processed at ${esc(st.name)}">queue <span class="viz-numeric">${st.queueDepth}</span></span>`
+      : '';
+  const current = st.currentItem ? `<span class="line-station-current viz-body">▶ ${esc(st.currentItem)}</span>` : '';
+  const setAside = st.setAside > 0 ? `<span class="line-station-setaside line-badge-error"><span class="viz-numeric">${st.setAside}</span> set aside</span>` : '';
+  const live = queue || current || setAside ? `<span class="line-station-live">${queue}${current}${setAside}</span>` : '';
+  const latency = st.slowest && st.latency ? `<span class="line-station-latency viz-numeric" title="Slowest station">slowest · ${esc(st.latency)}</span>` : '';
   return `<li class="line-station line-station-${esc(st.state)}${st.slowest ? ' line-station-slow' : ''}" data-stage="${esc(st.stage)}">
     <span class="line-station-glyph ${st.stateClass}" aria-hidden="true">${esc(st.glyph)}</span>
     <span class="line-station-name viz-signage">${esc(st.name)}</span>
     <span class="line-station-state viz-chip" title="${esc(st.state)}">${esc(st.state)}</span>
     <span class="line-rail" aria-hidden="true"><span class="line-rail-bar ${st.stateClass}${st.slowest ? ' line-rail-bar-slow' : ''}" style="height:${st.rail.barPct}%"></span></span>
-    <span class="line-rail-count viz-numeric">${st.rail.count}</span>
-    ${caption}
-    ${queue}
-    ${current}
-    ${setAside}
+    <span class="line-station-rail-lane">
+      ${count}
+      ${caption}
+    </span>
+    ${live}
     ${latency}
   </li>`;
 }
