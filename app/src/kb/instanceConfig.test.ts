@@ -19,15 +19,17 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
+const DEF = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' } as const;
+
 describe('instance config store (PANEL-5)', () => {
-  it('defaults to Guarded + info verbosity when no file exists', async () => {
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
-    expect(defaultInstanceConfig()).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
+  it('defaults to Guarded + info verbosity + ⌥Space hotkey when no file exists', async () => {
+    expect(await readInstanceConfig(root)).toEqual(DEF);
+    expect(defaultInstanceConfig()).toEqual(DEF);
   });
 
   it('round-trips a written config', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'autonomous', devLogLevel: 'debug' });
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous', devLogLevel: 'debug' });
+    await writeInstanceConfig(root, { autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K' });
+    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K' });
     // Stored under .kb/instance.json (per-vault, never the app config).
     expect(instanceConfigPath(root).endsWith(path.join('.kb', 'instance.json'))).toBe(true);
   });
@@ -35,16 +37,26 @@ describe('instance config store (PANEL-5)', () => {
   it('falls back to the safe default on malformed JSON or an unknown posture', async () => {
     await fs.mkdir(path.join(root, '.kb'), { recursive: true });
     await fs.writeFile(instanceConfigPath(root), '{ not json', 'utf8');
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'guarded', devLogLevel: 'info' });
-    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never, devLogLevel: 'info' });
+    expect(await readInstanceConfig(root)).toEqual(DEF);
+    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never, devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' });
     expect((await readInstanceConfig(root)).autonomyDefault).toBe('guarded');
   });
 
   it('OBS-10: devLogLevel round-trips and an unknown level falls back to info', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'debug' });
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'debug', quickCaptureAccelerator: 'Alt+Space' });
     expect((await readInstanceConfig(root)).devLogLevel).toBe('debug');
-    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'screaming' as never });
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'screaming' as never, quickCaptureAccelerator: 'Alt+Space' });
     expect((await readInstanceConfig(root)).devLogLevel).toBe('info'); // unknown → safe default
+  });
+
+  it('QCAP-6: quickCaptureAccelerator round-trips; empty/non-string falls back to the ⌥Space default', async () => {
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Control+Alt+Q' });
+    expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Control+Alt+Q');
+    // An empty/garbage stored value is replaced by the default (full grammar validation is at register).
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: '' }), 'utf8');
+    expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Alt+Space');
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 42 }), 'utf8');
+    expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Alt+Space');
   });
 });
 

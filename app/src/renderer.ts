@@ -13,11 +13,13 @@ import './shell/design-system.css'; // shared visual foundation — tokens/type-
 import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
 import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" — folder-permission UX
 import './shell/views/showcase.css'; // DESIGN-SHOWCASE — dev-only primitive gallery layout (?showcase)
+import './qcap/qcap.css'; // SPEC-0038 QCAP — the frictionless quick-capture sheet (#qcap route)
 import './index.css';
 import type { PathInspection } from './kb/types';
 import { esc, baseName } from './shell/html';
 import { mountShell } from './shell/shell';
 import { mountShowcase } from './shell/views/showcaseView';
+import { mountQuickCaptureSheet } from './qcap/qcapSheet';
 import { mountPermissionGate, icloudNoteHtml } from './shell/permissionGate';
 import { isLocalTccProtected, isICloudVault } from './kb/permissions';
 
@@ -116,7 +118,16 @@ function showcaseRequested(): boolean {
   return new URLSearchParams(location.search).has('showcase') || location.hash.toLowerCase().includes('showcase');
 }
 
+/** SPEC-0038 QCAP: the menubar agent loads this same renderer with `#qcap` for the capture sheet. */
+function qcapRequested(): boolean {
+  return location.hash.toLowerCase() === '#qcap';
+}
+
 async function init(): Promise<void> {
+  if (qcapRequested()) {
+    mountQuickCaptureSheet(root);
+    return;
+  }
   if (showcaseRequested()) {
     mountShowcase(root);
     return;

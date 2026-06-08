@@ -1,0 +1,40 @@
+/* SPEC-0038 QCAP — the frictionless quick-capture sheet. Minimal, calm, keyboard-first; it's a
+   transient frameless overlay, so it fills its small window edge-to-edge. */
+.qcap-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  box-sizing: border-box;
+  height: 100vh;
+}
+
+.qcap-input {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #d0d0d0);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--ink, #1a1a1a);
+}
+
+.qcap-input:focus {
+  outline: none;
+  border-color: var(--accent, #3b6ea5);
+}
+
+.qcap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.qcap-note {
+  white-space: nowrap;
+}
