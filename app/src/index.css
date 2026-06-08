@@ -480,15 +480,26 @@ button:disabled {
 .btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
 
 /* --- Control Panel: Agents / Sources / Settings autonomy (SPEC-0027 slice 2) --- */
+/* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §4): the status chip is the blessed .viz-chip
+   primitive (shape/signage/muted base from design-system.css); the status-* family carries STATE via
+   the canonical hue tokens — never a hard-coded hex (was #7ad17a/#2f5c2f). State also reads via the
+   text label (never color-alone, §3 DESIGN-4). Secondary text on --viz-ink-muted (was legacy .muted). */
 .agent-list, .source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.agent { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; }
+.agent { border: 1px solid var(--viz-rule); border-radius: 8px; padding: 0.75rem; }
 .agent-head { display: flex; align-items: center; gap: 0.5rem; }
 .agent-label { font-weight: 600; }
-.agent-status { margin-left: auto; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.4rem; color: var(--muted); }
-.agent-status.status-running { color: #7ad17a; border-color: #2f5c2f; }
-.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; }
+/* Layout only — shape/signage/border/muted color come from .viz-chip (design-system.css). */
+.agent-status { margin-left: auto; }
+/* State tokens (§4): running → ember, idle → idle, blocked → brass, error → oxide. The hue colors the
+   glyph/label + ties the border via currentColor (≥3:1). Exception: oxide MUST NOT color small text
+   (contract §2) → error carries the hue on the BORDER only, label stays --viz-ink-muted. */
+.agent-status.status-running { color: var(--viz-state-running); border-color: currentColor; }
+.agent-status.status-idle { color: var(--viz-state-idle); }
+.agent-status.status-blocked { color: var(--viz-state-blocked); border-color: currentColor; }
+.agent-status.status-error { border-color: var(--viz-state-error); }
+.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
 .agent-meta { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.82rem; }
-.agent-meta dt { color: var(--muted); }
+.agent-meta dt { color: var(--viz-ink-muted); }
 .agent-meta dd { margin: 0; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
 .autonomy-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
