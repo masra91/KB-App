@@ -9,6 +9,45 @@ function scalar(s: string): string {
   return /[:#'"\n]|^\s|\s$/.test(s) ? JSON.stringify(s) : s;
 }
 
+/**
+ * A human-readable title for a source, derived from its `source.md` (which has NO dedicated `title`
+ * field). Precedence: the frontmatter `originalName` (file sources) → the first body heading /
+ * non-empty line (text + clipped sources) → a neutral generic. NEVER returns a raw ULID — a source
+ * surfaced to the Principal must read as a *thing*, not an id (PRIN-24 / REVIEW-16). Truncated so a
+ * long first line can't blow out a review row. Pure (no FS) — callers read the file and pass content.
+ */
+export function deriveSourceTitle(sourceMd: string): string {
+  const fmMatch = sourceMd.match(/^---\n([\s\S]*?)\n---/);
+  if (fmMatch) {
+    const m = fmMatch[1].match(/^originalName:[ \t]*(.+)$/m);
+    if (m) {
+      const v = m[1].trim();
+      // `originalName` is `scalar()`-encoded: JSON-quoted only when it carries special chars.
+      const unquoted = v.startsWith('"') ? safeJsonParse(v) ?? v : v;
+      if (unquoted.trim()) return clipTitle(unquoted.trim());
+    }
+  }
+  const body = sourceMd.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  for (const line of body.split('\n')) {
+    const t = line.replace(/^#+[ \t]*/, '').trim(); // strip a leading markdown heading marker
+    if (t) return clipTitle(t);
+  }
+  return 'Untitled source';
+}
+
+function clipTitle(s: string): string {
+  return s.length > 80 ? s.slice(0, 79) + '…' : s;
+}
+
+function safeJsonParse(s: string): string | null {
+  try {
+    const v = JSON.parse(s);
+    return typeof v === 'string' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A truthful `archivedBy` from the decision's agent trace (ORCH-16). */
 export function archivedByLabel(agent?: AgentTrace): string {
   if (agent?.via === 'copilot') return `copilot (${agent.model ?? 'default'})`;

@@ -345,8 +345,9 @@ export function registerIpc(): void {
       detail: r.detail,
       stage: r.raisedBy.stage,
       refs: r.subject?.refs ?? [],
-      // REVIEW-16: pass the per-candidate disambiguation context through to the view (rows + links);
-      // optional-chained for the same empty-subject reasons as `refs`. Omitted when there are none.
+      // REVIEW-16: pass the per-candidate disambiguation context through to the view (rows + links +
+      // each candidate's resolved source title, persisted at raise — PRIN-24). Optional-chained for
+      // the same empty-subject reasons as `refs`. Omitted when there are none.
       ...(r.subject?.candidates?.length ? { candidates: r.subject.candidates } : {}),
       createdAt: r.createdAt,
     }));
