@@ -7,7 +7,7 @@ status: draft
 owners: [KB-Architect, Principal]
 created: 2026-05-30
 updated: 2026-05-30
-related: [SPEC-0001, SPEC-0002, SPEC-0003, SPEC-0004]
+related: [SPEC-0001, SPEC-0002, SPEC-0003, SPEC-0004, SPEC-0043]
 supersedes: null
 ---
 
@@ -168,6 +168,12 @@ instance split — is what prevents them.*
 
 ## 8. Changelog
 
+- 2026-06-07 — the **sensitivity** layer (SCOPE-7/8/9/10/14) is decomposed into an implementable feature
+  spec, **SPEC-0043 (SENSE)** — labels + provenance, the gate **comparator**, ingestion-time classification
+  (uncertain→Review), most-restrictive propagation, sticky Principal override, and consumer wiring to
+  surfacing (SCOPE-11) + the researcher egress gate (SPEC-0028 D6/D8). Prioritized by the Principal as the
+  track that "lights up" richer researcher orient reads. This product spec stays the *what/why*; SPEC-0043
+  is the *how*. (Scope-layer requirements SCOPE-1..6/13 remain unimplemented, no feature spec yet.)
 - 2026-05-30 — created (draft). Resolved Fork 1. Two-layer model (Instances +
   Scope/Sensitivity); `global` default scope; allow-but-flag cross-scope links;
   conservative default classification; **sensitivity propagation** (SCOPE-10);

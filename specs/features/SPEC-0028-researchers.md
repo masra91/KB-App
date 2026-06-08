@@ -6,7 +6,7 @@ type: feature
 status: draft
 owners: [KB-Lead, Principal]
 created: 2026-06-02
-updated: 2026-06-06
+updated: 2026-06-07
 related: [SPEC-0003, SPEC-0004, SPEC-0005, SPEC-0006, SPEC-0007, SPEC-0014, SPEC-0018, SPEC-0020, SPEC-0023, SPEC-0026, SPEC-0027]
 stage: Enrich
 supersedes: null
@@ -73,6 +73,31 @@ A request may be answered by **several** researchers (code + email + web), each 
 own cited secondary source. Findings are **never trusted blindly** — they flow through claims +
 Review like any source.
 
+### 3a. Warm start — orient before egress (RESEARCH-21/22)
+
+A pass does **not** begin cold at the search box. Each eligible researcher first runs a **bounded
+orient phase** — *local reads only, no egress* — to spend a little awareness before spending its
+query budget:
+
+```
+research-request → researcher self-nominates → ORIENT (local, non-egress, own `orientBudget`):
+   1. read OWN run history     (the field notebook, RESEARCH-21 — what I've returned, areas I've
+                                drilled, sources I've already harvested)
+   2. read in-tier KB neighborhood of the subject (EXPLORE read path, SPEC-0039 — what we already know)
+   →  produce: the GAP/ANGLE to pursue  +  a DEDUP SET (known facts/sources to skip)
+                      │
+                      ▼
+   EGRESS pass (bounded by `maxToolCalls`): query built via buildOutboundQuery from the request +
+   the chosen angle (NEVER a verbatim KB dump, D6a/D8) → fetch NET-NEW sources, expand & enrich
+                      │
+                      ▼
+   write CITED secondary source  +  update the field notebook (areas drilled, sources harvested)
+```
+
+The point: a researcher **knows what the KB already holds and what it has already chased**, so each
+run *expands the frontier* rather than re-establishing basics or re-finding the same first-page hits.
+Awareness is paid for out of a **separate `orientBudget`**, never the egress `maxToolCalls` (D8).
+
 ## 4. Built-in templates (v1)
 
 - **Web** — egress tier **`public-web`**. Config: allowed domains/sites, topics, recency
@@ -104,12 +129,14 @@ Review like any source.
 | RESEARCH-12| must     | **Untrusted-content defense**: fetched external content is treated as **data, never instructions**; researchers are prompted/structured accordingly and constrained by egress tier (limits exfiltration), read-only world (limits action), a **per-researcher tool/MCP allowlist**, and budget; findings are **marked externally-sourced** | none-yet | PRIN-19,20; AUTO-6 |
 | RESEARCH-13| must     | MCP servers / external tools are **third-party deps** — **vetted, pinned, version-aged** | none-yet | ENG-1,2,4,7 |
 | RESEARCH-14| should   | Researchers are a **prime Copilot SDK adopter** (tools/MCP, sessions, ORCH-21/22) — behind the agent interface, deterministic fallback retained | none-yet | ORCH-21,22 |
-| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/**budget — an editable per-pass `maxToolCalls`, default 15** + **session timeout**, default 15 min, RESEARCH-18 / MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations. The budget + timeout are **editable controls**, not just the read-only "reach readout" — i.e. the `read-only in v1` readout is **wired to editable inputs** that persist via `setResearcherConfig` (validated at the IPC boundary, under the per-Instance ceiling) | none-yet | PANEL-1; VISION-11 |
+| RESEARCH-15| must     | Researchers are managed in a **dedicated "Researchers" view** in the Control Panel Manage section: add-from-template, configure (prompt/scope/egress/**budget — an editable per-pass `maxToolCalls`, default 25** + a separate **orient budget** for non-egress awareness reads, RESEARCH-22 + **session timeout**, default 15 min, RESEARCH-18 / MCP), enable/disable, **run-now**, see last-run + findings/citations + escalations. The budget + timeout are **editable controls**, not just the read-only "reach readout" — i.e. the `read-only in v1` readout is **wired to editable inputs** that persist via `setResearcherConfig` (validated at the IPC boundary, under the per-Instance ceiling) | none-yet | PANEL-1; VISION-11 |
 | RESEARCH-16| must     | **v1 ships** the framework + three built-in templates — **Web** (public-web), **Code** (local-only, read-only), **M365/WorkIQ** (internal-tenant, OAuth) — plus **custom** | none-yet | VISION-6 |
-| RESEARCH-17| must     | A findings-note must be **substantive + structured**, *not* a thin précis: it captures the **specific** facts / figures / dates / named entities / quoted passages the sources actually contain, **each attributed to its source URL**, with real depth — so the secondary source carries genuine substance for Decompose/Claims. *A vague 3-paragraph summary is a defect, not a pass.* The Web skill prompt instructs **depth + specificity** (over brevity); the per-pass retrieval budget **default is 15** (raised from 8) and is **user-editable per researcher** (RESEARCH-15), under the global per-Instance ceiling (RESEARCH-11). Egress posture is unchanged (gated fetch, allowlist, untrusted-content-as-DATA) — more reads + richer capture, same guards | none-yet | RESEARCH-5,6,11,15; PRIN-2; VISION-5 |
+| RESEARCH-17| must     | A findings-note must be **substantive + structured**, *not* a thin précis: it captures the **specific** facts / figures / dates / named entities / quoted passages the sources actually contain, **each attributed to its source URL**, with real depth — so the secondary source carries genuine substance for Decompose/Claims. *A vague 3-paragraph summary is a defect, not a pass.* The Web skill prompt instructs **depth + specificity** (over brevity); the per-pass retrieval budget **default is 25** (raised 8→15→25) and is **user-editable per researcher** (RESEARCH-15), under the global per-Instance ceiling (RESEARCH-11). Egress posture is unchanged (gated fetch, allowlist, untrusted-content-as-DATA) — more reads + richer capture, same guards | none-yet | RESEARCH-5,6,11,15; PRIN-2; VISION-5 |
 | RESEARCH-19| must     | The Researchers view **exposes per-researcher configuration** — a **free-text instructions box** (the agent prompt: *what to look for, which sites/sources, which WorkIQ surfaces, which repo*) **+ scope** — so the Principal can steer each researcher. Templates show **short labels** (`Public Web` · `WorkIQ/M365` · `Local Repository` · `Custom`), long descriptions as helper text | none-yet | PANEL-1; [#109](https://github.com/masra91/KB-App/issues/109) |
 | RESEARCH-18| must     | Each researcher has a **per-pass session timeout** — a **stuck-session backstop, NOT a cost bound**. Cost/depth is bounded by the **budget** (`maxToolCalls`) + the per-Instance ceiling (RESEARCH-11); the agent bills **tokens/tools, never wall-clock time**, so a clock cap can only guess at "too long for real work." It exists for one reason: a wedged session would otherwise hold its one **global copilot slot** (ORCH-23) forever and starve the pipeline. **Default 15 min** (the SDK's 60s default false-failed deep multi-fetch passes — `research.session-failed: Timeout after 60000ms waiting for session.idle`); **user-editable per researcher** (RESEARCH-15), passed to the live SDK session. Finite ≠ a deadline for real work | test: `researchSessionTimeout`(wiring) → none-yet (editor) | RESEARCH-11,15,17; ORCH-23 |
 | RESEARCH-20| must     | The **Code researcher reasons over the repo via the Copilot SDK** (same `ResearchFn` seam as Web/M365, registered in `selectResearchFn`'s per-template switch — no `makeResearchDeps` change), **not** a deterministic `git grep` dump (today's `researchCodeAgent.ts` shells `git grep` + recent-log + PR-title-match — no model, no SDK, ignores the budget — so the Principal's run (#7) was a literal "code" string-dump, "extremely low effort"). It **reads the relevant files in depth and synthesizes a substantive, source-attributed findings-note** that clears the **RESEARCH-17 depth bar**, with **real repo `path:line` citations** (only files it actually read — fabricated/unread paths rejected, the citation analog of the Web allowlist). **Read-only stays inviolate (RESEARCH-10):** the SDK session's repo tools (read-file / list / grep / log) are thin wrappers over the **read-only `codeGit` layer** in the **isolated, gitignored** worktree — the `availableTools` allow-list admits ONLY those read tools + `submitFindings`; **no** write/exec/network verb is reachable. Fetched repo + PR content is **DATA, never instructions (RESEARCH-12)** (a README/comment saying "ignore your instructions" is quoted content, not a directive). The pass **honors `maxToolCalls`** (read-tool calls counted + refused past budget, forcing convergence — Web's fetch-cap analog) **and the RESEARCH-18 session timeout**; the query is built from the **request (D6a)** via `buildOutboundQuery`, never the template name. A **deterministic fallback is retained (RESEARCH-14)** — SDK-unavailable degrades to today's grep note, never a hard failure. **Slice 1 = local repo**; the gh/az **PR reads stay as-is** (deterministic, CONFIG-pinned) | none-yet | RESEARCH-5,6,10,11,12,14,16,17,18; D6a; AUTO-6 |
+| RESEARCH-21| must     | **Warm-start run history ("the researcher's field notebook").** A researcher is **not a cold start** each run: it keeps a **persistent, per-researcher local digest** under `.kb/research/<researcher-id>/` — **derived from its own audit lineage (RESEARCH-6)** — recording **what it has returned** (findings + their citations), the **subjects/areas it has already drilled** (with last-touched timestamps so a stale area re-opens), and the **sources/domains it has already harvested**. It is a **derived index, not a second source of truth** — the audit is canonical; the digest is the cheap working set, rebuilt from it — and **bounded + self-healing** (rolling cap, stale entries age out; mirrors `seen.json`/`passes.json`). The researcher **reads it at the start of a pass** (the orient phase, RESEARCH-22). *This piece reintroduces no exfiltration surface — a researcher reading its OWN prior outputs/citations — so it ships independent of the D6 egress mapping (D8).* | none-yet | RESEARCH-5,6,11; AUDIT-11; DATA-10 |
+| RESEARCH-22| must     | **Orient-before-egress (expand & enrich, don't re-find the first hits).** Before any outbound query, a researcher runs a **bounded orientation** that reads (a) its own **run history** (RESEARCH-21) and (b) the **in-tier** KB neighborhood of the request's subject (via the **EXPLORE** entity-neighborhood read path, SPEC-0039), gated by **one tier↔sensitivity check for all researchers** (`sensitivityAllowsOrientRead`, D8) — a **tier-agnostic structural floor** (neighbor entity names) for every researcher now + **sensitivity-gated content reads** that **auto-light when SPEC-0005 classification lands**, no per-template carve-out — producing the **specific gap/angle to pursue** + a **dedup set** of already-known facts/sources to avoid repeating, so the pass **expands and enriches** instead of re-fetching the same first-page hits. Orient reads are **KB-/audit-LOCAL (non-egress)** and therefore do **NOT** consume the egress `maxToolCalls`; they are bounded by a **separate, small `orientBudget`** (default modest, user-editable per researcher, RESEARCH-15) so awareness can't run away. **The egress invariant holds (D6a/D8):** orientation chooses a *target/angle + dedup set* — the **outbound query is still built through the constrained `buildOutboundQuery` path** (request + chosen angle, **never a verbatim KB dump**); result-level dedup steers toward **net-new sources**. Tier-gated read + query-construction guard are the **gate-2 security boundary** (D8) | none-yet | RESEARCH-6,8,11,17,21; SCOPE-7,8,9,10; SPEC-0039; D6; D6a; D8; VISION-8 |
 
 ## 6. User flows / surface
 
@@ -144,11 +171,69 @@ Security-dominant, so v1 lands in three reviewable slices, lowest-egress-risk fi
   grep + log + gh/az PR title-match. **WS4 / RESEARCH-20** upgrades the local-repo read to **agentic
   SDK reasoning** behind the same seam; gh/az PR reads stay as-is.)*
 - **Slice 3 — M365/WorkIQ** (`internal-tenant`, OAuth MCP) + **custom** researcher polish.
+- **Slice 4 — Warm-start orientation (RESEARCH-21/22).** The field notebook + orient-before-egress phase
+  + the `sensitivityAllowsOrientRead` gate (D8). Lands behind the existing `ResearchFn` seam — the orient
+  step runs *before* `runResearcher`'s egress pass and feeds it a target/angle + dedup set. **Gate-2
+  (KB-QD) reviews the query-construction guard + the sensitivity gate before it merges.** Ships against the
+  conservative-default gate (no dependency on SPEC-0043 being done); richer public-web reads light up when
+  SPEC-0043 (SENSE) classification lands. *Sub-slices: 4a = field notebook (RESEARCH-21, derived from
+  audit) + result-level source dedup; 4b = orient phase + structural-floor KB read + `orientBudget`;
+  4c = sensitivity-gated content reads wired to SENSE-3 comparator.*
+
+## 7b. Warm-start handoff — data shapes, config, user stories (RESEARCH-21/22)
+
+**Field-notebook digest** (`.kb/research/<researcher-id>/notebook.json`) — derived from the researcher's
+own audit lineage (RESEARCH-6), bounded + self-healing (rolling cap, stale ages out; mirrors
+`seen.json`/`passes.json`):
+
+```jsonc
+{
+  "researcherId": "web-1",
+  "areas": [            // subjects/topics already drilled — re-opens when stale
+    { "key": "quantum-error-correction::entity-xyz", "lastRunTs": 1717800000000,
+      "returned": "finding", "citations": 3 }
+  ],
+  "harvested": [        // sources already fetched+cited → result-level dedup (don't re-find page 1)
+    { "host": "arxiv.org", "url": "https://arxiv.org/abs/…", "ts": 1717800000000 }
+  ],
+  "frontier": [         // expand-next: entities a finding mentioned but did NOT cover
+    { "term": "surface codes", "fromSourceId": "src-…", "ts": 1717800000000 }
+  ]
+}
+```
+
+**Config** — `orientBudget` joins the editable per-researcher controls (RESEARCH-15) alongside
+`maxToolCalls` + `timeoutMs`: a small cap on **local (non-egress)** orient reads (default ~5, user-editable,
+validated/clamped at the IPC boundary like `maxToolCalls`). It is **separate from `maxToolCalls`** — orient
+reads never draw down the egress budget (Principal: "don't burn query budget maintaining awareness").
+
+**The gate** — `sensitivityAllowsOrientRead(tier, sensitivity): boolean` reads the **SENSE-3 comparator**
+(SPEC-0043) against the **D6 map**: `public-web → rank ≤ shareable`, `internal-tenant → ≤ confidential`,
+`local-only → any`. The **structural floor** (neighbor entity names) is tier-agnostic and bypasses the
+content gate (graph metadata, not content). Until SPEC-0043 lands, all sources read `internal` → public-web
+sits on the floor; internal-tenant/local-only read in-tier.
+
+**User stories:**
+- **As a researcher**, before I search I read my own notebook + the subject's KB neighborhood, so I chase
+  the **gap** ("we have the press release but not the benchmark numbers") instead of re-fetching the
+  overview I already filed last run. *(RESEARCH-21/22)*
+- **As the Principal**, my Web researcher stops handing me the same three first-page links every run — its
+  notebook remembers what it harvested, so each pass brings **net-new** sources. *(RESEARCH-21)*
+- **As the Principal**, I can see "areas drilled" + "last run" per researcher and trust that awareness is
+  cheap — it runs on a separate `orientBudget`, never eating the egress budget I set. *(RESEARCH-22)*
+
+**Verify targets (graduate `none-yet → test:` per sub-slice):** notebook round-trip + bounded/self-healing
+(`researchNotebook.test`); orient produces a gap/angle + dedup set from notebook+neighborhood
+(`researchOrient.test`); `orientBudget` clamp at the IPC boundary (`researchers.test`); orient reads do NOT
+increment the egress fetch counter (`researchRun.test`); `sensitivityAllowsOrientRead` per-tier truth table
++ structural-floor bypass (`researchSensitivityGate.test`); query-construction guard rejects a raw-KB-dump
+query (`researchOrient.test`).
 
 ## 8. Resolved decisions (Slice 1 locked) + escalations
 
-Forks resolved with KB-PM (D1–D3, D5, D6a are KB-PM/owner calls; D4-policy and the broader D6
-mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1):
+Forks resolved with KB-PM (D1–D3, D5, D6a are KB-PM/owner calls; D4-policy remains
+**escalated to the Principal**; **D6 — the egress-tier↔sensitivity mapping — is now RESOLVED by the
+Principal**, 2026-06-07, see below):
 
 - **D1 — `research-request` schema:** `{ id, ts, by: { stage, sourceId?, entityId? }, what, why,
   context, egressHint?, dedupKey }`, carried on the existing `signals[]` as `type:
@@ -173,10 +258,19 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
   from the `research-request`'s explicit `what`/`context`** — **never** arbitrary KB content.
   Least-privilege egress that ships safely **without depending on SPEC-0005** (sensitivity is
   hardcoded `internal` today) and is the floor any future egress model preserves.
-- **D6 (escalated) — egress-tier ↔ sensitivity mapping** (proposed `public-web → shareable`,
-  `internal-tenant → up to internal/confidential`, `local-only → any`) **and whether to prioritize
-  SPEC-0005 classification** so public-web researchers can later be fed KB content: **Principal
-  call.** Governs relaxation in Slices 2/3, not Slice 1.
+- **D6 — egress-tier ↔ sensitivity mapping: RESOLVED (Principal, 2026-06-07).** The ratified table —
+  the **policy table the orient gate (D8) and any future egress-content feeding read**:
+  - `public-web` → may read **`shareable`** only
+  - `internal-tenant` → may read **up to `internal` / `confidential`** (the user's own tenant)
+  - `local-only` → may read **any** sensitivity (incl. `confidential`; stays on the local machine)
+
+  Sensitivity labels are **already specced** in **SPEC-0005 (SCOPE-7/8/9/10)** — `shareable` /
+  `internal` / `confidential`, default-`internal`-on-capture, applied at ingestion, propagated
+  most-restrictively. They are **not yet implemented**, so today every source reads as `internal` and the
+  mapping yields the conservative default (public-web reads no content — only the D8 structural floor —
+  while internal-tenant/local-only read in-tier). **Implementing SPEC-0005 SCOPE-7/8/9 is the prioritized
+  work that "lights up" richer public-web reads** through this same mapping — no new researcher code path.
+  This governs both the orient KB-read (RESEARCH-22) and the broader Slice-2/3 egress-content relaxation.
 - **D7 — RESEARCH-11 bounds: enforcement model** (KB-PM-ratified, forks brought by KB-Developer-5):
   every bound is **deterministically ENFORCED at a chokepoint, never prompt-advisory** (the
   self-moderation prompt is a hint *on top of*, not instead of, the hard gate).
@@ -201,7 +295,37 @@ mapping are **escalated to the Principal**, governing Slices 2/3 — not Slice 1
     **tunable**) on total passes (egress) across all researchers, layered on the per-dispatch burst cap
     (24). Enforced at `runResearcher` so it bounds inline dispatch **and** scheduled standing passes; a
     **safety backstop, not a normal-use limit**, and **self-healing** (passes age out of the window).
-    Purely a runaway/volume backstop — *not* the egress↔sensitivity policy (that stays D6, escalated).
+    Purely a runaway/volume backstop — *not* the egress↔sensitivity policy (that's the D6 mapping, now resolved).
+- **D8 — orient/awareness boundary (the warm-start carve-out to D6a; KB-Lead, reads the now-resolved D6 mapping):**
+  the strict D6a floor ("the Web researcher never reads KB content") is **narrowed, not removed** so
+  researchers can warm-start (RESEARCH-21/22) without reopening the exfiltration hole D6a closed. The rule:
+  - **Query-construction invariant preserved.** KB/audit content MAY inform **target selection + dedup**
+    during the bounded orient phase, but the **outbound query is still built via `buildOutboundQuery`**
+    (request + a model-chosen *angle*) — **never KB content verbatim**. A guard rejects a raw-KB-dump
+    query. *Orientation chooses WHAT to chase; it never becomes the egress string.*
+  - **Past-run awareness (RESEARCH-21) ships unconditionally** — a researcher reading **its own** prior
+    findings/citations/harvested-sources adds no exfiltration surface (its outputs are already
+    externally-sourced or its own notes), so it is independent of the D6 mapping.
+  - **KB-state awareness (RESEARCH-22b) is governed by ONE tier↔sensitivity gate for ALL researchers —
+    not a per-template carve-out — wired against the live classification from day one.** The orient
+    KB-read obeys RESEARCH-8 (content only at-or-below the researcher's tier) via a single
+    `sensitivityAllowsOrientRead(tier, sourceSensitivity)` check. Two layers:
+    - **Structural floor (tier-agnostic, always available):** the subject + its direct-neighbor **entity
+      names/labels** are graph **metadata, not content**, so every researcher — public-web included — gets
+      this much warm-start *now* (enough to dedup "which entities do we already cover" and steer to gaps).
+    - **Content reads (sensitivity-gated, auto-lighting):** note bodies / claim text are admitted only when
+      the gate passes. Because sensitivity is **hardcoded `internal`** today (no SPEC-0005), the gate is
+      **conservatively scoped by default** — internal-tenant / local-only read in-tier content now;
+      public-web falls back to the structural floor. **When SPEC-0005 (SCOPE-7/8/9) classification is
+      implemented and sources carry real labels, the SAME gate automatically admits the now-`shareable`
+      content to public-web (etc.) — it "just lights up" for research, no new code path.** The gate's
+      **policy table is the now-RESOLVED D6 mapping** (public-web→shareable, internal-tenant→internal/
+      confidential, local-only→any) applied to the **SPEC-0005 SCOPE-7 labels** — one table, read by both
+      the orient gate and any future egress-content feeding.
+  - **Budget separation.** Orient reads are non-egress and draw on a **separate `orientBudget`**, never
+    the egress `maxToolCalls` — awareness is cheap and bounded, and never starves the actual research.
+  - **Gate-2 (KB-QD) reviews** the query-construction guard + the public-web read-limit as the
+    load-bearing security boundary before RESEARCH-22 implementation lands.
 
 ### RESEARCH-20 (WS4) — forks: **RESOLVED (KB-Lead, 2026-06-06)**
 
@@ -212,6 +336,44 @@ Both forks were brought with recommendations by KB-Developer-5 and **ratified by
 
 ## 9. Changelog
 
+- 2026-06-07 — **D6 RESOLVED — egress-tier↔sensitivity mapping ratified** (Principal). The long-escalated
+  mapping is locked: `public-web → shareable`, `internal-tenant → up to internal/confidential`,
+  `local-only → any`. This is the **policy table** the RESEARCH-22 orient gate (D8) and any future
+  egress-content feeding read. Clarification captured the same turn: **SPEC-0005 already exists and specs
+  the sensitivity model** (SCOPE-7/8/9/10 — labels, default-`internal`-on-capture, ingestion-time
+  classification, most-restrictive propagation); it is **not yet implemented**, so today all sources read
+  `internal` and the mapping yields the conservative default. **Implementing SCOPE-7/8/9 is the prioritized
+  parallel track** that lights up richer public-web orient reads through this same mapping — *not* new spec
+  authoring (the earlier "draft SPEC-0005" framing was a misread; the spec is in `specs/product/`).
+- 2026-06-07 — **RESEARCH-21/22: warm-start orientation — researchers are KB- & past-run-aware, not
+  cold-start** (Principal). Today every pass starts cold: the researcher reads neither the KB nor its own
+  history, builds one outbound query from the request string, and re-finds the same first-page hits run
+  after run (the only persistent state is the request-level dedup `seen.json` + the ceiling `passes.json`
+  — neither a working memory). Two new `must` requirements close that: **RESEARCH-21** — a **persistent
+  per-researcher "field notebook"** under `.kb/research/<id>/`, **derived from its own audit lineage**,
+  recording what it returned (findings + citations), the subjects/areas it has drilled (timestamped, stale
+  re-opens), and the sources/domains harvested (a **derived index**, not a second truth; bounded +
+  self-healing). **RESEARCH-22** — an **orient phase before egress**: bounded **local (non-egress)** reads
+  of (a) the field notebook and (b) the **in-tier** KB neighborhood (EXPLORE read path, SPEC-0039) produce
+  a **gap/angle + dedup set** so the pass **expands & enriches** toward **net-new** sources instead of
+  re-finding basics. **Awareness is paid from a separate `orientBudget`**, never the egress `maxToolCalls`
+  (Principal ask: "don't burn query budget maintaining awareness"). **Egress invariant preserved (new
+  decision D8 narrows D6a):** orientation chooses a target/angle — the outbound query is still built via
+  `buildOutboundQuery` (request + angle, never a verbatim KB dump). The KB-state read is governed by **one
+  tier↔sensitivity gate for ALL researchers** (`sensitivityAllowsOrientRead`, D8), **not a per-template
+  carve-out** (Principal: "don't scope this to just web — make it work for all using the sensitivity"): a
+  **tier-agnostic structural floor** (neighbor entity names) gives every researcher warm-start now, and
+  **sensitivity-gated content reads auto-light when SPEC-0005 classification lands** ("just lights up for
+  research, no new code path"). Because sensitivity is hardcoded `internal` today, the gate is
+  **conservatively scoped by default** (internal-tenant / local-only read in-tier content now; public-web
+  sits on the structural floor) — so **RESEARCH-21/22 do NOT block on SPEC-0005**; implementing SPEC-0005
+  SCOPE-7/8/9 classification is the prioritized parallel work that *unlocks* richer public-web reads
+  through the **now-resolved D6 mapping** this gate reads. **Past-run awareness (RESEARCH-21)
+  ships unconditionally** (own outputs, no exfil surface). **Gate-2 (KB-QD)** reviews the
+  query-construction guard + the sensitivity gate as the load-bearing boundary. Also: **per-pass `maxToolCalls` default raised 15 → 25** (the warm start spends
+  egress on expansion, not basics; the Principal had flagged pushing it past 15) — `researchers.ts:54`,
+  registry-default + code-skill tests updated, RESEARCH-15/17 text refreshed. **Spec-only — no
+  implementation until this lands + clears gate-2** (the orient/egress boundary is security-load-bearing).
 - 2026-06-06 — **RESEARCH-20: Code researcher grep → agentic (WS4)** (Principal app-review #7 — the Code
   researcher's run was a literal "code" string-dump, "extremely low effort"; KB-Lead root-caused it as a
   deterministic `git grep` with no model/SDK/budget). New requirement: the Code researcher must **reason
