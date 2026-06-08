@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
-import { createDevLog, noopDevLog, vaultLogDir, createVaultDevLog, createAppDevLog, readRecentDevLogEntries } from './devlog';
+import { createDevLog, noopDevLog, vaultLogDir, createVaultDevLog, createAppDevLog, readRecentDevLogEntries, type EmitRecord } from './devlog';
 
 const NOW = (): string => '2026-06-02T00:00:00.000Z';
 
@@ -124,6 +124,45 @@ describe('sink locations (SPEC-0030 OBS-2)', () => {
     await log.flush();
     expect(await pathExists(path.join(dir, 'logs', 'app.log'))).toBe(true);
     expect((await readLines(path.join(dir, 'logs'), 'app.log'))[0]).toMatchObject({ event: 'boot.init-pipeline-failed', level: 'error' });
+  });
+
+  // OBS-19 (regression): the app-level sink MUST exist after init even with zero log lines written.
+  // Forensics 2026-06-07 found `<userData>/logs/` absent in a live install, so the crash breadcrumb
+  // had nowhere to land. Before the eager fix this assertion fails (file created lazily on 1st write).
+  it('createAppDevLog creates the app.log sink EAGERLY on boot, before any write (OBS-19)', async () => {
+    const log = createAppDevLog(dir, { now: NOW });
+    await log.flush(); // no log call at all — eager creation is enqueued on the tail flush awaits
+    expect(await pathExists(path.join(dir, 'logs', 'app.log'))).toBe(true);
+  });
+
+  it('eager:true creates the sink file with no write; default (lazy) does not (OBS-19)', async () => {
+    const lazy = createDevLog({ dir: path.join(dir, 'lazy'), now: NOW });
+    await lazy.flush();
+    expect(await pathExists(path.join(dir, 'lazy', 'pipeline.log'))).toBe(false);
+
+    const eager = createDevLog({ dir: path.join(dir, 'eager'), eager: true, now: NOW });
+    await eager.flush();
+    expect(await pathExists(path.join(dir, 'eager', 'pipeline.log'))).toBe(true);
+  });
+
+  // OBS-18 support: the onEmit breadcrumb observer sees each line's last {scope,runId,itemId} — from
+  // both `.child()` bindings and per-call fields — so a crash handler can name the last item touched.
+  it('onEmit observes the last scope/runId/itemId from bindings AND per-call fields (OBS-18)', async () => {
+    const seen: EmitRecord[] = [];
+    const log = createDevLog({ dir, now: NOW, onEmit: (r) => seen.push(r) }).child({ scope: 'claims', runId: 'R7' });
+    log.info('claims.start', { itemId: 'E42' });
+    log.error('decompose.failed', { itemId: 'E99' });
+    await log.flush();
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toMatchObject({ event: 'claims.start', scope: 'claims', runId: 'R7', itemId: 'E42', level: 'info' });
+    expect(seen[1]).toMatchObject({ event: 'decompose.failed', scope: 'claims', runId: 'R7', itemId: 'E99', level: 'error' });
+  });
+
+  it('a throwing onEmit never breaks logging (OBS-18 best-effort)', async () => {
+    const log = createDevLog({ dir, now: NOW, onEmit: () => { throw new Error('observer fault'); } });
+    expect(() => log.info('still.logs', { a: 1 })).not.toThrow();
+    await log.flush();
+    expect((await readLines(dir))[0]).toMatchObject({ event: 'still.logs' });
   });
 });
 
