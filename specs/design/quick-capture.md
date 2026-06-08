@@ -83,15 +83,20 @@ the same language as everything else, just bigger and barer.
 
 The submit affordances (`⏎ save` ghost button + the `⏎ save · esc dismiss` hint + the live status note)
 form a **command bar** that must be **always on-screen** — it can never scroll off, even when pasted/typed
-content overflows the compact ~200px window. Today it can: the field is `flex: 1` with no `min-height: 0`,
-so a tall paste pushes the `.qcap-row` below the fold (`qcap.css:71` row / `:32` field) and the user loses
-the save/cancel actions. That contradicts the command-bar intent (§2): the actions are the instrument's
-**fixed footer rail**, not the tail of a scrolling document.
+content overflows the compact ~200px window. Today it can: the sheet is `height: 100vh` (`qcap.css:10`,
+filling the fixed `SHEET_HEIGHT` window — `quickCaptureElectron.ts:11-12`) and `.qcap-row` (`qcap.css:71`,
+markup `qcapSheet.ts:28`, `#qcapSave` at `:31`) is a **plain flex child**, so the `flex: 1` field
+(`qcap.css:32`) grows and squeezes/clips the action row below the fold — the user loses save/cancel. That
+contradicts the command-bar intent (§2): the actions are the instrument's **fixed footer rail**, not the
+tail of a scrolling document.
 
-- **The field flexes and scrolls; the command bar is pinned.** The intake field becomes the *only* region
-  that gives: `flex: 1 1 auto` **+ `min-height: 0`** so it can shrink below its content, and the textarea
-  **scrolls internally** (`overflow-y: auto`) instead of growing the sheet. The command bar is **`flex: none`**
-  — it never shrinks and always sits at the bottom edge of the slot.
+- **The field flexes and scrolls; the command bar is its own fixed band.** Recommended structure: make
+  `.qcap-sheet` a **grid `auto 1fr auto`** (head / field / command-bar) so the action row is a fixed band
+  that never moves and the field is the only region that gives — textarea **scrolls internally**
+  (`overflow-y: auto`; field `min-height: 0` so it shrinks below content). Equivalent flex expression: keep
+  the flex column but set the field `flex: 1 1 auto` **+ `min-height: 0`** and the command bar **`flex: none`**
+  (a `position: sticky; bottom: 0` footer over the surface bg also pins it). All three keep the bar on the
+  bottom edge; the **grid is the clearest** "the command bar is its own band" (KB-Lead's steer).
 - **A ruled footer, flat (no shadow).** The command bar gets a **1px `--viz-rule` hairline along its TOP**
   (the footer rail of the instrument — mirrors the §2 top ember hairline at the head), with the existing
   `8px` rhythm above it. When the field scrolls under it, the rule is the clean visual anchor — never a
@@ -107,14 +112,16 @@ the save/cancel actions. That contradicts the command-bar intent (§2): the acti
 ## 3b. Screenshot capture — an alternate intake source (QCAP-13)
 
 A second way to *load the slot*: capture a screenshot straight into the field, alongside type / paste /
-clipboard. Three modes — **Full screen · Region · Window** — that trigger the macOS `screencapture` path.
-This stays an **instrument**, not a generic camera widget.
+clipboard. The sheet is text/clipboard-only today (`qcapSheet.ts:76` payload `{ kind: 'text', text }`; no
+capture affordance). Three modes — **Full screen · Region · Window** — map to the macOS `screencapture`
+path **`-x` / `-i` / `-w`** respectively (DEV-1 plumbs the spawn + permission). This stays an **instrument**,
+not a generic camera widget.
 
 - **A spare icon-button cluster, not a toolbar.** Three **ghost icon-buttons** (`.viz-btn--ghost`,
   icon-only) grouped at the **trailing edge of the `.qcap-head`** (next to the source tag) — thin,
-  instrument-line template glyphs (a full-frame rect, a crop/region rect, a window rect), **never** a
-  📷/camera emoji or a filled "Capture" button. They're secondary to the field: muted `--viz-ink-muted`
-  ink at rest, ember on hover/focus (the `.viz-focusable` ring), so the keyboard intake stays the hero.
+  instrument-line template glyphs (a full-frame rect → `-x`, a crop/region rect → `-i`, a window rect →
+  `-w`), **never** a 📷/camera emoji or a filled "Capture" button. They're secondary to the field: muted
+  `--viz-ink-muted` ink at rest, ember on hover/focus (the `.viz-focusable` ring), keyboard intake stays hero.
 - **Captured image = a "loaded" state, tagged by source.** A screenshot loads into the slot the same way
   clipboard/selection do (§3, QCAP-7): the field enters `is-loaded` with a **`screenshot` source tag** —
   the identical `.viz-chip` + left `--viz-rule` tick pattern as `clipboard` / `selection` (one consistent
@@ -143,6 +150,10 @@ This stays an **instrument**, not a generic camera widget.
 - **Minimal menu.** Click the item → it **opens the same sheet** (primary action). The dropdown is
   spare, instrument-plain: `Capture  ⌥Space` · a muted `last saved <ago>` line (trust signal) ·
   `Settings…` · `Quit`. No marketing, no nav — it's a control, not a launcher.
+- **Window-restore item (QCAP-11) follows the same convention.** The tray "Show KB-App" restore
+  (plumbing — DEV-1, `quickCaptureElectron.ts:132`) is a plain menu item labeled **`Show KB-App`** in the
+  same spare instrument voice (no icon, no badge) — sits above `Settings…`. Label convention only; no other
+  visual from design.
 
 ## 5. The "saved" confirm — the ember acknowledge (non-modal — QCAP-10)
 
@@ -247,3 +258,8 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
   as clipboard/selection); Screen-Recording denial reuses the **brass** denied-permission steer (NOT
   oxide; the locked `macos-permission.md §3/§6` semantic, ratified on #258) and **degrades to paste-an-
   image**. No new tokens/components — all blessed primitives. Net-new visual → **KB-Lead classify/gate**.
+- 2026-06-08 — **folded in KB-Lead's WS4 file:line evidence:** §3a now cites the exact loci
+  (`qcap.css:10` 100vh / `:71` row / `:32` field; `qcapSheet.ts:28/:31`; `quickCaptureElectron.ts:11-12`)
+  and adopts the **grid `auto 1fr auto`** as the recommended footer structure (KB-Lead's steer); §3b maps
+  Full/Region/Window → **`screencapture -x/-i/-w`** and cites the text-only payload (`qcapSheet.ts:76`);
+  added the **QCAP-11** `Show KB-App` tray-restore label convention (§4, plumbing-only).
