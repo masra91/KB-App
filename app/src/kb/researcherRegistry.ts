@@ -80,6 +80,10 @@ function validResearcher(v: unknown): ResearcherConfig | null {
   // `resolveTimeoutMs` supplies the default (and re-clamps on use). (maxToolCalls rides `budget`, which
   // validBudget already preserves — timeoutMs is the top-level field that was being lost.)
   if (typeof o.timeoutMs === 'number' && Number.isFinite(o.timeoutMs) && o.timeoutMs > 0) r.timeoutMs = o.timeoutMs;
+  // Carry the editable orient budget through the read too (RESEARCH-22, warm-start) — same persist-on-read
+  // guard as timeoutMs (#245 class): a valid positive number survives; garbage falls away and
+  // `resolveOrientBudget` supplies the default.
+  if (typeof o.orientBudget === 'number' && Number.isFinite(o.orientBudget) && o.orientBudget > 0) r.orientBudget = o.orientBudget;
   if (Array.isArray(o.topics)) r.topics = o.topics.filter(isNonEmptyString);
   if (Array.isArray(o.allowedTools)) r.allowedTools = o.allowedTools.filter(isNonEmptyString);
   if (o.config && typeof o.config === 'object') r.config = o.config as Record<string, unknown>;
@@ -145,7 +149,7 @@ export async function upsertResearcher(root: string, researcher: ResearcherConfi
 export async function patchResearcher(
   root: string,
   id: string,
-  patch: Partial<Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'prompt' | 'egressTier' | 'scope' | 'budget' | 'timeoutMs' | 'topics' | 'allowedTools' | 'config'>>,
+  patch: Partial<Pick<ResearcherConfig, 'enabled' | 'schedule' | 'posture' | 'prompt' | 'egressTier' | 'scope' | 'budget' | 'timeoutMs' | 'orientBudget' | 'topics' | 'allowedTools' | 'config'>>,
 ): Promise<ResearcherConfig[]> {
   if (!isSafeResearcherId(id)) throw new Error(`refusing to patch researcher with unsafe id: ${JSON.stringify(id)}`);
   const researchers = await readResearcherRegistry(root);
@@ -159,6 +163,7 @@ export async function patchResearcher(
     if (patch.scope !== undefined) r.scope = patch.scope;
     if (patch.budget !== undefined) r.budget = patch.budget;
     if (patch.timeoutMs !== undefined) r.timeoutMs = patch.timeoutMs;
+    if (patch.orientBudget !== undefined) r.orientBudget = patch.orientBudget;
     if (patch.topics !== undefined) r.topics = patch.topics;
     if (patch.allowedTools !== undefined) r.allowedTools = patch.allowedTools;
     if (patch.config !== undefined) r.config = patch.config;

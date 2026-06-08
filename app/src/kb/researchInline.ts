@@ -14,7 +14,9 @@ import { makeCliSelfNominate, type NominateRunner } from './researchNominate';
 import { makeWebResearchFn, type WebResearchOptions } from './researchWebAgent';
 import { makeCodeResearchFn, type CodeResearchOptions } from './researchCodeAgent';
 import { makeM365ResearchFn, type M365ResearchOptions } from './researchM365Agent';
-import { runResearcher, type ResearchFn } from './researchRun';
+import { runResearcher, type ResearchFn, type RunResearcherDeps } from './researchRun';
+import { orient, orientedRequest, makeNeighborhoodReader } from './researchOrient';
+import { sensitivityAllowsOrientRead } from './sensitivity';
 import { raiseResearchEscalation } from './researchEscalate';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 
@@ -63,12 +65,28 @@ export function selectResearchFn(root: string, r: ResearcherConfig, opts: Resear
  * mixed registry routes each researcher to its own runtime behind the one `ResearchFn` seam.
  */
 export function makeResearchDeps(root: string, opts: ResearchDepsOptions = {}): DispatchDeps {
+  const orientRunner = makeOrientRunner(root);
   return {
     selfNominate: makeCliSelfNominate(opts.nominateRunner),
-    run: (r, req) => runResearcher(root, r, req, { research: selectResearchFn(root, r, opts) }),
+    run: (r, req) => runResearcher(root, r, req, { research: selectResearchFn(root, r, opts), orient: orientRunner }),
     escalate: (r, req, depth) => raiseResearchEscalation(root, r, req, depth),
     ...(opts.maxFanout !== undefined ? { maxFanout: opts.maxFanout } : {}),
     ...(opts.globalCeiling !== undefined ? { globalCeiling: opts.globalCeiling } : {}),
+  };
+}
+
+/**
+ * Bind the warm-start orient runner (RESEARCH-22) for `root`: each pass reads the researcher's field
+ * notebook + the subject's KB neighborhood (the structural floor; content gated by SENSE's
+ * `sensitivityAllowsOrientRead`, D8) and folds the chosen gap/angle into the request context (bounded —
+ * the egress adapter's buildOutboundQuery then includes it). Non-egress (a separate orientBudget); degrades
+ * to a cold start on a sparse KB. The recall tools are built once per dispatch (reused across the fan-out).
+ */
+function makeOrientRunner(root: string): NonNullable<RunResearcherDeps['orient']> {
+  const readNeighborhood = makeNeighborhoodReader(root);
+  return async (r, req) => {
+    const res = await orient(root, r, req, { readNeighborhood, gate: sensitivityAllowsOrientRead });
+    return { orientedReq: orientedRequest(req, res.angle), reads: res.reads, angle: res.angle };
   };
 }
 

@@ -26,7 +26,7 @@ import {
   researcherOutcomeLabel,
   researcherRunEligibility,
 } from '../../kb/researchersPanel';
-import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS, MIN_MAX_DEPTH, MAX_MAX_DEPTH } from '../../kb/researchers';
+import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS, MIN_MAX_DEPTH, MAX_MAX_DEPTH, MIN_ORIENT_BUDGET, MAX_ORIENT_BUDGET } from '../../kb/researchers';
 import { navigateTo } from '../nav';
 import { VIEW_REVIEWS } from '../views';
 import type { EgressTier } from '../../kb/researchers';
@@ -117,10 +117,11 @@ function reportLine(r: ResearcherView): string {
   return `<span class="rdesk-report" data-state="${state}">${flag(state)}last dispatch ${when} · ${esc(outcome)}${detail}</span>${open}`;
 }
 
-/** The reach readout (§2/§6). WS3: `reads/pass` (maxToolCalls), `timeout` (RESEARCH-15/18), and now
- *  `depth` (maxDepth — the chain-depth safety bound, RESEARCH-11, Slice-2) are EDITABLE on the WS2
- *  EditableField primitive (`viz-field`); the tool allowlist (SECURITY surface) stays READ-ONLY. Edits
- *  persist via setResearcherConfig (clamped at the IPC boundary). */
+/** The reach readout (§2/§6). WS3 + warm-start: `reads/pass` (maxToolCalls), `orient/pass` (orientBudget —
+ *  the non-egress awareness cap, RESEARCH-22), `timeout` (RESEARCH-15/18), and `depth` (maxDepth — the
+ *  chain-depth safety bound, RESEARCH-11) are all EDITABLE on the WS2 EditableField primitive (`viz-field`);
+ *  the tool allowlist (SECURITY surface) stays READ-ONLY. Edits persist via setResearcherConfig (clamped at
+ *  the IPC boundary). */
 function reachReadout(r: ResearcherView): string {
   const tools = r.allowedTools.length ? r.allowedTools.join(' · ') : 'template default';
   const timeoutMin = Math.max(1, Math.round(r.timeoutMs / 60_000));
@@ -129,6 +130,10 @@ function reachReadout(r: ResearcherView): string {
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">reads / pass</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxcalls viz-focusable" min="${MIN_TOOL_CALLS}" max="${MAX_TOOL_CALLS}" step="1" value="${r.budget.maxToolCalls}" aria-label="Max retrieval calls per pass" />
+      </label>
+      <label class="viz-field rdesk-reach-field">
+        <span class="viz-field__label">orient / pass</span>
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-orient viz-focusable" min="${MIN_ORIENT_BUDGET}" max="${MAX_ORIENT_BUDGET}" step="1" value="${r.orientBudget}" aria-label="Local orient/awareness reads per pass (non-egress)" />
       </label>
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">timeout (min)</span>
@@ -245,6 +250,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const maxCallsEl = li.querySelector<HTMLInputElement>('.researcher-maxcalls')!; // WS3 editable budget
     const timeoutEl = li.querySelector<HTMLInputElement>('.researcher-timeout')!; // WS3 editable session timeout
     const maxDepthEl = li.querySelector<HTMLInputElement>('.researcher-maxdepth')!; // WS3 Slice-2 editable chain-depth bound
+    const orientEl = li.querySelector<HTMLInputElement>('.researcher-orient')!; // warm-start editable orient budget
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
     const reviewLink = li.querySelector<HTMLButtonElement>('.rdesk-review-link'); // only on an escalated last-run
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
@@ -342,6 +348,11 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     maxDepthEl.addEventListener('change', () => {
       const n = Number(maxDepthEl.value);
       if (Number.isFinite(n)) void apply({ id, maxDepth: n });
+      else void render(container); // restore the field to its persisted value
+    });
+    orientEl.addEventListener('change', () => {
+      const n = Number(orientEl.value);
+      if (Number.isFinite(n)) void apply({ id, orientBudget: n });
       else void render(container); // restore the field to its persisted value
     });
 

@@ -139,3 +139,54 @@ describe.skipIf(!gitAvailable)('runResearcher (RESEARCH-5/6)', () => {
     });
   });
 });
+
+describe.skipIf(!gitAvailable)('runResearcher — warm-start orient integration (RESEARCH-21/22)', () => {
+  it('runs orient BEFORE egress, folds its angle into the research request, and is non-egress (separate from the fetch counter)', async () => {
+    await withVault(async (root) => {
+      const order: string[] = [];
+      let receivedContext = '';
+      // The orient dep (opaque to runResearcher): returns the request with an angle folded into context +
+      // a separate `reads` count. It must run BEFORE the egress research call.
+      const orientDep = async (_r: ResearcherConfig, req: ResearchRequest): Promise<{ orientedReq: ResearchRequest; reads: number; angle: string }> => {
+        order.push('orient');
+        return { orientedReq: { ...req, context: `${req.context} · benchmark numbers` }, reads: 3, angle: 'benchmark numbers' };
+      };
+      const research: ResearchFn = async (_r, req) => {
+        order.push('research');
+        receivedContext = req.context; // the egress pass sees the ORIENTED context
+        return { found: true, note: 'finding', citations: ['https://x.com/1'], query: buildOutboundQuery(req) };
+      };
+      const res = await runResearcher(root, web, request, { research, orient: orientDep, now: () => '2026-06-02T00:00:00.000Z' });
+      expect(res.sourceIds.length).toBe(1);
+      // Orient ran first; the egress research call is the ONLY pass (orient is non-egress — it never calls
+      // research, so it can't increment the egress fetch counter; the egress pass runs exactly once).
+      expect(order).toEqual(['orient', 'research']);
+      expect(order.filter((s) => s === 'research')).toHaveLength(1);
+      // The orient-chosen angle reached the egress query through the request context.
+      expect(receivedContext).toContain('benchmark numbers');
+    });
+  });
+
+  it('refreshes the field notebook after a successful pass (RESEARCH-21 — next orient sees the harvested source)', async () => {
+    await withVault(async (root) => {
+      const { readNotebook } = await import('./researchNotebook');
+      const research: ResearchFn = async (_r, req) => ({ found: true, note: 'finding', citations: ['https://arxiv.org/abs/9'], query: req.what });
+      await runResearcher(root, web, request, { research, now: () => '2026-06-02T00:00:00.000Z' });
+      const nb = await readNotebook(root, 'web-1');
+      // The notebook (derived from the just-written `researched` audit) now carries the harvested source.
+      expect(nb.harvested.some((s) => s.url === 'https://arxiv.org/abs/9')).toBe(true);
+      expect(nb.areas.length).toBeGreaterThan(0); // the drilled area is recorded
+    });
+  });
+
+  it('orient is best-effort — a thrown orient never blocks the egress pass (degrades to cold)', async () => {
+    await withVault(async (root) => {
+      const research: ResearchFn = async (_r, req) => ({ found: true, note: 'finding', citations: [], query: req.what });
+      const orientDep = async (): Promise<never> => {
+        throw new Error('orient boom');
+      };
+      const res = await runResearcher(root, web, request, { research, orient: orientDep, now: () => '2026-06-02T00:00:00.000Z' });
+      expect(res.sourceIds.length).toBe(1); // the pass still produced a finding despite orient throwing
+    });
+  });
+});
