@@ -13,6 +13,7 @@ import { Mutex } from './stageLock';
 import { ulid } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { noopDevLog, type DevLog } from './devlog';
+import { reconcileStaleIndexLock, hasLiveIndexHolder, withCanonicalIndexLock } from './canonicalLockHeal';
 
 /** Default same-path collision retries before an item is set aside (ORCH-19). */
 export const DEFAULT_MAX_COLLISION_RETRIES = 3;
@@ -171,28 +172,37 @@ export type AdvanceOutcome = 'advanced' | 'collision';
  * Runs in the canonical worktree (`root`), which is clean + on the canonical branch (stages commit
  * in their own disposable worktrees, never here).
  */
-export async function advanceOrCollide(root: string, workBranch: string, base: string, timeoutMs?: number): Promise<AdvanceOutcome> {
+export async function advanceOrCollide(root: string, workBranch: string, base: string, timeoutMs?: number, healLog?: DevLog): Promise<AdvanceOutcome> {
   // Time-bounded (#163): this runs UNDER the canonical-writer lock, so a git op that blocks
   // indefinitely (root-repo `index.lock` from a zombie git, a credential/editor prompt, a stalled
   // network) would hold the lock forever and wedge the whole pipeline silently. A bounded client
   // turns that into a thrown error → the section's `finally` releases the lock → the stuck-section
   // watchdog (#170) surfaces it, instead of a permanent silent deadlock.
-  const git = boundedGit(root, timeoutMs);
+  const effectiveTimeout = timeoutMs ?? WORKTREE_GIT_TIMEOUT_MS;
+  const git = boundedGit(root, effectiveTimeout);
   const head = (await git.revparse(['HEAD'])).trim();
+  // ORCH-27 acquire-finds-stale: heal a STALE root `index.lock` left by a crashed / boundedGit-timed-out
+  // prior op BEFORE we attempt the index-touching op — otherwise that orphaned lock makes every future
+  // ff/cherry-pick fatal (the #256 wedge). The heal NEVER clears a LIVE lock (triple-gate); a genuinely
+  // live one is kept and our bounded op below fails + surfaces rather than hanging. This is what makes
+  // the systemic-wedge back-off (refined ORCH-26) actually RESUME within a session, not just on restart.
+  await reconcileStaleIndexLock(root, { isLiveInProcHolder: () => hasLiveIndexHolder(root), log: healLog });
+  // Each index-touching op runs as the registered live holder (writes the sidecar so a crash mid-op is
+  // identifiable + clears it on clean success; ORCH-27 gate-1/2).
   if (head === base) {
-    await git.raw('merge', '--ff-only', workBranch); // base unchanged → clean fast-forward
+    await withCanonicalIndexLock(root, 'advance:ff', effectiveTimeout, () => git.raw('merge', '--ff-only', workBranch)); // base unchanged → clean fast-forward
     return 'advanced';
   }
   // Canonical moved since the checkpoint — replay the item's commits onto the new HEAD.
   try {
-    await git.raw('cherry-pick', `${base}..${workBranch}`);
+    await withCanonicalIndexLock(root, 'advance:cherry-pick', effectiveTimeout, () => git.raw('cherry-pick', `${base}..${workBranch}`));
     return 'advanced';
   } catch {
     // Same-path collision: abort to leave the canonical untouched, then signal a retry. A FAILED
     // abort would leave the sole canonical worktree mid-cherry-pick (dirty) — surface it, never
     // swallow, so the stage stops rather than advancing on a corrupt tree (QA #45 note).
     try {
-      await git.raw('cherry-pick', '--abort');
+      await withCanonicalIndexLock(root, 'advance:abort', effectiveTimeout, () => git.raw('cherry-pick', '--abort'));
     } catch (abortErr) {
       throw new Error(
         `canonicalAdvance: cherry-pick conflict could not be aborted — canonical worktree may be left dirty: ${abortErr instanceof Error ? abortErr.message : String(abortErr)}`,
@@ -213,6 +223,8 @@ export interface OptimisticAdvanceOptions {
   maxCollisionRetries?: number;
   /** OBS-7 / #163 watchdog label naming the holder of the canonical-writer lock during the advance. */
   label?: string;
+  /** Dev-log for the ORCH-27 acquire-finds-stale heal to surface a `orch.lock.healed`/`held` event. */
+  log?: DevLog;
 }
 
 export type OptimisticAdvanceResult = 'advanced' | 'noop' | 'setaside';
@@ -241,7 +253,7 @@ export async function withOptimisticAdvance(
     const base = await canonicalHead(opts.root);
     const committed = await prepare(base);
     if (!committed) return 'noop';
-    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base), opts.label ?? 'advance');
+    const outcome = await opts.lock.run(() => advanceOrCollide(opts.root, opts.workBranch, base, undefined, opts.log), opts.label ?? 'advance');
     if (outcome === 'advanced') return 'advanced';
     // 'collision' → re-sync to the moved canonical and retry the whole item.
   }
@@ -260,6 +272,8 @@ export interface ConcurrentAdvanceOptions {
   maxCollisionRetries?: number;
   /** OBS-7 / #163 watchdog label naming the lock holder during the advance. Defaults to `<stage>:advance`. */
   label?: string;
+  /** Dev-log for the ORCH-27 acquire-finds-stale heal to surface a `orch.lock.healed`/`held` event. */
+  log?: DevLog;
 }
 
 /** Context handed to a `prepare` callback under {@link withConcurrentAdvance}: its PRIVATE ephemeral
@@ -291,7 +305,7 @@ export async function withConcurrentAdvance(
     const outcome = await withEphemeralWorktree(opts.root, opts.stage, base, async ({ wt, workBranch }) => {
       const committed = await prepare({ wt, base });
       if (!committed) return 'noop' as const;
-      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base), opts.label ?? `${opts.stage}:advance`);
+      return opts.lock.run(() => advanceOrCollide(opts.root, workBranch, base, undefined, opts.log), opts.label ?? `${opts.stage}:advance`);
     });
     if (outcome === 'noop') return 'noop';
     if (outcome === 'advanced') return 'advanced';

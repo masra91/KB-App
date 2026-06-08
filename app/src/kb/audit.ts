@@ -34,6 +34,7 @@ export const AUDIT_ACTORS = [
   'intake',
   'watch',
   'output',
+  'maintenance',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
 
@@ -397,6 +398,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // writes an Output note to outputs/ (promoted to main)
     carriesWhy: true, // payload records the question + citations + "Principal saved a recall answer"
     traces: ['AUDIT-1', 'AUDIT-2', 'ASK-6'],
+  },
+  {
+    actor: 'maintenance',
+    what: 'ORCH-27 stale canonical `index.lock` self-heal: records every lock CLEAR with the why — which lock, why it was declared stale (dead pid / leaked-by-self / over-age / external+old), and the sidecar pid/op. Only emitted when a lock is actually cleared (a kept/live lock is dev-log-surfaced, not audited as a mutation). Emitted via appendAuditEvent into the cross-cutting control log so a self-heal surfaces in Activity, never an invisible repository mutation.',
+    emitters: ['canonicalLockHeal'],
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: true, // removes a stale .git/index.lock — a repository-state repair
+    carriesWhy: true, // payload records why-stale (the gate that fired) + the lock path + pid/op/age
+    traces: ['AUDIT-1', 'AUDIT-2', 'AUDIT-11', 'ORCH-27'],
   },
 ] as const;
 

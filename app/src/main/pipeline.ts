@@ -33,6 +33,7 @@ import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
 import { readConversionCounts } from '../kb/conversionCounts';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
+import { reconcileStaleIndexLock, hasLiveIndexHolder } from '../kb/canonicalLockHeal';
 import { promote } from '../kb/staging';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
@@ -174,6 +175,15 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     log.child({ scope: 'pipeline' }).error('startup.worktree-provision-failed', { itemId: vaultPath, err });
     throw err; // unchanged behavior — but no longer silent
   }
+  // ORCH-27 STARTUP-RECONCILE: heal a STALE canonical `index.lock` left by a prior crash/timed-out op
+  // BEFORE any stage drains — otherwise that orphaned lock makes every advance fatal (the #256 wedge).
+  // At startup no advance is in flight, so a present lock is never our live op; the triple-gate still
+  // refuses to clear a genuinely-live external lock (fail safe). Best-effort: a heal failure (or a
+  // kept live lock) must never block startup — the draining advance will surface a still-held lock.
+  await reconcileStaleIndexLock(stagingWt, {
+    isLiveInProcHolder: () => hasLiveIndexHolder(stagingWt),
+    log: log.child({ scope: 'lock' }),
+  }).catch((err) => log.child({ scope: 'lock' }).error('startup.lock-reconcile-failed', { itemId: vaultPath, err }));
   // The shared serialized canonical writer for this vault (§5). The watchdog logs a loud `lock.stuck`
   // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
   // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
