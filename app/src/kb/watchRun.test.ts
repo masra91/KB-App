@@ -46,10 +46,12 @@ describe.skipIf(!gitAvailable)('reconcileWatchFolder (SPEC-0037 WATCH)', () => {
     return (await readEvents(vault, {})).filter((e) => e.actor === 'watch').map((e) => ({ eventType: e.eventType, payload: e.payload }));
   }
 
-  it('copies a stable text file in as a PRIMARY source — and the original is UNTOUCHED (WATCH-4 non-destructive)', async () => {
+  it('copies a stable text file in as a PRIMARY source — and the original is UNTOUCHED (WATCH-4, copy opt-out)', async () => {
     const file = path.join(watched, 'note.md');
     await fs.writeFile(file, '# Meeting\n\nShipped WATCH core.');
-    const res = await reconcileWatchFolder(vault, cfg(), { vaultRoot: vault, now: T });
+    // copy mode (consume:false) — the WATCH-16 default DRAINS (moves out); this asserts the never-destroy
+    // copy path explicitly. (Drain is covered in watchConsume.test.ts.)
+    const res = await reconcileWatchFolder(vault, cfg({ consume: false }), { vaultRoot: vault, now: T });
     expect(res.ingested).toBe(1);
     expect(res.sourceIds.length).toBe(1);
     // NON-DESTRUCTIVE: the watched original still exists with identical bytes.

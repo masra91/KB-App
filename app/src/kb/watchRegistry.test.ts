@@ -96,7 +96,9 @@ describe('upsertWatchFolder / patchWatchFolder', () => {
       await patchWatchFolder(root, 'deep', { recursive: false, consume: false });
       r = (await readWatchRegistry(root)).find((x) => x.id === 'deep')!;
       expect(r.recursive ?? false).toBe(false); // explicit false normalizes to absent (both = non-recursive)
-      expect(r.consume ?? false).toBe(false);
+      // WATCH-16: an explicit `consume: false` (the copy opt-out) MUST be PRESERVED across read — drain is
+      // the default, so a folder that opted out of draining can't silently revert to draining.
+      expect(r.consume).toBe(false);
 
       // A hand-edited registry with junk Slice-2 values → ignored, falls back to the safe default.
       await writeWatchRegistry(root, [

@@ -36,13 +36,15 @@ describe('buildWatchFolderViews', () => {
   it('surfaces the Slice-2 opt-ins with a clamped effective depth (WATCH-12/14)', () => {
     const views = buildWatchFolderViews(
       [
-        folder({ id: 'flat' }), // defaults → non-recursive
-        folder({ id: 'deep', recursive: true, maxDepth: 99, consume: true }), // cap clamps 99 → 32
+        folder({ id: 'flat' }), // defaults → non-recursive, DRAINS (WATCH-16) → leaveOriginals false
+        folder({ id: 'deep', recursive: true, maxDepth: 99, consume: true }), // cap clamps 99 → 32; drains
+        folder({ id: 'copy', consume: false }), // WATCH-16 copy opt-out → leaveOriginals true
       ],
       new Set(),
       {},
     );
-    expect(views[0]).toMatchObject({ id: 'flat', recursive: false, maxDepth: 0, consume: false });
-    expect(views[1]).toMatchObject({ id: 'deep', recursive: true, maxDepth: 32, consume: true });
+    expect(views[0]).toMatchObject({ id: 'flat', recursive: false, maxDepth: 0, leaveOriginals: false });
+    expect(views[1]).toMatchObject({ id: 'deep', recursive: true, maxDepth: 32, leaveOriginals: false });
+    expect(views[2]).toMatchObject({ id: 'copy', leaveOriginals: true });
   });
 });

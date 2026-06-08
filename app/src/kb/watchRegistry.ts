@@ -42,7 +42,7 @@ function validWatchFolder(v: unknown): WatchFolderConfig | null {
   // default (non-recursive / non-consume) rather than entering the walk/move path malformed.
   if (o.recursive === true) c.recursive = true;
   if (typeof o.maxDepth === 'number' && Number.isFinite(o.maxDepth) && o.maxDepth >= 0) c.maxDepth = Math.floor(o.maxDepth);
-  if (o.consume === true) c.consume = true;
+  if (typeof o.consume === 'boolean') c.consume = o.consume; // WATCH-16: preserve an explicit `false` (the copy opt-out), not just `true`
   if (isNonEmptyString(o.archiveDir)) c.archiveDir = o.archiveDir;
   if (o.config && typeof o.config === 'object') c.config = o.config as Record<string, unknown>;
   return c;

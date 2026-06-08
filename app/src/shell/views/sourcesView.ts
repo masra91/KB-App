@@ -366,7 +366,7 @@ function watchStrip(w: WatchFolderView): string {
         <div class="watch-rules rdesk-reach" role="group" aria-label="Folder rules">
           <button type="button" class="viz-btn watch-recursive" role="switch" aria-checked="${w.recursive ? 'true' : 'false'}">Include subfolders: ${w.recursive ? 'on' : 'off'}</button>
           <label class="rdesk-field viz-field watch-depth-wrap"${w.recursive ? '' : ' hidden'}><span class="rdesk-field-label viz-field__label viz-signage">depth</span><input type="number" class="watch-depth viz-field__input viz-field__input--numeric viz-focusable" min="0" max="32" step="1" inputmode="numeric" value="${esc(String(w.maxDepth))}" aria-label="Subfolder depth limit" /></label>
-          <button type="button" class="viz-btn watch-consume" role="switch" aria-checked="${w.consume ? 'true' : 'false'}">Move out after import: ${w.consume ? 'on' : 'off'}</button>
+          <button type="button" class="viz-btn watch-consume" role="switch" aria-checked="${w.leaveOriginals ? 'true' : 'false'}">Leave originals in place: ${w.leaveOriginals ? 'on' : 'off'}</button>
         </div>
       </div>
       <div class="rdesk-footer viz-ruled">
@@ -381,7 +381,7 @@ function watchStrip(w: WatchFolderView): string {
       <div class="rdesk-confirm viz-confirm watch-consume-confirm" hidden>
         <p class="rdesk-confirm-msg viz-confirm__msg watch-consume-confirm-msg viz-body"></p>
         <button type="button" class="viz-btn watch-consume-confirm-cancel">Cancel</button>
-        <button type="button" class="viz-btn watch-consume-confirm-go">Turn on move-out</button>
+        <button type="button" class="viz-btn watch-consume-confirm-go">Start draining</button>
       </div>
       <p class="rdesk-status watch-status viz-body" role="status" aria-live="polite"></p>
     </li>`;
@@ -396,6 +396,7 @@ function watchAddDock(): string {
       <div class="rdesk-tiles" role="group" aria-label="Add a watched folder">
         <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">📂</span><span class="rdesk-tile-label viz-signage">Choose a folder…</span></button>
       </div>
+      <p class="watch-add-hint rdesk-add-hint viz-body">A watched folder <strong>drains like an inbox</strong> — after each file is brought in, the original moves to “.kb-processed/” inside the folder (a copy is kept in your KB first; files are never deleted), so the folder empties. Switch any folder to <em>leave originals in place</em> to keep the source untouched.</p>
       <p class="watch-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
     </div>`;
 }
@@ -485,31 +486,39 @@ function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
       }
     });
 
-    // Move-out / consume (WATCH-14) — enabling MOVES future originals out of the folder, so it is confirmed
-    // (a hard-to-undo, file-relocating change); turning it OFF is safe and applies directly. Non-destructive:
-    // the copy into the KB always happens first and the original is moved (never deleted) to `.kb-processed`.
+    // Drain / leave-originals (WATCH-16) — a watched folder DRAINS by default (empties like an inbox). The
+    // toggle is the copy opt-out. Turning "leave originals" OFF starts draining → MOVES future originals out
+    // of the folder, a hard-to-undo file-relocating change → confirmed. Turning it ON (stop moving, keep the
+    // source folder untouched) is safe → applies directly. Non-destructive either way: the copy into the KB
+    // always happens first; a drained original is moved (never deleted) to `.kb-processed`.
     const consumeEl = li.querySelector<HTMLButtonElement>('.watch-consume');
     const consumeConfirm = li.querySelector<HTMLElement>('.watch-consume-confirm')!;
     const consumeConfirmMsg = li.querySelector<HTMLElement>('.watch-consume-confirm-msg')!;
     const consumeConfirmGo = li.querySelector<HTMLButtonElement>('.watch-consume-confirm-go')!;
     const consumeConfirmCancel = li.querySelector<HTMLButtonElement>('.watch-consume-confirm-cancel')!;
-    const applyConsume = async (value: boolean): Promise<void> => {
+    // `consume:true` = drain (move out); `consume:false` = leave originals (copy).
+    const applyDrain = async (drain: boolean): Promise<void> => {
       status.textContent = 'Saving…';
       try {
-        await window.kbApi.setWatchFolder({ id, consume: value });
+        await window.kbApi.setWatchFolder({ id, consume: drain });
         await render(container);
       } catch {
         status.textContent = 'Could not save the change.';
       }
     };
     consumeEl?.addEventListener('click', () => {
-      if (current.consume) { void applyConsume(false); return; } // turning off — no confirm
-      consumeConfirmMsg.textContent = `Turn on move-out? After a file is imported, the original is moved into “.kb-processed” inside this folder (a copy is kept in your KB first — files are never deleted).`;
-      consumeConfirm.hidden = false;
+      if (current.leaveOriginals) {
+        // currently copy → turning "leave originals" OFF starts draining (moves future originals) → confirm.
+        consumeConfirmMsg.textContent = `Start draining “${current.folderPath}”? After each file is imported its original moves into “.kb-processed” inside the folder (a copy is kept in your KB first — files are never deleted), so the folder empties like an inbox.`;
+        consumeConfirm.hidden = false;
+      } else {
+        // currently draining → turning "leave originals" ON stops moving files (folder untouched) → safe, direct.
+        void applyDrain(false);
+      }
     });
     consumeConfirmGo.addEventListener('click', () => {
       consumeConfirm.hidden = true;
-      void applyConsume(true);
+      void applyDrain(true); // confirmed → start draining
     });
     consumeConfirmCancel.addEventListener('click', () => {
       consumeConfirm.hidden = true;
