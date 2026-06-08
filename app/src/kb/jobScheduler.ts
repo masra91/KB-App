@@ -62,6 +62,13 @@ export class JobScheduler {
     }
   }
 
+  /** Is a job run (or a tick) in flight right now? (SPEC-0045 QUIESCE-3 — "safe to shut down" needs every
+   *  scheduler idle, not just the pipeline stages.) `stop()` halts NEW ticks but an in-flight run finishes;
+   *  this stays true until it does. */
+  busy(): boolean {
+    return this.ticking || [...this.runners.values()].some((r) => r.runner.inFlight);
+  }
+
   /** One scheduler tick: run every enabled+due job whose type resolves, **serially** (v1 runs jobs
    *  serially under the shared lock — SPEC-0023 §2), each single-flight (JOBS-6). Ticks never
    *  overlap (`ticking` guard). Returns the ids it fired (for observability/tests). */

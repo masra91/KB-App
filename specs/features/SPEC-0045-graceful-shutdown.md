@@ -67,12 +67,12 @@ reconciles + resumes — same as any other abrupt stop.
 
 | ID | Priority | Statement (short) | Verify | Traces |
 | -- | -------- | ----------------- | ------ | ------ |
-| QUIESCE-1 | must | A **"Prepare for shutdown"** action (in **Settings**, SPEC-0027; **and** optionally the **tray menu**, SPEC-0038) puts the system into **QUIESCING**: **stop starting new work** — pause new **ingestion** (WATCH/INTAKE/quick-capture enqueue), stop picking up **new pipeline items**, pause **scheduled jobs/researchers** from starting new runs | none-yet | PANEL-1; ORCH-1; JOBS; WATCH; INTAKE |
-| QUIESCE-2 | must | Quiesce is a **drain, not a kill** — **in-flight** stage agents/jobs **finish their current item and commit cleanly** (no half-applied state; the canonical writer completes its current section); not-yet-started items stay **durably queued** for the next start | none-yet | ORCH-12,13,18; CANON-1 |
-| QUIESCE-3 | must | The user sees **live drain progress** — *"N tasks remaining"* across stages + jobs — and a clear, trustworthy **"Safe to shut down"** signal when **queue empty + no agent in flight + writer lock free** (the same OBS status the Status view reads) | none-yet | OBS-5,9; VISION-11 |
-| QUIESCE-4 | must | **Fault-tolerance is unconditional and independent of quiesce:** an **unexpected** stop (sleep, network outage, app/OS crash, force-quit, power loss) is **always safe** — on restart the pipeline **reconciles + resumes** from durable state with **no lost or double-applied work**. Quiesce is the *preferred* path, **never** a correctness prerequisite; interrupting a quiesce is just another abrupt stop | none-yet | ORCH-13,25,26,27; WATCH-5,8; PRIN-1 |
-| QUIESCE-5 | should | Quiesce is **reversible** — a **Resume** un-pauses new work before the user quits, if they change their mind; state returns to normal running | none-yet | AUTO-12 |
-| QUIESCE-6 | should | A **modest, non-major affordance** — lives in Settings (+ optional tray item), **not** a prominent/destructive-styled button; it surfaces the drain status inline and (optionally) offers **"quit when safe"** so the user can walk away and the app quits itself once idle | none-yet | PANEL-1; QCAP-3 |
+| QUIESCE-1 | must | A **"Prepare for shutdown"** action (in **Settings**, SPEC-0027; **and** optionally the **tray menu**, SPEC-0038) puts the system into **QUIESCING**: **stop starting new work** — pause new **ingestion** (WATCH/INTAKE/quick-capture enqueue), stop picking up **new pipeline items**, pause **scheduled jobs/researchers** from starting new runs | test: `quiesceBoundary` (4 producers stopped) + `settingsView` + capture-pause gate (`isActiveQuiescing`) | PANEL-1; ORCH-1; JOBS; WATCH; INTAKE |
+| QUIESCE-2 | must | Quiesce is a **drain, not a kill** — **in-flight** stage agents/jobs **finish their current item and commit cleanly** (no half-applied state; the canonical writer completes its current section); not-yet-started items stay **durably queued** for the next start | test: `quiesceBoundary` (drainers kept running; `remaining` reflects queued); clean-commit = ORCH-12/13 (the QUIESCE-4 floor) | ORCH-12,13,18; CANON-1 |
+| QUIESCE-3 | must | The user sees **live drain progress** — *"N tasks remaining"* across stages + jobs — and a clear, trustworthy **"Safe to shut down"** signal when **queue empty + no agent in flight + writer lock free** (the same OBS status the Status view reads) | test: `quiesceBoundary` + `settingsView` (live N-remaining + safe-when-idle: queues empty + nothing in flight + lock free) | OBS-5,9; VISION-11 |
+| QUIESCE-4 | must | **Fault-tolerance is unconditional and independent of quiesce:** an **unexpected** stop (sleep, network outage, app/OS crash, force-quit, power loss) is **always safe** — on restart the pipeline **reconciles + resumes** from durable state with **no lost or double-applied work**. Quiesce is the *preferred* path, **never** a correctness prerequisite; interrupting a quiesce is just another abrupt stop | test: existing fault-tolerance suite (ORCH-13/25/26/27, WATCH-5/8) — quiesce adds **no new correctness code**; `quiesceBoundary` confirms the drainers are untouched | ORCH-13,25,26,27; WATCH-5,8; PRIN-1 |
+| QUIESCE-5 | should | Quiesce is **reversible** — a **Resume** un-pauses new work before the user quits, if they change their mind; state returns to normal running | test: `quiesceBoundary` + `settingsView` (Resume restarts producers → normal) | AUTO-12 |
+| QUIESCE-6 | should | A **modest, non-major affordance** — lives in Settings (+ optional tray item), **not** a prominent/destructive-styled button; it surfaces the drain status inline and (optionally) offers **"quit when safe"** so the user can walk away and the app quits itself once idle | test: `settingsView` (modest non-danger control + inline drain readout) | PANEL-1; QCAP-3 |
 
 ## 5. User flows
 
@@ -97,6 +97,17 @@ reconciles + resumes — same as any other abrupt stop.
 
 ## 8. Changelog
 
+- 2026-06-08 — **Implemented (Settings affordance + drain controller)** (KB-Developer-2). A quiesce flag on
+  the active pipeline: `quiesceActive()` stops the 4 new-work producers (jobs/researchers/intake/watch
+  schedulers) + the capture path pauses ingestion (QUIESCE-1), while the **drainers** (orchestrator +
+  decompose/connect/claims) keep running so already-captured work finishes + commits via the existing
+  ORCH-12/13 guarantees (QUIESCE-2). `quiesceStatusForActive()` composes "**N remaining**" + a "**Safe to
+  shut down**" signal from the real queues + each stage/scheduler's new `busy()` + the writer-lock state
+  (QUIESCE-3). `resumeActive()` restarts the producers (QUIESCE-5). A modest, non-danger **Settings →
+  Shutdown** control with a live drain readout (QUIESCE-6). **Zero new correctness code** — quiesce leans
+  entirely on the fault-tolerance floor (QUIESCE-4: existing ORCH-13/25/26/27 + WATCH-5/8); the boundary
+  test confirms the drainers are untouched. `Verify` graduated for all six. The **optional tray** item
+  (QUIESCE-1/6) is a fast-follow, coordinated with the QCAP-14 tray-status seam (DEV-7/DEV-1).
 - 2026-06-08 — created (draft) per the Principal: a **"Prepare for shutdown"** that drains in-flight work
   + pauses new work + signals **"safe to shut down"**, in Settings (+ optional tray), a *modest* control.
   Framed as a **convenience on top of unconditional fault-tolerance** (QUIESCE-4) — it leans on the

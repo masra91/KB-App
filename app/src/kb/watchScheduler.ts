@@ -174,6 +174,12 @@ export class WatchScheduler {
     return new Set(this.active.keys());
   }
 
+  /** Is a folder reconcile in flight? (SPEC-0045 QUIESCE-3 — "safe to shut down" needs the watcher idle;
+   *  `stop()` tears down watchers but an in-flight reconcile finishes its copy→ingest first.) */
+  busy(): boolean {
+    return this.reconciling.size > 0;
+  }
+
   /** Close every live watcher (vault switch / shutdown). */
   stop(): void {
     for (const id of [...this.active.keys()]) void this.teardown(id);

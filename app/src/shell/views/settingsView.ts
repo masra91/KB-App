@@ -10,7 +10,7 @@
 // confirm-gate (guarded↔autonomous) re-wires onto the segment, not a removed select.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
-import type { InstanceSettings } from '../../kb/types';
+import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
 const REPLAY_CONFIRM =
@@ -105,11 +105,19 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
           <button id="replay-go" type="button" class="viz-btn viz-btn--danger viz-focusable">Clean &amp; Rebuild</button>
         </div>
         <p id="replay-status" class="settings-note" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
+        <h2>Shutdown</h2>
+        <p class="settings-note">Wind down before you quit: stop starting new work, let what's running finish, and tell you when it's safe to close the app. (Quitting unexpectedly is always safe too — this is just the tidy way.)</p>
+        <button id="quiesce-btn" type="button" class="viz-btn viz-focusable"${vaultPath ? '' : ' disabled'}>Prepare for shutdown</button>
+        <button id="resume-btn" type="button" class="viz-btn viz-focusable" hidden>Resume</button>
+        <p id="quiesce-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>`;
 
     wireAutonomy(container, settings);
     wireVerbosity(container, settings);
     wireReplay(container);
+    void wireQuiesce(container);
   } catch {
     // #145: failed/timed-out load → a retryable error, never an infinite spinner.
     renderLoadError(container, '<h1>⚙️ Settings</h1>', () => void mountSettings(container));
@@ -279,4 +287,79 @@ function wireReplay(container: HTMLElement): void {
       cancel.disabled = false;
     }
   });
+}
+
+// SPEC-0045 QUIESCE — "Prepare for shutdown": a modest control + a live drain readout. Module-scoped poll
+// handle so a re-mount (view toggle) never leaks a second interval.
+let quiescePoll: ReturnType<typeof setInterval> | null = null;
+function stopQuiescePoll(): void {
+  if (quiescePoll) {
+    clearInterval(quiescePoll);
+    quiescePoll = null;
+  }
+}
+
+async function wireQuiesce(container: HTMLElement): Promise<void> {
+  const btn = container.querySelector<HTMLButtonElement>('#quiesce-btn');
+  const resumeBtn = container.querySelector<HTMLButtonElement>('#resume-btn');
+  const status = container.querySelector<HTMLElement>('#quiesce-status');
+  if (!btn || !resumeBtn || !status) return;
+  stopQuiescePoll(); // re-mount: drop any prior interval
+
+  const render = (s: QuiesceStatus | null): void => {
+    if (!s || !s.quiescing) {
+      btn.hidden = false;
+      resumeBtn.hidden = true;
+      status.textContent = '';
+      stopQuiescePoll();
+      return;
+    }
+    btn.hidden = true;
+    resumeBtn.hidden = false;
+    status.textContent = s.safe ? `✅ ${s.detail}` : s.detail;
+    if (s.safe) stopQuiescePoll(); // idle — nothing left to poll for
+  };
+  const startPoll = (): void => {
+    stopQuiescePoll();
+    quiescePoll = setInterval(async () => {
+      try {
+        render(await window.kbApi.quiesceStatus());
+      } catch {
+        /* keep the last readout */
+      }
+    }, 1000);
+    quiescePoll.unref?.();
+  };
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try {
+      const s = await window.kbApi.quiesce();
+      render(s);
+      if (s.quiescing && !s.safe) startPoll();
+    } catch {
+      status.textContent = 'Could not start shutdown preparation.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  resumeBtn.addEventListener('click', async () => {
+    resumeBtn.disabled = true;
+    try {
+      render(await window.kbApi.resume());
+    } catch {
+      status.textContent = 'Could not resume.';
+    } finally {
+      resumeBtn.disabled = false;
+    }
+  });
+
+  // Reflect current state on mount (e.g. quiesce was started, then the user navigated away + back).
+  try {
+    const s = await window.kbApi.quiesceStatus();
+    render(s);
+    if (s?.quiescing && !s.safe) startPoll();
+  } catch {
+    /* leave the default Prepare button */
+  }
 }

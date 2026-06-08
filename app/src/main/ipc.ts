@@ -33,6 +33,10 @@ import {
   runActiveIntakeConnectorNow,
   setActiveSourceSensitivity,
   getActiveSourceSensitivities,
+  quiesceActive,
+  resumeActive,
+  quiesceStatusForActive,
+  isActiveQuiescing,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { noteRendererError } from './telemetry';
@@ -63,6 +67,7 @@ import type {
   AnswerReviewResult,
   PipelineControlRequest,
   PipelineControlResult,
+  QuiesceStatus,
   FullReplayResult,
   AskRequest,
   AskResult,
@@ -191,6 +196,11 @@ export function registerIpc(): void {
   ipcMain.handle('kb:capture', async (_e, req: CaptureRequest): Promise<CaptureResult> => {
     const orch = activePipeline();
     if (!orch) return NO_PIPELINE;
+    // SPEC-0045 QUIESCE-1: new ingestion is paused while preparing for shutdown — surface a clear reason,
+    // never a silent drop. The user can Resume to capture again.
+    if (isActiveQuiescing()) {
+      return { ...NO_PIPELINE, message: 'Preparing to shut down — new capture is paused. Resume to capture again.' };
+    }
 
     const payloads: CapturePayload[] = [];
     for (const input of req.inputs) {
@@ -506,6 +516,11 @@ export function registerIpc(): void {
       return {};
     }
   });
+
+  // SPEC-0045 QUIESCE — graceful "Prepare for shutdown": pause new work + drain / resume / poll status.
+  ipcMain.handle('kb:quiesce', async (): Promise<QuiesceStatus> => quiesceActive());
+  ipcMain.handle('kb:resume', async (): Promise<QuiesceStatus> => resumeActive());
+  ipcMain.handle('kb:quiesceStatus', async (): Promise<QuiesceStatus | null> => quiesceStatusForActive());
 }
 
 /** Deterministic recall result for the CI e2e happy-path (KB_ASK_E2E_STUB). Never used in prod. */

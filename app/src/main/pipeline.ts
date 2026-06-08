@@ -78,7 +78,7 @@ import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } 
 import type { Review } from '../kb/reviews';
 import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult } from '../kb/types';
+import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
@@ -107,6 +107,7 @@ interface ActivePipeline {
   watch: WatchScheduler; // SPEC-0037: live folder watchers (stable files → primary sources, non-destructive)
   lock: Mutex;
   log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
+  quiescing: boolean; // SPEC-0045 QUIESCE: true once "Prepare for shutdown" paused new work (drain in progress)
 }
 
 let active: ActivePipeline | null = null;
@@ -141,6 +142,90 @@ function stopAllStages(a: ActivePipeline): void {
   a.researchers.stop();
   a.intake.stop();
   a.watch.stop(); // SPEC-0037: close all live folder watchers
+}
+
+// ── SPEC-0045 QUIESCE — graceful shutdown (drain, don't kill) ───────────────────────────────────
+//
+// Quiesce stops the NEW-WORK PRODUCERS (the 4 schedulers + capture enqueue) but leaves the pipeline
+// DRAINERS (orchestrator + decompose/connect/claims) running, so already-captured work flows to clean
+// completion + commit (QUIESCE-2) — leaning entirely on the existing fault-tolerance floor (QUIESCE-4:
+// no new correctness code). It is a convenience: an abrupt stop mid-drain is just another restart the
+// reconcile/idempotency guarantees already cover.
+
+/** Stop only the new-work producers — the scheduled triggers. An in-flight run finishes (the scheduler
+ *  `busy()` stays true until it does); only NEW runs are halted. The drainers keep processing the queue. */
+function stopProducers(a: ActivePipeline): void {
+  a.jobs.stop(); // SPEC-0023 — no new scheduled jobs
+  a.researchers.stop(); // SPEC-0028 — no new scheduled researcher passes
+  a.intake.stop(); // SPEC-0041 — no new feed pulls
+  a.watch.stop(); // SPEC-0037 — no new folder watching (restart-reconcile catches anything that lands while down)
+}
+
+/** Restart the new-work producers (Resume / normal start). */
+function startProducers(a: ActivePipeline): void {
+  a.jobs.start();
+  a.researchers.start();
+  a.intake.start();
+  a.watch.start();
+}
+
+/** Enter QUIESCING (QUIESCE-1): pause new ingestion + scheduled work; the pipeline keeps draining. */
+export async function quiesceActive(): Promise<QuiesceStatus> {
+  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No knowledge base is open.' };
+  if (!active.quiescing) {
+    active.quiescing = true;
+    stopProducers(active);
+    active.log.child({ scope: 'quiesce' }).info('quiesce.start', { why: 'Principal requested Prepare for shutdown' });
+  }
+  return (await quiesceStatusForActive())!;
+}
+
+/** Leave QUIESCING (QUIESCE-5, reversible): un-pause — restart producers, resume normal running. */
+export async function resumeActive(): Promise<QuiesceStatus> {
+  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No knowledge base is open.' };
+  if (active.quiescing) {
+    active.quiescing = false;
+    startProducers(active);
+    active.log.child({ scope: 'quiesce' }).info('quiesce.resume', { why: 'Principal resumed before quitting' });
+  }
+  return (await quiesceStatusForActive())!;
+}
+
+/** Is the active pipeline quiescing? (the capture path checks this to pause new ingestion, QUIESCE-1). */
+export function isActiveQuiescing(): boolean {
+  return active?.quiescing === true;
+}
+
+/**
+ * The live drain status (QUIESCE-3): `remaining` = queued items across stages + anything in flight
+ * (a busy stage or scheduler counts its current item); `safe` = quiescing AND fully idle — every stage
+ * queue empty, no stage/scheduler in flight, AND the canonical writer lock free (so the last commit is
+ * done). The same primitives the Status view reads — no separate source of truth.
+ */
+export async function quiesceStatusForActive(): Promise<QuiesceStatus | null> {
+  if (!active) return null;
+  const { stagingWt, lock, orch, decompose, connect, claims, jobs, researchers, intake, watch, quiescing } = active;
+  const [archiveQ, decompQ, connectQ, claimsQ] = await Promise.all([
+    readQueue(stagingWt),
+    readDecomposeQueue(stagingWt),
+    readConnectQueue(stagingWt),
+    readClaimsQueue(stagingWt),
+  ]);
+  const queued = archiveQ.length + decompQ.length + connectQ.length + claimsQ.length;
+  const stagesBusy = [orch, decompose, connect, claims].filter((s) => s.busy()).length;
+  const schedulersBusy = [jobs, researchers, intake, watch].filter((s) => s.busy()).length;
+  const lockBusy = lock.state().held ? 1 : 0;
+  // `remaining` counts queued items + everything in flight; the lock being held means a commit is still
+  // landing, so it must clear before "safe" even if the queues read empty mid-write.
+  const inFlight = stagesBusy + schedulersBusy + lockBusy;
+  const remaining = queued + inFlight;
+  const safe = quiescing && remaining === 0;
+  const detail = !quiescing
+    ? 'Running normally.'
+    : safe
+      ? 'Safe to shut down — all work finished.'
+      : `Finishing up — ${remaining} task${remaining === 1 ? '' : 's'} remaining…`;
+  return { quiescing, remaining, safe, detail };
 }
 
 /**
@@ -254,7 +339,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // checks watched folders against the REAL vault root (vaultPath), never staging. Inert until the
   // Principal registers + enables a folder in `.kb/watch/registry.json`.
   const watch = new WatchScheduler(stagingWt, vaultPath, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, log };
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, log, quiescing: false };
   const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
   // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
   // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
