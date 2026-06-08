@@ -146,6 +146,19 @@ describe('Lineage (AUDIT-6)', () => {
     c.querySelector<HTMLButtonElement>('[data-act="clear-lineage"]')!.click();
     expect(c.querySelector('.lineage-panel')).toBeNull();
   });
+
+  // Regression (WS3 P1, KB-Lead defect): the "trace origin" action was an orphan <li> child flush to the
+  // entry's left edge, off-center from the padded head. It must sit in the shared, aligned header row.
+  it('keeps the trace-origin action in the aligned header row, not orphaned on the entry', async () => {
+    const c = await mount();
+    const row = c.querySelector('.activity-entry-row');
+    expect(row).not.toBeNull();
+    const traceBtn = c.querySelector<HTMLButtonElement>('.activity-trace')!;
+    // trace lives inside the header row next to the toggle — not a bare child of the <li>.
+    expect(traceBtn.closest('.activity-entry-row')).toBe(row);
+    expect(traceBtn.parentElement).not.toBe(traceBtn.closest('.activity-entry'));
+    expect(row!.querySelector('.activity-entry-head')).not.toBeNull();
+  });
 });
 
 describe('Read-only + XSS-safety (AUDIT-8)', () => {

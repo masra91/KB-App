@@ -628,9 +628,13 @@ option { background: var(--card); color: var(--fg); }
    theme) and the raw JSON a light <pre>. Make them theme-native. */
 .activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
 .activity-entry { border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; }
+/* Header row: the expand toggle fills, the trace-origin action trails — both vertically centered so the
+   trace link is no longer an orphan flush against the entry's left edge (it can't nest in the head button). */
+.activity-entry-row { display: flex; align-items: center; }
 .activity-entry-head {
   appearance: none;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -643,6 +647,9 @@ option { background: var(--card); color: var(--fg); }
   cursor: pointer;
 }
 .activity-entry-head:hover { background: var(--hover); }
+/* Trailing trace-origin action — inset to the entry's right edge (matching the head's 0.7rem padding),
+   centered with the toggle; specificity beats button.link's padding:0. */
+.activity-entry-row .activity-trace { flex: none; padding: 0 0.7rem; white-space: nowrap; }
 .activity-entry-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .activity-actor-badge { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; flex: none; }
 .activity-summary { flex: 1; }
