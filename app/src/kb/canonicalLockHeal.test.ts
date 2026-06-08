@@ -12,7 +12,10 @@ import {
   GATE3_STALE_AGE_MS,
   type ClassifyInputs,
 } from './canonicalLockHeal';
+import simpleGit from 'simple-git';
 import { writeLockMeta, readLockMeta, type CanonicalLockMeta } from './canonicalLockMeta';
+import { advanceOrCollide } from './canonicalAdvance';
+import { ensureGitIdentity } from './vault';
 
 const NOW = 1_700_000_000_000;
 const base = (over: Partial<ClassifyInputs> = {}): ClassifyInputs => ({
@@ -177,5 +180,60 @@ describe('ORCH-27 reconcileStaleIndexLock (wiring + heal)', () => {
     const v = await reconcileStaleIndexLock(root, { isLiveInProcHolder: () => false, pidAlive: () => false, now: () => NOW });
     expect(v.action).toBe('clear');
     await expect(fs.access(lock)).rejects.toThrow(); // wedge cleared → a fresh acquire can now take index.lock
+  });
+});
+
+describe('ORCH-27 acquire-finds-stale through the REAL advanceOrCollide path (integration, real git)', () => {
+  let dir: string;
+  afterEach(async () => {
+    if (dir) await rmTempDir(dir);
+  });
+
+  const seedRepo = async (): Promise<string> => {
+    const root = path.join(dir, 'repo');
+    await fs.mkdir(root, { recursive: true });
+    const git = simpleGit(root);
+    await git.init(['--initial-branch=canon']);
+    await ensureGitIdentity(git);
+    await fs.writeFile(path.join(root, 'README'), 'seed\n');
+    await git.raw('add', '-A');
+    await git.commit('seed');
+    return root;
+  };
+
+  // The #256 wedge end-to-end: a stale index.lock present at advance time would make `merge --ff-only`
+  // fatal forever. With ORCH-27's acquire-finds-stale pre-check, advanceOrCollide heals the leaked lock
+  // (gate-2: sidecar pid==self with no live op) and the advance SUCCEEDS. A leaked-by-self sidecar is a
+  // deterministic stale signal (no dependence on pid-liveness probing or the ps scan).
+  it('REGRESSION #256: a leaked index.lock present before the advance is healed → advance succeeds', async () => {
+    dir = await makeTempDir('kb-heal-int-');
+    const root = await seedRepo();
+    const git = simpleGit(root);
+    const base = (await git.revparse(['HEAD'])).trim();
+
+    // A prepared work branch one commit ahead of base (what a stage's off-lock prepare produces).
+    const wt = path.join(root, '.kb', 'cache', 'wt-work');
+    await git.raw('worktree', 'add', '--force', '-B', 'kb/work', wt, base);
+    const wtGit = simpleGit(wt);
+    await ensureGitIdentity(wtGit);
+    await fs.writeFile(path.join(wt, 'a.txt'), 'hello\n');
+    await wtGit.raw('add', '-A');
+    await wtGit.commit('work commit');
+    await git.raw('worktree', 'remove', '--force', wt);
+
+    // Plant a STALE lock + a leaked-by-self sidecar (pid==self, old) — the post-crash on-disk state.
+    const lockPath = await resolveIndexLockPath(root);
+    await fs.writeFile(lockPath, '', 'utf8');
+    await writeLockMeta(root, { pid: process.pid, startedAt: Date.now() - 10 * 60_000, op: 'advance', timeoutMs: 20_000 });
+
+    // The REAL advance path: pre-check heals the leaked lock, then the ff-advance succeeds.
+    const outcome = await advanceOrCollide(root, 'kb/work', base);
+
+    expect(outcome).toBe('advanced');
+    await expect(fs.access(lockPath)).rejects.toThrow(); // the stale lock is gone (healed, then cleanly released)
+    expect(await readLockMeta(root)).toBeNull(); // sidecar cleared after the clean advance
+    // HEAD advanced to include the work commit (the wedge is resolved, not merely cleared).
+    expect((await git.revparse(['HEAD'])).trim()).not.toBe(base);
+    expect((await git.raw('log', '--oneline')).includes('work commit')).toBe(true);
   });
 });
