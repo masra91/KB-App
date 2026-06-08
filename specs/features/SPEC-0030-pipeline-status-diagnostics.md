@@ -175,7 +175,7 @@ consistent with §7 "local on-disk only"):
   low-overhead constraint (KB-Lead's careful-review flag) and pollute the span store. (b) OBS-21 heap
   snapshot fires **at most once per leak episode** above a high RSS-growth threshold (snapshots are
   hundreds of MB / multi-second), re-arming after a plateau. No new deps (Electron `crashReporter` + node
-  `v8`/`process`/`fs`). Verify columns updated (SPECSYS-7). PR #TBD → KB-QD gate-2.
+  `v8`/`process`/`fs`). Verify columns updated (SPECSYS-7). PR #265 → KB-QD gate-2.
 - 2026-06-07 — **OBS-18..22: crash capture + memory/leak telemetry (the blind-spot a real crash
   exposed).** A packaged-app crash (`EXC_BREAKPOINT`/`SIGTRAP` on a V8 `ThreadPoolForegroundWorker`,
   ~2h uptime) was **undiagnosable** because the app captured nothing. Forensics (KB-Lead, from the macOS
