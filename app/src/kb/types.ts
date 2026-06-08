@@ -283,6 +283,20 @@ export interface OpenCitationResult {
   reason?: 'no-vault' | 'invalid-ref' | 'open-failed';
 }
 
+/**
+ * Result of a WORKING-ZONE-AWARE source open (SPEC-0018 REVIEW-17 / PRIN-24). A review's source may be
+ * staging-only (raised mid-pipeline, not yet promoted to the user's Obsidian vault), so the open
+ * resolves the source's location at click-time and NEVER fires a dead `obsidian://` link:
+ *  - `opened`   — the source is on `main`; the `obsidian://open` deep link was handed to the OS.
+ *  - `staging`  — staging-only (not in the vault yet) → the caller shows an in-app / "still processing"
+ *                 state (it already holds the human source title for that surface — PRIN-24).
+ *  - `missing`  — not found in either zone (deleted / stale ref) → no open, no dead link.
+ *  - `no-vault` / `invalid-ref` / `open-failed` — no active vault, a bad/escaping ref, or the OS had
+ *                 no `obsidian://` handler. */
+export interface OpenSourceRefResult {
+  status: 'opened' | 'staging' | 'missing' | 'no-vault' | 'invalid-ref' | 'open-failed';
+}
+
 // --- Control Panel · Jobs (SPEC-0027 PANEL-2; over the SPEC-0023 registry) ---
 
 /** Last-run summary for a job, derived from its run-state journal (JOBS-7/8) for display. */
@@ -583,6 +597,9 @@ export interface KbApi {
   // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian (obsidian:// deep-link). The
   // renderer passes the citation's vault-relative `ref`; main resolves + contains it, then opens it.
   openCitation(ref: string): Promise<OpenCitationResult>;
+  // SPEC-0018 REVIEW-17: open a review candidate's SOURCE, working-zone-aware — Obsidian if it's on
+  // `main`, else a `staging`/`missing` status the view surfaces (never a dead `obsidian://` link).
+  openSourceRef(ref: string): Promise<OpenSourceRefResult>;
   // Control Panel · Jobs (SPEC-0027 PANEL-2)
   listJobs(): Promise<JobView[]>;
   setJobConfig(patch: JobConfigPatch): Promise<JobView[]>;
