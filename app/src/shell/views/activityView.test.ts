@@ -4,7 +4,7 @@
 // stays default). The IPC is mocked (`window.kbApi.activityFeed/activityLineage`); we assert the
 // rendered DOM, the drill-down, the filter→re-query, lineage, and read-only/escaping behavior.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mountActivity } from './activityView';
+import { mountActivity, lineageHtml } from './activityView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { ActivityFeedResult, Lineage, KbApi } from '../../kb/types';
 
@@ -274,5 +274,29 @@ describe('Activity view · #145 load resilience (no infinite spinner on a hung I
     c.querySelector<HTMLButtonElement>('.load-retry')!.click();
     await vi.advanceTimersByTimeAsync(0);
     expect(c.querySelectorAll('.activity-entry')).toHaveLength(2);
+  });
+});
+
+describe('lineageHtml — SENSE-10 read-only sensitivity chip (AUDIT-8-safe)', () => {
+  const base: Lineage = { subjectId: 'E1', kind: 'entity', sources: ['01JSRC1', '01JSRC2'], events: [{ ts: 't', actor: 'archivist', eventType: 'archived', subjects: {}, payload: {}, provenance: { file: 'x', line: 0 } } as never], decisions: [] };
+
+  it('renders a read-only .viz-chip with the label + provenance per source that has one', () => {
+    const html = lineageHtml(base, { '01JSRC1': { sensitivity: 'confidential', by: 'connector' } });
+    expect(html).toContain('class="viz-chip sensitivity-chip"');
+    expect(html).toContain('>confidential<');
+    expect(html).toContain('set by connector'); // provenance in the tooltip
+    // no edit control — the observatory stays read-only (AUDIT-8)
+    expect(html).not.toMatch(/data-act="(edit|set)-sensitivity"/);
+    expect(html).not.toContain('<input');
+  });
+
+  it('omits the chip for a source with no readable label (degrades cleanly)', () => {
+    const html = lineageHtml(base, { '01JSRC1': { sensitivity: 'internal', by: 'default' } }); // 01JSRC2 absent
+    expect((html.match(/sensitivity-chip/g) ?? []).length).toBe(1); // only the source that had one
+  });
+
+  it('escapes an untrusted custom label (no HTML injection)', () => {
+    const html = lineageHtml(base, { '01JSRC1': { sensitivity: '"><img src=x onerror=alert(1)>', by: 'principal' } });
+    expect(html).not.toContain('<img');
   });
 });

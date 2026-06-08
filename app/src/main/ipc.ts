@@ -32,6 +32,7 @@ import {
   setActiveIntakeConnectorConfig,
   runActiveIntakeConnectorNow,
   setActiveSourceSensitivity,
+  getActiveSourceSensitivities,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { noteRendererError } from './telemetry';
@@ -491,6 +492,15 @@ export function registerIpc(): void {
       return await setActiveSourceSensitivity(sourceId, label);
     } catch {
       return { ok: false, reason: 'error' };
+    }
+  });
+
+  // SPEC-0043 SENSE-10: read sources' current sensitivity (+ provenance) for the Control-Panel display.
+  ipcMain.handle('kb:getSourceSensitivities', async (_e, sourceIds: string[]) => {
+    try {
+      return await getActiveSourceSensitivities(sourceIds);
+    } catch {
+      return {};
     }
   });
 }

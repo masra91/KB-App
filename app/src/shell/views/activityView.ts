@@ -14,7 +14,7 @@ import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
 import { formatTimestamp } from '../formatTime';
 import { stageDisplayName } from '../stageLabels';
-import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor } from '../../kb/types';
+import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor, SourceSensitivity } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
 let entries: ActivityFeedEntry[] = [];
@@ -24,6 +24,7 @@ let knownActors: string[] = []; // the actor universe, captured from the first u
 let filter: ActivityFilter = {};
 let expanded = new Set<string>(); // entry ids currently drilled-down to raw events
 let lineage: Lineage | null = null;
+let sourceSensitivities: Record<string, SourceSensitivity> = {}; // SENSE-10: per-source label for the lineage chips (read-only)
 let loading = false;
 let errorMsg = '';
 
@@ -35,6 +36,7 @@ export function mountActivity(container: HTMLElement): void {
   filter = {};
   expanded = new Set();
   lineage = null;
+  sourceSensitivities = {};
   loading = true;
   errorMsg = '';
   container.innerHTML = `
@@ -125,6 +127,16 @@ async function traceLineage(container: HTMLElement, id: string): Promise<void> {
     lineage = { subjectId: id, kind: 'unknown', sources: [], events: [], decisions: [] };
     errorMsg = err instanceof Error ? err.message : String(err);
   }
+  // SENSE-10 (read-only, AUDIT-8-safe): fold each source's current sensitivity label in for the chip. A
+  // failed read just omits the chip — never blocks the lineage panel.
+  sourceSensitivities = {};
+  if (lineage.sources.length > 0) {
+    try {
+      sourceSensitivities = await withTimeout(window.kbApi.getSourceSensitivities(lineage.sources));
+    } catch {
+      /* no chips this render */
+    }
+  }
   renderLineage(container);
 }
 
@@ -140,7 +152,7 @@ function renderBody(container: HTMLElement): void {
 }
 function renderLineage(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#activityLineage');
-  if (el) el.innerHTML = lineage ? lineageHtml(lineage) : '';
+  if (el) el.innerHTML = lineage ? lineageHtml(lineage, sourceSensitivities) : '';
 }
 
 export function controlsHtml(actors: readonly string[], f: ActivityFilter): string {
@@ -214,11 +226,21 @@ export function rawEventHtml(ev: AuditEvent): string {
   return `<pre class="activity-event"><code>${esc(json)}</code></pre><div class="activity-event-src">${esc(ev.provenance.file)}:${ev.provenance.line}</div>`;
 }
 
-export function lineageHtml(l: Lineage): string {
+/** A source's sensitivity as a read-only chip (SENSE-10): the current label, tag-styled, with its origin
+ *  in the tooltip. Read-only by design — the Activity view is the observatory (AUDIT-8); editing lives in
+ *  a config surface (fast-follow). Omitted when the source has no readable label. */
+function sensitivityChip(s: SourceSensitivity | undefined): string {
+  if (!s) return '';
+  return ` <span class="viz-chip sensitivity-chip" data-sensitivity="${esc(s.sensitivity)}" title="sensitivity: ${esc(s.sensitivity)} (set by ${esc(s.by)})">${esc(s.sensitivity)}</span>`;
+}
+
+export function lineageHtml(l: Lineage, sensitivities: Record<string, SourceSensitivity> = {}): string {
   if (l.events.length === 0) {
     return `<div class="lineage-panel"><div class="lineage-head"><strong>Lineage:</strong> <code>${esc(l.subjectId)}</code> <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="clear-lineage" aria-label="Close lineage panel">close</button></div><p class="activity-note">No lineage found for this id.</p></div>`;
   }
-  const sources = l.sources.length ? `<div class="lineage-sources activity-note">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<code>${esc(s)}</code>`).join(', ')}</div>` : '';
+  const sources = l.sources.length
+    ? `<div class="lineage-sources activity-note">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<span class="lineage-source"><code>${esc(s)}</code>${sensitivityChip(sensitivities[s])}</span>`).join(', ')}</div>`
+    : '';
   const timeline = l.events
     .map((e) => `<li class="lineage-step"><span class="activity-actor-badge viz-chip" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="lineage-step-ts">${esc(formatTimestamp(e.ts))}</span></li>`)
     .join('');
