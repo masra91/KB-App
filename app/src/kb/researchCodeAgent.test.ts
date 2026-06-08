@@ -227,7 +227,7 @@ describe('countAttributedCodeFacts — the RESEARCH-20/17 depth metric on the co
     '- `makeWebResearchFn` builds the production ResearchFn at src/kb/researchWebAgent.ts:250.',
     '- The egress gate `isAllowedUrl` rejects non-public hosts at src/kb/researchWebAgent.ts:190.',
     '- The per-pass budget is enforced in the fetch handler (src/kb/researchWebAgent.ts:314).',
-    '- The default budget is 15 reads, set at src/kb/researchers.ts:54.',
+    '- The default budget is 25 reads, set at src/kb/researchers.ts:54.',
   ].join('\n');
   // A THIN précis / grep dump (the defect): bare `path:line` lines with no prose, or prose with no cite.
   const grepDump = [

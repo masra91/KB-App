@@ -46,12 +46,14 @@ export interface ResearcherBudget {
   maxDepth: number;
 }
 
-// Default per-pass retrieval budget. `maxToolCalls` raised 8 → 15 (RESEARCH-17): the live test showed
-// 8 fetches yield only a thin précis — the secondary source (and the claims Decompose derives from it)
-// needs more reads to reach genuine depth. User-editable per researcher (RESEARCH-15), and the Principal
-// expects to push it past 15; the global per-Instance ceiling (RESEARCH_INSTANCE_CEILING) still backstops
-// total egress regardless of per-researcher budgets.
-export const DEFAULT_RESEARCHER_BUDGET: ResearcherBudget = { maxToolCalls: 15, maxDepth: 2 };
+// Default per-pass retrieval budget. `maxToolCalls` raised 8 → 15 (RESEARCH-17) → 25 (RESEARCH-22): the
+// live tests showed thinner reads yield only a précis — the secondary source (and the claims Decompose
+// derives from it) needs more reads to reach genuine depth, and the warm-start orient phase (RESEARCH-22)
+// spends its egress on EXPANDING past what the KB already knows rather than re-establishing basics, so the
+// floor is higher. This counts EGRESS reads only — the orient phase's KB-/audit-local reads are bounded
+// separately (RESEARCH-22) and do NOT draw down this budget. User-editable per researcher (RESEARCH-15);
+// the global per-Instance ceiling (RESEARCH_INSTANCE_CEILING) still backstops total egress regardless.
+export const DEFAULT_RESEARCHER_BUDGET: ResearcherBudget = { maxToolCalls: 25, maxDepth: 2 };
 
 // Per-pass session timeout for the live SDK research session (the `sendAndWait` idle wait). This is a
 // STUCK-SESSION BACKSTOP, not a cost bound: the agent bills tokens/tools — bounded by `maxToolCalls`
