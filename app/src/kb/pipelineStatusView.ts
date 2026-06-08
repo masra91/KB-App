@@ -11,6 +11,10 @@ import type { StageId } from './pipelineStages';
 // modules — and thus never `node:v8`/`node:fs` — into its bundle (the #248 renderer boundary).
 import type { MemorySample, MemTrend } from './memorySampler';
 import type { CrashBreadcrumb } from './crashCapture';
+// Value import of the pure item-name guard (PRIN-24). `pipelineStatusLabels` type-imports `OverallState`
+// from THIS module, but that back-edge is `import type` (erased at compile) — so the runtime graph stays
+// acyclic (view → labels → sourceDoc) and both modules remain renderer-safe (no node builtins).
+import { displayItemName } from './pipelineStatusLabels';
 
 /**
  * OBS-22 — the Status view's memory/health readout: the current RSS/heap sample, the leak/long-run
@@ -140,7 +144,9 @@ export interface StageRoster {
 
 /** Build the in-flight carriage roster (SPEC-0032 VIZ-2, pure). Each stage's queue items become
  *  carriages; `active = busy && index < cap` (the drain processes `queue[0..cap)`), and `sinceTs` is
- *  the drain start for active carriages only. `name` falls back to the id. */
+ *  the drain start for active carriages only. `name` is the upstream-resolved source title; a still-
+ *  unresolved source id collapses to the neutral generic (PRIN-24 — `displayItemName` never prints a
+ *  ULID), so no surface reading this roster can leak an id. */
 export function buildInFlightRoster(stages: StageRoster[]): InFlightItem[] {
   const out: InFlightItem[] = [];
   for (const s of stages) {
@@ -148,7 +154,7 @@ export function buildInFlightRoster(stages: StageRoster[]): InFlightItem[] {
       const active = s.busy && i < s.cap;
       out.push({
         itemId: it.id,
-        name: it.name ?? it.id,
+        name: displayItemName(it.name, it.id),
         stage: s.stage,
         ...(active ? { active: true } : {}),
         ...(active && s.since ? { sinceTs: s.since } : {}),

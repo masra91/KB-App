@@ -212,6 +212,15 @@ describe('buildInFlightRoster (SPEC-0032 VIZ-2)', () => {
     expect(r[0]).toEqual({ itemId: 'S1', name: 'Ada bio', stage: 'decompose', active: true }); // no sinceTs (since null)
   });
 
+  it('PRIN-24: a source-id carriage with no resolved name NEVER surfaces the raw ULID — it collapses to the neutral generic', () => {
+    // Fails-before/passes-after: the old roster did `name ?? id`, putting the bare ULID on The Line.
+    const ulid = '01HZESPVN2X1G3QK9M4T7B8C5D';
+    const r = buildInFlightRoster([{ stage: 'archive', items: [{ id: ulid }], busy: true, cap: 1, since: 'T0' }]);
+    expect(r[0].name).toBe('Untitled source');
+    expect(r[0].name).not.toBe(ulid);
+    expect(r[0].itemId).toBe(ulid); // the id is still carried (behind the label) for the control affordances
+  });
+
   it('flattens multiple stages in order', () => {
     const r = buildInFlightRoster([
       { stage: 'archive', items: [{ id: 'src' }], busy: true, cap: 1, since: 'T0' },

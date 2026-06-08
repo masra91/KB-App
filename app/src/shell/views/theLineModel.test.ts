@@ -201,9 +201,13 @@ describe('theLineModel — carriages (VIZ-2 stepper, VIZ-9 virtualization)', () 
     expect(shown[0].cells).toEqual(stepperCells('decompose'));
   });
 
-  it('falls back to the item id when no name is known', () => {
-    const { shown } = splitCarriages([{ itemId: 'nameless', name: '', stage: 'claims' }], 0);
-    expect(shown[0].name).toBe('nameless');
+  it('surfaces the upstream-resolved name verbatim (the never-a-ULID guard lives in buildInFlightRoster)', () => {
+    // splitCarriages trusts InFlightItem.name — it has already been through displayItemName in
+    // buildInFlightRoster (PRIN-24), so the carriage layer just renders it (a raw ULID id never
+    // reaches here as a name). The id→name resolution + never-a-ULID guard is tested in
+    // pipelineStatusView.test.ts (buildInFlightRoster).
+    const { shown } = splitCarriages([{ itemId: '01HZESPVN2X1G3QK9M4T7B8C5D', name: 'Quarterly report', stage: 'claims' }], 0);
+    expect(shown[0].name).toBe('Quarterly report');
   });
 
   it('collapses beyond MAX_CARRIAGES into a +K more count, keeping active ones on screen (VIZ-9)', () => {

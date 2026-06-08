@@ -284,7 +284,7 @@ export function splitCarriages(
   const ordered = [...items].sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
   const shown = ordered.slice(0, max).map((it) => ({
     itemId: it.itemId,
-    name: it.name || it.itemId,
+    name: it.name, // already the resolved human title (PRIN-24 — buildInFlightRoster guards via displayItemName; never a ULID)
     stage: it.stage,
     stageName: stageDisplayName(it.stage),
     active: Boolean(it.active),
