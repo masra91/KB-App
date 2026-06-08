@@ -52,6 +52,11 @@ export interface StationModel {
   glyph: string;
   stateClass: string;
   queueDepth: number;
+  /** The real backlog here is STUCK (§6 role 3 / VIZ-10 / OBS-11) → the renderer tints the queue brass
+   *  (needs-you). Stuck-coupled, NOT depth: a deep-but-*draining* queue is healthy work (the Principal
+   *  routinely has hundreds in flight), so brass fires only when this stage is blocked/errored or the
+   *  whole pipeline is stalled AND there's a backlog — never on depth alone (the cry-wolf guard). */
+  queueConcerning: boolean;
   setAside: number;
   currentItem?: string;
   /** This station's gauge-rail (volume bar + directional conversion caption). */
@@ -63,17 +68,42 @@ export interface StationModel {
 }
 
 /** A gauge-rail: a volume bar (% of the funnel's peak) + the directional conversion caption to the
- *  next station (§2). The terminal PROMOTE rail carries a completion *ratio*, not a delta. */
+ *  next station (§2). The terminal PROMOTE rail carries a completion *ratio*, not a delta.
+ *  VIZ-10 (funnel-caption legibility): the rail carries the two RAIL-lane numbers — *volume*
+ *  (reached-here, with its bucket noun) and the *conversion projection* (to-next) — each with a
+ *  role-declaring signifier + a decode-on-hover title so a projection can never read as a backlog. */
 export interface FunnelRail {
   stage: StageId;
   count: number;
   /** Bar height as a % of the funnel's peak bucket (so a fan-out reads as the stream *widening*). */
   barPct: number;
-  /** The caption text (`−2 deduped`, `+15 (×3.1)`, `5/10 · 50%`, or ''). Small text → renders in ink. */
+  /** Volume bucket noun (§6 role 1 / VIZ-10) — the count self-describes as `<count> <noun>`
+   *  (`399 entities`). Mirrors `bucketFor`'s stage→bucket mapping. */
+  noun: string;
+  /** Decode-on-hover for the volume count (VIZ-10 `title=`): e.g. `399 entities reached Linking`. */
+  countTitle: string;
+  /** The role-declaring conversion-projection caption to the NEXT stage (§6 role 2 / VIZ-10):
+   *  `→ −23 deduped`, `→ +15 ×3.1 fan-out`, or the terminal `5/10 · 50% complete`; '' when none.
+   *  The leading `→` ties it to the next station so it reads *flows-to-next*, never *waiting-here*.
+   *  Small text → renders in ink/ink-muted (§3). */
   caption: string;
   /** What kind of caption (drives nothing colour-wise on small text; for tests + aria). */
   captionKind: 'reduction' | 'fanout' | 'ratio' | 'none';
+  /** Decode-on-hover for the projection caption (VIZ-10 `title=`): e.g.
+   *  `projected fan-out ×3.1 into Claim extraction`; '' when there's no caption. */
+  captionTitle: string;
 }
+
+/** The volume bucket noun a station's count carries so a bare number self-describes (§6 role 1 /
+ *  VIZ-10): `399 entities`. Mirrors `bucketFor`'s stage→bucket mapping (capture/archive→captured). */
+export const BUCKET_NOUN: Record<StageId, string> = {
+  capture: 'captured',
+  archive: 'captured',
+  decompose: 'candidates',
+  connect: 'entities',
+  claims: 'claims',
+  promote: 'promoted',
+};
 
 // ── Funnel (§2 funnel unit logic; VIZ-3) ──────────────────────────────────────────────────────────
 //
@@ -106,15 +136,17 @@ export function bucketFor(stage: StageId, c: ConversionCounts): number {
   }
 }
 
-/** The directional conversion caption from `a` → `b` (§2). A reduction (dedup) reads `−N deduped`;
- *  a fan-out reads `+N (×ratio)` (or `+N` when the source bucket is 0 and the ratio is undefined);
- *  no change → empty. Uses the typographic minus/multiply so it reads as an engineered caption. */
+/** The directional conversion projection from `a` → `b` (§2 / §6 role 2 / VIZ-10). Each carries a
+ *  role-declaring signifier word so it can never read as a backlog: a reduction (dedup) reads
+ *  `−N deduped`; a fan-out reads `+N ×ratio fan-out` (or `+N fan-out` when the source bucket is 0 and
+ *  the ratio is undefined); no change → empty. Uses the typographic minus/multiply so it reads as an
+ *  engineered caption. `buildFunnel` prepends the leading `→` that ties it to the next station. */
 export function directionalDelta(a: number, b: number): { text: string; kind: FunnelRail['captionKind'] } {
   const d = b - a;
   if (d === 0) return { text: '', kind: 'none' };
   if (d < 0) return { text: `−${a - b} deduped`, kind: 'reduction' };
   const ratio = a > 0 ? b / a : null;
-  return { text: ratio !== null ? `+${d} (×${ratio.toFixed(1)})` : `+${d}`, kind: 'fanout' };
+  return { text: ratio !== null ? `+${d} ×${ratio.toFixed(1)} fan-out` : `+${d} fan-out`, kind: 'fanout' };
 }
 
 /** The terminal completion ratio `promoted/captured · P%` (§2). Guards the 0/0 cold-start → `0/0 · 0%`. */
@@ -132,20 +164,35 @@ export function buildFunnel(c: ConversionCounts): FunnelRail[] {
   return STAGE_ORDER.map((stage, i) => {
     const count = counts[i];
     const barPct = peak > 0 ? Math.round((count / peak) * 100) : 0;
+    const noun = BUCKET_NOUN[stage];
+    // VIZ-10 decode-on-hover: the volume count says exactly what it counts + where (role 1).
+    const countTitle = `${count} ${noun} reached ${stageDisplayName(stage)}`;
     let caption = '';
     let captionKind: FunnelRail['captionKind'] = 'none';
+    let captionTitle = '';
     if (stage === 'promote') {
-      caption = completionRatio(c.promoted, c.captured);
+      // Terminal: the completion ratio (not a delta) — a `complete` signifier, no `→` (no next stage).
+      caption = `${completionRatio(c.promoted, c.captured)} complete`;
       captionKind = 'ratio';
+      captionTitle = `${c.promoted} of ${c.captured} captured sources promoted to main`;
     } else if (stage === 'claims') {
       caption = ''; // claims→promote crosses units; PROMOTE shows the ratio
       captionKind = 'none';
     } else {
-      const d = directionalDelta(count, counts[i + 1]);
-      caption = d.text;
-      captionKind = d.kind;
+      const next = counts[i + 1];
+      const d = directionalDelta(count, next);
+      if (d.kind !== 'none') {
+        // The leading `→` ties the projection to the next station (role 2) — flows-to-next, not waiting-here.
+        caption = `→ ${d.text}`;
+        captionKind = d.kind;
+        const nextName = stageDisplayName(STAGE_ORDER[i + 1]);
+        captionTitle =
+          d.kind === 'fanout'
+            ? `projected fan-out${count > 0 ? ` ×${(next / count).toFixed(1)}` : ''} into ${nextName}`
+            : `projected reduction −${count - next} deduped into ${nextName}`;
+      }
     }
-    return { stage, count, barPct, caption, captionKind };
+    return { stage, count, barPct, noun, countTitle, caption, captionKind, captionTitle };
   });
 }
 
@@ -174,13 +221,17 @@ export function buildStations(v: PipelineStatusView): StationModel[] {
     const st = byStage.get(stage);
     const state: StageState = st?.state ?? 'idle';
     const isSlowest = slow !== null && slow.stage === stage;
+    const queueDepth = st?.queueDepth ?? 0;
     return {
       stage,
       name: stageDisplayName(stage),
       state,
       glyph: STATION_GLYPH[state],
       stateClass: STATION_STATE_CLASS[state],
-      queueDepth: st?.queueDepth ?? 0,
+      queueDepth,
+      // Stuck-coupled, not depth (VIZ-10 / OBS-11): a stuck stage (blocked/error) or an overall-stalled
+      // pipeline WITH a backlog is the needs-you case; a deep draining queue stays calm.
+      queueConcerning: queueDepth > 0 && (state === 'blocked' || state === 'error' || v.stalled),
       setAside: st?.setAside ?? 0,
       ...(st?.currentItem !== undefined ? { currentItem: st.currentItem } : {}),
       rail: rails[i],

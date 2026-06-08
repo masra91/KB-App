@@ -123,6 +123,32 @@
   align-items: flex-start;
   gap: 0.5rem;
 }
+/* VIZ-10 spine legend — a quiet once-per-spine key (progressive disclosure), not a loud banner.
+   Flat ink, no card chrome (§6 guardrail): just a small disclosure under the rule. */
+.line-legend {
+  margin-top: 0.5rem;
+  font-size: 0.62rem;
+}
+.line-legend-key {
+  color: var(--viz-ink-muted);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  list-style: none;
+}
+.line-legend-key::-webkit-details-marker {
+  display: none;
+}
+.line-legend-key::before {
+  content: '＋ ';
+}
+.line-legend[open] .line-legend-key::before {
+  content: '－ ';
+}
+.line-legend-body {
+  margin: 0.3rem 0 0;
+  color: var(--viz-ink-muted);
+  line-height: 1.5;
+}
 .line-station {
   flex: 1 1 0;
   display: flex;
@@ -170,12 +196,37 @@
   transition: height var(--viz-dur-odometer) ease-out;
 }
 .line-rail-bar-slow { background: var(--viz-oxide); } /* slowest station tints oxide (§6, VIZ-4) */
+/* VIZ-10 — two typographic lanes per station so a projection can never read as a backlog:
+   the RAIL lane (volume + projection, flows-through) sits with the gauge bar; the LIVE-STATE
+   cluster (queue + current + set-aside, what's actually here) is pulled into its own lane. */
+.line-station-rail-lane,
+.line-station-live {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.line-station-live {
+  /* a quiet ruled gap separates the live-state cluster from the rail lane above it */
+  margin-top: 0.1rem;
+  padding-top: 0.2rem;
+  border-top: 1px dotted var(--viz-rule);
+  gap: 0.2rem;
+}
 .line-rail-count {
   font-size: 0.8rem;
   color: var(--viz-ink);
 }
+.line-rail-noun {
+  /* the bucket noun (§6 role 1) — a quiet signage micro-unit so the bare count self-describes */
+  font-size: 0.56rem;
+  color: var(--viz-ink-muted);
+  letter-spacing: 0.04em;
+}
 .line-rail-caption {
-  /* directional conversion delta — small text, stays ink-muted (never a state hue, §3) */
+  /* directional conversion projection — small text, stays ink-muted (never a state hue, §3) */
   font-size: 0.68rem;
   color: var(--viz-ink-muted);
 }
@@ -188,6 +239,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The real backlog (§6 role 3) past the concern threshold takes brass — needs-you, consistent with
+   the #192 queue. Brass is a semantic state colour (not a §3 small-text violation): it marks the one
+   number that's actionable, kept distinct from the muted projection it used to be confused with. */
+.line-station-queue.line-queue-concern {
+  color: var(--viz-brass);
 }
 /* Set-aside count under a station — oxide BORDER + ink text (oxide off small text, §3). */
 .line-badge-error {
