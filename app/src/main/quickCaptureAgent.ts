@@ -10,9 +10,11 @@
 //   - QCAP-7  on summon, read the focused-app selection BEFORE the sheet steals focus (Slice 2)
 // QCAP adds NO preservation logic — the sheet delivers onto the SPEC-0013 capture path (QCAP-1).
 import { DEFAULT_QUICK_CAPTURE_ACCELERATOR } from '../kb/instanceConfig';
+import type { AccessibilityStatus } from '../kb/types';
 
 /** The shipped default global hotkey (fork #1 — Principal's pick: ⌥Space). User-configurable (QCAP-6). */
 export { DEFAULT_QUICK_CAPTURE_ACCELERATOR };
+export type { AccessibilityStatus };
 
 const MODIFIERS: Record<string, string> = {
   command: 'Command', cmd: 'Command',
@@ -69,14 +71,6 @@ export function normalizeAccelerator(accel: string): string | null {
 export function normalizeAcceleratorOrDefault(accel: string | undefined | null): string {
   return (typeof accel === 'string' && normalizeAccelerator(accel)) || DEFAULT_QUICK_CAPTURE_ACCELERATOR;
 }
-
-/**
- * macOS Accessibility grant state for selection-capture (QCAP-9, Slice 2):
- *   - `granted`     — the focused-app selection can be read (entitlement held)
- *   - `denied`      — entitlement not granted → degrade to clipboard-only; the sheet steers to Settings
- *   - `unsupported` — no platform support for selection-read (non-macOS / dep absent) → clipboard-only
- */
-export type AccessibilityStatus = 'granted' | 'denied' | 'unsupported';
 
 /** A read of the focused-app text selection at summon time (Slice 2, QCAP-7/9). */
 export interface SelectionRead {

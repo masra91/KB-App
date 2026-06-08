@@ -13,6 +13,7 @@ const kbApi: KbApi = {
   quickCapture: (req) => ipcRenderer.invoke('kb:quickCapture', req),
   quickCaptureClose: () => ipcRenderer.invoke('kb:quickCaptureClose'),
   quickCaptureContext: () => ipcRenderer.invoke('kb:quickCaptureContext'),
+  openAccessibilitySettings: () => ipcRenderer.invoke('kb:openAccessibilitySettings'),
   pipelineStatus: () => ipcRenderer.invoke('kb:pipelineStatus'),
   pipelineStatusView: () => ipcRenderer.invoke('kb:pipelineStatusView'),
   listReviews: () => ipcRenderer.invoke('kb:listReviews'),

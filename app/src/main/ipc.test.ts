@@ -75,6 +75,8 @@ vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 import { registerIpc, initPipeline } from './ipc';
 import { createKb } from '../kb/vault';
 import { obsidianOpenUri } from '../kb/citationLink';
+import { setQuickCaptureAgent } from './quickCaptureService';
+import type { QuickCaptureAgent, SelectionRead } from './quickCaptureAgent';
 import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -93,6 +95,7 @@ beforeEach(async () => {
   state.stagingRoot = null;
   state.clipboard = '';
   state.orch = null;
+  setQuickCaptureAgent(null); // SPEC-0038: reset the QCAP agent singleton between tests (no cross-leak)
   mocks.startPipeline.mockClear();
   mocks.pipelineControl.mockClear();
   mocks.recall.mockClear();
@@ -467,10 +470,43 @@ describe('SPEC-0038 QCAP — quick capture IPC', () => {
     expect(res.ok).toBe(false);
   });
 
-  it('QCAP-7: kb:quickCaptureContext returns the current clipboard for prefill', async () => {
+  it('QCAP-7: kb:quickCaptureContext returns the clipboard + degrades selection when no agent is wired', async () => {
     state.clipboard = 'something I was reading';
+    // No QCAP agent → no summon-time selection → selection null + accessibility unsupported (clipboard-only).
     const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
-    expect(ctx).toEqual({ clipboard: 'something I was reading' });
+    expect(ctx).toEqual({ clipboard: 'something I was reading', selection: null, accessibility: 'unsupported' });
+  });
+
+  it('QCAP-7/9 (Slice 2): kb:quickCaptureContext folds in the agent selection read at summon time', async () => {
+    state.clipboard = 'on the clipboard';
+    // A contract-faithful stub agent: takeSelectionContext returns what the real agent stashed on open().
+    const stub = { takeSelectionContext: (): SelectionRead => ({ status: 'granted', text: 'the highlighted line' }) };
+    setQuickCaptureAgent(stub as unknown as QuickCaptureAgent);
+    const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
+    expect(ctx).toEqual({ clipboard: 'on the clipboard', selection: 'the highlighted line', accessibility: 'granted' });
+  });
+
+  it('QCAP-9 (Slice 2): a denied grant degrades — selection null, accessibility denied, clipboard still flows', async () => {
+    state.clipboard = 'fallback text';
+    const stub = { takeSelectionContext: (): SelectionRead => ({ status: 'denied', text: null }) };
+    setQuickCaptureAgent(stub as unknown as QuickCaptureAgent);
+    const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
+    expect(ctx).toEqual({ clipboard: 'fallback text', selection: null, accessibility: 'denied' });
+  });
+
+  it('QCAP-9 (Slice 2): kb:openAccessibilitySettings deep-links to the Accessibility Privacy anchor', async () => {
+    const res = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openAccessibilitySettings');
+    expect(res.ok).toBe(true);
+    expect(res.usedFallback).toBeUndefined();
+    expect(mocks.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+  });
+
+  it('QCAP-9 (Slice 2): kb:openAccessibilitySettings falls back to the general Privacy pane (never a no-op)', async () => {
+    mocks.openExternal.mockRejectedValueOnce(new Error('anchor not resolvable'));
+    const res = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openAccessibilitySettings');
+    expect(res).toEqual({ ok: true, usedFallback: true });
+    expect(mocks.openExternal).toHaveBeenNthCalledWith(1, 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+    expect(mocks.openExternal).toHaveBeenNthCalledWith(2, 'x-apple.systempreferences:com.apple.preference.security?Privacy');
   });
 
   it('QCAP-2: kb:quickCaptureClose resolves (no-op when no agent is wired)', async () => {
