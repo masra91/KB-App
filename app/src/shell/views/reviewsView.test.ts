@@ -214,6 +214,17 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       expect(openCitation).toHaveBeenCalledWith('sources/2026/06/02/01XYZ/source.md'); // the FILE, not the dir
     });
 
+    it('renders the source TITLE as the link text (PRIN-24) — not a generic label or a raw ULID', async () => {
+      // The live bug: the link showed a generic "Open in Obsidian" and the Principal saw a raw ULID / dead
+      // dir. Fix: the link TEXT is the human source title, opening source.md.
+      setApi(vi.fn(async () => [DISAMBIG_REVIEW]));
+      await mountReviews(root);
+      const links = Array.from(root.querySelectorAll<HTMLButtonElement>('.review-candidate-open'));
+      expect(links.map((l) => l.textContent?.trim())).toEqual(['Fishing trip notes ↗', "Dave's wedding guest list ↗"]);
+      expect(root.textContent).not.toContain('Open in Obsidian'); // generic placeholder gone from visible text
+      expect(links[0].title).toBe('Open in Obsidian'); // survives only as the accessible action label (tooltip)
+    });
+
     it('omits the link for a candidate with no known sourceRel (renders gloss only)', async () => {
       const review: ReviewSummary = {
         ...DISAMBIG_REVIEW,
@@ -228,7 +239,7 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       expect(root.querySelectorAll('.review-candidate-open')).toHaveLength(1); // only the one with a source
     });
 
-    it('esc()s the agent-authored gloss/name — untrusted LLM text never reaches an HTML sink (XSS)', async () => {
+    it('esc()s the source-/agent-derived name/gloss/title — untrusted text never reaches an HTML sink (XSS)', async () => {
       const xss = '<img src=x onerror="window.__pwned=1">';
       const review: ReviewSummary = {
         ...DISAMBIG_REVIEW,
@@ -241,8 +252,12 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       expect(root.querySelector('.review-candidate-gloss img')).toBeNull();
       expect(root.querySelector('.review-candidate script')).toBeNull();
       expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+      // The malicious TITLE renders as inert link text (PRIN-24 fix surface), not DOM.
+      const openBtn = root.querySelector<HTMLButtonElement>('.review-candidate-open');
+      expect(openBtn?.textContent?.trim()).toBe(`${xss} ↗`);
+      expect(openBtn?.querySelector('img')).toBeNull();
       // The malicious sourceRel survives only as an inert data attribute, round-tripped verbatim.
-      expect(root.querySelector<HTMLButtonElement>('.review-candidate-open')?.dataset.rel).toBe('"><script>window.__pwned=1</script>');
+      expect(openBtn?.dataset.rel).toBe('"><script>window.__pwned=1</script>');
     });
 
     it('an ordinary review (no candidates) renders no candidate block — unchanged behaviour', async () => {
