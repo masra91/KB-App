@@ -2,7 +2,7 @@
 // renderer (SPEC-0013 §3). No FS/git.
 import { describe, it, expect } from 'vitest';
 import { deterministicDecide } from './archivist';
-import { renderSourceMd, bodyFor, archivedByLabel, applySensitivityOverrideToSourceMd, deriveSourceTitle } from './sourceDoc';
+import { renderSourceMd, bodyFor, archivedByLabel, applySensitivityOverrideToSourceMd, deriveSourceTitle, pickSourceTitle } from './sourceDoc';
 import type { CapturedMeta } from './ingest';
 
 const textMeta: CapturedMeta = {
@@ -212,5 +212,70 @@ describe('deriveSourceTitle (REVIEW-16 / PRIN-24 — a source reads as a thing, 
   it('returns a neutral generic (never a ULID) for an empty body and no originalName', () => {
     const md = '---\nid: 01ABC\nkind: text\n---\n\n\n';
     expect(deriveSourceTitle(md)).toBe('Untitled source');
+  });
+
+  // PRIN-24 (#292): a persisted/overridden `title:` is the source of truth — it wins over re-derivation
+  // so the human label is stable + Principal-overridable, and resolves identically everywhere.
+  it('prefers a persisted/overridden `title:` over re-derivation', () => {
+    const md = '---\nid: 01ABC\ntitle: Q3 Board Deck\noriginalName: deck-final-v7.pptx\n---\n\n![[raw.pptx]]\n';
+    expect(deriveSourceTitle(md)).toBe('Q3 Board Deck'); // stored title wins over originalName + body
+  });
+  it('decodes a YAML-quoted persisted title', () => {
+    const md = '---\nid: 01ABC\ntitle: "Re: budget #4"\n---\n\nbody\n';
+    expect(deriveSourceTitle(md)).toBe('Re: budget #4');
+  });
+});
+
+describe('pickSourceTitle — the shared write/read derivation ladder (PRIN-24, one wording)', () => {
+  it('originalName → first body line/heading → neutral generic; never a ULID', () => {
+    expect(pickSourceTitle('report.pdf', '![[raw.pdf]]')).toBe('report.pdf');
+    expect(pickSourceTitle(undefined, '# Heading\nbody')).toBe('Heading');
+    expect(pickSourceTitle(undefined, '\n\nfirst real line\nmore')).toBe('first real line');
+    expect(pickSourceTitle(undefined, '')).toBe('Untitled source');
+    expect(pickSourceTitle('   ', '')).toBe('Untitled source'); // a blank originalName falls through
+  });
+  it('truncates a long title to ≤80 chars', () => {
+    const t = pickSourceTitle(undefined, 'x'.repeat(200));
+    expect(t.length).toBeLessThanOrEqual(80);
+    expect(t.endsWith('…')).toBe(true);
+  });
+});
+
+// PRIN-24 (#292 / DESIGN-LEGACY-VIEWS lineage): a source surfaces a HUMAN title in Obsidian, never its
+// ULID. The write-path persists a `title:` Property (self-describing when the Principal OPENS the file
+// in Obsidian — read-time derivation only fixes the app's own UI) + an H1 where the body isn't the
+// Principal's verbatim capture. Reuses the ONE `pickSourceTitle` ladder (no second authoring).
+describe('renderSourceMd — PRIN-24 persisted title + Obsidian surfacing', () => {
+  it('persists a `title:` Property via the shared ladder (text → first body line), never the ULID', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'Call Steve about Q3\n\nmore');
+    expect(md).toContain('title: Call Steve about Q3');
+    expect(md).not.toContain(`title: ${textMeta.id}`); // never the ULID
+  });
+  it('persists `title:` = originalName for a file source', () => {
+    const md = renderSourceMd(fileMeta, deterministicDecide(fileMeta), 'now', '![[raw.png]]');
+    expect(md).toContain('title: screenshot.png');
+  });
+  it('YAML-quotes a title with significant chars', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'Re: budget #4');
+    expect(md).toContain('title: "Re: budget #4"');
+  });
+  it('falls back to the neutral generic title (never a ULID) for an empty body + no originalName', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', '');
+    expect(md).toContain('title: Untitled source');
+  });
+  it('surfaces the title as an H1 for a FILE source (chrome above the opaque embed); the embed is preserved', () => {
+    const md = renderSourceMd(fileMeta, deterministicDecide(fileMeta), 'now', '![[raw.png]]');
+    const body = md.split('\n---\n')[1];
+    expect(body).toContain('# screenshot.png');
+    expect(body).toContain('![[raw.png]]'); // raw embed intact below the heading
+  });
+  it('does NOT inject an H1 into a TEXT source — its body stays the verbatim capture (PRIN-1)', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'Call Steve');
+    expect(md).not.toContain('# Call Steve'); // no heading injected into ground truth
+    expect(md.trimEnd().endsWith('Call Steve')).toBe(true);
+  });
+  it('round-trips: deriveSourceTitle reads back the persisted title (stable, override-ready, one wording)', () => {
+    const md = renderSourceMd(fileMeta, deterministicDecide(fileMeta), 'now', '![[raw.png]]');
+    expect(deriveSourceTitle(md)).toBe('screenshot.png');
   });
 });

@@ -15,24 +15,14 @@ function scalar(s: string): string {
 export const UNTITLED_SOURCE = 'Untitled source';
 
 /**
- * A human-readable title for a source, derived from its `source.md` (which has NO dedicated `title`
- * field). Precedence: the frontmatter `originalName` (file sources) → the first body heading /
- * non-empty line (text + clipped sources) → a neutral generic. NEVER returns a raw ULID — a source
- * surfaced to the Principal must read as a *thing*, not an id (PRIN-24 / REVIEW-16). Truncated so a
- * long first line can't blow out a review row. Pure (no FS) — callers read the file and pass content.
+ * The human-title derivation ladder from STRUCTURED parts (no md parsing): the file's `originalName`
+ * → the first body heading / non-empty line → a neutral generic. NEVER a ULID. Shared by the
+ * write-path (`renderSourceMd`, which persists the result as `title:`) and the read-path
+ * (`deriveSourceTitle`), so a titleless source resolves to the SAME string everywhere (PRIN-24, one
+ * wording — PR #285/#295 lineage). Truncated so a long first line can't blow out a review row.
  */
-export function deriveSourceTitle(sourceMd: string): string {
-  const fmMatch = sourceMd.match(/^---\n([\s\S]*?)\n---/);
-  if (fmMatch) {
-    const m = fmMatch[1].match(/^originalName:[ \t]*(.+)$/m);
-    if (m) {
-      const v = m[1].trim();
-      // `originalName` is `scalar()`-encoded: JSON-quoted only when it carries special chars.
-      const unquoted = v.startsWith('"') ? safeJsonParse(v) ?? v : v;
-      if (unquoted.trim()) return clipTitle(unquoted.trim());
-    }
-  }
-  const body = sourceMd.replace(/^---\n[\s\S]*?\n---\n?/, '');
+export function pickSourceTitle(originalName: string | undefined, body: string): string {
+  if (originalName && originalName.trim()) return clipTitle(originalName.trim());
   for (const line of body.split('\n')) {
     const t = line.replace(/^#+[ \t]*/, '').trim(); // strip a leading markdown heading marker
     if (t) return clipTitle(t);
@@ -40,8 +30,36 @@ export function deriveSourceTitle(sourceMd: string): string {
   return UNTITLED_SOURCE;
 }
 
+/**
+ * A human-readable title for a source, read from its `source.md`. Precedence: a persisted (or
+ * Principal-overridden) frontmatter **`title:`** wins (the stored human label / future override);
+ * else derive via the shared `pickSourceTitle` ladder (originalName → first body line → generic).
+ * NEVER returns a raw ULID — a source surfaced to the Principal must read as a *thing*, not an id
+ * (PRIN-24 / REVIEW-16). Pure (no FS) — callers read the file and pass content.
+ */
+export function deriveSourceTitle(sourceMd: string): string {
+  const fmMatch = sourceMd.match(/^---\n([\s\S]*?)\n---/);
+  const fm = fmMatch ? fmMatch[1] : '';
+  // PRIN-24: the persisted `title:` (written at ingest, or a future Principal override) is the source
+  // of truth — it wins over re-derivation so the human label is stable + overridable.
+  const stored = fm.match(/^title:[ \t]*(.+)$/m);
+  if (stored) {
+    const v = decodeScalar(stored[1]);
+    if (v.trim()) return clipTitle(v.trim());
+  }
+  const on = fm.match(/^originalName:[ \t]*(.+)$/m);
+  const body = sourceMd.replace(/^---\n[\s\S]*?\n---\n?/, '');
+  return pickSourceTitle(on ? decodeScalar(on[1]) : undefined, body);
+}
+
 function clipTitle(s: string): string {
   return s.length > 80 ? s.slice(0, 79) + '…' : s;
+}
+
+/** Decode a `scalar()`-encoded frontmatter value (JSON-quoted only when it carried special chars). */
+function decodeScalar(v: string): string {
+  const t = v.trim();
+  return t.startsWith('"') ? safeJsonParse(t) ?? t : t;
 }
 
 function safeJsonParse(s: string): string | null {
@@ -88,8 +106,15 @@ export function renderSourceMd(
   archivedAt: string,
   body: string,
 ): string {
+  // PRIN-24: persist a human title as a frontmatter Property so the source is self-describing IN
+  // Obsidian (the file's Properties panel), not just in the app's read-time derivation — the
+  // Principal's "god help us Obsidian" is about opening the file, which a read-time derivation never
+  // touches. Same `pickSourceTitle` ladder deriveSourceTitle uses (one wording); never a ULID.
+  // Writing it once at ingest is metadata-at-creation, not a body mutation (PRIN-1 safe).
+  const title = pickSourceTitle(meta.originalName, body);
   const fm: string[] = [
     `id: ${meta.id}`,
+    `title: ${scalar(title)}`,
     `class: ${decision.class}`,
     `kind: ${decision.kind}`,
     `scope: ${decision.scope}`,
@@ -132,5 +157,11 @@ export function renderSourceMd(
     fm.push('    citations:');
     for (const c of r.citations) fm.push(`      - ${scalar(c)}`);
   }
-  return `---\n${fm.join('\n')}\n---\n\n${body}\n`;
+  // PRIN-24: surface the title as an H1 for FILE sources — the body is an opaque `![[raw]]` embed, so a
+  // heading is pure chrome (the raw file is untouched) and the title (= originalName) is DISTINCT from
+  // the embed, so it never duplicates. NOT for text (its body is the Principal's verbatim capture —
+  // PRIN-1 forbids injecting a heading) and NOT for research (its title derives FROM the finding's own
+  // first line, so an H1 would duplicate it — the persisted `title:` Property carries it instead).
+  const surfacedBody = meta.kind === 'file' ? `# ${title}\n\n${body}` : body;
+  return `---\n${fm.join('\n')}\n---\n\n${surfacedBody}\n`;
 }

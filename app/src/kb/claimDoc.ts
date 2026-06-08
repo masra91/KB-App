@@ -43,7 +43,11 @@ export function sourceLink(derivedFrom: string): string {
   const dir = derivedFrom.replace(/\/+$/, '');
   if (!dir) return '';
   const m = dir.match(/(\d{4})\/(\d{2})\/(\d{2})/);
-  const label = m ? `${m[1]}-${m[2]}-${m[3]}` : dir.split('/').pop() || dir;
+  // PRIN-24: NEVER surface a ULID as the link label. The date is the human label on the (normal)
+  // date-sharded path; when the path isn't date-sharded, fall back to a neutral 'source' — the old
+  // `dir.split('/').pop()` fallback leaked the source dir's ULID. (The date→source-TITLE display
+  // upgrade — resolving the real title at render time — is REVIEW-17's title-resolver, not here.)
+  const label = m ? `${m[1]}-${m[2]}-${m[3]}` : 'source';
   return `[[${dir}/source.md|${label}]]`;
 }
 
