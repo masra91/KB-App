@@ -71,12 +71,13 @@ the same language as everything else, just bigger and barer.
 - **Submit is the keystroke, not a button.** `⏎` submits; the design is keyboard-first. A single
   **`ghost` Button** (`⏎ save`) appears at the trailing edge for discoverability/mouse users — ghost,
   not a filled primary, so the keystroke stays the protagonist. `⇧⏎` = newline.
-- **Empty input is a no-op (no junk in the KB).** When the field is empty or whitespace-only, `⏎`/save
-  **does nothing**: **no source is created**, **no ember-acknowledge fires** (nothing was preserved, so
-  the §5 confirm stays silent), and the **sheet stays open**. The `⏎ save` ghost Button renders in the
-  **WS2 disabled state** (`.viz-btn:disabled`, 0.5-dim) while the field is effectively empty. To leave
-  without capturing, use `Esc` (§7). An accidental summon must never write an empty source into the
-  user's vault (KB-QD invariant, #249 gate-2).
+- **Empty input creates nothing, and `⏎` is a frictionless cancel (no junk in the KB).** When the field
+  is empty or whitespace-only: **no source is created** and **no ember-acknowledge fires** (nothing was
+  preserved, so the §5 confirm stays silent). `⏎` on an empty field is a **frictionless cancel** — it
+  dismisses the sheet and restores focus, same as `Esc` (so `⏎` always means "I'm done here": it saves
+  *and* dismisses when there's content, just dismisses when there isn't — one consistent keystroke). An
+  accidental summon therefore never writes an empty source into the user's vault (KB-QD invariant, #249
+  gate-2; implemented + tested in #251).
 
 ## 4. The menubar presence (always-there, quietly alive — QCAP-3)
 
@@ -142,9 +143,9 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
 4. **Menubar entry** — click the menubar mark → same sheet; the mark shows capture is alive. (QCAP-3)
 5. **Save failed** — the rare case: oxide rule + held `couldn't save — ⏎ retry`, no auto-dismiss. (QCAP-10)
 6. **Degraded permission** — brass menubar mark; capture still works via menubar-click. (QCAP-9)
-7. **Empty save = no-op** — `⌥Space` → `⏎` on an empty/whitespace field → nothing happens: no source
-   created, no acknowledge, sheet stays (the `⏎ save` Button is disabled while empty). §3. No empty
-   source ever reaches the vault. (KB-QD #249 gate-2 invariant)
+7. **Empty `⏎` = frictionless cancel** — `⌥Space` → `⏎` on an empty/whitespace field → no source, no
+   acknowledge; the sheet dismisses + restores focus (same as `Esc`). §3. No empty source ever reaches
+   the vault. (KB-QD #249 gate-2 invariant; impl/tested in #251)
 
 ## 9. Out of scope (deferred to SPEC-0038 later slices / other specs)
 
