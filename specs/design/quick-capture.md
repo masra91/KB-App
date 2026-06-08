@@ -71,6 +71,12 @@ the same language as everything else, just bigger and barer.
 - **Submit is the keystroke, not a button.** `⏎` submits; the design is keyboard-first. A single
   **`ghost` Button** (`⏎ save`) appears at the trailing edge for discoverability/mouse users — ghost,
   not a filled primary, so the keystroke stays the protagonist. `⇧⏎` = newline.
+- **Empty input is a no-op (no junk in the KB).** When the field is empty or whitespace-only, `⏎`/save
+  **does nothing**: **no source is created**, **no ember-acknowledge fires** (nothing was preserved, so
+  the §5 confirm stays silent), and the **sheet stays open**. The `⏎ save` ghost Button renders in the
+  **WS2 disabled state** (`.viz-btn:disabled`, 0.5-dim) while the field is effectively empty. To leave
+  without capturing, use `Esc` (§7). An accidental summon must never write an empty source into the
+  user's vault (KB-QD invariant, #249 gate-2).
 
 ## 4. The menubar presence (always-there, quietly alive — QCAP-3)
 
@@ -136,6 +142,9 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
 4. **Menubar entry** — click the menubar mark → same sheet; the mark shows capture is alive. (QCAP-3)
 5. **Save failed** — the rare case: oxide rule + held `couldn't save — ⏎ retry`, no auto-dismiss. (QCAP-10)
 6. **Degraded permission** — brass menubar mark; capture still works via menubar-click. (QCAP-9)
+7. **Empty save = no-op** — `⌥Space` → `⏎` on an empty/whitespace field → nothing happens: no source
+   created, no acknowledge, sheet stays (the `⏎ save` Button is disabled while empty). §3. No empty
+   source ever reaches the vault. (KB-QD #249 gate-2 invariant)
 
 ## 9. Out of scope (deferred to SPEC-0038 later slices / other specs)
 
@@ -166,3 +175,7 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
   "saved" confirm** (the `--viz-ember` rule-sweep acknowledge + `--viz-patina` `preserved`, auto-dismiss;
   oxide-held on failure) — all on the `_design-system.md` instrument language. Awaiting GATE 1
   (AI-Detector) + GATE 2 (KB-QD). DEV-1 aligns the sheet to this; I classify at DEV-1's impl PR.
+- 2026-06-07 — **GATE 2 (KB-QD) PASSED**; added the **empty-input no-op invariant** (§3/§8) per KB-QD's
+  non-blocking gate-2 note: empty/whitespace `⏎` creates no source, fires no acknowledge, keeps the
+  sheet open, and disables the save Button (WS2 disabled state) — so an accidental summon never writes
+  an empty source into the vault. Awaiting GATE 1 (AI-Detector).
