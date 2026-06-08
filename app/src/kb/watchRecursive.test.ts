@@ -134,15 +134,15 @@ describe.skipIf(!gitAvailable)('reconcileWatchFolder recursive (WATCH-12)', () =
     expect(rec.sourceIds.length).toBe(1);
   });
 
-  it('same-basename files in different subdirs BOTH ingest — relative-path dedup, no collision (WATCH-12)', async () => {
+  it('same-basename, DIFFERENT-content files in different subdirs BOTH ingest — relpath change-tracking (WATCH-12)', async () => {
     await fs.mkdir(path.join(watched, 'a'), { recursive: true });
     await fs.mkdir(path.join(watched, 'b'), { recursive: true });
     await fs.writeFile(path.join(watched, 'a', 'notes.md'), 'A notes');
     await fs.writeFile(path.join(watched, 'b', 'notes.md'), 'B notes');
     const res = await reconcileWatchFolder(vault, cfg({ recursive: true, maxDepth: 3 }), { vaultRoot: vault, now: T });
-    expect(res.ingested).toBe(2); // a/notes.md AND b/notes.md — distinct relpath keys
+    expect(res.ingested).toBe(2); // distinct content at distinct paths → two sources
 
-    // Re-run unchanged → no-op (both deduped by their relative path).
+    // Re-run unchanged → no-op (each path's content is unchanged in its relpath ledger).
     const again = await reconcileWatchFolder(vault, cfg({ recursive: true, maxDepth: 3 }), { vaultRoot: vault, now: T });
     expect(again.ingested).toBe(0);
     // The ingested provenance carries the relative path, not a bare basename.
@@ -150,5 +150,20 @@ describe.skipIf(!gitAvailable)('reconcileWatchFolder recursive (WATCH-12)', () =
     const files = ingested.flatMap((e) => (e.payload.files as string[]) ?? []);
     expect(files).toContain('a/notes.md');
     expect(files).toContain('b/notes.md');
+  });
+
+  it('contentHash is the dedup-of-record: IDENTICAL bytes at two paths = ONE source, not two (WATCH-12 refinement)', async () => {
+    await fs.mkdir(path.join(watched, 'a'), { recursive: true });
+    await fs.mkdir(path.join(watched, 'b'), { recursive: true });
+    // Byte-identical content at two distinct relative paths.
+    await fs.writeFile(path.join(watched, 'a', 'dup.md'), 'IDENTICAL BYTES');
+    await fs.writeFile(path.join(watched, 'b', 'dup.md'), 'IDENTICAL BYTES');
+    const res = await reconcileWatchFolder(vault, cfg({ recursive: true, maxDepth: 3 }), { vaultRoot: vault, now: T });
+    expect(res.ingested).toBe(1); // ONE source for the shared content…
+    expect(res.sourceIds.length).toBe(1);
+    expect(res.skipped).toBeGreaterThanOrEqual(1); // …the second path deduped to it (no second source)
+    const ingested = (await readEvents(vault, {})).filter((e) => e.actor === 'watch' && e.eventType === 'watch-ingested');
+    const allSourceIds = ingested.flatMap((e) => (e.payload.sourceIds as string[]) ?? []);
+    expect(new Set(allSourceIds).size).toBe(1); // exactly one distinct source minted across the pass
   });
 });
