@@ -46,8 +46,8 @@ const DISAMBIG_REVIEW: ReviewSummary = {
   stage: 'connect',
   refs: ['Ada'],
   candidates: [
-    { name: 'Ada', gloss: 'from the fishing trip', sourceRel: 'sources/2026/06/01/01ABC' },
-    { name: 'Ada', gloss: "from Dave's wedding", sourceRel: 'sources/2026/06/02/01XYZ' },
+    { name: 'Ada', gloss: 'from the fishing trip', title: 'Fishing trip notes', sourceRel: 'sources/2026/06/01/01ABC/source.md' },
+    { name: 'Ada', gloss: "from Dave's wedding", title: "Dave's wedding guest list", sourceRel: 'sources/2026/06/02/01XYZ/source.md' },
   ],
   createdAt: '2026-06-02T12:00:00.000Z',
 };
@@ -211,15 +211,15 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       const links = root.querySelectorAll<HTMLButtonElement>('.review-candidate-open');
       expect(links).toHaveLength(2);
       links[1].click(); // open the second candidate's source
-      expect(openCitation).toHaveBeenCalledWith('sources/2026/06/02/01XYZ');
+      expect(openCitation).toHaveBeenCalledWith('sources/2026/06/02/01XYZ/source.md'); // the FILE, not the dir
     });
 
     it('omits the link for a candidate with no known sourceRel (renders gloss only)', async () => {
       const review: ReviewSummary = {
         ...DISAMBIG_REVIEW,
         candidates: [
-          { name: 'Ada', gloss: 'from the fishing trip', sourceRel: 'sources/2026/06/01/01ABC' },
-          { name: 'Ada', gloss: 'mentioned only in passing' }, // no sourceRel
+          { name: 'Ada', gloss: 'from the fishing trip', title: 'Fishing trip notes', sourceRel: 'sources/2026/06/01/01ABC/source.md' },
+          { name: 'Ada', gloss: 'mentioned only in passing', title: 'Ada' }, // no sourceRel (title falls back to name)
         ],
       };
       setApi(vi.fn(async () => [review]));
@@ -232,7 +232,7 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       const xss = '<img src=x onerror="window.__pwned=1">';
       const review: ReviewSummary = {
         ...DISAMBIG_REVIEW,
-        candidates: [{ name: xss, gloss: xss, sourceRel: '"><script>window.__pwned=1</script>' }],
+        candidates: [{ name: xss, gloss: xss, title: xss, sourceRel: '"><script>window.__pwned=1</script>' }],
       };
       setApi(vi.fn(async () => [review]));
       await mountReviews(root);

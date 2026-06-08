@@ -48,7 +48,17 @@ export interface ReviewSubjectCandidate {
   name: string;
   /** The distinguishing gloss authored by the raising agent (what makes this one this one). */
   gloss: string;
-  /** Repo-relative source dir → the working "Open in Obsidian" link (REVIEW-16); omitted if unknown. */
+  /**
+   * The source's human-readable TITLE, resolved + persisted at raise time (PRIN-24): the view shows
+   * this (e.g. as the link text) — NEVER the raw ULID. Always populated for a stage-built candidate
+   * (falls back to the candidate `name` if the source has no derivable title). Persisted at raise so
+   * the display is durable + offline (no per-render IPC) and immune to source promotion-lag.
+   */
+  title: string;
+  /**
+   * Repo-relative source FILE (`<dir>/source.md`) → the working "Open in Obsidian" link (REVIEW-16):
+   * the readable note, not the bare dir (opening a dir is "file not found", PRIN-24). Omitted if unknown.
+   */
   sourceRel?: string;
 }
 

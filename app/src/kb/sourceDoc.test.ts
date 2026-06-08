@@ -2,7 +2,7 @@
 // renderer (SPEC-0013 §3). No FS/git.
 import { describe, it, expect } from 'vitest';
 import { deterministicDecide } from './archivist';
-import { renderSourceMd, bodyFor, archivedByLabel, applySensitivityOverrideToSourceMd } from './sourceDoc';
+import { renderSourceMd, bodyFor, archivedByLabel, applySensitivityOverrideToSourceMd, deriveSourceTitle } from './sourceDoc';
 import type { CapturedMeta } from './ingest';
 
 const textMeta: CapturedMeta = {
@@ -177,5 +177,40 @@ describe('applySensitivityOverrideToSourceMd (SENSE-7)', () => {
     const out = applySensitivityOverrideToSourceMd(md, 'tier-$& $1 $`', 'now');
     expect(out).toContain('sensitivity: tier-$& $1 $`'); // verbatim ($/backtick aren't YAML-significant → unquoted)
     expect(out).not.toContain('tier-sensitivity:'); // the `$&` did NOT expand to the matched line
+  });
+});
+
+describe('deriveSourceTitle (REVIEW-16 / PRIN-24 — a source reads as a thing, never a ULID)', () => {
+  it('prefers the frontmatter originalName (file sources)', () => {
+    const md = '---\nid: 01ABC\nkind: file\noriginalName: Quarterly Plan.pdf\n---\n\n![[raw.pdf]]\n';
+    expect(deriveSourceTitle(md)).toBe('Quarterly Plan.pdf');
+  });
+
+  it('decodes a YAML-quoted originalName (special chars)', () => {
+    const md = '---\nid: 01ABC\noriginalName: "Notes: trip.md"\n---\n\nbody\n';
+    expect(deriveSourceTitle(md)).toBe('Notes: trip.md');
+  });
+
+  it('falls back to the first body heading (text sources)', () => {
+    const md = '---\nid: 01ABC\nkind: text\n---\n\n# Fishing trip notes\n\nWe caught three.\n';
+    expect(deriveSourceTitle(md)).toBe('Fishing trip notes');
+  });
+
+  it('falls back to the first non-empty body line when there is no heading', () => {
+    const md = '---\nid: 01ABC\nkind: text\n---\n\n\nMet Benton at the dock.\n';
+    expect(deriveSourceTitle(md)).toBe('Met Benton at the dock.');
+  });
+
+  it('truncates a very long first line', () => {
+    const long = 'x'.repeat(200);
+    const md = `---\nid: 01ABC\n---\n\n${long}\n`;
+    const title = deriveSourceTitle(md);
+    expect(title.length).toBeLessThanOrEqual(80);
+    expect(title.endsWith('…')).toBe(true);
+  });
+
+  it('returns a neutral generic (never a ULID) for an empty body and no originalName', () => {
+    const md = '---\nid: 01ABC\nkind: text\n---\n\n\n';
+    expect(deriveSourceTitle(md)).toBe('Untitled source');
   });
 });

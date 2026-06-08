@@ -42,6 +42,7 @@ import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
 import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
+import { deriveSourceTitle } from './sourceDoc';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
@@ -112,6 +113,34 @@ async function pathExists(p: string): Promise<boolean> {
  */
 function sourceDirRel(sourceId: string): string {
   return isUlid(sourceId) ? path.join('sources', dateShard(sourceId), sourceId) : sourceId;
+}
+
+/**
+ * Resolve a candidate's `sourceId` to the repo-relative SOURCE FILE (`<dir>/source.md`) — the
+ * readable note inside the source dir (every source dir holds exactly one `source.md`, the
+ * orchestrator writes it; cf. claimDoc's `[[<dir>/source.md|…]]`). This is what an Obsidian
+ * "Open in Obsidian" deep link must target: opening the bare DIR is "file not found" (PRIN-24).
+ * Distinct from `sourceDirRel` on purpose — the Claims `derivedFrom` needs the DIR (CLAIMS-5),
+ * the review's candidate link needs the FILE. A non-ULID `sourceId` (unit fixtures) passes through.
+ */
+function sourceFileRel(sourceId: string): string {
+  return isUlid(sourceId) ? path.join(sourceDirRel(sourceId), 'source.md') : sourceId;
+}
+
+/**
+ * The source's human-readable title for a review candidate row (REVIEW-16 / PRIN-24): read the
+ * source's `source.md` from the stage's worktree (`wt`) — where it always exists at raise time,
+ * before any promotion-lag — and derive a title. Persisted on the review so the display is durable +
+ * offline and never a raw ULID. Any read/derive failure falls back to the candidate's `name` (a human
+ * surface name, never a ULID), so the row always reads as a thing.
+ */
+async function resolveCandidateTitle(wt: string, cand: Candidate): Promise<string> {
+  try {
+    const content = await fs.readFile(path.join(wt, sourceFileRel(cand.sourceId)), 'utf8');
+    return deriveSourceTitle(content);
+  } catch {
+    return cand.name;
+  }
 }
 
 // ── Reading the working zone: candidates + existing nodes ──────────────────────────────────
@@ -589,15 +618,25 @@ export async function connectOne(
       for (const req of decision.reviews) {
         const id = ulid();
         // REVIEW-16: enrich the agent's per-candidate glosses into decision-grade subject context —
-        // join each {id, gloss} to its candidate's name + source-dir rel (the working Obsidian link).
-        // Unknown ids (an agent naming a candidate outside its set) are dropped, never surfaced as a
-        // bare ULID-as-name. The agent authors the gloss; the stage owns the name + deterministic path.
-        const subjectCandidates = (req.candidates ?? [])
-          .map((rc): ReviewSubjectCandidate | null => {
-            const cand = candidateById.get(rc.id);
-            return cand ? { name: cand.name, gloss: rc.gloss, sourceRel: sourceDirRel(cand.sourceId) } : null;
-          })
-          .filter((c): c is ReviewSubjectCandidate => c !== null);
+        // join each {id, gloss} to its candidate's name + resolved source title (PRIN-24: shown, never
+        // the ULID) + source-FILE rel (the working Obsidian link — `<dir>/source.md`, the readable note;
+        // a bare dir is "file not found"). Unknown ids (an agent naming a candidate outside its set) are
+        // dropped, never surfaced as a bare ULID-as-name. The agent authors the gloss; the stage owns the
+        // name, the deterministic file path, and the persisted title.
+        const subjectCandidates = (
+          await Promise.all(
+            (req.candidates ?? []).map(async (rc): Promise<ReviewSubjectCandidate | null> => {
+              const cand = candidateById.get(rc.id);
+              if (!cand) return null;
+              return {
+                name: cand.name,
+                gloss: rc.gloss,
+                title: await resolveCandidateTitle(wt, cand),
+                sourceRel: sourceFileRel(cand.sourceId),
+              };
+            }),
+          )
+        ).filter((c): c is ReviewSubjectCandidate => c !== null);
         const review: Review = {
           id,
           status: 'open',

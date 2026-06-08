@@ -293,7 +293,7 @@ describe.skipIf(!gitAvailable)('connectOne — ambiguity parks for Review (CONNE
   // REVIEW-16: the agent's per-candidate {id, gloss} is enriched into decision-grade subject context
   // ({name, sourceRel, gloss}) on the real park path — the stage joins the id to the candidate's name
   // + source-dir rel (the working Obsidian link); the agent only authors the gloss.
-  it('enriches the parked review subject with per-candidate {name, sourceRel, gloss} (REVIEW-16)', async () => {
+  it('enriches the parked review subject with per-candidate {name, title, sourceRel, gloss} (REVIEW-16)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       // two same-name candidates from DIFFERENT sources — the textbook disambiguation case.
@@ -321,17 +321,85 @@ describe.skipIf(!gitAvailable)('connectOne — ambiguity parks for Review (CONNE
       expect(review.subject.candidates).toBeDefined();
       const cands = review.subject.candidates!;
       expect(cands).toHaveLength(2);
-      // each carries the candidate's NAME (stage-owned), the agent's GLOSS, and the source-dir REL link.
+      // each carries the candidate's NAME (stage-owned), the agent's GLOSS, and the source REL link.
       for (const c of cands) {
         expect(c.name).toBe('Benton');
         expect(c.gloss).toMatch(/^gloss for 01S[12]$/);
-        expect(c.sourceRel).toBe(c.gloss.replace('gloss for ', '')); // sourceDirRel passthrough for the non-ULID fixture id
+        expect(c.sourceRel).toBe(c.gloss.replace('gloss for ', '')); // sourceFileRel passthrough for the non-ULID fixture id
+        // PRIN-24: title is always populated; with no readable source.md here it falls back to the
+        // candidate name (a human surface name — never the ULID).
+        expect(c.title).toBe('Benton');
       }
       // both distinct sources are represented (the whole point — tell the two apart).
       expect(new Set(cands.map((c) => c.sourceRel))).toEqual(new Set(['01S1', '01S2']));
     });
   });
+
+  // PRIN-24 / REVIEW-16 regression: the candidate "Open in Obsidian" link must target the source
+  // FILE (`<dir>/source.md`), not the bare source DIR — opening a directory is "file not found" —
+  // and the row must show the source's human TITLE (read from source.md), never the raw ULID.
+  // (Fails before the sourceDirRel→sourceFileRel + persisted-title fix: sourceRel was the dir,
+  // no `/source.md`, and there was no title field at all.)
+  it('targets the source FILE (<dir>/source.md) and persists its human title for a real ULID source', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // real ULID source ids → the deterministic sources/<shard>/<id> layout (not a unit-fixture id),
+      // each with a real source.md carrying a distinct human title to resolve.
+      const sa = ulid();
+      const sb = ulid();
+      await seedSourceMd(root, sa, '---\nid: x\noriginalName: Fishing trip notes.md\n---\n\nbody\n');
+      await seedSourceMd(root, sb, '---\nid: y\nkind: text\n---\n\n# Wedding guest list\n\nnames…\n');
+      await seedCandidate(root, 'person', 'Benton', sa);
+      await seedCandidate(root, 'person', 'Benton', sb);
+      await commitAll(root, 'seed');
+
+      const reviewer: ConnectDecider = async (set) => ({
+        blockKey: set.blockKey,
+        clusters: set.candidates.map((c) => ({ canonicalName: c.name, memberCandidateIds: [c.id], confidence: 0.4 })),
+        reviews: [
+          {
+            question: 'Is Benton (A) the same person as Benton (B)?',
+            detail: 'Same name, two sources — ambiguous.',
+            candidates: set.candidates.map((c) => ({ id: c.id, gloss: `gloss for ${c.sourceId}` })),
+          },
+        ],
+        agent: { via: 'copilot', model: 'test' },
+      });
+      const res = await connectOne(root, 'person|benton', reviewer);
+      expect(res.parked).toBe(true);
+
+      const cands = (await findOpenReviews(root))[0].subject.candidates!;
+      expect(cands).toHaveLength(2);
+      for (const c of cands) {
+        expect(c.sourceRel!.endsWith(`${path.sep}source.md`)).toBe(true); // FILE, not dir
+        expect(isUlidLike(c.title)).toBe(false); // PRIN-24: never the raw ULID
+      }
+      // exactly the deterministic per-source `source.md` paths (both sources represented).
+      expect(new Set(cands.map((c) => c.sourceRel))).toEqual(
+        new Set([
+          path.join('sources', dateShard(sa), sa, 'source.md'),
+          path.join('sources', dateShard(sb), sb, 'source.md'),
+        ]),
+      );
+      // titles come from each source's source.md (originalName / first heading), per source id.
+      const titleBySource = new Map(cands.map((c) => [c.sourceRel!.split(path.sep).at(-2), c.title]));
+      expect(titleBySource.get(sa)).toBe('Fishing trip notes.md');
+      expect(titleBySource.get(sb)).toBe('Wedding guest list');
+    });
+  });
 });
+
+/** Write a `source.md` at the deterministic location for a real source ULID. */
+async function seedSourceMd(root: string, sourceId: string, content: string): Promise<void> {
+  const dir = path.join(root, 'sources', dateShard(sourceId), sourceId);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'source.md'), content, 'utf8');
+}
+
+/** A ULID-shaped string (26-char Crockford) — used to assert a title is NEVER a raw ULID. */
+function isUlidLike(s: string): boolean {
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/i.test(s);
+}
 
 describe.skipIf(!gitAvailable)('connectOne — failure never loses candidates; set aside after K (CONNECT-14)', () => {
   it('retries a poison block then sets it aside, leaving candidates intact', async () => {
