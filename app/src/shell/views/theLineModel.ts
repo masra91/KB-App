@@ -6,6 +6,9 @@
 // mutates and never imports electron/DOM.
 import { STAGE_ORDER, stageIndex } from '../../kb/pipelineStages';
 import { stageDisplayName } from '../stageLabels';
+// Overall-state glyph vocabulary now lives in the neutral kb layer so the tray (main) shares one
+// source with The Line (QCAP-14); re-exported here so existing importers are unchanged.
+export { OVERALL_GLYPH } from '../../kb/pipelineStatusLabels';
 import type { StageId } from '../../kb/pipelineStages';
 import type {
   PipelineStatusView,
@@ -13,7 +16,6 @@ import type {
   StageState,
   ConversionCounts,
   InFlightItem,
-  OverallState,
 } from '../../kb/pipelineStatusView';
 
 // ── State vocabulary (§3/§6) — state is NEVER color alone: each carries a distinct glyph + hue + a
@@ -34,13 +36,6 @@ export const STATION_STATE_CLASS: Record<StageState, string> = {
   running: 'viz-state-running',
   blocked: 'viz-state-blocked',
   error: 'viz-state-error',
-};
-
-/** Overall headline badge glyph (§2 `◐ RUNNING`). A stall reads as the alarm shape. */
-export const OVERALL_GLYPH: Record<OverallState, string> = {
-  idle: '○',
-  running: '◐',
-  stalled: '✕',
 };
 
 /** One station on the spine — its own liveness merged with its funnel gauge-rail (§2/§6). */
