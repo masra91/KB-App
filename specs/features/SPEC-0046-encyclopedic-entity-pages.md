@@ -113,16 +113,22 @@ the gate (CANON). Bounded + audited like every stage.
 - Hover/click a `[n]` → the source (by title). Click `[[Apple]]` → Apple's page (equally readable).
 - The graph view shows **named** entities (Title-Case), connected — not ULID-slug dots.
 
-## 7. Forks (one for the Principal)
+## 7. Resolved decisions (Principal, 2026-06-08)
 
-- **Separate "Compose" stage vs. extend Connect/Claims → KB-Lead lean: a separate final stage**
-  (clean separation: Connect owns identity+links, Claims owns substance, Compose owns the *human
-  presentation* of that substance; it re-runs when claims change without disturbing them). Extending
-  Claims would conflate substance-extraction with prose-authoring. *Principal can override.*
-- **Title-Case filenames (COMPOSE-6) — confirm.** My lean: yes (it's the kebab half of PRIN-24).
-  Risk: filenames with spaces/punctuation need careful path handling (already partly there — the
-  ULID is the identity, the filename cosmetic). The `slugify` was a deliberate grep/quick-switcher
-  convenience; Obsidian handles spaces fine, so the human name wins.
+> **The outcome/requirements/spirit are the contract — the flow/steps are flexible.** Principal:
+> *"we can tweak the specifics of the flow or steps at any time; it's the outcome, requirements,
+> spirit stuff I want captured and working."* So **COMPOSE-1..6/8 (the outcome — readable, grounded,
+> cited, human-named, links-woven, RAG-intact) are firm**; the **mechanism (COMPOSE-7: a separate
+> Compose stage) is the chosen-but-adjustable means**, not the point. Implementers may re-shape the
+> flow/steps freely as long as the §3 grounding invariant and the §5 outcome requirements hold.
+
+- **Separate "Compose" stage → CONFIRMED** ("let's add a separate compose if that helps") — clean
+  separation (Connect owns identity+links, Claims owns substance, Compose owns the *human
+  presentation*; re-runs on claim change without disturbing them). But per the framing above, the
+  stage boundary is a means to the outcome, not a hard requirement — adjustable.
+- **Title-Case filenames (COMPOSE-6) → CONFIRMED** (it's the kebab half of PRIN-24). The `slugify`
+  grep-convenience yields to the human name; the ULID stays the identity (filename is cosmetic), so
+  spaces/case are safe — Obsidian handles them fine.
 
 ## 8. Out of scope
 
