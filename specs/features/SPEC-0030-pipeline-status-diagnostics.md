@@ -6,7 +6,7 @@ type: feature
 status: draft
 owners: [KB-Lead, Principal]
 created: 2026-06-02
-updated: 2026-06-02
+updated: 2026-06-07
 related: [SPEC-0006, SPEC-0014, SPEC-0017, SPEC-0021, SPEC-0027, SPEC-0029]
 stage: Cross-cutting
 supersedes: null
@@ -69,6 +69,33 @@ A sidebar view (SPEC-0017), read-only:
   recent **slow operations**, and a **where-time-goes** breakdown (most of it is Copilot
   invocations) — so the minutes-long ingestion→link delay is explained, not mysterious.
 
+## 4a. Crash capture & resource/memory telemetry (the blind-spot a real crash exposed)
+
+A packaged-app crash (2026-06-07, `EXC_BREAKPOINT`/`SIGTRAP` on a V8 `ThreadPoolForegroundWorker`
+after ~2h uptime) surfaced a hard gap: **when the app dies natively, our diagnostics capture
+nothing.** Forensics found (a) the macOS `.ips` had **no Application-Specific-Information** (no V8
+fatal reason emitted), (b) `crashReporter` was **off** (no minidump), (c) there were **no
+process-level crash handlers**, (d) the **app-level dev-log was never created** (the `<userData>/logs/`
+sink from OBS-2 was absent in a live install), and (e) there is **no memory/resource telemetry** at
+all — so a long-run memory climb (the prime suspect for a V8-worker trap) is invisible. The
+*pipeline* dev-log did help (it showed a `decompose.failed` cascade + recurring `lock.stuck` around
+the crash), which is exactly why we extend, not replace, this subsystem.
+
+This section adds three things, all **local-only** (no egress, no telemetry upload — PRIN-19;
+consistent with §7 "local on-disk only"):
+- **Crash capture** — Electron's built-in `crashReporter` writing **local minidumps** (no upload)
+  + JS process-level handlers (`uncaughtException`, `unhandledRejection`, and main-process
+  `render-process-gone` / `child-process-gone` / `gpu-process-crashed`) that write a structured
+  `fatal`/`crash` dev-log entry — reason + the **last runId/itemId/stage** — *before* exit. A native
+  trap can't always be caught, but the breadcrumb + minidump turn "captured nothing" into "captured
+  the last known state + a symbolicable dump."
+- **Resource/memory telemetry** — periodic, low-overhead sampling of `process.memoryUsage()`
+  (rss/heapUsed/heapTotal/external/arrayBuffers) and `app.getAppMetrics()` (per-process CPU/mem) into
+  the dev-log + perf-index, so memory over a long run is a **trend**, not a mystery.
+- **Leak / long-run watchdog** — detect sustained monotonic RSS/heap growth over a rolling window and
+  emit a **loud, visible warn** (+ a Status-view memory readout); optional **heap-snapshot-on-threshold**
+  (gitignored, for offline diffing). Turns a silent OOM-class trap into an early, visible signal.
+
 ## 5. Requirements
 
 | ID     | Priority | Statement (short)                                                                   | Verify   | Traces |
@@ -90,6 +117,11 @@ A sidebar view (SPEC-0017), read-only:
 | OBS-15 | should   | The status surface shows **latency & throughput** — per-stage throughput, recent **slow operations**, a Copilot-latency summary, and the time-breakdown — so the Principal can see **where time goes** | test:app/src/shell/views/statusView.test.ts | OBS-5; LIFE-9 |
 | OBS-16 | should   | Spans support **end-to-end per-item tracing** (capture→archive→decompose→connect→claims→link) with per-hop durations — the "ingestion-to-link" latency is readable directly | test:app/src/kb/perfIndex.test.ts | OBS-12 |
 | OBS-17 | should   | **Interactive unblock** — for a stuck/errored stage, the Status view shows the **error message + the offending item** (drill-down to the dev-log) and offers **retry / set-aside / dismiss**, so the Principal can clear a poison-loop without restarting the app. The view calls the stage-owned recovery primitives (claims: CLAIMS-20 `retryClaimsItem`/`dismissClaimsItem`/`listSetAsideItems`) — no parallel reader/epoch logic in the view | test:app/src/kb/pipelineControl.test.ts, app/src/shell/views/statusView.test.ts, app/src/main/ipc.test.ts | ORCH-12; CLAIMS-20; [#137](https://github.com/masra91/KB-App/issues/137) |
+| OBS-18 | must | **Crash capture (local-only).** Electron's built-in **`crashReporter`** is started with **no upload** (`uploadToServer: false`; minidumps kept in `<userData>/Crashpad`), **and** JS process-level handlers are installed — `process.on('uncaughtException'/'unhandledRejection')` (main + renderer) and main-process **`render-process-gone` / `child-process-gone` / `gpu-process-crashed`** — each writing a structured **`fatal`/`crash`** dev-log entry (reason + stack + the **last `runId`/`itemId`/`stage`**) to the app-level log **before exit**. *Today there is NONE — a native/worker trap captured nothing (no minidump, no breadcrumb).* A native trap may be uncatchable, but the minidump + last-known-state turn "captured nothing" into a symbolicable dump + a breadcrumb | none-yet | OBS-2,4; PRIN-19; AUTO-8 |
+| OBS-19 | must | **Fix the app-level dev-log sink (OBS-2 regression).** The `<userData>/logs/app.log` sink is **not created in a live install** (forensics 2026-06-07: the dir was absent), so pre-vault/main-process errors — and crash breadcrumbs (OBS-18) — vanish. The app-level `createAppDevLog` MUST create its sink **eagerly on boot** (not lazily on first write) and a **regression test** asserts the log file exists after app init | test:app/src/kb/devlog.test.ts | OBS-2 |
+| OBS-20 | must | **Resource/memory telemetry.** A periodic, **low-overhead** sampler records `process.memoryUsage()` (rss/heapUsed/heapTotal/external/arrayBuffers) and `app.getAppMetrics()` (per-process CPU/mem) to the dev-log + perf-index, on a coarse interval (default ~60s, leveled), so memory over a long run is a readable **trend** — the prime suspect for the V8-worker trap — not a mystery. Local-only; redaction-irrelevant (numbers only) | none-yet | OBS-1,14; PRIN-19 |
+| OBS-21 | should | **Leak / long-run watchdog.** Detect **sustained monotonic RSS/heap growth** over a rolling window (no plateau across N samples) and emit a **loud `warn`** ("memory climbing: rss +X MB over Ym") so a slow leak is visible **before** an OOM-class trap; optional **heap-snapshot-on-threshold** (`v8.writeHeapSnapshot` into `<vault>/.kb/cache/`, gitignored, for offline diffing). Turns the silent climb-then-die into an early signal | none-yet | OBS-11,20 |
+| OBS-22 | should | **Status-view health panel.** The Status view surfaces a **memory/health** readout — current RSS/heap + the OBS-21 trend + the **last crash breadcrumb** (OBS-18: when/where/last item) — so "is memory climbing / did we recently crash + on what" is answerable at a glance | test:app/src/shell/views/statusView.test.ts | OBS-5,15,20 |
 
 ## 6. User flows / surface
 
@@ -127,6 +159,23 @@ A sidebar view (SPEC-0017), read-only:
 
 ## 9. Changelog
 
+- 2026-06-07 — **OBS-18..22: crash capture + memory/leak telemetry (the blind-spot a real crash
+  exposed).** A packaged-app crash (`EXC_BREAKPOINT`/`SIGTRAP` on a V8 `ThreadPoolForegroundWorker`,
+  ~2h uptime) was **undiagnosable** because the app captured nothing. Forensics (KB-Lead, from the macOS
+  `.ips` + the live install): the report had **no Application-Specific-Information** (no V8 fatal reason),
+  **`crashReporter` was off** (no minidump), there were **no crash handlers**, the **app-level dev-log was
+  never created** (`<userData>/logs/` absent — an OBS-2 regression), and there is **no memory telemetry**.
+  The *pipeline* dev-log DID help — it showed a `decompose.failed` cascade + recurring `lock.stuck` around
+  the crash — which is why we **extend** the diagnostics subsystem rather than replace it. New §4a + five
+  requirements, all **local-only** (no upload/egress, PRIN-19): **OBS-18** crash capture (built-in
+  `crashReporter` no-upload + `uncaughtException`/`unhandledRejection`/`*-process-gone` handlers →
+  structured breadcrumb with last runId/itemId), **OBS-19** fix the missing app-level log sink (+
+  regression), **OBS-20** periodic `memoryUsage`/`getAppMetrics` sampling to dev-log/perf-index, **OBS-21**
+  leak/long-run watchdog (monotonic-growth warn + heap-snapshot-on-threshold), **OBS-22** Status-view
+  health panel (RSS/heap trend + last crash breadcrumb). Uses **no new deps** (Electron `crashReporter` +
+  node `v8`/`process` built-ins, E1). **The crash itself is filed P1** (root cause still open — needs a
+  symbolicated dev-build repro; this work is the enabler). Decision: crash/telemetry data stays **on-disk,
+  no upload** — matches §7 "local on-disk only."
 - 2026-06-02 — **SPEC-0032 §9 dep: in-flight item roster on the view-model (VIZ-2).** The
   `PipelineStatusView` gains `inFlight: InFlightItem[]` — every queued item as a "carriage" at its
   stage, `active` marking the draining batch. Pure `buildInFlightRoster` computes `active = busy &&
