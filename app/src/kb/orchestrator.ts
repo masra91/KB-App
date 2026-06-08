@@ -15,6 +15,7 @@ import simpleGit from 'simple-git';
 import { dateShard } from './ulid';
 import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
+import { readSensitivityOverrides } from './sensitivityOverride';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
 import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
@@ -74,7 +75,14 @@ export async function archiveOne(
 
     const unitDir = path.join(wt, 'inbox', id);
     const meta = await readCapturedMeta(unitDir);
-    const decision = await decider(meta, { span });
+    const baseDecision = await decider(meta, { span });
+    // SENSE-7: a Principal override wins over whatever the classifier/default decided, and re-applies on
+    // EVERY archive (incl. Replay) — read from the worktree snapshot so a rebuild stays sticky and the
+    // classifier never overwrites a `by: principal` label. Absent an override, the decision is unchanged.
+    const override = (await readSensitivityOverrides(wt))[id];
+    const decision = override
+      ? { ...baseDecision, sensitivity: override.label, sensitivityBy: 'principal' as const, sensitivityAt: override.at || undefined }
+      : baseDecision;
 
     const dest = path.join(wt, destRel);
     await fs.mkdir(path.dirname(dest), { recursive: true });

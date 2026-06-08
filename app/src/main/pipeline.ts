@@ -66,7 +66,9 @@ import { buildIntakeConnectorViews, isIntakeConnectorType, clampMaxItems, intake
 import type { WatchFolderView, WatchFolderPatch, IntakeConnectorView, IntakeConnectorConfigPatch, RunIntakeConnectorResult } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
-import { ulid } from '../kb/ulid';
+import { ulid, dateShard, isUlid } from '../kb/ulid';
+import { setSensitivityOverride, sensitivityOverridesPath } from '../kb/sensitivityOverride';
+import { applySensitivityOverrideToSourceMd } from '../kb/sourceDoc';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
@@ -1088,6 +1090,47 @@ export async function setActiveIntakeConnectorConfig(patch: IntakeConnectorConfi
     for (const event of intakeConfigAuditEvents(prior, clean)) await appendAuditEvent(root, event);
   }
   return listIntakeConnectorsForActive();
+}
+
+/**
+ * Principal override of a source's sensitivity label (SENSE-7/8). Validates the id is a real archived
+ * source; under the canonical-writer lock it (1) persists the override to the Replay-sticky store so a
+ * rebuild re-applies it (the classifier never overwrites a `by: principal` label), (2) re-stamps the
+ * source's `source.md` frontmatter to the new label + `by: principal` (committing both atomically), then
+ * (3) audits the change (`panel` event, from→to + why, SENSE-8). An empty label CLEARS the override (back
+ * to the classifier/default). A custom label is accepted verbatim (SENSE-1); the comparator handles unknowns.
+ */
+export async function setActiveSourceSensitivity(sourceId: string, label: string): Promise<{ ok: boolean; reason?: string; sensitivity?: string }> {
+  if (!active) return { ok: false, reason: 'no-kb' };
+  if (typeof sourceId !== 'string' || !isUlid(sourceId)) return { ok: false, reason: 'bad-id' }; // #29: only a real ULID → a real source path
+  const clean = typeof label === 'string' ? label.trim() : '';
+  const root = active.stagingWt;
+  const srcMdRel = path.join('sources', dateShard(sourceId), sourceId, 'source.md');
+  let before: string;
+  try {
+    before = await fs.readFile(path.join(root, srcMdRel), 'utf8');
+  } catch {
+    return { ok: false, reason: 'not-found' };
+  }
+  const fromLabel = (before.match(/^sensitivity: (.*)$/m)?.[1] ?? '').trim();
+  const at = new Date().toISOString();
+  await active.lock.run(async () => {
+    await setSensitivityOverride(root, sourceId, clean, at); // clean === '' clears the override
+    // Setting: re-stamp the live source.md now so the Panel reflects it without a rebuild. Clearing: leave
+    // the frontmatter as-is (a later Replay re-derives the classifier/default label).
+    if (clean.length > 0) await fs.writeFile(path.join(root, srcMdRel), applySensitivityOverrideToSourceMd(before, clean, at), 'utf8');
+    const git = boundedGit(root);
+    await git.add([path.relative(root, sensitivityOverridesPath(root)), srcMdRel]);
+    const staged = (await git.diff(['--cached', '--name-only'])).trim();
+    if (staged.length > 0) await git.commit(`control-panel: sensitivity ${sourceId} → ${clean || '(cleared)'}`);
+  }, 'sensitivity-override:write');
+  await appendAuditEvent(root, {
+    actor: 'panel',
+    eventType: 'sensitivity-override',
+    subjects: { sourceId },
+    payload: { field: 'sensitivity', from: fromLabel, to: clean || '(cleared → classifier/default)', by: 'principal', why: 'Principal overrode a source sensitivity via Control Panel' },
+  });
+  return { ok: true, sensitivity: clean || fromLabel };
 }
 
 /**

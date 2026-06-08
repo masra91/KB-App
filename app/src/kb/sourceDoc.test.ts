@@ -2,7 +2,7 @@
 // renderer (SPEC-0013 §3). No FS/git.
 import { describe, it, expect } from 'vitest';
 import { deterministicDecide } from './archivist';
-import { renderSourceMd, bodyFor, archivedByLabel } from './sourceDoc';
+import { renderSourceMd, bodyFor, archivedByLabel, applySensitivityOverrideToSourceMd } from './sourceDoc';
 import type { CapturedMeta } from './ingest';
 
 const textMeta: CapturedMeta = {
@@ -140,5 +140,33 @@ describe('renderSourceMd (SPEC-0013 §3)', () => {
   it('RICHIN-10: omits the clip block when there is no derivation (plain text)', () => {
     const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'plain');
     expect(md).not.toContain('clip:');
+  });
+});
+
+describe('applySensitivityOverrideToSourceMd (SENSE-7)', () => {
+  it('re-stamps a SENSE-1a source: new label + by: principal + the override at, dropping the old block', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), '2026-05-30T18:22:09.000Z', 'body');
+    expect(md).toContain('  by: default'); // precondition
+    const out = applySensitivityOverrideToSourceMd(md, 'shareable', '2026-06-08T09:00:00.000Z');
+    expect(out).toContain('sensitivity: shareable');
+    expect(out).toContain('  by: principal');
+    expect(out).toContain('  at: 2026-06-08T09:00:00.000Z');
+    expect(out).not.toContain('  by: default'); // the old block is gone (single sensitivityMeta block)
+    expect(out.match(/sensitivityMeta:/g)?.length).toBe(1);
+    expect(out.startsWith('---\n')).toBe(true); // structure intact
+  });
+
+  it('upgrades a PRE-SENSE source (no sensitivityMeta block): injects the principal block', () => {
+    const legacy = `---\nid: X\nclass: primary\nscope: global\nsensitivity: internal\nraw: raw.md\n---\n\nbody\n`;
+    const out = applySensitivityOverrideToSourceMd(legacy, 'confidential', '2026-06-08T09:00:00.000Z');
+    expect(out).toContain('sensitivity: confidential');
+    expect(out).toContain('sensitivityMeta:\n  by: principal\n  at: 2026-06-08T09:00:00.000Z');
+    expect(out).toContain('raw: raw.md'); // surrounding frontmatter untouched
+  });
+
+  it('quotes a custom override label with YAML-significant chars (SENSE-1 custom labels)', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'body');
+    const out = applySensitivityOverrideToSourceMd(md, 'legal: hold', 'now');
+    expect(out).toContain('sensitivity: "legal: hold"');
   });
 });
