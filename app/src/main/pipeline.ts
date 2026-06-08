@@ -10,8 +10,9 @@
 //
 // All stages share ONE canonical-writer lock per vault (SPEC-0014 §5): promotion + every stage
 // ref-advance serialize through it.
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
@@ -130,6 +131,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.researchers.start(); // SPEC-0028: the scheduled-researcher tick (standing external research)
   a.intake.start(); // SPEC-0041: the proactive-intake tick (scheduled feed pulls → primary sources)
   a.watch.start(); // SPEC-0037: live folder watchers (startup reconcile + chokidar stable-file events)
+  statusStore.start(); // OBS-24: maintain the status snapshot off the render path (seed from persisted, then live)
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -142,6 +144,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.researchers.stop();
   a.intake.stop();
   a.watch.stop(); // SPEC-0037: close all live folder watchers
+  statusStore.stop(); // OBS-24: halt the background status refresh (retains the in-memory snapshot)
 }
 
 // ── SPEC-0045 QUIESCE — graceful shutdown (drain, don't kill) ───────────────────────────────────
@@ -418,13 +421,16 @@ async function listWorktrees(vaultPath: string): Promise<WorktreeInfo[]> {
 }
 
 /**
- * Assemble the live Pipeline Status view-model for the active KB (SPEC-0030 OBS-5/6/7/11/15), or
- * null when no KB is open. Read-only (OBS-9): gathers per-stage queue depths + busy flags, the
- * canonical-writer lock state, recent dev-log errors, the perf index, and the worktrees, then hands
- * them to the pure {@link assemblePipelineStatus}. Queues + perf read the `staging` worktree (where
- * the pipeline operates); the dev log + worktrees read the vault path.
+ * The EXPENSIVE status compute (SPEC-0030 OBS-5/6/7/11/15) — gathers per-stage queue depths + busy
+ * flags, the canonical-writer lock state, recent dev-log errors, the perf index, conversion counts,
+ * and the worktrees (git enumeration), then hands them to the pure {@link assemblePipelineStatus}.
+ *
+ * OBS-24: this is the work that must NEVER run on the render path — its git/file reads can block
+ * behind the pipeline's own git ops and trip the 8s load-guard under load (#256). It is run ONLY on a
+ * background cadence by {@link statusStore}; the render path ({@link pipelineStatusForActive}) reads
+ * the maintained snapshot instantly. Read-only (OBS-9). Null when no KB is open.
  */
-export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
+async function computePipelineStatus(): Promise<PipelineStatusView | null> {
   if (!active) return null;
   const { vaultPath, stagingWt, lock, orch, decompose, connect, claims } = active;
   const [archiveQ, decompQ, connectQ, claimsQ, archiveStatus, recentRaw, perf, worktrees, claimsSetAside, connectSetAside, conversion] = await Promise.all([
@@ -493,6 +499,65 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   const health = await telemetryHealth();
 
   return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, inFlight, health, ...(lastActivity ? { lastActivity } : {}) });
+}
+
+// ── OBS-24: the maintained status snapshot ──────────────────────────────────────────────────────────
+//
+// The render path reads a continuously-maintained last-known-good snapshot instead of synchronously
+// recomputing. The expensive `computePipelineStatus` runs only on a background cadence; reads are
+// instant (no git/fs), so a status read can never block or trip the load-guard. The snapshot is
+// persisted per-vault so launch shows last-known-good instantly, then goes live.
+
+/** Background refresh cadence — matches the former render poll, now off the render path. */
+const STATUS_REFRESH_MS = 2500;
+
+/** Where the last-known-good status snapshot is persisted (gitignored cache; never promoted). */
+function statusSnapshotPath(vaultPath: string): string {
+  return path.join(vaultPath, '.kb', 'cache', 'status-snapshot.json');
+}
+
+/** Load the persisted last-known-good snapshot for `vaultPath` (sync — a small one-time read at
+ *  activation, so launch can paint status instantly). Any error (missing/corrupt) → null. */
+function loadStatusSnapshot(vaultPath: string): PipelineStatusView | null {
+  try {
+    return JSON.parse(readFileSync(statusSnapshotPath(vaultPath), 'utf8')) as PipelineStatusView;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist `view` as the new last-known-good snapshot (best-effort, off the render path). */
+async function saveStatusSnapshot(vaultPath: string, view: PipelineStatusView): Promise<void> {
+  const file = statusSnapshotPath(vaultPath);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(view), 'utf8');
+}
+
+/** The maintained status projection (OBS-24). Started/stopped with the stage sweeps. */
+const statusStore: StatusSnapshotStore = createStatusSnapshotStore({
+  compute: computePipelineStatus,
+  intervalMs: STATUS_REFRESH_MS,
+  load: () => (active ? loadStatusSnapshot(active.vaultPath) : null),
+  save: (view) => {
+    if (active) void saveStatusSnapshot(active.vaultPath, view).catch(() => {});
+  },
+  onError: (err) => active?.log.child({ scope: 'status' }).warn('status.snapshot-refresh-failed', { err }),
+});
+
+/**
+ * The render-path status read (SPEC-0030 OBS-5/9, OBS-24). Returns the background-maintained
+ * last-known-good snapshot **instantly** — no git/fs/compute here, so a status read can never block
+ * or trip the 8s load-guard. The view's `builtAt` is its "as of" timestamp (a slightly-stale status
+ * is honest; a timeout is not). Null until the first snapshot is computed/loaded.
+ */
+export async function pipelineStatusForActive(): Promise<PipelineStatusView | null> {
+  return active ? statusStore.current() : null; // no active KB → null (don't serve a closed vault's stale snapshot)
+}
+
+/** OBS-24 test/diagnostic seam: force one background refresh + await it (e.g. an immediate post-action
+ *  status update). Never called on the render path. */
+export function refreshStatusSnapshot(): Promise<void> {
+  return statusStore.refreshNow();
 }
 
 /**
