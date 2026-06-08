@@ -791,11 +791,10 @@ export async function readLinkQueue(root: string): Promise<string[]> {
  * it CONSUMES Claims' `relatesTo` output, so making it optimistic/concurrent with Claims is a
  * producer-consumer ordering concern that needs its own design (deferred slice-2 follow-up).
  */
-export async function linkOne(root: string, nodeRel: string): Promise<LinkOneResult> {
+export async function linkOne(root: string, nodeRel: string, log: DevLog = noopDevLog): Promise<LinkOneResult> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
   const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
-  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base); // sync to the base branch HEAD
   await wtGit.raw('clean', '-fd', 'entities', 'claims'); // drop stray files from a prior aborted run
 
@@ -913,7 +912,13 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
   await wtGit.commit(
     `connect: links ${nodeRel} → ${links.length} link(s)${toRaise.length ? `, ${toRaise.length} ambiguous→review` : ''}${unresolved.length ? `, ${unresolved.length} unresolved` : ''}`,
   );
-  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  // Serialized canonical advance through the SAME ORCH-27 discipline every other writer uses (#256
+  // second symptom): a raw `merge --ff-only` here bypassed the stale-`index.lock` self-heal +
+  // sidecar guard, so a stale lock (the #256 wedge) made every link advance throw `connect.link-error`
+  // — links never rendered — while decompose/connect self-healed. We're coarse-locked single-writer, so
+  // head === checkpoint and advanceOrCollide takes the guarded ff path (heal-then-advance).
+  const checkpoint = await canonicalHead(root);
+  await advanceOrCollide(root, WORK_BRANCH, checkpoint, undefined, log);
   return { nodeRel, changed: true, links: links.length, unresolved, reviewsRaised: toRaise.length };
 }
 
@@ -927,11 +932,10 @@ export async function linkOne(root: string, nodeRel: string): Promise<LinkOneRes
  * canonical advance. A no-dupe vault is a byte-stable no-op. MUST be called serialized via the shared
  * canonical-writer lock. Returns the report (for the drain's audit/log) + whether it committed.
  */
-export async function dedupClaimsOnce(root: string): Promise<DedupReport & { committed: boolean }> {
+export async function dedupClaimsOnce(root: string, log: DevLog = noopDevLog): Promise<DedupReport & { committed: boolean }> {
   root = path.resolve(root);
   const { wt, base } = await ensureWorktree(root);
   const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
-  const rootGit = boundedGit(root);
   await wtGit.raw('reset', '--hard', base);
   await wtGit.raw('clean', '-fd', 'entities', 'claims');
 
@@ -953,7 +957,10 @@ export async function dedupClaimsOnce(root: string): Promise<DedupReport & { com
   );
   await wtGit.raw('add', '-A');
   await wtGit.commit(`connect: dedup ${report.dropped} within-source duplicate claim(s)`);
-  await rootGit.raw('merge', '--ff-only', WORK_BRANCH); // serialized canonical advance
+  // Serialized canonical advance through the ORCH-27 discipline (heal stale `index.lock` + sidecar
+  // guard), same as linkOne — a raw `merge --ff-only` here had the same #256-wedge blind spot.
+  const checkpoint = await canonicalHead(root);
+  await advanceOrCollide(root, WORK_BRANCH, checkpoint, undefined, log);
   return { ...report, committed: true };
 }
 
@@ -1073,7 +1080,7 @@ export class ConnectStage {
     // later poke/sweep retries) and never abort the whole pass.
     for (const nodeRel of await readLinkQueue(this.root)) {
       try {
-        const res = await this.lock.run(() => linkOne(this.root, nodeRel), 'connect:link');
+        const res = await this.lock.run(() => linkOne(this.root, nodeRel, this.log), 'connect:link');
         if (res.changed) worked = true;
       } catch (err) {
         this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
@@ -1085,7 +1092,7 @@ export class ConnectStage {
     // `main` via the deletion-aware gate), so set `worked` when it committed. Best-effort: a failure
     // is logged and a later poke/sweep retries — it never aborts the rest of the drain.
     try {
-      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root), 'connect:dedup');
+      const dedup = await this.lock.run(() => dedupClaimsOnce(this.root, this.log), 'connect:dedup');
       if (dedup.committed) {
         worked = true;
         this.log.info('connect.claim-dedup', {

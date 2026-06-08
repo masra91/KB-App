@@ -10,6 +10,7 @@ import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
+import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -554,6 +555,37 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       expect(md).not.toContain('[[');
     });
   });
+
+  // REGRESSION (connect.link-error class): linkOne's canonical advance must self-heal a stale
+  // `.git/index.lock` like EVERY other canonical writer (ORCH-27). It used to advance via a RAW
+  // `git merge --ff-only` that bypassed `reconcileStaleIndexLock`, so a stale lock (the #256 wedge)
+  // made it throw `Unable to create '…/index.lock': File exists` for every relatesTo node — links
+  // never rendered (isolated nodes / no Obsidian edges) — while decompose/connect self-healed.
+  it('heals a stale index.lock instead of throwing connect.link-error (the #256 wedge, second symptom)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const apple = await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedClaimRelatesTo(root, steve.rel, 'Co-founded Apple.', ['Apple']);
+      await commitAll(root, 'seed node + relatesTo claim');
+
+      // A stale `.git/index.lock` left by a crashed / boundedGit-timed-out prior op (#256).
+      const lockPath = await resolveIndexLockPath(root);
+      await fs.writeFile(lockPath, '', 'utf8');
+      const stale = new Date(Date.now() - (GATE3_STALE_AGE_MS + 60_000));
+      await fs.utimes(lockPath, stale, stale); // older than the gate-3 threshold → genuinely stale
+
+      // FAILS-BEFORE: raw `merge --ff-only` throws on the present lock. PASSES-AFTER: advanceOrCollide
+      // heals the stale lock, advances, and the wikilink renders.
+      const res = await linkOne(root, steve.rel);
+      expect(res.links).toBe(1);
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(`[[${apple.rel}|Apple]]`);
+      expect(await fs.stat(lockPath).then(() => true).catch(() => false)).toBe(false); // lock healed away
+      // The heal records its clear in `.kb/audit.jsonl` (ORCH-27 audits every clear) — that breadcrumb
+      // is the only working-tree change, so we assert the link landed, not a byte-clean tree.
+    });
+  });
 });
 
 describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on the node (SPEC-0025 META-2/3/4)', () => {
@@ -687,6 +719,31 @@ describe.skipIf(!gitAvailable)('Connect within-source claim dedup (CLAIMS-19)', 
       expect(second.committed).toBe(false);
       expect(second.dropped).toBe(0);
       expect((await simpleGit(root).revparse(['HEAD'])).trim()).toBe(headAfter);
+    });
+  });
+
+  // REGRESSION (same class as connect.link-error): dedupClaimsOnce's canonical advance shared the
+  // raw `merge --ff-only` blind spot — it must self-heal a stale `.git/index.lock` (ORCH-27) too.
+  it('heals a stale index.lock when it advances a dedup (shares the linkOne fix)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const ada = await seedNode(root, 'person', 'Ada Lovelace', [SRC]);
+      const REL = 'Pioneered the first published algorithm.';
+      await seedClaimProv(root, ada.rel, REL, 'fact', 0.9);
+      const dup = await seedClaimProv(root, ada.rel, REL, 'hypothesis', 0.4);
+      await commitAll(root, 'seed');
+
+      const lockPath = await resolveIndexLockPath(root);
+      await fs.writeFile(lockPath, '', 'utf8');
+      const stale = new Date(Date.now() - (GATE3_STALE_AGE_MS + 60_000));
+      await fs.utimes(lockPath, stale, stale);
+
+      // FAILS-BEFORE: throws on the stale lock. PASSES-AFTER: heals + commits the collapse.
+      const report = await dedupClaimsOnce(root);
+      expect(report.committed).toBe(true);
+      expect(report.dropped).toBe(1);
+      expect(await exists(root, dup)).toBe(false);
+      expect(await fs.stat(lockPath).then(() => true).catch(() => false)).toBe(false); // healed
     });
   });
 });
