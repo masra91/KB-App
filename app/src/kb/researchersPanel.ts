@@ -210,12 +210,13 @@ export function researcherConfigAuditEvents(
       payload: { field, from: base[field], to, why: RESEARCHER_AUDIT_WHY },
     });
   }
-  // The editable spend/backstop controls (RESEARCH-15/18, WS3): a change to the per-pass budget or the
-  // session timeout is behavior-relevant → audited from→to (validated/applied values only). `maxToolCalls`
-  // lives under `budget`; `timeoutMs` is top-level with the default as its base.
-  const numericChanges: Array<{ field: 'maxToolCalls' | 'timeoutMs'; from: number; to: number | undefined }> = [
+  // The editable spend/backstop/depth controls (RESEARCH-15/18/11, WS3): a change to the per-pass budget,
+  // the session timeout, or the chain-depth bound is behavior-relevant → audited from→to (validated/applied
+  // values only). `maxToolCalls` + `maxDepth` (Slice-2) live under `budget`; `timeoutMs` is top-level.
+  const numericChanges: Array<{ field: 'maxToolCalls' | 'timeoutMs' | 'maxDepth'; from: number; to: number | undefined }> = [
     { field: 'maxToolCalls', from: prior?.budget?.maxToolCalls ?? DEFAULT_RESEARCHER_BUDGET.maxToolCalls, to: patch.maxToolCalls },
     { field: 'timeoutMs', from: resolveTimeoutMs({ timeoutMs: prior?.timeoutMs }), to: patch.timeoutMs },
+    { field: 'maxDepth', from: prior?.budget?.maxDepth ?? DEFAULT_RESEARCHER_BUDGET.maxDepth, to: patch.maxDepth },
   ];
   for (const { field, from, to } of numericChanges) {
     if (to === undefined || to === from) continue;

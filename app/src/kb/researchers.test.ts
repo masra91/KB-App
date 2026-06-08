@@ -9,8 +9,11 @@ import {
   TEMPLATE_DEFAULT_EGRESS,
   clampToolCalls,
   clampTimeoutMs,
+  clampMaxDepth,
   resolveTimeoutMs,
   MAX_TOOL_CALLS,
+  MAX_MAX_DEPTH,
+  MIN_MAX_DEPTH,
   MIN_SESSION_TIMEOUT_MS,
   MAX_SESSION_TIMEOUT_MS,
   DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
@@ -80,6 +83,13 @@ describe('clampToolCalls / clampTimeoutMs — editable-bounds at the IPC boundar
     expect(clampTimeoutMs(5)).toBe(MIN_SESSION_TIMEOUT_MS); // 5ms → clamped up to the 30s floor
     expect(clampTimeoutMs(99 * 60 * 60_000)).toBe(MAX_SESSION_TIMEOUT_MS); // 99h → clamped to the 60min ceiling
     for (const bad of [0, -1, NaN, Infinity, '600000', null, undefined]) expect(clampTimeoutMs(bad as unknown)).toBeUndefined();
+  });
+
+  it('clampMaxDepth: keeps a valid integer; CLAMPS above the cap; REJECTS garbage (WS3 Slice-2, RESEARCH-11)', () => {
+    expect(clampMaxDepth(3)).toBe(3); // in-range valid
+    expect(clampMaxDepth(1)).toBe(MIN_MAX_DEPTH); // min
+    expect(clampMaxDepth(99)).toBe(MAX_MAX_DEPTH); // clamped to the chain-depth cap (10)
+    for (const bad of [0, -1, 1.5, NaN, Infinity, '3', null, undefined]) expect(clampMaxDepth(bad as unknown)).toBeUndefined();
   });
 
   it('resolveTimeoutMs: persisted value (clamped) or the default when absent/invalid', () => {

@@ -226,4 +226,12 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     const prior = web({ timeoutMs: 20 * 60_000 });
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', timeoutMs: 20 * 60_000 })).toEqual([]); // no-op re-assert
   });
+
+  it('audits an editable maxDepth change from→to (WS3 Slice-2 — chain-depth bound change is never silent)', () => {
+    const prior = web({ budget: { maxToolCalls: 8, maxDepth: 2 } });
+    const events = researcherConfigAuditEvents(prior, { id: 'web-1', maxDepth: 5 });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'maxDepth', from: 2, to: 5 });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', maxDepth: 2 })).toEqual([]); // no-op re-assert
+  });
 });

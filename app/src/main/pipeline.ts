@@ -65,7 +65,7 @@ import { DEFAULT_INTAKE_SCOPE, DEFAULT_INTAKE_SENSITIVITY, type IntakeConnectorC
 import { buildIntakeConnectorViews, isIntakeConnectorType, clampMaxItems, intakeConfigAuditEvents } from '../kb/intakeSourcingPanel';
 import type { WatchFolderView, WatchFolderPatch, IntakeConnectorView, IntakeConnectorConfigPatch, RunIntakeConnectorResult } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
-import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid } from '../kb/ulid';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -868,6 +868,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   if (cleanMaxCalls !== undefined) clean.maxToolCalls = cleanMaxCalls;
   const cleanTimeout = clampTimeoutMs(patch.timeoutMs);
   if (cleanTimeout !== undefined) clean.timeoutMs = cleanTimeout;
+  const cleanMaxDepth = clampMaxDepth(patch.maxDepth); // WS3 Slice-2: the chain-depth safety bound (RESEARCH-11)
+  if (cleanMaxDepth !== undefined) clean.maxDepth = cleanMaxDepth;
 
   let prior: ResearcherConfig | undefined;
   let applied = false;
@@ -883,8 +885,17 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         ...(clean.prompt !== undefined ? { prompt: clean.prompt } : {}),
         ...(clean.scope !== undefined ? { scope: clean.scope } : {}),
         ...(clean.topics !== undefined ? { topics: clean.topics } : {}),
-        // WS3: maxToolCalls merges into the existing budget (preserve maxDepth); timeoutMs is top-level.
-        ...(clean.maxToolCalls !== undefined ? { budget: { ...prior.budget, maxToolCalls: clean.maxToolCalls } } : {}),
+        // WS3: maxToolCalls + maxDepth (Slice-2) merge into the existing budget (each preserved if unset);
+        // timeoutMs is top-level.
+        ...(clean.maxToolCalls !== undefined || clean.maxDepth !== undefined
+          ? {
+              budget: {
+                ...prior.budget,
+                ...(clean.maxToolCalls !== undefined ? { maxToolCalls: clean.maxToolCalls } : {}),
+                ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}),
+              },
+            }
+          : {}),
         ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
         // Template config: merge repoPath (Code) / tenantId (M365) into the existing config,
         // preserving other config keys.
@@ -911,7 +922,11 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
         prompt: clean.prompt ?? `Research ${template} sources relevant to the request.`,
         egressTier,
         scope: clean.scope ?? 'global',
-        budget: clean.maxToolCalls !== undefined ? { ...DEFAULT_RESEARCHER_BUDGET, maxToolCalls: clean.maxToolCalls } : DEFAULT_RESEARCHER_BUDGET,
+        budget: {
+          ...DEFAULT_RESEARCHER_BUDGET,
+          ...(clean.maxToolCalls !== undefined ? { maxToolCalls: clean.maxToolCalls } : {}),
+          ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}),
+        },
         ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
         schedule: clean.schedule ?? 'off',
         posture: clean.posture ?? DEFAULT_POSTURE,
