@@ -81,10 +81,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux-only: Vite-build + asar-pack is platform-agnostic, so a bundling regression
-        # fails here regardless of the shipped OS. The mac/Windows package step stays in the
-        # opt-in e2e job (where it also feeds the boot smoke).
-        os: [ubuntu-latest]
+        # Ubuntu + macOS: the Vite-build + asar-pack catches platform-agnostic bundling regressions on
+        # Linux, BUT a macOS-only NATIVE dep (e.g. chokidar's `fsevents`, SPEC-0037) can break ONLY the
+        # mac package — `fsevents` has `os: ["darwin"]`, so it's never installed/bundled on Linux. The
+        # macos-latest leg is the durable catch for that class (the #247 fsevents regression the
+        # ubuntu-only matrix missed). Default `npm run package` is UNSIGNED (KB_OSX_SIGN unset), so the
+        # mac leg needs no signing cert.
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -100,14 +103,24 @@ jobs:
         shell: bash
         run: |
           # electron-forge exits non-zero on a hard failure, but assert the artifact exists too
-          # so a silently-empty package can never read as green.
-          dir=$(ls -d out/KB-App-linux-* 2>/dev/null | head -n1)
-          if [ -z "$dir" ] || [ ! -x "$dir/KB-App" ]; then
-            echo "::error::npm run package produced no runnable Linux artifact under out/"
-            ls -R out || true
-            exit 1
+          # so a silently-empty package can never read as green. Per-OS output layout.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            app=$(ls -d out/KB-App-darwin-*/KB-App.app 2>/dev/null | head -n1)
+            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/KB-App" ]; then
+              echo "::error::npm run package produced no launchable macOS .app under out/ (fsevents/native-bundling regression?)"
+              ls -R out || true
+              exit 1
+            fi
+            echo "Packaged artifact OK: $app"
+          else
+            dir=$(ls -d out/KB-App-linux-* 2>/dev/null | head -n1)
+            if [ -z "$dir" ] || [ ! -x "$dir/KB-App" ]; then
+              echo "::error::npm run package produced no runnable Linux artifact under out/"
+              ls -R out || true
+              exit 1
+            fi
+            echo "Packaged artifact OK: $dir/KB-App"
           fi
-          echo "Packaged artifact OK: $dir/KB-App"
 
   e2e:
     name: e2e (packaged smoke) — phased / opt-in
