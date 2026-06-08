@@ -2,8 +2,8 @@
 // uses to place + fold + parse nodes. Hand-rolled YAML (flat + one nested `provenance`
 // block) — no yaml dependency (ENG-5), matching sourceDoc.ts / claimDoc.ts.
 //
-// CANON-6: evergreen knowledge is for humans. The FILENAME is the human name
-// (`entities/<kind>/<slug>.md`); identity is the stable `id:` in frontmatter, with the ULID
+// CANON-6: evergreen knowledge is for humans. The FILENAME is the human name — real case + spaces
+// (`entities/<kind>/<Human Name>.md`, COMPOSE-6); identity is the stable `id:` in frontmatter, with the ULID
 // (and folded-in prior spellings) under `aliases:` so id-search / old links keep resolving
 // through renames and merges. Connect is the SOLE writer of `entities/` (CONNECT-3).
 import path from 'node:path';
@@ -42,28 +42,52 @@ export function slugify(name: string): string {
   return s.length > 0 ? s : 'unnamed';
 }
 
-/** Kind segment for the path: same slug treatment so `entities/<kind>/...` stays tidy. */
+/** Kind segment for the path: a lowercase slug so the *directory* `entities/<kind>/...` stays tidy
+ *  (`entities/organization/...`). Only the leaf FILENAME is the human name (entityFileName). */
 export function kindSlug(kind: string): string {
   return slugify(kind);
 }
 
 /**
- * Repo-relative path for an entity node: `entities/<kind>/<slug>.md`. `taken` lets the caller
- * pass already-used relative paths in this run so a within-kind collision deterministically
- * gets a short id suffix (`<slug>-<id6>.md`) — never a ULID-only filename (CANON-7).
+ * COMPOSE-6 (SPEC-0046) / PRIN-24 / CANON-6: the human leaf filename for an entity — the **natural
+ * name with real case + spaces preserved** (`Steve Jobs.md`), NOT a kebab-slug (`steve-jobs.md`).
+ * Identity is the `id:` (the ULID + folded aliases), so the filename is purely cosmetic and free to
+ * be human; Obsidian opens spaces/case fine. We only strip characters a path / Obsidian wikilink
+ * cannot hold (`/ \ : * ? " < > |` and the wikilink-significant `# ^ [ ]` + control chars), collapse
+ * the resulting whitespace, drop leading/trailing dots+spaces (hidden-file / Windows hazards), and
+ * cap length. Case is **never** folded (so `iPhone`, `NASA`, `von Neumann` survive). Empty → `Unnamed`.
+ */
+export function entityFileName(name: string): string {
+  const cleaned = name
+    // eslint-disable-next-line no-control-regex -- strip C0 control chars from the human filename
+    .replace(/[/\\:*?"<>|#^[\]\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\s]+/, '')
+    .trimEnd()
+    .slice(0, 120)
+    .replace(/[.\s]+$/, '');
+  return cleaned.length > 0 ? cleaned : 'Unnamed';
+}
+
+/**
+ * Repo-relative path for an entity node: `entities/<kind>/<Human Name>.md` (COMPOSE-6 — the leaf is
+ * the human name, the kind dir stays a lowercase slug). `taken` lets the caller pass already-used
+ * relative paths in this run so a within-kind collision deterministically gets a short id suffix
+ * (`<Human Name> (<id6>).md`) — never a ULID-only filename (CANON-7).
  */
 export function entityFileRel(kind: string, name: string, id: string, taken: ReadonlySet<string> = new Set()): string {
   const dir = path.join('entities', kindSlug(kind));
-  const base = path.join(dir, `${slugify(name)}.md`);
+  const leaf = entityFileName(name);
+  const base = path.join(dir, `${leaf}.md`);
   if (!taken.has(base)) return base;
-  const suffixed = path.join(dir, `${slugify(name)}-${id.slice(0, 6).toLowerCase()}.md`);
+  const suffixed = path.join(dir, `${leaf} (${id.slice(0, 6).toLowerCase()}).md`);
   return suffixed;
 }
 
 export interface EntityNode {
   id: string; // stable canonical ULID (frontmatter identity; survives renames/merges)
   kind: string;
-  name: string; // human canonical name (also the filename slug source)
+  name: string; // human canonical name (also the source for the human leaf filename, entityFileName)
   confidence: number;
   aliases: string[]; // ULID + prior names/spellings folded in (CANON-6)
   derivedFrom: string[]; // ALL contributing source dirs (CONNECT-8)
