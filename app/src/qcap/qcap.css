@@ -36,8 +36,10 @@
   display: none;
 }
 
-/* QCAP-9 steer-to-Settings affordance: a quiet oxide-tinted text button, never a loud blocking banner —
-   selection-capture is off, here's the one-tap fix. Underline-on-hover marks it as actionable. */
+/* QCAP-9 steer-to-Settings affordance: a quiet brass text button, never a loud blocking banner — a
+   denied permission is "waiting on YOU," actionable, NOT an error/crash, so it takes --viz-brass (the
+   needs-you/blocked token), not --viz-oxide (error). Mirrors the SPEC-0034 vault-permission steer
+   (specs/design/macos-permission.md §3/§6). Underline-on-hover marks it as actionable. */
 .qcap-ax {
   border: 0;
   background: none;
@@ -45,7 +47,7 @@
   cursor: pointer;
   font: inherit;
   font-size: 0.62rem;
-  color: var(--viz-oxide);
+  color: var(--viz-brass);
 }
 .qcap-ax:hover {
   text-decoration: underline;

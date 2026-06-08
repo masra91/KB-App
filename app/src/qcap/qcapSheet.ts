@@ -23,7 +23,7 @@ export function mountQuickCaptureSheet(root: HTMLElement): void {
         <span class="qcap-mark viz-signage">Capture</span>
         <span class="qcap-head__meta">
           <span id="qcapClipTag" class="viz-chip qcap-cliptag" hidden>clipboard</span>
-          <button id="qcapAxEnable" type="button" class="qcap-ax viz-numeric" hidden
+          <button id="qcapAxEnable" type="button" class="qcap-ax" hidden
             title="Turn on Accessibility to capture the selected text from any app">selection capture off — enable</button>
         </span>
       </div>
