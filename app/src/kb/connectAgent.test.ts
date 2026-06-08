@@ -35,6 +35,17 @@ describe('buildConnectPrompt (CONNECT-5)', () => {
     expect(buildConnectPrompt(set())).toContain('(none)');
     expect(buildConnectPrompt(set({ existingNodes: [{ id: 'N1', name: 'Steve Jobs' }] }))).toContain('existingNodeId: N1');
   });
+
+  // REVIEW-16: a disambiguation review must carry per-candidate glosses + a gloss-using question, so
+  // the Principal can tell the candidates apart without re-reading the sources. Drives the prompt.
+  it('instructs a per-candidate distinguishing gloss + a question that USES the glosses (REVIEW-16)', () => {
+    const p = buildConnectPrompt(set());
+    expect(p).toMatch(/one-line "gloss"/i); // the per-candidate gloss
+    expect(p).toMatch(/MUST use those glosses, NOT bare names/i); // the question must use them
+    expect(p).toMatch(/REVIEW-16/); // traced to the requirement
+    // the JSON schema offers candidates:[{id, gloss}] on a review
+    expect(p).toMatch(/"candidates":\[\{"id":"<candidate id>","gloss":"\.\.\."\}\]/);
+  });
 });
 
 describe('makeConnectDecider (CONNECT-5/14)', () => {
@@ -47,6 +58,40 @@ describe('makeConnectDecider (CONNECT-5/14)', () => {
     expect(d.clusters[0].canonicalName).toBe('Steve Jobs');
     expect(d.agent?.via).toBe('copilot');
     expect(d.agent?.ok).toBe(true);
+  });
+
+  // REVIEW-16, through the REAL decider path (prompt-faithful runner): a verdict whose review carries
+  // per-candidate glosses parses into decision.reviews[].candidates — the data the stage then enriches.
+  it('parses a review carrying per-candidate {id, gloss} glosses (REVIEW-16)', async () => {
+    const decide = makeConnectDecider({
+      available: true,
+      run: async (prompt) => {
+        // prompt-faithful: the runner only answers because the prompt asked for glosses (the contract).
+        expect(prompt).toMatch(/one-line "gloss"/i);
+        return JSON.stringify({
+          blockKey: 'person|steve jobs',
+          clusters: [
+            { canonicalName: 'Steve Jobs (fishing)', memberCandidateIds: ['01A'], confidence: 0.5 },
+            { canonicalName: 'Steve Jobs (wedding)', memberCandidateIds: ['01B'], confidence: 0.5 },
+          ],
+          reviews: [
+            {
+              question: 'Is Steve Jobs (fishing-trip notes) the same person as Steve Jobs (wedding list)?',
+              detail: 'Same name, two sources — ambiguous.',
+              candidates: [
+                { id: '01A', gloss: 'from the fishing-trip notes' },
+                { id: '01B', gloss: "Dave's wedding guest list" },
+              ],
+            },
+          ],
+        });
+      },
+    });
+    const d = await decide(set());
+    expect(d.reviews?.[0].candidates).toEqual([
+      { id: '01A', gloss: 'from the fishing-trip notes' },
+      { id: '01B', gloss: "Dave's wedding guest list" },
+    ]);
   });
 
   it('THROWS when copilot is unavailable — never fabricates a resolution (CONNECT-14)', async () => {

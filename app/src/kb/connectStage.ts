@@ -42,7 +42,7 @@ import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
 import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
-import type { Review } from './reviews';
+import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
@@ -584,13 +584,26 @@ export async function connectOne(
       const reviewIds: string[] = [];
       for (const req of decision.reviews) {
         const id = ulid();
+        // REVIEW-16: enrich the agent's per-candidate glosses into decision-grade subject context —
+        // join each {id, gloss} to its candidate's name + source-dir rel (the working Obsidian link).
+        // Unknown ids (an agent naming a candidate outside its set) are dropped, never surfaced as a
+        // bare ULID-as-name. The agent authors the gloss; the stage owns the name + deterministic path.
+        const subjectCandidates = (req.candidates ?? [])
+          .map((rc): ReviewSubjectCandidate | null => {
+            const cand = candidateById.get(rc.id);
+            return cand ? { name: cand.name, gloss: rc.gloss, sourceRel: sourceDirRel(cand.sourceId) } : null;
+          })
+          .filter((c): c is ReviewSubjectCandidate => c !== null);
         const review: Review = {
           id,
           status: 'open',
           question: req.question,
           detail: req.detail,
           raisedBy: { stage: STAGE, runId, item: { kind: 'block', ref: key }, auditRel: AUDIT_REL, markerKey: { blockKey: key } },
-          subject: { ...(req.refs ? { refs: req.refs } : {}) },
+          subject: {
+            ...(req.refs ? { refs: req.refs } : {}),
+            ...(subjectCandidates.length > 0 ? { candidates: subjectCandidates } : {}),
+          },
           createdAt,
         };
         await writeReviewFile(path.join(wt, reviewRel(id)), review);
