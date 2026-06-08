@@ -287,6 +287,48 @@ describe.skipIf(!gitAvailable)('connectOne — ambiguity parks for Review (CONNE
       expect(hasReview).toBe(true);
     });
   });
+
+  // REVIEW-16: the agent's per-candidate {id, gloss} is enriched into decision-grade subject context
+  // ({name, sourceRel, gloss}) on the real park path — the stage joins the id to the candidate's name
+  // + source-dir rel (the working Obsidian link); the agent only authors the gloss.
+  it('enriches the parked review subject with per-candidate {name, sourceRel, gloss} (REVIEW-16)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // two same-name candidates from DIFFERENT sources — the textbook disambiguation case.
+      await seedCandidate(root, 'person', 'Benton', '01S1');
+      await seedCandidate(root, 'person', 'Benton', '01S2');
+      await commitAll(root, 'seed');
+
+      const reviewer: ConnectDecider = async (set) => ({
+        blockKey: set.blockKey,
+        clusters: set.candidates.map((c) => ({ canonicalName: c.name, memberCandidateIds: [c.id], confidence: 0.4 })),
+        // glosses authored per candidate, keyed by id, tagged with the source so we can assert the join.
+        reviews: [
+          {
+            question: 'Is Benton (fishing-trip notes) the same person as Benton (wedding list)?',
+            detail: 'Same name, two sources — ambiguous.',
+            candidates: set.candidates.map((c) => ({ id: c.id, gloss: `gloss for ${c.sourceId}` })),
+          },
+        ],
+        agent: { via: 'copilot', model: 'test' },
+      });
+      const res = await connectOne(root, 'person|benton', reviewer);
+      expect(res.parked).toBe(true);
+
+      const review = (await findOpenReviews(root))[0];
+      expect(review.subject.candidates).toBeDefined();
+      const cands = review.subject.candidates!;
+      expect(cands).toHaveLength(2);
+      // each carries the candidate's NAME (stage-owned), the agent's GLOSS, and the source-dir REL link.
+      for (const c of cands) {
+        expect(c.name).toBe('Benton');
+        expect(c.gloss).toMatch(/^gloss for 01S[12]$/);
+        expect(c.sourceRel).toBe(c.gloss.replace('gloss for ', '')); // sourceDirRel passthrough for the non-ULID fixture id
+      }
+      // both distinct sources are represented (the whole point — tell the two apart).
+      expect(new Set(cands.map((c) => c.sourceRel))).toEqual(new Set(['01S1', '01S2']));
+    });
+  });
 });
 
 describe.skipIf(!gitAvailable)('connectOne — failure never loses candidates; set aside after K (CONNECT-14)', () => {

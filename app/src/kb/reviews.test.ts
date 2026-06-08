@@ -16,6 +16,23 @@ describe('validReviewRequest (REVIEW-2/3)', () => {
   it('requires non-empty detail/context (REVIEW-3)', () => {
     expect(() => validReviewRequest({ question: 'q' }, 0)).toThrow(/detail/);
   });
+
+  // REVIEW-16: a disambiguation review may carry per-candidate distinguishing glosses (id-keyed).
+  it('accepts candidates[] of {id, gloss} (REVIEW-16)', () => {
+    const r = validReviewRequest(
+      { question: 'Is Steve (fishing notes) the same as Steve (wedding list)?', detail: 'd', candidates: [{ id: '01A', gloss: 'from the fishing-trip notes' }, { id: '01B', gloss: "Dave's wedding guest list" }] },
+      0,
+    );
+    expect(r.candidates).toEqual([{ id: '01A', gloss: 'from the fishing-trip notes' }, { id: '01B', gloss: "Dave's wedding guest list" }]);
+  });
+  it('drops empty candidates[] to undefined (REVIEW-16)', () => {
+    expect(validReviewRequest({ question: 'q', detail: 'd', candidates: [] }, 0).candidates).toBeUndefined();
+  });
+  it('requires each candidate to carry a non-empty id AND gloss (REVIEW-16)', () => {
+    expect(() => validReviewRequest({ question: 'q', detail: 'd', candidates: [{ gloss: 'g' }] }, 0)).toThrow(/candidates\[0\]\.id/);
+    expect(() => validReviewRequest({ question: 'q', detail: 'd', candidates: [{ id: '01A' }] }, 0)).toThrow(/candidates\[0\]\.gloss/);
+    expect(() => validReviewRequest({ question: 'q', detail: 'd', candidates: {} }, 0)).toThrow(/candidates must be an array/);
+  });
 });
 
 describe('validReviewRequests (the optional decision channel)', () => {

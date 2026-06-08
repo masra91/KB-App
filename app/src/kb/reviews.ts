@@ -13,6 +13,19 @@
 export const REVIEW_VERDICTS = ['confirm', 'reject'] as const;
 export type ReviewVerdict = (typeof REVIEW_VERDICTS)[number];
 
+/**
+ * A per-candidate distinguishing gloss the RAISING agent authors for a disambiguation review
+ * (REVIEW-16). Keyed by candidate `id` — in a "same entity?" review the candidates usually share
+ * a NAME, so a name key would be ambiguous; the id ties the gloss to the right one. The stage
+ * enriches `{id}` → `{name, sourceRel}` from the candidate set (the agent only authors the gloss).
+ */
+export interface ReviewCandidateGloss {
+  /** The candidate id from the agent's input set (e.g. a Connect `Candidate.id`). */
+  id: string;
+  /** A one-line "what makes this one this one" — source context / strongest claim / timeframe. */
+  gloss: string;
+}
+
 /** What the agent emits in its decision to raise a review (REVIEW-1/3/14). */
 export interface ReviewRequest {
   /** A single yes/no question — confirmable, never open-ended (REVIEW-2). */
@@ -21,6 +34,22 @@ export interface ReviewRequest {
   detail: string;
   /** Optional entity names / mentions the question is about. */
   refs?: string[];
+  /**
+   * Optional decision-grade per-candidate context for a disambiguation review (REVIEW-16): each
+   * affected candidate's id + a distinguishing gloss the agent authored. The stage joins these to
+   * `subject.candidates` ({name, sourceRel, gloss}); the `question` itself should use the glosses.
+   */
+  candidates?: ReviewCandidateGloss[];
+}
+
+/** Decision-grade per-candidate context on a persisted review (REVIEW-16), rendered as a row. */
+export interface ReviewSubjectCandidate {
+  /** The candidate's surface name. */
+  name: string;
+  /** The distinguishing gloss authored by the raising agent (what makes this one this one). */
+  gloss: string;
+  /** Repo-relative source dir → the working "Open in Obsidian" link (REVIEW-16); omitted if unknown. */
+  sourceRel?: string;
 }
 
 /** A reference to the parked work item that raised the review (the resume target). */
@@ -54,6 +83,7 @@ export interface Review {
   subject: {
     refs?: string[];
     sources?: string[]; // repo-relative source dirs the question concerns
+    candidates?: ReviewSubjectCandidate[]; // REVIEW-16: decision-grade per-candidate context + links
   };
   createdAt: string;
   answer?: ReviewAnswer;
@@ -79,6 +109,19 @@ export function validReviewRequest(v: unknown, i: number): ReviewRequest {
       throw new Error(`review: reviews[${i}].refs must be an array of non-empty strings`);
     }
     if (o.refs.length > 0) req.refs = o.refs as string[];
+  }
+  if (o.candidates !== undefined) {
+    if (!Array.isArray(o.candidates)) {
+      throw new Error(`review: reviews[${i}].candidates must be an array when present`);
+    }
+    const cands = o.candidates.map((c, j): ReviewCandidateGloss => {
+      if (typeof c !== 'object' || c === null) throw new Error(`review: reviews[${i}].candidates[${j}] must be an object`);
+      const co = c as Record<string, unknown>;
+      if (!isNonEmptyString(co.id)) throw new Error(`review: reviews[${i}].candidates[${j}].id must be a non-empty string`);
+      if (!isNonEmptyString(co.gloss)) throw new Error(`review: reviews[${i}].candidates[${j}].gloss must be a non-empty string`);
+      return { id: co.id, gloss: co.gloss };
+    });
+    if (cands.length > 0) req.candidates = cands;
   }
   return req;
 }
