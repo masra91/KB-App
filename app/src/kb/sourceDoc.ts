@@ -9,6 +9,11 @@ function scalar(s: string): string {
   return /[:#'"\n]|^\s|\s$/.test(s) ? JSON.stringify(s) : s;
 }
 
+/** The neutral generic a titleless source falls back to — NEVER a raw ULID (PRIN-24). Exported so the
+ *  renderer-safe status guard (`pipelineStatusLabels.displayItemName`) reuses the SAME wording: an
+ *  untitled source reads identically in Reviews, the Status stations, The Line, and the tray. */
+export const UNTITLED_SOURCE = 'Untitled source';
+
 /**
  * A human-readable title for a source, derived from its `source.md` (which has NO dedicated `title`
  * field). Precedence: the frontmatter `originalName` (file sources) → the first body heading /
@@ -32,7 +37,7 @@ export function deriveSourceTitle(sourceMd: string): string {
     const t = line.replace(/^#+[ \t]*/, '').trim(); // strip a leading markdown heading marker
     if (t) return clipTitle(t);
   }
-  return 'Untitled source';
+  return UNTITLED_SOURCE;
 }
 
 function clipTitle(s: string): string {

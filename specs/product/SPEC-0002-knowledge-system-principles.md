@@ -6,7 +6,7 @@ type: product
 status: draft
 owners: [KB-Architect, Principal]
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-08
 related: [SPEC-0001]
 supersedes: null
 ---
@@ -128,7 +128,7 @@ time.
 | ------- | -------- | ------------------------------------------------- | -------- |
 | PRIN-22 | should   | Workflows, agents, and prompts are observable and evaluable | none-yet |
 | PRIN-23 | should   | Coverage gaps, failures, and lessons learned are captured and fed back | none-yet |
-| PRIN-24 | must     | **Human-readable surfacing — internal IDs NEVER reach the user.** ULIDs / hashes / repo-relative paths are **internal identity** (paths, dedup, provenance, links) and must **never be what a human sees**. **Every** user-facing surface — Reviews, Status/VIZ, the Obsidian vault (filenames, links, graph), Activity, anywhere — shows a **human label** (entity name · source title · gloss · friendly stage/item name); the ID is carried *behind* it (frontmatter, `data-*`, a resolved link target), never *as* the label. **A raw ULID/hash visible in a user surface is a defect.** (Principal, repeatedly, 2026-06-08: *"these are totally meaningless… every time a user sees it it's just garbage and confusing — reviews, status, and god help us Obsidian."*) Corollaries: a link's **display text is the human name** and its **target resolves to the real file** (e.g. `sources/<shard>/<id>/source.md`, not a bare id or a directory); a source without a human title gets one (derived) so it never surfaces as its ULID. | none-yet | LANG-1; PRIN-13; CANON-6; VAULT |
+| PRIN-24 | must     | **Human-readable surfacing — internal IDs NEVER reach the user.** ULIDs / hashes / repo-relative paths are **internal identity** (paths, dedup, provenance, links) and must **never be what a human sees**. **Every** user-facing surface — Reviews, Status/VIZ, the Obsidian vault (filenames, links, graph), Activity, anywhere — shows a **human label** (entity name · source title · gloss · friendly stage/item name); the ID is carried *behind* it (frontmatter, `data-*`, a resolved link target), never *as* the label. **A raw ULID/hash visible in a user surface is a defect.** (Principal, repeatedly, 2026-06-08: *"these are totally meaningless… every time a user sees it it's just garbage and confusing — reviews, status, and god help us Obsidian."*) Corollaries: a link's **display text is the human name** and its **target resolves to the real file** (e.g. `sources/<shard>/<id>/source.md`, not a bare id or a directory); a source without a human title gets one (derived) so it never surfaces as its ULID. | test: **Status/VIZ** — `pipelineStatusLabels` (never-a-ULID guard) · `sourceTitleRead` (id→title) · `pipelineStatusView` (roster); shared `deriveSourceTitle` (`sourceDoc`). Reviews/vault via REVIEW-16 (#295) + COMPOSE-8 | LANG-1; PRIN-13; CANON-6; VAULT |
 
 ## 5. Open questions
 
@@ -147,3 +147,13 @@ time.
 
 - 2026-05-30 — created (draft). Captured the 7 principles + guiding philosophy from
   the Principal; rendered implications as requirements PRIN-1..PRIN-23.
+- 2026-06-08 — **PRIN-24 Status/VIZ slice implemented** (KB-Developer-2). The Status surfaces (The
+  Line carriages, the per-station current item) now show a source's **human title**, never the raw
+  ULID. Resolution runs in `computePipelineStatus` (OBS-24's background cadence, off the render path):
+  each source-keyed roster id + the archive `currentItem` is loaded from its `source.md` and derived
+  via the **one shared** `deriveSourceTitle` (REVIEW-16 — no second fallback ladder, per the
+  cross-surface design rule). The pure renderer-safe guard `displayItemName` (`pipelineStatusLabels`)
+  is the final gate every surface shares: a still-unresolved source id collapses to the same neutral
+  generic (`UNTITLED_SOURCE`), so The Line, the stations, and the tray can **never** print a ULID;
+  a non-ULID id (entity / connect block key) is already human-readable and shows as-is. `Verify`
+  graduated for the Status/VIZ surface. (Reviews/Obsidian surfaces land via REVIEW-16/COMPOSE-8.)

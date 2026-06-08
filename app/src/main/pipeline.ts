@@ -30,6 +30,8 @@ import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
 import { assemblePipelineStatus, toSetAsideViews, deriveStageError, buildInFlightRoster, type PipelineStatusView, type StageInput, type RecentError, type WorktreeInfo } from '../kb/pipelineStatusView';
+import { displayItemName } from '../kb/pipelineStatusLabels';
+import { readSourceTitles } from '../kb/sourceTitleRead';
 import { planSetAsideAction, type SetAsideTarget } from '../kb/pipelineControl';
 import { readConversionCounts } from '../kb/conversionCounts';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
@@ -469,8 +471,24 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
   const nowMs = Date.now();
   const hasErrorFor = (stage: string): boolean => deriveStageError(recentErrors, stage, nowMs);
 
+  // PRIN-24: resolve the source-keyed stages' ids to human titles. Archive + decompose carry the
+  // SOURCE ULID being processed; resolve each to its `source.md` title via the ONE shared derivation
+  // (deriveSourceTitle / REVIEW-16). This is the fs title-LOAD the seam places HERE — in
+  // computePipelineStatus, on OBS-24's background cadence (never the render path) — so the resolved
+  // names bake into the cached snapshot and flow to The Line + the Status stations + the tray.
+  // Connect/claims ids are block keys / entity ids (not ULIDs), so they don't resolve to a source and
+  // the renderer guard (`displayItemName`) shows them as-is — never a raw ULID.
+  const sourceTitles = await readSourceTitles(vaultPath, [
+    ...(archiveStatus.processing ? [archiveStatus.processing] : []),
+    ...archiveQ,
+    ...decompQ,
+  ]);
+  const archiveCurrent = archiveStatus.processing
+    ? displayItemName(sourceTitles.get(archiveStatus.processing), archiveStatus.processing)
+    : undefined;
+
   const stages: StageInput[] = [
-    { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveStatus.processing ? { currentItem: archiveStatus.processing } : {}) },
+    { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveCurrent ? { currentItem: archiveCurrent } : {}) },
     { stage: 'decompose', queueDepth: decompQ.length, setAside: setAsideFor('decompose'), busy: decompose.busy(), hasError: hasErrorFor('decompose') },
     { stage: 'connect', queueDepth: connectQ.length, setAside: setAsideFor('connect'), busy: connect.busy(), hasError: hasErrorFor('connect') },
     { stage: 'claims', queueDepth: claimsQ.length, setAside: setAsideFor('claims'), busy: claims.busy(), hasError: hasErrorFor('claims') },
@@ -479,13 +497,14 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
   // SPEC-0032 VIZ-2: in-flight carriages — each stage's queue items, `active` = the draining batch
   // (`busy && index < cap`; the drain processes `queue[0..cap)`). Archive's active item is its
   // `processing` (prepended; cap=1); connect drains 1 block at a time (cap=1); decompose/claims = STAGE_CAP.
+  // Source-keyed items (archive/decompose) carry the resolved title as `name` (PRIN-24).
   const inFlight = buildInFlightRoster([
     {
       stage: 'archive',
-      items: [...(archiveStatus.processing ? [{ id: archiveStatus.processing }] : []), ...archiveQ.map((id) => ({ id }))],
+      items: [...(archiveStatus.processing ? [{ id: archiveStatus.processing, name: sourceTitles.get(archiveStatus.processing) }] : []), ...archiveQ.map((id) => ({ id, name: sourceTitles.get(id) }))],
       busy: orch.busy(), cap: 1, since: archiveStatus.updatedAt ?? null,
     },
-    { stage: 'decompose', items: decompQ.map((id) => ({ id })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
+    { stage: 'decompose', items: decompQ.map((id) => ({ id, name: sourceTitles.get(id) })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
     { stage: 'connect', items: connectQ.map((cs) => ({ id: cs.blockKey })), busy: connect.busy(), cap: 1, since: connect.currentSince() },
     { stage: 'claims', items: claimsQ.map((rel) => ({ id: path.basename(rel, '.md') })), busy: claims.busy(), cap: STAGE_CAP, since: claims.currentSince() },
   ]);
