@@ -15,7 +15,6 @@ import {
   STATION_GLYPH,
   OVERALL_GLYPH,
   MAX_CARRIAGES,
-  QUEUE_CONCERN_THRESHOLD,
 } from './theLineModel';
 import type { PipelineStatusView, ConversionCounts, InFlightItem } from '../../kb/pipelineStatusView';
 
@@ -136,17 +135,36 @@ describe('theLineModel — stations (§6, state never colour alone)', () => {
     expect(st.find((s) => s.stage === 'decompose')!.slowest).toBe(false);
   });
 
-  it('flags the queue as concerning only once the real backlog crosses the threshold (§6 role 3 / VIZ-10)', () => {
+  it('flags the queue concerning only when the backlog is STUCK (blocked/error), never on depth alone — the cry-wolf guard (§6 role 3 / VIZ-10)', () => {
     const st = buildStations(
       viewWith({
+        overall: 'running',
+        stalled: false,
         stages: [
-          { stage: 'decompose', state: 'running', queueDepth: 2, setAside: 0 }, // small churn → calm
-          { stage: 'connect', state: 'blocked', queueDepth: QUEUE_CONCERN_THRESHOLD, setAside: 0 }, // pile-up → brass-eligible
+          { stage: 'decompose', state: 'running', queueDepth: 250, setAside: 0 }, // deep but DRAINING → calm
+          { stage: 'connect', state: 'blocked', queueDepth: 1, setAside: 0 }, // stuck w/ backlog → brass
+          { stage: 'claims', state: 'error', queueDepth: 3, setAside: 0 }, // errored w/ backlog → brass
         ],
       }),
     );
-    expect(st.find((s) => s.stage === 'decompose')!.queueConcerning).toBe(false);
+    expect(st.find((s) => s.stage === 'decompose')!.queueConcerning).toBe(false); // depth alone ≠ concern
     expect(st.find((s) => s.stage === 'connect')!.queueConcerning).toBe(true);
+    expect(st.find((s) => s.stage === 'claims')!.queueConcerning).toBe(true);
+  });
+
+  it('an overall-stalled pipeline (OBS-11) flags any backlogged station brass; an empty queue never does', () => {
+    const st = buildStations(
+      viewWith({
+        overall: 'stalled',
+        stalled: true,
+        stages: [
+          { stage: 'decompose', state: 'idle', queueDepth: 4, setAside: 0 }, // stalled + backlog → brass
+          { stage: 'connect', state: 'idle', queueDepth: 0, setAside: 0 }, // no backlog → calm even when stalled
+        ],
+      }),
+    );
+    expect(st.find((s) => s.stage === 'decompose')!.queueConcerning).toBe(true);
+    expect(st.find((s) => s.stage === 'connect')!.queueConcerning).toBe(false);
   });
 
   it('slowestStage returns null when no stage has timing yet (cold start)', () => {

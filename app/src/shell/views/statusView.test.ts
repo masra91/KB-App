@@ -177,15 +177,18 @@ describe('The Line — funnel-caption legibility, each number declares its role 
     expect(h).toContain('title="1 waiting to be processed at Linking"'); // queue = waiting-here, not flowing
   });
 
-  it('a queue past the concern threshold takes brass (needs-you) — never confusable with the muted projection (role 3)', () => {
-    const piled: PipelineStatusView = {
+  it('a STUCK stage with backlog takes brass (needs-you); a deep but draining queue stays calm — cry-wolf guard (role 3)', () => {
+    // STALLED has blocked/error stations with a backlog → the real backlog goes brass.
+    expect(spine()).toContain('line-station-queue viz-body line-queue-concern');
+    // a deep queue in a RUNNING (draining) stage of a healthy pipeline is normal work → never brass.
+    const draining: PipelineStatusView = {
       ...STALLED,
-      stages: [{ stage: 'connect', state: 'blocked', queueDepth: 25, setAside: 0 }],
+      overall: 'running',
+      stalled: false,
+      lock: { held: false, waiters: 0 },
+      stages: [{ stage: 'connect', state: 'running', queueDepth: 250, setAside: 0 }],
     };
-    const h = spineHtml(buildStations(piled));
-    expect(h).toContain('line-station-queue viz-body line-queue-concern'); // brass-eligible class on the real backlog
-    // the calm (sub-threshold) queue in STALLED does NOT get the concern class.
-    expect(spine()).not.toContain('line-queue-concern');
+    expect(spineHtml(buildStations(draining))).not.toContain('line-queue-concern');
   });
 
   it('a once-per-spine legend decodes the caption grammar (progressive disclosure, not per-station clutter)', () => {

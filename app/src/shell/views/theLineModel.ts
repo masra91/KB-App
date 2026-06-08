@@ -52,8 +52,10 @@ export interface StationModel {
   glyph: string;
   stateClass: string;
   queueDepth: number;
-  /** The real backlog at this station crosses the concern threshold (§6 role 3 / VIZ-10) → the
-   *  renderer may tint the queue brass (needs-you). The *only* number that's a genuine backlog. */
+  /** The real backlog here is STUCK (§6 role 3 / VIZ-10 / OBS-11) → the renderer tints the queue brass
+   *  (needs-you). Stuck-coupled, NOT depth: a deep-but-*draining* queue is healthy work (the Principal
+   *  routinely has hundreds in flight), so brass fires only when this stage is blocked/errored or the
+   *  whole pipeline is stalled AND there's a backlog — never on depth alone (the cry-wolf guard). */
   queueConcerning: boolean;
   setAside: number;
   currentItem?: string;
@@ -199,11 +201,6 @@ export function buildFunnel(c: ConversionCounts): FunnelRail[] {
 /** The slowest pipeline stage by mean run duration (§6 / VIZ-4 — the spatial "where time goes"). The
  *  model exposes per-stage `avgMs` (not per-stage p95), so the slowest = the longest mean; null when
  *  no stage has timing yet. */
-/** Queue depth at/above which the live-state backlog reads as "concerning" → the renderer may tint it
- *  brass (§6 role 3 / VIZ-10). A soft visual cue, not a hard limit — tuned to flag a genuine pile-up,
- *  not transient 1–2-item churn. (KB-Lead may retune in the HYBRID classify.) */
-export const QUEUE_CONCERN_THRESHOLD = 10;
-
 export function slowestStage(perf: PipelineStatusView['perf']): { stage: string; avgMs: number } | null {
   let worst: { stage: string; avgMs: number } | null = null;
   for (const s of perf.stages) {
@@ -232,7 +229,9 @@ export function buildStations(v: PipelineStatusView): StationModel[] {
       glyph: STATION_GLYPH[state],
       stateClass: STATION_STATE_CLASS[state],
       queueDepth,
-      queueConcerning: queueDepth >= QUEUE_CONCERN_THRESHOLD,
+      // Stuck-coupled, not depth (VIZ-10 / OBS-11): a stuck stage (blocked/error) or an overall-stalled
+      // pipeline WITH a backlog is the needs-you case; a deep draining queue stays calm.
+      queueConcerning: queueDepth > 0 && (state === 'blocked' || state === 'error' || v.stalled),
       setAside: st?.setAside ?? 0,
       ...(st?.currentItem !== undefined ? { currentItem: st.currentItem } : {}),
       rail: rails[i],
