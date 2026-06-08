@@ -20,10 +20,14 @@ export function lockMetaPath(root: string): string {
 export interface CanonicalLockMeta {
   /** OS pid of the process that took the lock — `kill(pid, 0)` proves alive/dead. */
   pid: number;
-  /** Epoch ms when the index-op started — an age > 2× the op-timeout marks the lock stale. */
+  /** Epoch ms when the index-op started — an age > 2× `timeoutMs` marks the lock stale. */
   startedAt: number;
   /** The operation holding it (e.g. `advance`) — for the audited why-stale record. */
   op: string;
+  /** The boundedGit op-timeout (ms) in effect for THIS op, so gate-2's age test is exact, not a
+   *  guess (KB-Lead's Q3 refinement): stale iff `now - startedAt > 2 × timeoutMs`. Sound because
+   *  ORCH-25 means a live op exceeding its own timeout already threw + cleaned up in `finally`. */
+  timeoutMs: number;
 }
 
 /**
@@ -48,8 +52,13 @@ export async function readLockMeta(root: string): Promise<CanonicalLockMeta | nu
   try {
     const raw = await fs.readFile(lockMetaPath(root), 'utf8');
     const parsed = JSON.parse(raw) as Partial<CanonicalLockMeta>;
-    if (typeof parsed.pid === 'number' && typeof parsed.startedAt === 'number' && typeof parsed.op === 'string') {
-      return { pid: parsed.pid, startedAt: parsed.startedAt, op: parsed.op };
+    if (
+      typeof parsed.pid === 'number' &&
+      typeof parsed.startedAt === 'number' &&
+      typeof parsed.op === 'string' &&
+      typeof parsed.timeoutMs === 'number'
+    ) {
+      return { pid: parsed.pid, startedAt: parsed.startedAt, op: parsed.op, timeoutMs: parsed.timeoutMs };
     }
     return null; // shape-invalid → treat as absent (fail safe, never trust a malformed sidecar)
   } catch {

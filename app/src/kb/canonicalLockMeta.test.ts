@@ -13,14 +13,14 @@ describe('ORCH-27 canonical-writer lock sidecar', () => {
 
   it('round-trips {pid, startedAt, op}', async () => {
     root = await makeTempDir('kb-lockmeta-');
-    const meta: CanonicalLockMeta = { pid: 4242, startedAt: 1_700_000_000_000, op: 'advance' };
+    const meta: CanonicalLockMeta = { pid: 4242, startedAt: 1_700_000_000_000, op: 'advance', timeoutMs: 20_000 };
     await writeLockMeta(root, meta);
     expect(await readLockMeta(root)).toEqual(meta);
   });
 
   it('writes under .kb/cache/ (working-zone, never committed)', async () => {
     root = await makeTempDir('kb-lockmeta-');
-    await writeLockMeta(root, { pid: 1, startedAt: 1, op: 'advance' });
+    await writeLockMeta(root, { pid: 1, startedAt: 1, op: 'advance', timeoutMs: 20_000 });
     expect(lockMetaPath(root).endsWith('/.kb/cache/canonical-writer.lock.meta')).toBe(true);
     await expect(fs.access(lockMetaPath(root))).resolves.toBeUndefined();
   });
@@ -41,7 +41,7 @@ describe('ORCH-27 canonical-writer lock sidecar', () => {
 
   it('clear removes the sidecar and is idempotent (safe when already gone)', async () => {
     root = await makeTempDir('kb-lockmeta-');
-    await writeLockMeta(root, { pid: 7, startedAt: 2, op: 'advance' });
+    await writeLockMeta(root, { pid: 7, startedAt: 2, op: 'advance', timeoutMs: 20_000 });
     await clearLockMeta(root);
     expect(await readLockMeta(root)).toBeNull();
     await expect(clearLockMeta(root)).resolves.toBeUndefined(); // idempotent — no throw on a missing file
@@ -49,8 +49,8 @@ describe('ORCH-27 canonical-writer lock sidecar', () => {
 
   it('a later write atomically replaces an earlier one (last writer wins, no partial state)', async () => {
     root = await makeTempDir('kb-lockmeta-');
-    await writeLockMeta(root, { pid: 1, startedAt: 100, op: 'advance' });
-    await writeLockMeta(root, { pid: 2, startedAt: 200, op: 'reconcile' });
-    expect(await readLockMeta(root)).toEqual({ pid: 2, startedAt: 200, op: 'reconcile' });
+    await writeLockMeta(root, { pid: 1, startedAt: 100, op: 'advance', timeoutMs: 20_000 });
+    await writeLockMeta(root, { pid: 2, startedAt: 200, op: 'reconcile', timeoutMs: 30_000 });
+    expect(await readLockMeta(root)).toEqual({ pid: 2, startedAt: 200, op: 'reconcile', timeoutMs: 30_000 });
   });
 });
