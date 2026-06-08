@@ -72,7 +72,7 @@ reconciles + resumes — same as any other abrupt stop.
 | QUIESCE-3 | must | The user sees **live drain progress** — *"N tasks remaining"* across stages + jobs — and a clear, trustworthy **"Safe to shut down"** signal when **queue empty + no agent in flight + writer lock free** (the same OBS status the Status view reads) | test: `quiesceBoundary` + `settingsView` (live N-remaining + safe-when-idle: queues empty + nothing in flight + lock free) | OBS-5,9; VISION-11 |
 | QUIESCE-4 | must | **Fault-tolerance is unconditional and independent of quiesce:** an **unexpected** stop (sleep, network outage, app/OS crash, force-quit, power loss) is **always safe** — on restart the pipeline **reconciles + resumes** from durable state with **no lost or double-applied work**. Quiesce is the *preferred* path, **never** a correctness prerequisite; interrupting a quiesce is just another abrupt stop | test: existing fault-tolerance suite (ORCH-13/25/26/27, WATCH-5/8) — quiesce adds **no new correctness code**; `quiesceBoundary` confirms the drainers are untouched | ORCH-13,25,26,27; WATCH-5,8; PRIN-1 |
 | QUIESCE-5 | should | Quiesce is **reversible** — a **Resume** un-pauses new work before the user quits, if they change their mind; state returns to normal running | test: `quiesceBoundary` + `settingsView` (Resume restarts producers → normal) | AUTO-12 |
-| QUIESCE-6 | should | A **modest, non-major affordance** — lives in Settings (+ optional tray item), **not** a prominent/destructive-styled button; it surfaces the drain status inline and (optionally) offers **"quit when safe"** so the user can walk away and the app quits itself once idle | test: `settingsView` (modest non-danger control + inline drain readout) | PANEL-1; QCAP-3 |
+| QUIESCE-6 | should | A **modest, non-major affordance** — lives in Settings (+ optional tray item), **not** a prominent/destructive-styled button; it surfaces the drain status inline and (optionally) offers **"quit when safe"** so the user can walk away and the app quits itself once idle | test: `settingsView` (modest non-danger control + inline drain readout) + `quiesceTray`/`trayMenu` (the optional tray toggle) | PANEL-1; QCAP-3 |
 
 ## 5. User flows
 
@@ -97,6 +97,12 @@ reconciles + resumes — same as any other abrupt stop.
 
 ## 8. Changelog
 
+- 2026-06-08 — **QUIESCE-6 tray fast-follow** (KB-Developer-2). The optional tray affordance: a single
+  "Prepare for shutdown…" / "Resume — cancel shutdown" item via DEV-7's `getExtraTrayItems` hook on the
+  section-composed `setTray` (QCAP-14, #296). Runs in the main process so it calls the controller directly;
+  toggles on the synchronous `isActiveQuiescing()` (the tray re-evaluates on menu-open). The live drain
+  count is the QCAP-14 status readout already at the top of the tray; this is the action toggle. Pure
+  `quiesceTray` helper (electron-free, node-tested) + the existing `trayMenu` splice test.
 - 2026-06-08 — **Implemented (Settings affordance + drain controller)** (KB-Developer-2). A quiesce flag on
   the active pipeline: `quiesceActive()` stops the 4 new-work producers (jobs/researchers/intake/watch
   schedulers) + the capture path pauses ingestion (QUIESCE-1), while the **drainers** (orchestrator +

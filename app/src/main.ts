@@ -3,7 +3,8 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import started from 'electron-squirrel-startup';
 import { registerIpc, initPipeline } from './main/ipc';
-import { stopPipeline, getActiveInstanceSettings, activeSnapshotDir, pipelineStatusForActive } from './main/pipeline';
+import { stopPipeline, getActiveInstanceSettings, activeSnapshotDir, pipelineStatusForActive, quiesceActive, resumeActive, isActiveQuiescing } from './main/pipeline';
+import { quiesceTrayItems } from './main/quiesceTray';
 import { startTelemetry, stopTelemetry } from './main/telemetry';
 import { ensurePath } from './main/resolvePath';
 import { createAppDevLog } from './kb/devlog';
@@ -72,6 +73,9 @@ function startQuickCapture(): void {
     onClose: () => qcapAgent?.close(),
     onShowMainWindow: () => showMainWindow(), // QCAP-11: tray "Show KB-App" restore
     getPipelineStatus: () => pipelineStatusForActive(), // QCAP-14: read-only tray live-status readout
+    // QUIESCE-6: the optional "Prepare for shutdown / Resume" tray item — re-evaluated on each menu open,
+    // so it reflects the current quiesce state. Runs in main, so it calls the controller directly.
+    getExtraTrayItems: () => quiesceTrayItems(isActiveQuiescing(), { onPrepare: () => void quiesceActive(), onResume: () => void resumeActive() }),
   });
   qcapAgent = new QuickCaptureAgent(deps); // shipped default ⌥Space; conflict-aware + degrades (QCAP-9)
   setQuickCaptureAgent(qcapAgent);
