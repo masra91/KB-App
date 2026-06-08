@@ -185,15 +185,19 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const raw = open
     ? `<div class="activity-raw">${e.events.map(rawEventHtml).join('')}</div>`
     : '';
+  // The expand toggle and the (optional) trace-origin action share one centered header row — trace can't
+  // nest inside the head <button>, so the row aligns them as flex siblings (head fills, trace trails).
   return `
     <li class="activity-entry${open ? ' open' : ''}">
-      <button class="activity-entry-head" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-        <span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
-        <span class="activity-summary">${esc(e.summary)}</span>
-        <span class="activity-ts muted">${esc(formatTimestamp(e.ts))}</span>
-        ${e.eventCount > 1 ? `<span class="activity-evcount muted">${e.eventCount} events</span>` : ''}
-      </button>
-      ${traceBtn}
+      <div class="activity-entry-row">
+        <button class="activity-entry-head" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
+          <span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
+          <span class="activity-summary">${esc(e.summary)}</span>
+          <span class="activity-ts muted">${esc(formatTimestamp(e.ts))}</span>
+          ${e.eventCount > 1 ? `<span class="activity-evcount muted">${e.eventCount} events</span>` : ''}
+        </button>
+        ${traceBtn}
+      </div>
       ${raw}
     </li>`;
 }
