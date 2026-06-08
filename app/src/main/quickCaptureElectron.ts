@@ -75,6 +75,8 @@ export interface ElectronQcapHooks {
   onOpen: () => void;
   /** Dismiss + restore focus (wired to the agent; used by sheet blur — click-away dismiss). */
   onClose: () => void;
+  /** QCAP-11: restore/focus (create-if-none) the main window — the menubar "Show KB-App" item. */
+  onShowMainWindow?: () => void;
   log?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -206,6 +208,13 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
                 },
               } as Electron.MenuItemConstructorOptions,
             ]
+          : []),
+        { type: 'separator' as const },
+        // QCAP-11: restore the main window from the menubar so the LSUIElement accessory is never a
+        // one-way trap. Plain instrument-voice label (design §4) — no icon/badge. onShowMainWindow
+        // creates the window if none exists; omitted in tests/headless → the item is simply absent.
+        ...(hooks.onShowMainWindow
+          ? [{ label: 'Show KB-App', click: () => hooks.onShowMainWindow?.() } as Electron.MenuItemConstructorOptions]
           : []),
         { type: 'separator' as const },
         { label: 'Quit KB-App', role: 'quit' as const },
