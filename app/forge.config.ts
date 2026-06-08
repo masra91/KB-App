@@ -30,6 +30,11 @@ const config: ForgeConfig = {
       // SPEC-0038 QCAP-4/8: ship as a macOS accessory/menubar agent — no forced dock icon — so the
       // global hotkey + capture sheet are always available, headless, without a window or dock presence.
       LSUIElement: true,
+      // SPEC-0038 QCAP-7/9 (Slice 2): selection-capture posts a synthetic ⌘C through System Events,
+      // which triggers the macOS Automation TCC prompt — this usage string is its honest rationale.
+      // A denied/absent grant degrades to clipboard-only (never silently dead). Harmless when unsigned.
+      NSAppleEventsUsageDescription:
+        'KB-App captures the text you have selected in the frontmost app when you summon Quick Capture. If you decline, capture still works from your clipboard.',
     },
     // MACOS-3: sign with the hardened runtime + the non-sandboxed entitlements (opt-in; see above).
     ...(SIGN_MACOS

@@ -200,7 +200,9 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
                 click: () => {
                   // Trigger the native Accessibility prompt, then steer to the pane (flaky anchor → fallback).
                   systemPreferences.isTrustedAccessibilityClient(true);
-                  void shell.openExternal(ACCESSIBILITY_PANE).catch(() => void shell.openExternal(PRIVACY_PANE));
+                  void shell.openExternal(ACCESSIBILITY_PANE).catch(() => {
+                    void shell.openExternal(PRIVACY_PANE);
+                  });
                 },
               } as Electron.MenuItemConstructorOptions,
             ]
