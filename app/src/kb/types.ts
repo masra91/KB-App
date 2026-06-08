@@ -13,11 +13,15 @@ import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
-import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem } from './pipelineStatusView';
+import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem, HealthReadout } from './pipelineStatusView';
+import type { MemorySample, MemTrend } from './memorySampler';
+import type { CrashBreadcrumb } from './crashCapture';
 import type { DevLogLevel } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
 export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem };
+// OBS-22 health readout + its sub-types (memory sample, leak trend, crash breadcrumb) for the renderer.
+export type { HealthReadout, MemorySample, MemTrend, CrashBreadcrumb };
 
 export const KB_CONFIG_VERSION = 1;
 

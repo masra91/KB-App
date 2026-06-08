@@ -354,7 +354,7 @@ export function sidingHtml(items: SetAsideView[], opts: { actionMsg?: string; ac
  *  latency & throughput (OBS-15), and worktrees (OBS-7). The Line is the at-a-glance instrument; this
  *  is the depth behind it. */
 function readoutHtml(v: PipelineStatusView, expanded: Set<number>): string {
-  return `<section class="line-readout">${[lockHtml(v.lock), errorsHtml(v.recentErrors, expanded), latencyHtml(v), worktreesHtml(v.worktrees)].join('')}</section>`;
+  return `<section class="line-readout">${[lockHtml(v.lock), errorsHtml(v.recentErrors, expanded), healthHtml(v), latencyHtml(v), worktreesHtml(v.worktrees)].join('')}</section>`;
 }
 
 /** Format a held-lock duration (ms) compactly for the OBS-7 readout (#163): "45s", "2m 5s". */
@@ -444,6 +444,46 @@ export function latencyHtml(v: PipelineStatusView): string {
         .join('')}</ul></div>`
     : '';
   return `<h2 class="line-h2 viz-signage">Latency &amp; throughput</h2>${copilot}${where}${stages}${slow}`;
+}
+
+/** OBS-22 — the memory/health readout: current RSS/heap, the OBS-21 leak trend (a loud "climbing"
+ *  alarm when leaking — mirrors the stall alarm's treatment, hue on the glyph only per §2), and the
+ *  last crash breadcrumb (when/where/last item). Answers "is memory climbing / did we recently crash
+ *  + on what" at a glance. Omitted entirely when the build has no telemetry wired. */
+export function healthHtml(v: PipelineStatusView): string {
+  const h = v.health;
+  if (!h) return '';
+  const mb = (bytes: number): string => `${Math.round(bytes / (1024 * 1024))}`;
+  const parts: string[] = [`<h2 class="line-h2 viz-signage">Memory &amp; health</h2>`];
+
+  if (h.memory) {
+    const m = h.memory;
+    parts.push(
+      `<p class="line-health-mem viz-body">RSS <strong class="viz-numeric">${mb(m.rss)} MB</strong> · heap <span class="viz-numeric">${mb(m.heapUsed)}/${mb(m.heapTotal)} MB</span> · external <span class="viz-numeric">${mb(m.external)} MB</span></p>`,
+    );
+  } else {
+    parts.push(`<p class="viz-body line-readout-empty">No memory sample yet.</p>`);
+  }
+
+  if (h.trend?.leaking) {
+    // Loud "memory climbing" alarm — reuses the stall-alarm treatment (glyph carries the hue, §2).
+    parts.push(
+      `<div class="line-alarm line-alarm-stall" role="alert"><span class="line-alarm-glyph viz-state-error" aria-hidden="true">✕</span><span class="line-alarm-text viz-body"><strong>Memory climbing</strong> — RSS <span class="viz-numeric">+${h.trend.rssDeltaMb} MB</span> over <span class="viz-numeric">${h.trend.windowMin}m</span> (<span class="viz-numeric">${h.trend.rssSlopeMbPerMin} MB/min</span>), no plateau. A slow leak is the prime suspect for an OOM-class crash.</span></div>`,
+    );
+  } else if (h.trend) {
+    parts.push(
+      `<p class="line-health-trend viz-body">Trend: <span class="viz-numeric">${h.trend.rssDeltaMb >= 0 ? '+' : ''}${h.trend.rssDeltaMb} MB</span> RSS over <span class="viz-numeric">${h.trend.windowMin}m</span> — steady.</p>`,
+    );
+  }
+
+  if (h.lastCrash) {
+    const c = h.lastCrash;
+    const where = [c.stage, c.itemId].filter(Boolean).map((x) => esc(String(x))).join(' · ');
+    parts.push(
+      `<div class="line-health-crash" role="alert"><span class="line-alarm-glyph viz-state-error" aria-hidden="true">⚠</span> <span class="viz-body">Last crash: <strong>${esc(c.kind)}</strong> at <span class="viz-numeric">${esc(formatTimestamp(c.ts))}</span>${where ? ` · ${where}` : ''}${c.reason ? ` — ${esc(c.reason)}` : ''}</span></div>`,
+    );
+  }
+  return parts.join('');
 }
 
 /** OBS-7: the live worktrees + the branch each is on. */
