@@ -81,6 +81,10 @@ const AUDIT_REL = path.join('connect', 'audit.jsonl');
 export const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default review rounds (parks) on one block before it is set aside (REVIEW-8 cascade cap). */
 export const DEFAULT_MAX_REVIEW_ROUNDS = 3;
+/** In-pass retries for a link write that hits the bounded-git BLOCK TIMEOUT under bulk-writer
+ *  contention (CONNECT-12). A transient timeout must be retried, not silently dropped — else the
+ *  entity is left permanently unlinked. The lock is released between attempts so contention eases. */
+export const LINK_WRITE_MAX_ATTEMPTS = 3;
 
 // Terminal block markers (the block leaves the active queue). `setaside` is poison/recoverable
 // (CONNECT-14); `dismissed` is user-retired (OBS-17, never re-queued). Resolution itself is recorded
@@ -1079,11 +1083,24 @@ export class ConnectStage {
     // no-op when unchanged, so idle sweeps don't churn. Per-node failures are best-effort (a
     // later poke/sweep retries) and never abort the whole pass.
     for (const nodeRel of await readLinkQueue(this.root)) {
-      try {
-        const res = await this.lock.run(() => linkOne(this.root, nodeRel, this.log), 'connect:link');
-        if (res.changed) worked = true;
-      } catch (err) {
-        this.log.warn('connect.link-error', { itemId: nodeRel, err }); // best-effort; the rest of the pass continues
+      // A link write that hits the bounded-git BLOCK TIMEOUT under bulk-writer contention must NOT be
+      // silently dropped — that leaves the entity permanently unlinked (no `[[wikilink]]` edge) until a
+      // re-derive. Retry the node a bounded number of times in-pass (the lock is released between
+      // attempts, so a transient contention spike eases); on exhaustion surface it LOUDLY (`error`, not
+      // a swallowed `warn`) so it's visible + reconcilable (REFLECT-3/4). The node stays in the derived
+      // link queue while unlinked, so the next sweep retries it once load drops.
+      for (let attempt = 1; attempt <= LINK_WRITE_MAX_ATTEMPTS; attempt++) {
+        try {
+          const res = await this.lock.run(() => linkOne(this.root, nodeRel, this.log), 'connect:link');
+          if (res.changed) worked = true;
+          break; // landed (or a byte-stable no-op) — done with this node
+        } catch (err) {
+          if (attempt < LINK_WRITE_MAX_ATTEMPTS) {
+            this.log.warn('connect.link-retry', { itemId: nodeRel, attempt, err }); // transient (e.g. block timeout) → retry
+          } else {
+            this.log.error('connect.link-error', { itemId: nodeRel, attempt, err }); // exhausted; stays queued for the next sweep
+          }
+        }
       }
     }
     // Within-source claim dedup (CLAIMS-19): collapse the "same assertion restated per-entity"

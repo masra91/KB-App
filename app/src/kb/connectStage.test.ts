@@ -11,6 +11,7 @@ import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
+import type { DevLog } from './devlog';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -584,6 +585,51 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       expect(await fs.stat(lockPath).then(() => true).catch(() => false)).toBe(false); // lock healed away
       // The heal records its clear in `.kb/audit.jsonl` (ORCH-27 audits every clear) — that breadcrumb
       // is the only working-tree change, so we assert the link landed, not a byte-clean tree.
+    });
+  });
+
+  // REGRESSION (connect.link-error / KB-Lead live-vault diagnosis): a link write that hits the
+  // bounded-git BLOCK TIMEOUT under bulk-writer contention must RETRY, not silently drop — a transient
+  // timeout left 92% of entities permanently unlinked. The drain retries the node in-pass; the link lands.
+  it('retries a link write that times out under contention instead of silently dropping it', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const apple = await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']);
+      await seedClaimRelatesTo(root, steve.rel, 'Co-founded Apple.', ['Apple']);
+      await commitAll(root, 'seed node + relatesTo claim');
+
+      // A lock whose FIRST `connect:link` section throws a bounded-git block timeout (the live-vault
+      // failure), then behaves normally — simulating a transient contention spike.
+      class FlakyLinkLock extends Mutex {
+        linkFailsLeft = 1;
+        run<T>(fn: () => Promise<T>, label?: string): Promise<T> {
+          if (label === 'connect:link' && this.linkFailsLeft > 0) {
+            this.linkFailsLeft -= 1;
+            return Promise.reject(new Error('block timeout reached'));
+          }
+          return super.run(fn, label);
+        }
+      }
+      const events: { level: string; event: string }[] = [];
+      const rec = (): DevLog => ({
+        debug: (event: string) => { events.push({ level: 'debug', event }); },
+        info: (event: string) => { events.push({ level: 'info', event }); },
+        warn: (event: string) => { events.push({ level: 'warn', event }); },
+        error: (event: string) => { events.push({ level: 'error', event }); },
+        child: () => rec(),
+        flush: () => Promise.resolve(),
+      });
+      const stage = new ConnectStage(root, oneClusterDecider('unused'), new FlakyLinkLock(), undefined, undefined, rec());
+      await stage.poke();
+      stage.stop();
+
+      // The link LANDED via retry (not dropped): the wikilink is rendered…
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(`[[${apple.rel}|Apple]]`);
+      // …a retry was logged for the transient timeout, and NO terminal link-error (the retry succeeded).
+      expect(events.some((e) => e.event === 'connect.link-retry')).toBe(true);
+      expect(events.some((e) => e.event === 'connect.link-error')).toBe(false);
     });
   });
 });
