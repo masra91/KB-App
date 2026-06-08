@@ -56,7 +56,7 @@ import { ResearcherScheduler } from '../kb/researcherScheduler';
 import { IntakeScheduler, selectIntakeFn } from '../kb/intakeScheduler';
 import { WatchScheduler } from '../kb/watchScheduler';
 import { readWatchRegistry, writeWatchRegistry, upsertWatchFolder, patchWatchFolder, watchRegistryPath } from '../kb/watchRegistry';
-import { checkWatchLoopSafe, isSafeWatchId, DEFAULT_WATCH_SCOPE, DEFAULT_WATCH_SENSITIVITY } from '../kb/watchConnectors';
+import { checkWatchLoopSafe, isSafeWatchId, DEFAULT_WATCH_SCOPE, DEFAULT_WATCH_SENSITIVITY, WATCH_MAX_DEPTH_CAP } from '../kb/watchConnectors';
 import { buildWatchFolderViews } from '../kb/watchPanel';
 import { readIntakeRegistry, upsertIntakeConnector, patchIntakeConnector, intakeRegistryPath } from '../kb/intakeRegistry';
 import { runIntakeConnector } from '../kb/intakeRun';
@@ -723,6 +723,10 @@ export async function setActiveWatchFolder(patch: WatchFolderPatch): Promise<Wat
   if (typeof patch.label === 'string') clean.label = patch.label;
   if (Array.isArray(patch.ignoreGlobs)) clean.ignoreGlobs = patch.ignoreGlobs.filter((g): g is string => typeof g === 'string');
   if (typeof patch.folderPath === 'string' && patch.folderPath.trim()) clean.folderPath = patch.folderPath.trim();
+  // Slice-2 opt-ins (WATCH-12/14): coerce to safe values at the boundary — maxDepth clamped to [0, cap].
+  if (typeof patch.recursive === 'boolean') clean.recursive = patch.recursive;
+  if (typeof patch.maxDepth === 'number' && Number.isFinite(patch.maxDepth)) clean.maxDepth = Math.min(Math.max(0, Math.floor(patch.maxDepth)), WATCH_MAX_DEPTH_CAP);
+  if (typeof patch.consume === 'boolean') clean.consume = patch.consume;
 
   // WATCH-10 loop-guard at the IPC boundary: a folderPath set/change must be loop-safe vs the REAL vault,
   // else REFUSE the whole change (never persist a folder that would re-ingest the vault into itself).
@@ -746,6 +750,9 @@ export async function setActiveWatchFolder(patch: WatchFolderPatch): Promise<Wat
         ...(clean.sensitivity !== undefined ? { sensitivity: clean.sensitivity } : {}),
         ...(clean.label !== undefined ? { label: clean.label } : {}),
         ...(clean.ignoreGlobs !== undefined ? { ignoreGlobs: clean.ignoreGlobs } : {}),
+        ...(clean.recursive !== undefined ? { recursive: clean.recursive } : {}),
+        ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}),
+        ...(clean.consume !== undefined ? { consume: clean.consume } : {}),
       });
     } else {
       // New watched folder requires a folderPath (already loop-guarded above).
@@ -758,6 +765,9 @@ export async function setActiveWatchFolder(patch: WatchFolderPatch): Promise<Wat
         sensitivity: clean.sensitivity ?? DEFAULT_WATCH_SENSITIVITY,
         ...(clean.label !== undefined ? { label: clean.label } : {}),
         ...(clean.ignoreGlobs !== undefined ? { ignoreGlobs: clean.ignoreGlobs } : {}),
+        ...(clean.recursive !== undefined ? { recursive: clean.recursive } : {}),
+        ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}),
+        ...(clean.consume !== undefined ? { consume: clean.consume } : {}),
       });
     }
     applied = true;
@@ -765,7 +775,7 @@ export async function setActiveWatchFolder(patch: WatchFolderPatch): Promise<Wat
   }, 'watch-config:write');
 
   if (applied) {
-    await appendAuditEvent(root, { actor: 'panel', eventType: 'watch-config-change', subjects: { watchId: clean.id }, payload: { ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}), ...(clean.folderPath !== undefined ? { folderPath: clean.folderPath } : {}), why: 'Principal edited a watched folder via Control Panel' } });
+    await appendAuditEvent(root, { actor: 'panel', eventType: 'watch-config-change', subjects: { watchId: clean.id }, payload: { ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}), ...(clean.folderPath !== undefined ? { folderPath: clean.folderPath } : {}), ...(clean.recursive !== undefined ? { recursive: clean.recursive } : {}), ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}), ...(clean.consume !== undefined ? { consume: clean.consume } : {}), why: 'Principal edited a watched folder via Control Panel' } });
     await active.watch.refresh(); // start/stop live watchers to match the new config
   }
   return listWatchFoldersForActive();

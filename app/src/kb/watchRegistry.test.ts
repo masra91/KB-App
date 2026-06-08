@@ -87,4 +87,25 @@ describe('upsertWatchFolder / patchWatchFolder', () => {
       expect((await readWatchRegistry(root)).length).toBe(1);
     });
   });
+
+  it('round-trips the Slice-2 opt-ins (recursive / maxDepth / consume) and ignores junk values (WATCH-12/14)', async () => {
+    await withTemp(async (root) => {
+      await upsertWatchFolder(root, watcher({ id: 'deep', recursive: true, maxDepth: 4, consume: true }));
+      let r = (await readWatchRegistry(root)).find((x) => x.id === 'deep')!;
+      expect(r).toMatchObject({ recursive: true, maxDepth: 4, consume: true });
+      await patchWatchFolder(root, 'deep', { recursive: false, consume: false });
+      r = (await readWatchRegistry(root)).find((x) => x.id === 'deep')!;
+      expect(r.recursive ?? false).toBe(false); // explicit false normalizes to absent (both = non-recursive)
+      expect(r.consume ?? false).toBe(false);
+
+      // A hand-edited registry with junk Slice-2 values → ignored, falls back to the safe default.
+      await writeWatchRegistry(root, [
+        { id: 'junk', folderPath: '/abs/j', enabled: true, scope: 'global', sensitivity: 'internal', recursive: 'yes', maxDepth: -3, consume: 1 } as unknown as WatchFolderConfig,
+      ]);
+      const j = (await readWatchRegistry(root)).find((x) => x.id === 'junk')!;
+      expect(j.recursive).toBeUndefined(); // 'yes' (not true) → not set
+      expect(j.maxDepth).toBeUndefined(); // -3 (<0) → not set
+      expect(j.consume).toBeUndefined(); // 1 (not true) → not set
+    });
+  });
 });

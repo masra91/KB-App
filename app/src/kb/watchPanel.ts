@@ -4,7 +4,7 @@
 // watching set + the per-folder newest audit event. DEV-2's unified view does one `kb:listWatchFolders`
 // read per render and renders these rows; there is no separate status read.
 import type { AuditEvent } from './audit';
-import type { WatchFolderConfig } from './watchConnectors';
+import { effectiveWatchDepth, type WatchFolderConfig } from './watchConnectors';
 import type { WatchFolderView, WatchFolderLastEvent } from './types';
 
 /** Derive a watched folder's last-event summary from its newest `watch` audit event (or null). */
@@ -32,6 +32,9 @@ export function buildWatchFolderViews(
     scope: f.scope,
     sensitivity: f.sensitivity,
     ignoreGlobs: f.ignoreGlobs ?? [],
+    recursive: f.recursive === true,
+    maxDepth: effectiveWatchDepth(f), // clamped effective cap (0 when non-recursive) — WATCH-12
+    consume: f.consume === true,
     watching: watchingIds.has(f.id),
     lastEvent: watchLastEventFromEvent(lastEventByWatchId[f.id]),
   }));

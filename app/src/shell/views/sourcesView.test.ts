@@ -14,7 +14,7 @@ const rss: IntakeConnectorView = {
 };
 const folder: WatchFolderView = {
   id: 'inbox', folderPath: '/Users/me/KB-Inbox', label: 'inbox', enabled: true, scope: 'global', sensitivity: 'internal',
-  ignoreGlobs: ['*.tmp'], watching: true, lastEvent: { ts: '2025-06-03T09:00:00Z', kind: 'watch-ingested', path: 'note.md' },
+  ignoreGlobs: ['*.tmp'], recursive: false, maxDepth: 0, consume: false, watching: true, lastEvent: { ts: '2025-06-03T09:00:00Z', kind: 'watch-ingested', path: 'note.md' },
 };
 
 let listIntakeConnectors: ReturnType<typeof vi.fn>;
@@ -204,5 +204,58 @@ describe('Sources view · Watched folders (WATCH-9)', () => {
     const c = await mount();
     expect(c.querySelector('.rdesk-strip[data-id="news"]')).toBeTruthy(); // feeds still render
     expect(c.textContent).toMatch(/Couldn.t load watched folders/);
+  });
+});
+
+describe('Sources view · Slice-2 per-folder rules (WATCH-12/14)', () => {
+  it('toggling "Include subfolders" applies directly — a local read, no confirm (WATCH-12)', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
+    const rec = strip.querySelector('.watch-recursive') as HTMLButtonElement;
+    expect(rec.getAttribute('aria-checked')).toBe('false');
+    rec.click();
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', recursive: true }); // was off → on
+  });
+
+  it('the depth field is hidden until recursive, then visible; a change applies clamped to [0,32] (WATCH-12)', async () => {
+    // non-recursive → depth control hidden
+    let c = await mount();
+    expect((c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-depth-wrap') as HTMLElement).hidden).toBe(true);
+
+    // recursive folder → depth control visible + steers on change (clamped)
+    listWatchFolders = vi.fn(async () => [{ ...folder, recursive: true, maxDepth: 3 }]);
+    setApi();
+    c = await mount();
+    const wrap = c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-depth-wrap') as HTMLElement;
+    expect(wrap.hidden).toBe(false);
+    const depth = c.querySelector('.watch-depth') as HTMLInputElement;
+    depth.value = '99';
+    depth.dispatchEvent(new Event('change'));
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', maxDepth: 32 }); // clamped
+  });
+
+  it('enabling move-out CONFIRMS first (it relocates files), then applies (WATCH-14)', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
+    (strip.querySelector('.watch-consume') as HTMLButtonElement).click();
+    await flush();
+    const confirm = strip.querySelector('.watch-consume-confirm') as HTMLElement;
+    expect(confirm.hidden).toBe(false);
+    expect(strip.querySelector('.watch-consume-confirm-msg')!.textContent).toMatch(/moved into.*\.kb-processed.*never deleted/i);
+    expect(setWatchFolder).not.toHaveBeenCalled(); // gated — not applied yet
+    (strip.querySelector('.watch-consume-confirm-go') as HTMLButtonElement).click();
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: true });
+  });
+
+  it('disabling move-out applies directly — no confirm (turning it off is safe) (WATCH-14)', async () => {
+    listWatchFolders = vi.fn(async () => [{ ...folder, consume: true }]);
+    setApi();
+    const c = await mount();
+    (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement).click();
+    await flush();
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: false });
   });
 });
