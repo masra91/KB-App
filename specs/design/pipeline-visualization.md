@@ -245,6 +245,50 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
   and calm idle stay quiet; only `stuck` escalates to the alarm. (Turns a silent P0-class wedge into
   a named, surfaced state — the whole reason this surface exists.)
 
+### Reading the numbers — funnel-caption legibility (clarity pass)
+
+> Principal-reported confusion: the Linking gauge-rail's `399` + `+1116 (×3.8)` was read as **queue
+> depth / backlog**. It is not — `399` is the *volume* that reached Connect and `+1116 (×3.8)` is the
+> *fan-out projection* into Claims (`theLineModel.ts:directionalDelta`). The station stacks **four
+> distinct number-roles** (volume · projection · queue · latency) and two of them were bare, adjacent
+> numerics — so they blurred. This pass makes each number **declare its role at a glance**, and ensures
+> a **projection can never read as a backlog**. No new tokens — signage micro-labels + the existing
+> badge/`title` patterns; small text stays ink/ink-muted per the §3 contrast rule.
+
+The four number-roles and their fixed treatment:
+
+1. **Volume** (`line-rail-count`) — items that *reached* this station. Carry the station's **bucket
+   noun** as a quiet signage micro-unit so the bare count self-describes: `399 entities` (capture →
+   `captured`, decompose → `candidates`, connect → `entities`, claims → `claims`, promote → `promoted`).
+2. **Projection / conversion** (`line-rail-caption`, `+N (×r)` / `−N deduped`) — a **derived projection**
+   of how this bucket fans out / reduces into the **next** stage; it is *not* live work sitting here.
+   Tie it to the next station with a leading **`→`** and a quiet `fan-out` / `deduped` signifier (e.g.
+   `→ +1116 ×3.8 fan-out` , `→ −40 deduped`) so it reads as *flows-to-next*, never *waiting-here*. Stays
+   ink-muted (§3); the terminal PROMOTE completion ratio (`5/10 · 50%`) gets a `complete` signifier.
+3. **Load / queue** (`line-station-queue`) — the **only real backlog number**: items *waiting* to be
+   processed at this station, and the only number that can be **actionable**. Keep the `queue N` label
+   but pull it into the **live-state cluster** (with current-item / set-aside), a distinct typographic
+   lane from the rail's volume+projection. When it crosses a concern threshold it may take **`--viz-brass`**
+   (needs-you, consistent with the #192 queue + the system semantic) — never confusable with the muted
+   projection.
+4. **Latency** (`line-station-latency`, `slowest · p95`) — already labeled + carries a `title`; keep.
+
+Plus two cross-cutting affordances:
+
+- **A spine legend (progressive disclosure).** One small, always-available **legend key** under the
+  spine that decodes the caption grammar *once*: `→ fan-out/deduped projection to next · vol = reached
+  here · queue = waiting · set aside = pulled off`. Quiet signage (a `details`/`title` affordance), not
+  a loud banner — the dense engineered captions get a key without cluttering every station.
+- **Decode-on-hover.** Extend the existing `title=` pattern (latency already has one) to the **volume
+  count** and the **projection caption** — e.g. `title="399 entities reached Connect"` /
+  `title="projected fan-out ×3.8 into Claims"` — so the exact meaning is one hover/focus away (and the
+  legend keeps it glanceable without the hover).
+
+**Net:** volume, projection, queue and latency each announce their role; the **queue (real backlog) is
+visually + semantically separated from the conversion fan-out (projection)** — the exact confusion
+reported. Reuses blessed primitives + the §3 contrast contract; net-new affordance → KB-Lead HYBRID
+classify, with any VIZ requirement delta KB-Lead specs.
+
 ### Implementation guardrails — keep it from regressing to generic (GATE-1 watch-item 2)
 
 The fastest way "The Line" reverts to a generic AI app is a component-library default sneaking
@@ -391,3 +435,12 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   the push channel / keyed-DOM diffing; a change-guard keeps the ambient motion smooth across unchanged
   polls (VIZ-9); (3) the **carriage → per-hop trace drill-down** (VIZ-2 expand) — needs an OBS-16
   `spansForItem` IPC not yet exposed. Tests trace to VIZ-1/2/3/4/5/6/7/9 + OBS-5/6/7/11/15/17.
+- 2026-06-08 — **Funnel-caption legibility clarity pass added** (§6) — Principal read the Linking
+  gauge-rail `399` + `+1116 (×3.8)` as *queue depth*; it's volume + a fan-out *projection*. The station
+  stacks four number-roles (volume · projection · queue · latency) and two were bare adjacent numerics.
+  The pass makes each declare its role at a glance — **volume** carries its bucket noun (`399 entities`),
+  the **projection** caption ties to the next stage with a `→` + `fan-out`/`deduped` signifier (so it
+  can't read as backlog), the **queue** (the only real backlog, brass when concerning) moves into the
+  live-state cluster apart from the projection, **latency** stays labeled — plus a once-per-spine **legend**
+  and `title=` decode-on-hover. No new tokens; §3 contrast contract held. Net-new affordance → **KB-Lead
+  HYBRID classify** (+ any VIZ requirement delta KB-Lead specs). Authored for the Status clarity-pass ask.
