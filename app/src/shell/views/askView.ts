@@ -32,11 +32,16 @@ function renderMarkdown(md: string): string {
  * regex, so nothing untrusted reaches the attribute; wrapping it also stops markdown from
  * reinterpreting a bare `[1]` as a link-reference. Pure + exported for unit testing.
  */
-export function linkifyCitationMarkers(answer: string, turnIndex: number): string {
-  return answer.replace(
-    /\[(\d+)\]/g,
-    (_m, n: string) => `<a class="cite-link" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}">[${n}]</a>`,
-  );
+export function linkifyCitationMarkers(answer: string, turnIndex: number, citations: Citation[] = []): string {
+  return answer.replace(/\[(\d+)\]/g, (_m, n: string) => {
+    // WS3 a11y (DESIGN-LEGACY-VIEWS §5): the marker is an href-less link (the obsidian:// scheme is
+    // built in main, never in the DOM) — give it role="link" + an aria-label naming its source so it
+    // isn't an anonymous, AT-invisible anchor. Markers are dense/gap-free 1:1 with citations[] (DEV-3),
+    // but fall back to a bare "Citation n" if a marker outruns the list (malformed model output).
+    const c = citations[Number(n) - 1];
+    const label = c ? `Citation ${n}: ${refDisplayName(c)}` : `Citation ${n}`;
+    return `<a class="cite-link viz-focusable" role="link" tabindex="0" aria-label="${esc(label)}" data-turn="${turnIndex}" data-cite="${n}">[${n}]</a>`;
+  });
 }
 
 interface Turn {
@@ -58,11 +63,11 @@ export function mountAsk(container: HTMLElement): void {
   container.innerHTML = `
     <div class="card ask-view">
       <h1>💬 Ask</h1>
-      <p class="muted">Ask your knowledge base a question. Answers are grounded in your sources, entities, and claims — with citations.</p>
+      <p class="ask-note">Ask your knowledge base a question. Answers are grounded in your sources, entities, and claims — with citations.</p>
       <ul class="ask-transcript" id="askTranscript"></ul>
       <form class="ask-form" id="askForm">
-        <input id="askInput" class="ask-input" type="text" autocomplete="off" placeholder="Ask a question…" aria-label="Ask a question" />
-        <button id="askBtn" class="primary" type="submit">Ask</button>
+        <input id="askInput" class="ask-input viz-field__input viz-body viz-focusable" type="text" autocomplete="off" placeholder="Ask a question…" aria-label="Ask a question" />
+        <button id="askBtn" class="viz-btn viz-btn--primary viz-focusable" type="submit">Ask</button>
       </form>
     </div>`;
   const form = container.querySelector<HTMLFormElement>('#askForm');
@@ -206,19 +211,20 @@ function renderReferences(citations: Citation[], turnIndex: number): string {
     .map((c, i) => {
       const n = i + 1;
       const kind = CITATION_KIND_LABEL[c.kind] ?? c.kind;
-      return `<li><a class="cite-ref" role="button" tabindex="0" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
+      return `<li><a class="cite-ref viz-focusable" role="link" tabindex="0" aria-label="Citation ${n}: ${esc(refDisplayName(c))}" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
     })
     .join('');
-  return `<div class="ask-citations"><span class="muted">References</span><ul>${items}</ul></div>`;
+  return `<div class="ask-citations"><span class="ask-ref-label viz-signage">References</span><ul>${items}</ul></div>`;
 }
 
 function renderAnswer(r: AskResult, turnIndex: number, citeError?: string): string {
   const flags: string[] = [];
   if (!r.grounded) flags.push('⚠ not grounded in the KB');
   if (r.truncated) flags.push('partial — retrieval budget reached');
-  const flagHtml = flags.length ? `<div class="ask-flags muted">${flags.map(esc).join(' · ')}</div>` : '';
-  // ASK-14: linkify the inline `[n]` BEFORE sanitizing, so each marker is a clickable deep-link.
-  const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex));
+  const flagHtml = flags.length ? `<div class="ask-flags">${flags.map(esc).join(' · ')}</div>` : '';
+  // ASK-14: linkify the inline `[n]` BEFORE sanitizing, so each marker is a clickable deep-link with
+  // a source-naming aria-label (§5 a11y) — the citations carry the per-marker accessible names.
+  const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex, r.citations));
   const citeErr = citeError ? `<div class="ask-cite-status error">${esc(citeError)}</div>` : '';
   return `<div class="ask-answer">${answerHtml}</div>${renderReferences(r.citations, turnIndex)}${citeErr}${flagHtml}`;
 }
@@ -226,22 +232,22 @@ function renderAnswer(r: AskResult, turnIndex: number, citeError?: string): stri
 /** The save-as-Output affordance for a completed turn (ASK-6): a button, or the saved confirmation. */
 function renderSaveRow(t: Turn, index: number): string {
   if (t.savedRel) {
-    return `<div class="ask-save-row muted">✓ Saved as Output — <code>${esc(t.savedRel)}</code></div>`;
+    return `<div class="ask-save-row ask-note">✓ Saved as Output — <code>${esc(t.savedRel)}</code></div>`;
   }
   const err = t.saveError ? `<span class="ask-save-status error"> ${esc(t.saveError)}</span>` : '';
-  return `<div class="ask-save-row"><button type="button" class="ask-save" data-turn="${index}">Save as report</button>${err}</div>`;
+  return `<div class="ask-save-row"><button type="button" class="ask-save viz-btn viz-btn--sm viz-focusable" data-turn="${index}">Save as report</button>${err}</div>`;
 }
 
 function renderTurn(t: Turn, index: number): string {
   let body: string;
   let saveRow = '';
   if (t.error) body = `<div class="ask-answer error">Sorry — recall failed: ${esc(t.error)}</div>`;
-  else if (t.result === null) body = `<div class="ask-answer muted">Thinking…</div>`;
+  else if (t.result === null) body = `<div class="ask-answer ask-note">Thinking…</div>`;
   else {
     body = renderAnswer(t.result, index, t.citeError);
     saveRow = renderSaveRow(t, index); // grounded OR ungrounded — saving an ungrounded answer is allowed (F4)
   }
-  return `<li class="ask-turn"><div class="ask-q"><span class="muted">You</span> ${esc(t.question)}</div><div class="ask-a">${body}${saveRow}</div></li>`;
+  return `<li class="ask-turn"><div class="ask-q"><span class="ask-who viz-signage">You</span> ${esc(t.question)}</div><div class="ask-a">${body}${saveRow}</div></li>`;
 }
 
 function renderTranscript(container: HTMLElement): void {
