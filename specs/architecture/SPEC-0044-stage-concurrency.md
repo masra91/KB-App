@@ -94,7 +94,7 @@ The Principal sets the throughput/consistency dial **knowingly**:
 | ID | Priority | Statement (short) | Verify | Traces |
 | -- | -------- | ----------------- | ------ | ------ |
 | CONCUR-1 | must | **Per-stage concurrency is user-customizable** (Control Panel, persisted per-Instance), **bounded by the global Copilot ceiling** (ORCH-23); the UI is honest that a per-stage cap above the ceiling is inert | none-yet | ORCH-20,23; PANEL-6 |
-| CONCUR-2 | must | Stages parallelize by **write-disjointness**: Decompose + Claims freely; **Connect MAY parallelize** (relaxed from serial — its race is reconciled, not prevented); the **canonical ff-advance stays serial** (ORCH-18) — concurrency is allowed **only on the derived, replayable layer**, never ground truth or git ordering | none-yet | ORCH-6,17,18; DATA-2; CANON-11 |
+| CONCUR-2 | must | Stages parallelize by **write-disjointness**: Decompose + Claims freely; **Connect MAY parallelize but is OPT-IN-WITH-WARNING, default-off** (Principal, 2026-06-08) — the capability is relaxed-from-serial, but the *default stays serial* until the Principal opts in (and is warned, CONCUR-4) + Reflect's reconciliation is proven on real race volume; the **canonical ff-advance stays serial** (ORCH-18) — concurrency is allowed **only on the derived, replayable layer**, never ground truth or git ordering | none-yet | ORCH-6,17,18; DATA-2; CANON-11 |
 | CONCUR-3 | must | **Concurrency's correctness depends on Rumination.** Raising Connect concurrency **requires Reflect enabled + scheduled** (REFLECT-1); Reflect **reconciles the race products** — merge duplicate entities (REFLECT-5), restore missed links (REFLECT-3/4); its **cadence scales with ingestion/concurrency** so convergence stays timely | none-yet | SPEC-0024 REFLECT-1,3,4,5,11 |
 | CONCUR-4 | must | **Honest trade-off, never a hidden footgun:** raising a stage's concurrency (esp. Connect) shows a **clear explanation** of the throughput-vs-transient-consistency trade-off + the §2 reassurance that **nothing is lost** (ground truth immutable, fully replayable) | none-yet | PRIN-19; AUTO-8 |
 | CONCUR-5 | must | **Eventual-consistency is visible, not silent:** the user can see Reflect's **reconciliation backlog** (pending transient inconsistency) so a transiently-duplicated entity / missing link reads as *"Rumination will converge this,"* not a defect | none-yet | OBS-5; SPEC-0024 |
@@ -104,8 +104,9 @@ The Principal sets the throughput/consistency dial **knowingly**:
 
 - [ ] **Copilot-ceiling vs stage-caps as the real lever** — CONCUR-6: measure. If Copilot is the wall, the
       bigger win may be **batching multiple items per Copilot call** or a higher ceiling, not stage caps.
-- [ ] **Connect concurrency default** — ship Connect concurrent-by-default (trusting Reflect), or
-      opt-in-with-warning until Reflect's reconciliation is proven on real race volume?
+- [x] **Connect concurrency default → RESOLVED (Principal, 2026-06-08): opt-in-with-warning, default-off**
+      (CONCUR-2/4). The capability exists, but the default stays serial; prove Reflect's reconciliation on
+      real race volume before considering concurrent-by-default.
 - [ ] **Reflect cadence scaling** — what function of ingestion-rate/concurrency drives reconciliation
       cadence so convergence is timely without Reflect itself becoming the bottleneck?
 - [ ] **Promotion batching** — promote N resolved items per ff-advance (vs one-at-a-time) may be a bigger,
