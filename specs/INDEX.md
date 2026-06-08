@@ -55,6 +55,7 @@ and a unique `key` here.
 | SPEC-0040 | RICHIN  | Rich Ingestion (formatted paste / multi-file drag / chat) | feature | draft | `features/` |
 | SPEC-0041 | INTAKE  | Proactive Intake                              | feature | draft | `features/` |
 | SPEC-0042 | EVAL    | Evals & Scenario Harness (seeded-KB cognition evaluation) | architecture | draft | `architecture/` |
+| SPEC-0043 | SENSE   | Sensitivity Classification (labels, propagation, the gate comparator) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
