@@ -334,6 +334,12 @@ export interface WatchFolderView {
   scope: string;
   sensitivity: string;
   ignoreGlobs: string[];
+  /** Opt-in recursive watch (WATCH-12); default false = non-recursive. */
+  recursive: boolean;
+  /** Effective recursion depth cap shown/edited in the view (WATCH-12); 0 when non-recursive. */
+  maxDepth: number;
+  /** Opt-in consume/move-out (WATCH-14): the original is moved to the archive after a successful ingest. */
+  consume: boolean;
   /** True iff a live watcher is currently active for this folder (enabled + loop-safe). */
   watching: boolean;
   lastEvent: WatchFolderLastEvent | null;
@@ -349,6 +355,12 @@ export interface WatchFolderPatch {
   sensitivity?: string;
   label?: string;
   ignoreGlobs?: string[];
+  /** Opt into recursive watch (WATCH-12). */
+  recursive?: boolean;
+  /** Recursion depth cap (WATCH-12); clamped at the IPC boundary. */
+  maxDepth?: number;
+  /** Opt into consume/move-out (WATCH-14). */
+  consume?: boolean;
 }
 
 /** Outcome of a manual researcher "Run now" (RESEARCH-15). `ran:false` carries why it didn't run;

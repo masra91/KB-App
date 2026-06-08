@@ -32,4 +32,17 @@ describe('buildWatchFolderViews', () => {
     // `photos` is disabled → no live watcher, no events.
     expect(views[1]).toMatchObject({ id: 'photos', label: 'photos', watching: false, lastEvent: null });
   });
+
+  it('surfaces the Slice-2 opt-ins with a clamped effective depth (WATCH-12/14)', () => {
+    const views = buildWatchFolderViews(
+      [
+        folder({ id: 'flat' }), // defaults → non-recursive
+        folder({ id: 'deep', recursive: true, maxDepth: 99, consume: true }), // cap clamps 99 → 32
+      ],
+      new Set(),
+      {},
+    );
+    expect(views[0]).toMatchObject({ id: 'flat', recursive: false, maxDepth: 0, consume: false });
+    expect(views[1]).toMatchObject({ id: 'deep', recursive: true, maxDepth: 32, consume: true });
+  });
 });

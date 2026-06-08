@@ -11,7 +11,7 @@
 import chokidar from 'chokidar';
 import { reconcileWatchFolder } from './watchRun';
 import { readWatchRegistry } from './watchRegistry';
-import { checkWatchLoopSafe, type WatchFolderConfig } from './watchConnectors';
+import { checkWatchLoopSafe, effectiveWatchDepth, type WatchFolderConfig } from './watchConnectors';
 import { noopDevLog, type DevLog } from './devlog';
 
 /** A live watcher handle (the subset of chokidar's FSWatcher we use). Injectable for tests. */
@@ -20,13 +20,15 @@ export interface WatchHandle {
 }
 
 /** Build a live watcher over `folderPath` that calls `onChange()` (debounced upstream) on add/change.
- *  Non-recursive + never follows symlinks. The default uses chokidar; tests inject a fake. */
-export type WatcherFactory = (folderPath: string, onChange: () => void, onError: (err: unknown) => void) => WatchHandle;
+ *  `depth` is the recursion cap (0 = non-recursive, WATCH-12); never follows symlinks. The default uses
+ *  chokidar; tests inject a fake. (The reconcile core re-applies the per-path loop-guard + depth, so the
+ *  watcher's `depth` is just an event-surface bound — defense-in-depth, not the security boundary.) */
+export type WatcherFactory = (folderPath: string, onChange: () => void, onError: (err: unknown) => void, depth: number) => WatchHandle;
 
-const defaultWatcherFactory: WatcherFactory = (folderPath, onChange, onError) => {
+const defaultWatcherFactory: WatcherFactory = (folderPath, onChange, onError, depth) => {
   const w = chokidar.watch(folderPath, {
-    depth: 0, // non-recursive (WATCH-6)
-    followSymlinks: false, // never follow symlinks out of the watched folder (WATCH-3 scope-escape)
+    depth, // recursion cap (WATCH-12); 0 = non-recursive (WATCH-6)
+    followSymlinks: false, // never follow symlinks out of the watched folder (WATCH-3/13 scope-escape)
     ignoreInitial: true, // existing files are handled by the explicit startup reconcile, not re-emitted
     awaitWriteFinish: { stabilityThreshold: 2000, pollInterval: 100 }, // stable-file detection (WATCH-2)
   });
@@ -114,6 +116,7 @@ export class WatchScheduler {
       f.folderPath,
       () => this.onEvent(f.id),
       (err) => this.log.error('watch.watcher-error', { watchId: f.id, err }),
+      effectiveWatchDepth(f), // recursion cap (WATCH-12) — 0 for a non-recursive folder
     );
     this.active.set(f.id, { handle, debounce: null });
   }

@@ -363,6 +363,11 @@ function watchStrip(w: WatchFolderView): string {
       </div>
       <div class="rdesk-config">
         <span class="rdesk-reach-ro viz-body">scope ${esc(w.scope)} · ${esc(w.sensitivity)}${ignore}</span>
+        <div class="watch-rules rdesk-reach" role="group" aria-label="Folder rules">
+          <button type="button" class="viz-btn watch-recursive" role="switch" aria-checked="${w.recursive ? 'true' : 'false'}">Include subfolders: ${w.recursive ? 'on' : 'off'}</button>
+          <label class="rdesk-field viz-field watch-depth-wrap"${w.recursive ? '' : ' hidden'}><span class="rdesk-field-label viz-field__label viz-signage">depth</span><input type="number" class="watch-depth viz-field__input viz-field__input--numeric viz-focusable" min="0" max="32" step="1" inputmode="numeric" value="${esc(String(w.maxDepth))}" aria-label="Subfolder depth limit" /></label>
+          <button type="button" class="viz-btn watch-consume" role="switch" aria-checked="${w.consume ? 'true' : 'false'}">Move out after import: ${w.consume ? 'on' : 'off'}</button>
+        </div>
       </div>
       <div class="rdesk-footer viz-ruled">
         ${watchReportLine(w)}
@@ -372,6 +377,11 @@ function watchStrip(w: WatchFolderView): string {
         <p class="rdesk-confirm-msg viz-confirm__msg watch-confirm-msg viz-body"></p>
         <button type="button" class="viz-btn watch-confirm-cancel">Cancel</button>
         <button type="button" class="viz-btn viz-btn--danger watch-confirm-go">Remove</button>
+      </div>
+      <div class="rdesk-confirm viz-confirm watch-consume-confirm" hidden>
+        <p class="rdesk-confirm-msg viz-confirm__msg watch-consume-confirm-msg viz-body"></p>
+        <button type="button" class="viz-btn watch-consume-confirm-cancel">Cancel</button>
+        <button type="button" class="viz-btn watch-consume-confirm-go">Turn on move-out</button>
       </div>
       <p class="rdesk-status watch-status viz-body" role="status" aria-live="polite"></p>
     </li>`;
@@ -447,6 +457,62 @@ function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
       } catch {
         status.textContent = 'Could not save the change.';
       }
+    });
+
+    // Include-subfolders (WATCH-12) — widening a local read (no egress, no mutation) → applies directly.
+    const recursiveEl = li.querySelector<HTMLButtonElement>('.watch-recursive');
+    recursiveEl?.addEventListener('click', async () => {
+      status.textContent = 'Saving…';
+      try {
+        await window.kbApi.setWatchFolder({ id, recursive: !current.recursive });
+        await render(container);
+      } catch {
+        status.textContent = 'Could not save the change.';
+      }
+    });
+
+    // Depth cap (WATCH-12) — steering a local read; clamp to [0,32] and apply on change.
+    const depthEl = li.querySelector<HTMLInputElement>('.watch-depth');
+    depthEl?.addEventListener('change', async () => {
+      const n = Math.min(Math.max(0, Math.floor(Number(depthEl.value))), 32);
+      if (!Number.isFinite(n)) { depthEl.value = String(current.maxDepth); return; }
+      status.textContent = 'Saving…';
+      try {
+        await window.kbApi.setWatchFolder({ id, maxDepth: n });
+        await render(container);
+      } catch {
+        status.textContent = 'Could not save the change.';
+      }
+    });
+
+    // Move-out / consume (WATCH-14) — enabling MOVES future originals out of the folder, so it is confirmed
+    // (a hard-to-undo, file-relocating change); turning it OFF is safe and applies directly. Non-destructive:
+    // the copy into the KB always happens first and the original is moved (never deleted) to `.kb-processed`.
+    const consumeEl = li.querySelector<HTMLButtonElement>('.watch-consume');
+    const consumeConfirm = li.querySelector<HTMLElement>('.watch-consume-confirm')!;
+    const consumeConfirmMsg = li.querySelector<HTMLElement>('.watch-consume-confirm-msg')!;
+    const consumeConfirmGo = li.querySelector<HTMLButtonElement>('.watch-consume-confirm-go')!;
+    const consumeConfirmCancel = li.querySelector<HTMLButtonElement>('.watch-consume-confirm-cancel')!;
+    const applyConsume = async (value: boolean): Promise<void> => {
+      status.textContent = 'Saving…';
+      try {
+        await window.kbApi.setWatchFolder({ id, consume: value });
+        await render(container);
+      } catch {
+        status.textContent = 'Could not save the change.';
+      }
+    };
+    consumeEl?.addEventListener('click', () => {
+      if (current.consume) { void applyConsume(false); return; } // turning off — no confirm
+      consumeConfirmMsg.textContent = `Turn on move-out? After a file is imported, the original is moved into “.kb-processed” inside this folder (a copy is kept in your KB first — files are never deleted).`;
+      consumeConfirm.hidden = false;
+    });
+    consumeConfirmGo.addEventListener('click', () => {
+      consumeConfirm.hidden = true;
+      void applyConsume(true);
+    });
+    consumeConfirmCancel.addEventListener('click', () => {
+      consumeConfirm.hidden = true;
     });
 
     // Remove — confirm (it stops watching + forgets the folder; the already-ingested sources stay).

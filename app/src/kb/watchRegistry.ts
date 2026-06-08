@@ -38,6 +38,12 @@ function validWatchFolder(v: unknown): WatchFolderConfig | null {
   };
   if (isNonEmptyString(o.label)) c.label = o.label;
   if (Array.isArray(o.ignoreGlobs)) c.ignoreGlobs = o.ignoreGlobs.filter(isNonEmptyString);
+  // Slice-2 opt-ins (WATCH-12/14): only accept well-typed values; a junk value falls back to the safe
+  // default (non-recursive / non-consume) rather than entering the walk/move path malformed.
+  if (o.recursive === true) c.recursive = true;
+  if (typeof o.maxDepth === 'number' && Number.isFinite(o.maxDepth) && o.maxDepth >= 0) c.maxDepth = Math.floor(o.maxDepth);
+  if (o.consume === true) c.consume = true;
+  if (isNonEmptyString(o.archiveDir)) c.archiveDir = o.archiveDir;
   if (o.config && typeof o.config === 'object') c.config = o.config as Record<string, unknown>;
   return c;
 }
@@ -100,7 +106,7 @@ export async function upsertWatchFolder(root: string, folder: WatchFolderConfig)
 export async function patchWatchFolder(
   root: string,
   id: string,
-  patch: Partial<Pick<WatchFolderConfig, 'enabled' | 'folderPath' | 'scope' | 'sensitivity' | 'label' | 'ignoreGlobs' | 'config'>>,
+  patch: Partial<Pick<WatchFolderConfig, 'enabled' | 'folderPath' | 'scope' | 'sensitivity' | 'label' | 'ignoreGlobs' | 'recursive' | 'maxDepth' | 'consume' | 'archiveDir' | 'config'>>,
 ): Promise<WatchFolderConfig[]> {
   if (!isSafeWatchId(id)) throw new Error(`refusing to patch watched folder with unsafe id: ${JSON.stringify(id)}`);
   const folders = await readWatchRegistry(root);
@@ -112,7 +118,10 @@ export async function patchWatchFolder(
     if (patch.sensitivity !== undefined) f.sensitivity = patch.sensitivity;
     if (patch.label !== undefined) f.label = patch.label;
     if (patch.ignoreGlobs !== undefined) f.ignoreGlobs = patch.ignoreGlobs;
-    if (patch.config !== undefined) f.config = patch.config;
+    if (patch.recursive !== undefined) f.recursive = patch.recursive;
+    if (patch.maxDepth !== undefined) f.maxDepth = patch.maxDepth;
+    if (patch.consume !== undefined) f.consume = patch.consume;
+    if (patch.archiveDir !== undefined) f.archiveDir = patch.archiveDir;
     await writeWatchRegistry(root, folders);
   }
   return folders;

@@ -11,7 +11,16 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { appendAuditEvent } from './audit';
 import { captureToInbox } from './ingest';
-import { checkWatchLoopSafe, hashContent, isIgnoredFile, renderWatchSourceBody, isSafeWatchId, type WatchFolderConfig } from './watchConnectors';
+import {
+  checkWatchLoopSafe,
+  collectWatchedFiles,
+  hashContent,
+  moveOriginalToArchive,
+  renderWatchSourceBody,
+  isSafeWatchId,
+  watchArchiveBase,
+  type WatchFolderConfig,
+} from './watchConnectors';
 
 /** Per-folder dedup ledger (WATCH-8): basename → the last-ingested content hash + the source it produced.
  *  Lets an unchanged re-save be a no-op and a changed file link its new source to the prior. */
@@ -50,8 +59,12 @@ export interface RunWatchResult {
   sourceIds: string[];
   /** Files copied in as sources (new or changed). */
   ingested: number;
-  /** Files seen but skipped (unchanged, ignored, symlink, or directory). */
+  /** Files seen but skipped (unchanged, ignored, symlink, directory, or a loop-refused subdir). */
   skipped: number;
+  /** Originals moved out after a successful ingest (consume mode, WATCH-14). */
+  movedOut?: number;
+  /** Relative paths of subdirectories the per-descended-path loop-guard refused (WATCH-13). */
+  refusedSubdirs?: string[];
   /** The loop-guard refused the folder (WATCH-10) — distinct from an empty pass. */
   refused?: boolean;
   /** The pass failed to read the folder (WATCH read error) — distinct from "nothing new" (OBS-4). */
@@ -75,7 +88,10 @@ function asText(data: Uint8Array): string | null {
 /**
  * Copy ONE watched file into the KB as a primary source (non-destructive — reads, never moves/deletes).
  * Text files ingest as a rendered markdown source (provenance header + the prior-source link when
- * superseding); binary files ingest as the raw file artifact. Returns the new source id.
+ * superseding); binary files ingest as the raw file artifact. `name` is the file's path RELATIVE to the
+ * watched root (== basename when non-recursive) — it rides provenance/originalName; the on-disk raw
+ * filename is reduced to an extension-only `raw.<ext>` by the ingest spine, so a nested relpath is
+ * path-safe (never creates inbox subdirs). Returns the new source id.
  */
 export async function ingestWatchedFile(
   root: string,
@@ -98,8 +114,10 @@ export async function ingestWatchedFile(
 
 /**
  * Run one reconcile pass over `c.folderPath` (the restart-safe core — a startup reconcile and every live
- * chokidar event both route here). Loop-guarded, non-recursive, never follows symlinks. Returns the pass
- * outcome; always audits (ingested / no-new / refused / failed) so a pass is never silent (AUDIT-2/OBS-4).
+ * chokidar event both route here). Loop-guarded (root AND every descended subdir, WATCH-13); recursive
+ * within the configured depth cap or flat (WATCH-12); never follows symlinks. In consume mode (WATCH-14)
+ * the original is MOVED out only AFTER a successful, non-destructive ingest. Always audits (ingested /
+ * no-new / subdir-refused / refused / failed) so a pass is never silent (AUDIT-2/OBS-4).
  */
 export async function reconcileWatchFolder(root: string, c: WatchFolderConfig, deps: RunWatchDeps): Promise<RunWatchResult> {
   if (!isSafeWatchId(c.id)) throw new Error(`reconcileWatchFolder: refusing unsafe watch id ${JSON.stringify(c.id)}`);
@@ -112,50 +130,86 @@ export async function reconcileWatchFolder(root: string, c: WatchFolderConfig, d
     return { sourceIds: [], ingested: 0, skipped: 0, refused: true, note: `refused: ${guard.reason}` };
   }
 
-  let entries: import('node:fs').Dirent[];
+  // Scan the folder (WATCH-12 — recursive within the depth cap, or Slice-1 flat). A ROOT read failure is a
+  // distinct watch-failed (failed ≠ empty, OBS-4); subdir read errors / loop-refused subdirs are skips.
+  let scan: import('./watchConnectors').WatchScanResult;
   try {
-    entries = await fs.readdir(c.folderPath, { withFileTypes: true }); // non-recursive (WATCH-6)
+    scan = await collectWatchedFiles(deps.vaultRoot, c);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     await appendAuditEvent(root, { actor: 'watch', eventType: 'watch-failed', ts: now(), subjects: { watchId: c.id }, payload: { folderPath: c.folderPath, error, why: 'folder-watch read failed' } });
     return { sourceIds: [], ingested: 0, skipped: 0, failed: true, error, note: `watch failed: ${error}` };
   }
 
+  // Consume/move-out (WATCH-14): resolve the archive base once and confirm it is OUTSIDE the vault (a
+  // misconfigured custom archiveDir inside the vault would pollute the KB) — else fall back to plain copy.
+  const consume = c.consume === true;
+  let archiveBase: string | undefined;
+  if (consume) {
+    archiveBase = watchArchiveBase(c);
+    try {
+      const vaultReal = await fs.realpath(deps.vaultRoot);
+      const a = path.resolve(archiveBase);
+      if (a === vaultReal || a.startsWith(vaultReal + path.sep)) archiveBase = undefined; // refuse in-vault archive
+    } catch {
+      /* vault doesn't resolve — archive lives under the (already loop-safe) watched folder; keep it */
+    }
+  }
+
   const ledger = await readWatchLedger(root, c.id);
   const sourceIds: string[] = [];
-  const ingestedNames: Array<{ name: string; sourceId: string; priorSourceId?: string }> = [];
-  let skipped = 0;
-  let failure: string | undefined;
+  const ingestedItems: Array<{ name: string; sourceId: string; priorSourceId?: string; movedTo?: string }> = [];
+  let skipped = scan.skipped;
+  let movedOut = 0;
+  let ingestFailure: string | undefined;
+  let moveFailure: string | undefined;
 
   try {
-    for (const e of entries) {
-      if (e.isSymbolicLink()) { skipped++; continue; } // never follow symlinks (WATCH-3, scope-escape)
-      if (!e.isFile()) { skipped++; continue; } // non-recursive: subdirectories are not descended
-      if (isIgnoredFile(e.name, c.ignoreGlobs)) { skipped++; continue; } // bounds / editor-temp (WATCH-6)
-
-      const data = new Uint8Array(await fs.readFile(path.join(c.folderPath, e.name)));
+    for (const f of scan.files) {
+      const data = new Uint8Array(await fs.readFile(f.absPath));
       const hash = hashContent(data);
-      const prior = ledger[e.name];
-      if (prior && prior.hash === hash) { skipped++; continue; } // unchanged re-save → no-op (WATCH-8)
+      const prior = ledger[f.relPath];
+      if (prior && prior.hash === hash) { skipped++; continue; } // unchanged re-save → no-op (WATCH-3/8)
 
       const fetchedAt = now();
       const stampMs = Date.parse(fetchedAt) || Date.now();
-      const sourceId = await ingestWatchedFile(root, c, e.name, data, stampMs, fetchedAt, prior?.sourceId);
-      ledger[e.name] = { hash, sourceId };
+      // WATCH-14: copy into the KB FIRST — the source is committed/preserved before we ever touch the original.
+      const sourceId = await ingestWatchedFile(root, c, f.relPath, data, stampMs, fetchedAt, prior?.sourceId);
+      ledger[f.relPath] = { hash, sourceId };
       sourceIds.push(sourceId);
-      ingestedNames.push({ name: e.name, sourceId, ...(prior ? { priorSourceId: prior.sourceId } : {}) });
+      const item: { name: string; sourceId: string; priorSourceId?: string; movedTo?: string } = { name: f.relPath, sourceId, ...(prior ? { priorSourceId: prior.sourceId } : {}) };
+
+      // …THEN move the original out (consume). Reached ONLY after a successful ingest; a never-clobbering
+      // MOVE, never a delete. A move failure leaves the original in place (safe — it's already in the KB)
+      // and is audited; it never undoes the ingest nor fails the whole pass.
+      if (consume && archiveBase) {
+        try {
+          item.movedTo = await moveOriginalToArchive(f.absPath, archiveBase, f.relPath);
+          movedOut++;
+        } catch (mErr) {
+          if (!moveFailure) moveFailure = `archive move failed for ${f.relPath}: ${mErr instanceof Error ? mErr.message : String(mErr)}`;
+        }
+      }
+      ingestedItems.push(item);
     }
   } catch (err) {
     // A copy/capture failed mid-pass (WATCH/INTAKE-12 parity): already-committed sources stay; record
     // the partial outcome + error, and only successfully-ingested files advance the ledger.
-    failure = err instanceof Error ? err.message : String(err);
+    ingestFailure = err instanceof Error ? err.message : String(err);
   }
 
-  if (ingestedNames.length > 0) await writeWatchLedger(root, c.id, ledger);
+  if (ingestedItems.length > 0) await writeWatchLedger(root, c.id, ledger);
 
-  if (ingestedNames.length === 0 && !failure) {
-    await appendAuditEvent(root, { actor: 'watch', eventType: 'watch-no-new', ts: now(), subjects: { watchId: c.id }, payload: { folderPath: c.folderPath, skipped, why: 'folder-watch pass — no new/changed files' } });
-    return { sourceIds, ingested: 0, skipped, note: 'no new files' };
+  // Audit refused subdirs distinctly (WATCH-13) even on an otherwise-empty pass — never silent (OBS-4).
+  if (scan.refusedSubdirs.length > 0) {
+    await appendAuditEvent(root, { actor: 'watch', eventType: 'watch-subdir-refused', ts: now(), subjects: { watchId: c.id }, payload: { folderPath: c.folderPath, refusedSubdirs: scan.refusedSubdirs, why: 'per-descended-path loop-guard (WATCH-13)' } });
+  }
+
+  const partial = ingestFailure ?? moveFailure;
+
+  if (ingestedItems.length === 0 && !ingestFailure) {
+    await appendAuditEvent(root, { actor: 'watch', eventType: 'watch-no-new', ts: now(), subjects: { watchId: c.id }, payload: { folderPath: c.folderPath, skipped, ...(scan.refusedSubdirs.length ? { refusedSubdirs: scan.refusedSubdirs } : {}), why: 'folder-watch pass — no new/changed files' } });
+    return { sourceIds, ingested: 0, skipped, ...(scan.refusedSubdirs.length ? { refusedSubdirs: scan.refusedSubdirs } : {}), note: 'no new files' };
   }
 
   await appendAuditEvent(root, {
@@ -165,20 +219,26 @@ export async function reconcileWatchFolder(root: string, c: WatchFolderConfig, d
     subjects: { watchId: c.id, ...(sourceIds[0] ? { sourceId: sourceIds[0] } : {}) },
     payload: {
       folderPath: c.folderPath,
-      files: ingestedNames.map((f) => f.name),
+      files: ingestedItems.map((f) => f.name),
       sourceIds,
       // carry the prior-source link for each changed (superseding) file (ratified Fork#1)
-      supersedes: ingestedNames.filter((f) => f.priorSourceId).map((f) => ({ name: f.name, priorSourceId: f.priorSourceId, sourceId: f.sourceId })),
-      ...(failure ? { partialFailure: failure } : {}),
+      supersedes: ingestedItems.filter((f) => f.priorSourceId).map((f) => ({ name: f.name, priorSourceId: f.priorSourceId, sourceId: f.sourceId })),
+      // consume/move-out provenance (WATCH-14): where each original was archived to
+      ...(movedOut > 0 ? { movedOut, archivedTo: ingestedItems.filter((f) => f.movedTo).map((f) => ({ name: f.name, movedTo: f.movedTo })) } : {}),
+      ...(scan.refusedSubdirs.length ? { refusedSubdirs: scan.refusedSubdirs } : {}),
+      ...(partial ? { partialFailure: partial } : {}),
       why: 'folder-watch arrival (non-destructive copy → primary source)',
     },
   });
 
   return {
     sourceIds,
-    ingested: ingestedNames.length,
+    ingested: ingestedItems.length,
     skipped,
-    ...(failure ? { failed: true, error: failure } : {}),
-    note: `${ingestedNames.length} ingested, ${skipped} skipped${failure ? ` (partial: ${failure})` : ''}`,
+    ...(movedOut > 0 ? { movedOut } : {}),
+    ...(scan.refusedSubdirs.length ? { refusedSubdirs: scan.refusedSubdirs } : {}),
+    // Only an INGEST failure flags the pass failed; a best-effort consume-move miss is surfaced in the note.
+    ...(ingestFailure ? { failed: true, error: ingestFailure } : {}),
+    note: `${ingestedItems.length} ingested, ${skipped} skipped${movedOut > 0 ? `, ${movedOut} moved out` : ''}${partial ? ` (partial: ${partial})` : ''}`,
   };
 }
