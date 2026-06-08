@@ -432,6 +432,7 @@ appends JSONL. Structure in the envelope, freedom in the payload.
 | CONNECT-18  | must     | The agent may emit optional **signals** (open `{type, note, refs?}`) routed to the **audit log only**; every run emits append-only audit in the rigid envelope | test:connectStage.test.ts | DATA-10; AUTO-8; ORCH-11 |
 | CONNECT-19  | should   | v1 blocks/ resolves **within a single `kind`** and on the **forward pass + re-poke sweep**; cross-kind resolution and continuous recooks/reconcilers are deferred (Reflect-adjacent) | test:connect.test.ts | LIFE-8 |
 | CONNECT-20  | should   | v1 links are untyped `[[wikilinks]]` (graph connectivity); a **typed link-as-object** model (predicate + own confidence/evidence) is deferred | **deferred-slice** | DATA-8 |
+| CONNECT-21  | must     | **Consult durable disambiguation decisions BEFORE raising a Review — never re-ask a decided pair.** CONNECT-15 parks-and-asks on ambiguity but the verdict was per-round (it didn't survive the next mention), so a name like *Leavenworth* / *Paris* / *Gary* re-blocked and re-raised the **same** question on every later source. Before raising a "same entity?" Review, the block-and-match MUST consult the durable decision memory (REVIEW-18): if the candidate **entity-pair already has a verdict**, **don't re-raise** — **same** → they're already **one** node (resolve against it; if the approved merge is still pending under contention per ORCH-26, treat as **pending-merge**, not unresolved); **different** → treat the pair as **resolved-distinct** and **suppress** the re-ask. New mentions/claims **resolve against existing entities + recorded decisions** rather than re-opening the question — this is the missing durable half of CONNECT-15's "resume with the verdict as context." A pair is re-surfaced **only** on **materially new evidence** (and then framed as "new evidence on a pair you marked distinct," REVIEW-18), never as a naive repeat. A genuinely **new, never-decided** pair still asks (the memory is per-pair). Effect: the Review queue **converges** instead of spamming. | test:connectStage.test.ts (a recorded "different" verdict suppresses a re-raise on a fresh mention of the same pair; a recorded "same" resolves against the merged node; an undecided new pair still raises) | REVIEW-18; CONNECT-15; AUTO-1; LIFE-6; ORCH-26; SPEC-0024 |
 
 ### CONNECT-3 — entities/ is resolution-only, one writer
 - **Status:** draft · **Priority:** must
@@ -590,6 +591,15 @@ the DATA edit mirrors CANON onto SPEC-0007.) These amendments are part of this c
 
 ## 9. Changelog
 
+- 2026-06-08 — **CONNECT-21: consult durable disambiguation decisions before raising (Principal-reported review spam).**
+  The Principal kept getting re-asked the *same* "are these the same?" question — *Leavenworth* (the company vs the WA
+  town), *Paris* (Paris-SG vs a "Parish-of-…" entity), *Gary* — on every new source mentioning the name. Diagnosed on the
+  live vault: these are genuinely **distinct** entities, but CONNECT-15's verdict was consumed **per-round** and never
+  persisted, so the next mention re-blocked the name and re-raised the identical Review. CONNECT-21 (pair) + REVIEW-18 close
+  it: a verdict becomes a **durable per-entity-pair decision** (same → merged; different → recorded distinct-from), and the
+  matcher **consults it before raising** — a decided pair is never re-asked; the queue converges. Re-surfaces only on
+  materially new evidence, framed as such. Decision is recorded at answer-time independent of the merge write landing
+  (pending-merge under ORCH-26 contention is not re-asked as undecided). **Not by design — a real gap.**
 - 2026-06-06 — **CONNECT-12 producer-contract annotation (Connect link-promotion not firing).**
   Link-promotion (`readLinkQueue`/`linkOne`) was correct but **starved**: it consumes Claims'
   `relatesTo` hints, and the Claims prompt framed `relatesTo` as optional, so live runs emitted
