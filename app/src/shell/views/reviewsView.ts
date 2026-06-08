@@ -13,6 +13,7 @@
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import type { ReviewSummary } from '../../kb/types';
+import type { ReviewSubjectCandidate } from '../../kb/reviews';
 
 /** Poll cadence — matches the rail badge (shell.ts) so the list and the count never drift. */
 const REVIEW_POLL_MS = 5000;
@@ -74,7 +75,9 @@ async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean }
     }
     return; // poll error → keep the last good list
   }
-  const sig = reviews.map((r) => r.id).join(',');
+  // ENG-16: the change-signature must tolerate a malformed item too (a null/odd entry can't be
+  // allowed to throw here and abort the whole render before `paint` ever runs).
+  const sig = (Array.isArray(reviews) ? reviews : []).map((r) => r?.id ?? '∅').join(',');
   if (opts.onlyIfChanged && sig === renderedSig) return;
   renderedSig = sig;
   paint(container, reviews);
@@ -88,28 +91,18 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
     return;
   }
 
+  // ENG-16 per-item failure isolation: one malformed review degrades its OWN row, never the whole
+  // list. A field with an unexpected shape (e.g. `refs` not an array, a candidate row that throws)
+  // must not take down every other review + leave the surface stuck on "Loading…" (REVIEW-19).
   const items = reviews
-    .map(
-      (r) => `
-      <li class="review" data-id="${esc(r.id)}">
-        <div class="review-q">${esc(r.question)}</div>
-        ${candidatesBlock(r)}
-        <details class="review-detail">
-          <summary>Why this matters</summary>
-          <p>${esc(r.detail)}</p>
-          ${r.refs.length ? `<p class="muted">About: ${r.refs.map(esc).join(', ')}</p>` : ''}
-          <p class="muted">Raised by: ${esc(r.stage)}</p>
-        </details>
-        <label class="viz-field review-note-field">
-          <span class="viz-field__label viz-signage">Note (optional)</span>
-          <textarea class="review-note viz-field__input viz-field__input--multiline" rows="2" placeholder="Optional note (e.g. a correction) — saved as a source"></textarea>
-        </label>
-        <div class="review-actions">
-          <button type="button" class="viz-btn viz-btn--primary review-confirm" data-id="${esc(r.id)}">Confirm</button>
-          <button type="button" class="viz-btn review-reject" data-id="${esc(r.id)}">Reject</button>
-        </div>
-      </li>`,
-    )
+    .map((r) => {
+      try {
+        return reviewItemHtml(r);
+      } catch (err) {
+        console.warn('reviews: a review item failed to render — showing a fallback row', err);
+        return reviewItemFallback(r);
+      }
+    })
     .join('');
 
   container.innerHTML = `
@@ -138,6 +131,50 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
   }
 }
 
+/** The full markup for one review item. Extracted so the list `.map` can isolate a per-item render
+ *  failure (ENG-16) — a throw here drops to `reviewItemFallback`, never the whole list. */
+function reviewItemHtml(r: ReviewSummary): string {
+  const refs = Array.isArray(r.refs) ? r.refs : []; // legacy/malformed: refs may be absent/non-array
+  return `
+      <li class="review" data-id="${esc(r.id)}">
+        <div class="review-q">${esc(r.question)}</div>
+        ${candidatesBlock(r)}
+        <details class="review-detail">
+          <summary>Why this matters</summary>
+          <p>${esc(r.detail)}</p>
+          ${refs.length ? `<p class="muted">About: ${refs.map(esc).join(', ')}</p>` : ''}
+          <p class="muted">Raised by: ${esc(r.stage)}</p>
+        </details>
+        <label class="viz-field review-note-field">
+          <span class="viz-field__label viz-signage">Note (optional)</span>
+          <textarea class="review-note viz-field__input viz-field__input--multiline" rows="2" placeholder="Optional note (e.g. a correction) — saved as a source"></textarea>
+        </label>
+        <div class="review-actions">
+          <button type="button" class="viz-btn viz-btn--primary review-confirm" data-id="${esc(r.id)}">Confirm</button>
+          <button type="button" class="viz-btn review-reject" data-id="${esc(r.id)}">Reject</button>
+        </div>
+      </li>`;
+}
+
+/** A minimal, still-actionable fallback row when a review item can't be fully rendered (ENG-16). The
+ *  Confirm/Reject pair stays wired (keyed by id) so the Principal can still clear the item; the rest
+ *  of the list is unaffected. Every field is esc()'d (null-safe) so the fallback itself can't throw. */
+function reviewItemFallback(r: ReviewSummary): string {
+  const id = esc(r?.id);
+  const actions = id
+    ? `<div class="review-actions">
+          <button type="button" class="viz-btn viz-btn--primary review-confirm" data-id="${id}">Confirm</button>
+          <button type="button" class="viz-btn review-reject" data-id="${id}">Reject</button>
+        </div>`
+    : '';
+  return `
+      <li class="review" data-id="${id}">
+        <div class="review-q">${esc(r?.question) || 'This review couldn’t be fully displayed.'}</div>
+        <p class="muted">Some details for this item are unavailable.</p>
+        ${actions}
+      </li>`;
+}
+
 /**
  * REVIEW-16 — the disambiguation candidate rows. A "same entity?" review's candidates usually share
  * a name, so the distinguishing **gloss** ("from the fishing trip" vs "Dave's wedding") is the star;
@@ -148,26 +185,49 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
  * Returns '' for an ordinary review (no candidates) so nothing renders. Name/gloss/title/sourceRel are
  * source-/agent-derived (untrusted) → every interpolation is esc()'d, including the `data-rel` the
  * click handler reads back (KB-QD-2's forward-flagged XSS).
+ *
+ * REVIEW-19 / ENG-15/16: the data is partial in the LIVE queue — candidates raised before
+ * title-persistence (#295/#305) carry `title: null` (55 such candidates / 9 open reviews observed,
+ * incl. "Jordan"). So the link text falls back title → name → a generic "Open" (NEVER `esc(undefined)`,
+ * NEVER a raw ULID), and each candidate row is isolated: one malformed candidate degrades its OWN row.
  */
 function candidatesBlock(r: ReviewSummary): string {
   if (!r.candidates?.length) return '';
   const rows = r.candidates
     .map((c) => {
-      // REVIEW-16 link fix (PRIN-24): the link TEXT is the source's human title (never the raw ULID),
-      // opening the `source.md` FILE the data half now provides (a bare dir was "file not found"). `title`
-      // is required + source-derived → esc() it like name/gloss. No sourceRel → no link (title not shown).
-      const link = c.sourceRel
-        ? `<button type="button" class="review-candidate-open viz-btn viz-btn--ghost viz-focusable" data-rel="${esc(c.sourceRel)}" title="Open in Obsidian">${esc(c.title)} ↗</button>`
-        : '';
-      return `
+      try {
+        return candidateRowHtml(c);
+      } catch (err) {
+        console.warn('reviews: a candidate row failed to render — showing a fallback', err);
+        return `<li class="review-candidate viz-spine"><span class="review-candidate-gloss viz-body muted">This candidate couldn’t be displayed.</span></li>`;
+      }
+    })
+    .join('');
+  return `<ul class="review-candidates" aria-label="Candidates to tell apart">${rows}</ul>`;
+}
+
+/** One candidate row. The Obsidian link TEXT is the source title with a robust fallback chain so a
+ *  legacy `title: null` candidate still renders a real, working link (REVIEW-19 / PRIN-24). */
+function candidateRowHtml(c: ReviewSubjectCandidate): string {
+  // title → name → (neither) a generic label. NEVER the raw ULID/sourceRel basename (PRIN-24), and
+  // NEVER `esc(undefined)`. `name` is the legacy fall-through (e.g. "Jordan") when title is absent.
+  const label = firstNonEmpty(c.title, c.name);
+  const linkText = label ? `${esc(label)} ↗` : 'Open in Obsidian ↗';
+  const link = c.sourceRel
+    ? `<button type="button" class="review-candidate-open viz-btn viz-btn--ghost viz-focusable" data-rel="${esc(c.sourceRel)}" title="Open in Obsidian">${linkText}</button>`
+    : '';
+  return `
         <li class="review-candidate viz-spine">
           <span class="review-candidate-name viz-signage">${esc(c.name)}</span>
           <span class="review-candidate-gloss viz-body">${esc(c.gloss)}</span>
           ${link}
         </li>`;
-    })
-    .join('');
-  return `<ul class="review-candidates" aria-label="Candidates to tell apart">${rows}</ul>`;
+}
+
+/** First value that is a non-empty string (trims) — for null-safe display fallbacks. */
+function firstNonEmpty(...vals: Array<string | null | undefined>): string | undefined {
+  for (const v of vals) if (typeof v === 'string' && v.trim().length > 0) return v;
+  return undefined;
 }
 
 async function answer(container: HTMLElement, id: string, verdict: 'confirm' | 'reject'): Promise<void> {
