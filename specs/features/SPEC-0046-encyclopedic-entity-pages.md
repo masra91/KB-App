@@ -102,7 +102,7 @@ the gate (CANON). Bounded + audited like every stage.
 | COMPOSE-3 | must | **Grounded — synthesis, not generation:** the prose is composed **only from the entity's existing cited claims** (SPEC-0016); Compose **may not introduce a fact that isn't a claim**; every prose sentence **traces to a claim → a source**; an un-cited prose statement is a **defect**; **no new egress** | test: every prose sentence resolves to a claim/source | PRIN-1,2,9,10; CLAIMS |
 | COMPOSE-4 | must | **Links woven into the prose** — entity cross-links (`[[Other Entity]]`) appear **in the prose where they're mentioned**, not only as a block at the top; the page reads as connected text | none-yet | CONNECT-12; VAULT |
 | COMPOSE-5 | must | **Keep the structured blocks for RAG** — the delimited `kb:links` / `kb:claims` blocks remain (**below** the prose) so the machine/retrieval layer is intact; the prose is the human layer, the blocks the index. Both regenerate idempotently | none-yet | DATA; ASK; CONNECT-12; CLAIMS-9 |
-| COMPOSE-6 | must | **Human Title-Case filenames** (honor CANON-6 + PRIN-24): entity files are the **natural name** (`Steve Jobs.md`), spaces + real case — **not** a kebab-slug (`steve-jobs.md`); the ULID stays `id:` + alias (links survive renames). The kebab-slug `slugify` (connectDoc.ts) is the change point | none-yet | CANON-6,7; PRIN-24; DATA-5 |
+| COMPOSE-6 | must | **Human Title-Case filenames** (honor CANON-6 + PRIN-24): entity files are the **natural name** (`Steve Jobs.md`), spaces + real case — **not** a kebab-slug (`steve-jobs.md`); the ULID stays `id:` + alias (links survive renames). The kebab-slug `slugify` (connectDoc.ts) is the change point | test: connectDoc.test.ts (`entityFileName`/`entityFileRel`) + connectStage.test.ts (born-resolved node lands at `entities/<kind>/<Human Name>.md`) | CANON-6,7; PRIN-24; DATA-5 |
 | COMPOSE-7 | must | A new **"Compose" Enrich stage** (after Claims) (re)writes the prose body from the entity's cited claims — **idempotent** (regenerated on claim change), behind the agent seam with a **deterministic fallback** (Compose-unavailable → structured blocks alone, never a hard failure); works on `staging`, promotes via the gate; bounded + audited | none-yet | ORCH-9,21; CANON-1,3; SPEC-0024 |
 | COMPOSE-8 | should | **Sources surface a human title too** (PRIN-24 reach): a source's `source.md` carries a human title (derived if absent) so a `[[…]]` reference + the References section read as titles, never `sources/<shard>/<ULID>` | none-yet | PRIN-24; VAULT; SPEC-0031 |
 
@@ -149,3 +149,11 @@ the gate (CANON). Bounded + audited like every stage.
   evidence, never new facts, no egress. Two forks for the Principal in §7 (separate stage [lean];
   Title-Case filenames [lean yes]). Spec-first; impl + tests → PM. Ties the entity-pages ask to PRIN-24
   (the kebab-slug + ULID-surfacing is the same human-readable problem).
+- 2026-06-08 — **Slice 1 (COMPOSE-6) implemented**: new entity files land at `entities/<kind>/<Human Name>.md`
+  — the leaf is the natural name (real case + spaces preserved), the kind directory stays a lowercase slug
+  (`entities/organization/Apple.md`). New `entityFileName()` (connectDoc.ts) strips only path/Obsidian-wikilink-
+  illegal chars + control chars, keeps case/hyphens, collapses whitespace, drops leading/trailing dots, caps
+  length, falls back to `Unnamed`; `entityFileRel` uses it for the leaf + a human collision suffix
+  `<Human Name> (<id6>).md` (never a ULID-only filename, CANON-7). Existing entities keep their stored `rel`
+  (ULID identity persists → no mass-rename); only new files get the human name. COMPOSE-7 (the Compose stage)
+  + the prose/citations/grounding/woven-links layer (COMPOSE-1..5,8) follow as Slice 2.

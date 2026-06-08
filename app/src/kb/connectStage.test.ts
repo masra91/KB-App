@@ -8,7 +8,7 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
-import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
+import { renderEntityNode, entityFileRel, LINKS_BLOCK_START } from './connectDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
@@ -62,7 +62,7 @@ async function seedCandidate(root: string, kind: string, name: string, sourceId:
 /** Seed an existing canonical entity node; returns { id, rel }. */
 async function seedNode(root: string, kind: string, name: string, derivedFrom: string[]): Promise<{ id: string; rel: string }> {
   const id = ulid();
-  const rel = path.join('entities', kind, `${name.toLowerCase().replace(/\s+/g, '-')}.md`);
+  const rel = entityFileRel(kind, name, id); // COMPOSE-6: human leaf (real case + spaces), kind dir lowercase
   const dest = path.join(root, rel);
   await fs.mkdir(path.dirname(dest), { recursive: true });
   await fs.writeFile(
@@ -183,9 +183,9 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
 
       const res = await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs'));
       expect(res.ok).toBe(true);
-      expect(res.nodeRels).toEqual(['entities/person/steve-jobs.md']); // human filename (CONNECT-7)
+      expect(res.nodeRels).toEqual(['entities/person/Steve Jobs.md']); // human filename — real case + spaces (CONNECT-7 / COMPOSE-6)
 
-      const md = await fs.readFile(path.join(root, 'entities/person/steve-jobs.md'), 'utf8');
+      const md = await fs.readFile(path.join(root, 'entities/person/Steve Jobs.md'), 'utf8');
       expect(md).toContain('# Steve Jobs');
       // multi-source provenance (CONNECT-8) — order-independent
       expect(md).toContain('01S1');
@@ -206,7 +206,7 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
       await seedCandidate(root, 'person', 'Steve Jobs', '01S2');
       await commitAll(root, 'seed');
       await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs'));
-      expect(await listEntityFiles(root)).toEqual(['entities/person/steve-jobs.md']);
+      expect(await listEntityFiles(root)).toEqual(['entities/person/Steve Jobs.md']);
     });
   });
 });
@@ -221,7 +221,7 @@ describe.skipIf(!gitAvailable)('connectOne — fold into existing node (CONNECT-
 
       await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs', { existingNodeId: existing.id }));
 
-      expect(await listEntityFiles(root)).toEqual(['entities/person/steve-jobs.md']); // no duplicate
+      expect(await listEntityFiles(root)).toEqual(['entities/person/Steve Jobs.md']); // no duplicate
       const md = await fs.readFile(path.join(root, existing.rel), 'utf8');
       expect(md).toContain('sources/old/01S0'); // kept
       expect(md).toContain('01S1'); // folded in
@@ -444,7 +444,7 @@ describe.skipIf(!gitAvailable)('connectOne — failure never loses candidates; s
       const res = await connectOne(root, 'person|grace hopper', decider);
       expect(res.ok).toBe(true);
       expect(res.setAside).toBe(false); // resolved, not wedged
-      expect(res.nodeRels).toEqual(['entities/person/grace-hopper.md']); // born fresh
+      expect(res.nodeRels).toEqual(['entities/person/Grace Hopper.md']); // born fresh (COMPOSE-6 human leaf)
       expect(await readConnectQueue(root)).toHaveLength(0); // candidate consumed
     });
   });
@@ -459,7 +459,7 @@ describe.skipIf(!gitAvailable)('connectOne — idempotent / restartable (CONNECT
       const stage = new ConnectStage(root, oneClusterDecider('Steve Jobs'));
       await stage.poke();
       await stage.poke(); // re-poke: candidates already consumed → nothing to do
-      expect(await listEntityFiles(root)).toEqual(['entities/person/steve-jobs.md']);
+      expect(await listEntityFiles(root)).toEqual(['entities/person/Steve Jobs.md']);
       expect((await simpleGit(root).status()).isClean()).toBe(true);
     });
   });
@@ -487,7 +487,7 @@ describe.skipIf(!gitAvailable)('connectOne — signals route to the audit log on
         .map((l) => JSON.parse(l))
         .find((o) => o.event === 'signal');
       expect(sig).toMatchObject({ stage: 'connect', type: 'note', note: 'one plausible match only' });
-      const node = await fs.readFile(path.join(root, 'entities/person/steve-jobs.md'), 'utf8');
+      const node = await fs.readFile(path.join(root, 'entities/person/Steve Jobs.md'), 'utf8');
       expect(node).not.toContain('one plausible match only');
     });
   });
@@ -556,8 +556,8 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });
       const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
-      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']); // entities/organization/apple.md
-      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']); // entities/fruit/apple.md — same name, distinct entity
+      await seedNode(root, 'organization', 'Apple', ['sources/b/01SB']); // entities/organization/Apple.md
+      await seedNode(root, 'fruit', 'Apple', ['sources/c/01SC']); // entities/fruit/Apple.md — same name, distinct entity
       await seedClaimRelatesTo(root, steve.rel, 'Likes Apple.', ['Apple']);
       await commitAll(root, 'seed two same-name nodes');
 
@@ -572,7 +572,7 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       const open = await findOpenReviews(root);
       expect(open).toHaveLength(1);
       expect(open[0].raisedBy.markerKey).toMatchObject({ kind: 'link', nodeRel: steve.rel, hint: 'Apple' });
-      expect(open[0].raisedBy.markerKey.targetRel).toMatch(/entities\/(organization|fruit)\/apple\.md/);
+      expect(open[0].raisedBy.markerKey.targetRel).toMatch(/entities\/(organization|fruit)\/Apple\.md/);
       expect(open[0].question).toContain('Steve Jobs');
 
       // Idempotent: a second pass does NOT raise a duplicate (the hint is already asked).
@@ -724,7 +724,7 @@ describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on
       });
       await connectOne(root, 'person|steve jobs', tagger);
 
-      const md = await fs.readFile(path.join(root, 'entities/person/steve-jobs.md'), 'utf8');
+      const md = await fs.readFile(path.join(root, 'entities/person/Steve Jobs.md'), 'utf8');
       expect(md).toContain('type: person'); // curated Property
       expect(md).toMatch(/tags: \[[^\]]*"type\/person"[^\]]*\]/); // deterministic curated core, always present
       expect(md).toContain('"topic/machine-learning"'); // agent tag, normalized (META-3)
@@ -746,7 +746,7 @@ describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on
       await seedCandidate(root, 'organization', 'Apple', '01S1');
       await commitAll(root, 'seed');
       await connectOne(root, 'organization|apple', oneClusterDecider('Apple')); // no tags in verdict
-      const md = await fs.readFile(path.join(root, 'entities/organization/apple.md'), 'utf8');
+      const md = await fs.readFile(path.join(root, 'entities/organization/Apple.md'), 'utf8');
       expect(md).toContain('tags: ["type/organization"]');
     });
   });
