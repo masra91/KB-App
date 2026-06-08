@@ -3,9 +3,27 @@
 // registration (conflict = register returns false → agent degrades, QCAP-9), the always-present
 // menubar/tray entry (QCAP-3), the frameless capture sheet window (loads the shared renderer at the
 // `#qcap` route, QCAP-4 headless), and focus-restore to the prior app on dismiss (QCAP-2, macOS app.hide).
-import { app, globalShortcut, Tray, Menu, BrowserWindow, nativeImage } from 'electron';
+import { app, globalShortcut, Tray, Menu, BrowserWindow, nativeImage, screen } from 'electron';
 import path from 'node:path';
 import type { QuickCaptureDeps } from './quickCaptureAgent';
+
+/** DESIGN-QCAP §2: command-bar proportions — a narrow sheet that reads as a summoned tool. */
+const SHEET_WIDTH = 520;
+const SHEET_HEIGHT = 200;
+
+/** DESIGN-QCAP §2/§10: anchor the sheet in the upper third of the focused display (command-bar
+ *  convention) — never centered like a blocking modal. Chosen for hotkey-summon consistency. */
+function anchorUpperThird(win: BrowserWindow): void {
+  try {
+    const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const wa = display.workArea;
+    const x = Math.round(wa.x + (wa.width - SHEET_WIDTH) / 2);
+    const y = Math.round(wa.y + wa.height / 3 - SHEET_HEIGHT / 2);
+    win.setPosition(x, y);
+  } catch {
+    win.center(); // fall back to centered if display geometry is unavailable
+  }
+}
 
 export interface ElectronQcapHooks {
   /** Open the sheet (wired to the agent; used by the tray menu item). */
@@ -17,8 +35,8 @@ export interface ElectronQcapHooks {
 
 function createSheetWindow(onBlur: () => void): BrowserWindow {
   const win = new BrowserWindow({
-    width: 560,
-    height: 200,
+    width: SHEET_WIDTH,
+    height: SHEET_HEIGHT,
     frame: false,
     resizable: false,
     fullscreenable: false,
@@ -71,7 +89,7 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
       const w = sheet;
       w.once('ready-to-show', () => {
         if (!w.isDestroyed()) {
-          w.center();
+          anchorUpperThird(w);
           w.show();
           w.focus();
         }
@@ -79,7 +97,7 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
       if (!w.isVisible()) {
         // already ready (re-show path)
         try {
-          w.center();
+          anchorUpperThird(w);
           w.show();
           w.focus();
         } catch {
