@@ -8,6 +8,7 @@ import simpleGit from 'simple-git';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir, pathExists, makeTempDir } from '../../test/tempVault';
 import { recall, makeReadOnlyTools, buildRecallToolDefs, recallBudget, countEntityNodes, RECALL_BUDGET, finalizeCitations, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
+import { CopilotCapacityTimeoutError } from './copilotConcurrency';
 import { createKb } from './vault';
 
 interface ScriptStep {
@@ -346,5 +347,72 @@ describe('finalizeCitations (ASK-13) — dense, deduped, verified [n] ↔ citati
     expect(res.answer).toContain('[2]');
     // No dangling marker beyond the citation count.
     expect(res.answer).not.toMatch(/\[3\]/);
+  });
+});
+
+// ASK-16 — recall is interactive-priority: it acquires a slot from the GLOBAL copilot pool (no longer
+// bypassing the safety ceiling) through the priority lane, held across the SDK session, and fails fast
+// + honestly when capacity can't be granted in bound instead of hanging to the 60s session.idle timeout.
+describe('recall is interactive-priority (ASK-16)', () => {
+  let v: RecallVault | undefined;
+  afterEach(async () => {
+    if (v) await rmTempDir(v.root);
+    v = undefined;
+  });
+
+  it('acquires a (priority) capacity slot BEFORE opening the session and releases it AFTER — no bypass', async () => {
+    v = await buildRecallVault();
+    const events: string[] = [];
+    const acquireSlot = async (): Promise<() => void> => {
+      events.push('acquire');
+      return () => events.push('release');
+    };
+    const base = fakeClient([
+      { tool: 'submitAnswer', args: { answer: 'Ada [1].', citations: [{ kind: 'claim', ref: v.claimRel }], grounded: true } },
+    ]);
+    const client: RecallClient = {
+      ...base.client,
+      async createSession(config) {
+        events.push('session');
+        return base.client.createSession(config);
+      },
+    };
+    const res = await recall(v.root, 'Who was Ada?', { client, acquireSlot, now: fixedNow });
+    expect(res.grounded).toBe(true); // the session ran (while the slot was held)
+    expect(events).toEqual(['acquire', 'session', 'release']); // acquired BEFORE, released AFTER
+  });
+
+  it('fails FAST + honestly when capacity is denied (bounded) — never opens a session, no 60s hang', async () => {
+    v = await buildRecallVault();
+    let sessionOpened = false;
+    const client: RecallClient = {
+      async createSession() {
+        sessionOpened = true;
+        throw new Error('should not be reached');
+      },
+      async disconnect(): Promise<void> {},
+    };
+    const acquireSlot = async (): Promise<() => void> => {
+      throw new CopilotCapacityTimeoutError(30_000); // pool saturated/wedged → bounded denial
+    };
+    const res = await recall(v.root, 'Who was Ada?', { client, acquireSlot, now: fixedNow });
+    expect(sessionOpened).toBe(false); // failed fast — never spawned an out-of-bound session
+    expect(res.grounded).toBe(false);
+    expect(res.answer).toMatch(/busy ingesting/i); // honest, retryable — not a silent hang
+    expect(res.trace?.ok).toBe(false);
+  });
+
+  it('waits for a freed slot then resolves (saturated pool, granted within bound)', async () => {
+    v = await buildRecallVault();
+    const { client } = fakeClient([
+      { tool: 'submitAnswer', args: { answer: 'Ada [1].', citations: [{ kind: 'claim', ref: v.claimRel }], grounded: true } },
+    ]);
+    // The priority acquire resolves only after a background op frees the slot (a tick later).
+    const acquireSlot = async (): Promise<() => void> => {
+      await new Promise((r) => setTimeout(r, 5));
+      return () => {};
+    };
+    const res = await recall(v.root, 'Who was Ada?', { client, acquireSlot, now: fixedNow });
+    expect(res.grounded).toBe(true); // got the slot promptly, then answered
   });
 });
