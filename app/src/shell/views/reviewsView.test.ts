@@ -266,4 +266,76 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       expect(root.querySelector('.review-candidates')).toBeNull();
     });
   });
+
+  // REVIEW-19 / ENG-15/16: the LIVE queue carries partial/legacy/malformed records — e.g. candidates
+  // raised BEFORE title-persistence (#295/#305) carry `title: null` on disk (55 such / 9 open reviews
+  // observed live, incl. "Jordan"). The old render did `esc(c.title)` (→ `.replace` on null) inside a
+  // `.map`, throwing AFTER the fetch resolved → the WHOLE list never painted ("Loading… forever")
+  // while the rail badge still showed a count. These lock the null-safe + per-item-isolation fix.
+  describe('REVIEW-19 / ENG-15/16 — partial / legacy / malformed data never blanks the list', () => {
+    const legacyTitleNull: ReviewSummary = {
+      id: 'D-legacy',
+      question: 'Is this "Jordan" the same as that "Jordan"?',
+      detail: 'Raised before title-persistence landed.',
+      stage: 'connect',
+      refs: ['Jordan'],
+      // `title: null` is the real legacy shape (violates the compile-time type → cast, the whole point).
+      candidates: [
+        { name: 'Jordan', gloss: 'from the climbing log', title: null, sourceRel: 'sources/2026/06/01/01J/source.md' },
+        { name: 'Jordan', gloss: 'from the invoice', title: null, sourceRel: 'sources/2026/06/02/01K/source.md' },
+      ] as unknown as ReviewSummary['candidates'],
+      createdAt: '2026-06-03T09:00:00.000Z',
+    };
+
+    it('renders a legacy candidate with title:null — the list PAINTS (fails-before: esc(c.title) threw in .map)', async () => {
+      setApi(vi.fn(async () => [legacyTitleNull]));
+      await mountReviews(root);
+      // The regression was "Loading… forever" — assert the list actually painted.
+      expect(root.querySelector('.review-list')).not.toBeNull();
+      expect(root.querySelector('.review-q')?.textContent).toContain('Jordan');
+      // Both rows render; the link text falls back to the candidate NAME (never esc(undefined), never a ULID).
+      const links = root.querySelectorAll<HTMLButtonElement>('.review-candidate-open');
+      expect(links).toHaveLength(2);
+      expect(links[0].textContent?.trim()).toBe('Jordan ↗');
+      expect(root.textContent).not.toContain('undefined');
+    });
+
+    it('renders a candidate missing BOTH title and name — generic link text, never esc(undefined)', async () => {
+      const review = {
+        ...legacyTitleNull,
+        id: 'D-noname',
+        candidates: [{ gloss: 'only a gloss', sourceRel: 'sources/2026/06/02/01M/source.md' }] as unknown as ReviewSummary['candidates'],
+      } as ReviewSummary;
+      setApi(vi.fn(async () => [review]));
+      await mountReviews(root);
+      const link = root.querySelector<HTMLButtonElement>('.review-candidate-open');
+      expect(link?.textContent?.trim()).toBe('Open in Obsidian ↗');
+      expect(root.textContent).not.toContain('undefined');
+    });
+
+    it('ENG-16: one malformed candidate degrades its OWN row — sibling candidates still render', async () => {
+      const review = {
+        ...legacyTitleNull,
+        id: 'D-mixed',
+        candidates: [
+          { name: 'Jordan', gloss: 'good row', title: 'A real title', sourceRel: 'sources/2026/06/01/01J/source.md' },
+          null, // a malformed entry in the array
+        ] as unknown as ReviewSummary['candidates'],
+      } as ReviewSummary;
+      setApi(vi.fn(async () => [review]));
+      await mountReviews(root);
+      expect(root.querySelectorAll('.review-candidate')).toHaveLength(2); // good row + a safe fallback row
+      expect(root.textContent).toContain('A real title'); // the good candidate survived
+      expect(root.querySelector('.review-list')).not.toBeNull();
+    });
+
+    it('ENG-16: one malformed REVIEW degrades its own row — sibling reviews still render + stay actionable', async () => {
+      setApi(vi.fn(async () => [CLAIM_REVIEW, null as unknown as ReviewSummary, DISAMBIG_REVIEW]));
+      await mountReviews(root);
+      expect(root.querySelectorAll('.review')).toHaveLength(3); // two good + one fallback
+      expect(root.textContent).toContain('Ada Lovelace'); // CLAIM_REVIEW survived
+      expect(root.textContent).toContain("Dave's wedding"); // DISAMBIG_REVIEW survived
+      expect(root.querySelectorAll('.review-confirm').length).toBeGreaterThanOrEqual(2); // good items still answerable
+    });
+  });
 });
