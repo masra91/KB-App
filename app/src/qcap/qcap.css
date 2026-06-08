@@ -1,9 +1,12 @@
 /* SPEC-0038 QCAP — "the intake slot" (DESIGN-QCAP). A flat-ink instrument panel, NOT a card: the
    frameless window IS the slot. Built on the _design-system viz tokens. Flat edge = a 1px --viz-rule
    border + a 2px --viz-ember "live" hairline on top (the instrument is powered) — no drop shadow. */
+/* QCAP-12: head / field / command-bar as a grid `auto 1fr auto` — the action row is its own fixed
+   band that NEVER scrolls off; only the middle field row gives. (KB-Lead's steer: the grid is the
+   clearest "the command bar is its own band".) */
 .qcap-sheet {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
   gap: 8px;
   padding: 12px 14px;
   box-sizing: border-box;
@@ -36,6 +39,29 @@
   display: none;
 }
 
+/* QCAP-13 §3b: the screenshot icon-button cluster — spare ghost glyphs at the head's trailing edge,
+   secondary to the field (muted --viz-ink-muted at rest, ember on hover/focus). Never a toolbar. */
+.qcap-shots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.qcap-shots[hidden] {
+  display: none;
+}
+.qcap-shot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  line-height: 0;
+  color: var(--viz-ink-muted);
+}
+.qcap-shot:hover,
+.qcap-shot:focus-visible {
+  color: var(--viz-ember);
+}
+
 /* QCAP-9 steer-to-Settings affordance: a quiet brass text button, never a loud blocking banner — a
    denied permission is "waiting on YOU," actionable, NOT an error/crash, so it takes --viz-brass (the
    needs-you/blocked token), not --viz-oxide (error). Mirrors the SPEC-0034 vault-permission steer
@@ -56,17 +82,20 @@
   display: none;
 }
 
+/* QCAP-12: the field is the sole region that gives — `min-height: 0` lets the grid row shrink below
+   its content so the textarea scrolls INTERNALLY instead of pushing the command bar off-screen. */
 .qcap-field {
   display: block;
-  flex: 1;
+  min-height: 0;
 }
 
-/* The hero intake field fills the slot at instrument scale. */
+/* The hero intake field fills the slot at instrument scale; overflow scrolls within the field (QCAP-12). */
 .qcap-field .qcap-input {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
   resize: none;
+  overflow-y: auto;
   font-size: 15px;
   line-height: 1.45;
 }
@@ -95,12 +124,18 @@
   border-color: var(--viz-oxide);
 }
 
+/* QCAP-12: the pinned command-bar footer. A 1px --viz-rule hairline along its TOP (the footer rail of
+   the instrument — mirrors the §2 top ember hairline at the head), flat (no shadow); the 8px grid gap
+   sits above it, 8px padding below the rule. `flex: none`-equivalent: as the grid's last `auto` row it
+   never grows, so Save/Cancel stay on-screen even when the field scrolls under it. */
 .qcap-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
+  border-top: 1px solid var(--viz-rule);
+  padding-top: 8px;
 }
 
 .qcap-hint {

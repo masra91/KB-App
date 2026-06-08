@@ -70,7 +70,7 @@ slices of THIS spec — the spine is shared, only the surface is added).
 | QCAP-10 | should   | **Trustworthy confirmation**: a brief, non-modal "saved" signal (sheet flash / subtle toast) so fire-and-forget feels safe — never a blocking dialog | none-yet | VISION-1; CAPTURE-11 |
 | QCAP-11 | must     | **Restore the main window from the menubar.** The tray menu (QCAP-3) includes a **"Show KB-App"** item that opens/restores the windowed app — **creating the window if none exists** (`app.show()` + window `show()`/`focus()`, front-most) — so the `LSUIElement` accessory (QCAP-4/8) is **never a one-way trap**: a user who closed or hid the main window can always get back to it from the menubar. Today the tray menu is **only** Capture + Quit (no restore) | none-yet | QCAP-3,4; PANEL-1 |
 | QCAP-12 | must     | **Capture-sheet controls are always on-screen — no scroll-to-save.** The sheet's actions (**Save / Confirm / Cancel**) sit in a **fixed/sticky footer always visible without scrolling**; the sheet sizes so the action row **never clips** regardless of content height (the textarea scrolls internally; the footer does not move). Matches the DESIGN-QCAP command-bar intent — a minimal slot with actions instantly reachable. *(Principal hit a sheet where Save required scrolling — the button row is currently a flex child, not a pinned footer.)* | none-yet | QCAP-2,10; DESIGN-QCAP |
-| QCAP-13 | should   | **Screenshot capture (Slice 2).** The sheet offers **Full screen / Region / Window** buttons — macOS `screencapture -x` (full, silent) / `-i` (interactive drag-region) / `-w` (window pick) → temp PNG → attached as a captured **source** through the SPEC-0013 path (`surface=quick-capture`, image kind). Requests **Screen-Recording** permission via the QCAP-9 honest-permission pattern; **denied → graceful degrade** to "paste a screenshot instead" (clipboard image), never a dead button. **Extends the v1 text+clipboard payload** (ratified fork #3) — an explicit Principal-requested Slice-2 capability, kept as an **opt-in affordance** off the zero-friction text path | none-yet | QCAP-7,9; MACOS-7; CAPTURE-1 |
+| QCAP-13 | should   | **Screenshot capture (Slice 2).** The sheet offers **Full screen / Region / Window** buttons — macOS `screencapture -x` (full, silent) / `-i` (interactive drag-region) / `-w` (window pick) → temp PNG → attached as a captured **source** through the SPEC-0013 path (`surface=quick-capture`, image kind). Requests **Screen-Recording** permission via the QCAP-9 honest-permission pattern; **denied → graceful degrade** to "paste a screenshot instead" (clipboard image), never a dead button. **Extends the v1 text+clipboard payload** (ratified fork #3) — an explicit Principal-requested Slice-2 capability, kept as an **opt-in affordance** off the zero-friction text path | test:src/qcap/qcapSheet.test.ts | QCAP-7,9; MACOS-7; CAPTURE-1 |
 | QCAP-14 | should   | **Tray live-status readout (read-only).** The menubar/tray surface (QCAP-3) shows a **compact, at-a-glance indicator that work is happening + how much remains** — e.g. *"~1,000 tasks pending across all jobs"*, or per-stage queue depths, or a simple working/idle dot — so the Principal can glance at the menubar without opening the app. **Composes the existing OBS pipeline-status view-model** (SPEC-0030 OBS-5: per-stage queue depth + state); **read-only** (the observatory invariant, AUDIT-8 / OBS-9 — no actions beyond QCAP-11 restore + the QUIESCE-1 prepare-shutdown). Updates on tray-open (and/or live while open). Grows with the Status view — as OBS/VIZ improve, this is their menubar-sized summary | none-yet | QCAP-3; OBS-5,9; SPEC-0030; SPEC-0045 |
 
 ## 5. Open questions (forks) — RESOLVED (KB-Lead + Principal, 2026-06-07)
@@ -87,14 +87,25 @@ slices of THIS spec — the spine is shared, only the surface is added).
   the focused-app selection on summon (before the sheet steals focus) behind the Accessibility grant;
   denied → a steer-to-Settings affordance + graceful degrade to clipboard-only (QCAP-9); the sheet
   prefers the selection over the clipboard as the "capture this" affordance (QCAP-7); the Slice-1
-  fast-out / focus-restore / zero-permission fallback are preserved. **Remaining Slice 2:** **screenshot
-  capture (QCAP-13: full/region/window via `screencapture` + Screen-Recording permission)**, the
-  **menubar "Show KB-App" restore (QCAP-11)**, the **sticky-footer sheet (QCAP-12)**, richer sheet.
-  *(QCAP-11/12 are small Principal-reported gaps — can land ahead of the rest of Slice 2.)*
+  fast-out / focus-restore / zero-permission fallback are preserved.
+- **Slice 2 — WS4 (QCAP-11/12/13): ✅ done.** **QCAP-11** menubar "Show KB-App" restore (create-if-none,
+  unhide+focus); **QCAP-12** sticky command-bar footer (grid `auto 1fr auto` — Save/Cancel never scroll
+  off; field scrolls internally); **QCAP-13** screenshot capture (full/region/window via `screencapture`
+  → temp-PNG handle → file source on the SPEC-0013 path; Screen-Recording TCC w/ brass steer + degrade to
+  paste-an-image). The screenshot bytes stay in main behind an issued-only handle (never through the DOM).
 - **Slice 3+:** Windows / Linux surfaces over the same spine.
 
 ## 7. Changelog
 
+- 2026-06-08 — **WS4 implemented (QCAP-11/12/13).** QCAP-11: tray "Show KB-App" restores/focuses the main
+  window, creating it if none exists (LSUIElement accessory is never a one-way trap); main.ts tracks the
+  window + unhides the app first. QCAP-12: the sheet is a grid `auto 1fr auto` so the command bar is a
+  fixed footer rail (1px `--viz-rule` top hairline) that never scrolls off — the field is the sole region
+  that gives (min-height:0, internal scroll). QCAP-13: three ghost icon-buttons (full/region/window) spawn
+  `screencapture -x/-i/-w` → a temp PNG the main process holds behind an **issued-only handle** (bytes
+  never cross the DOM; kb:quickCapture reads only a handle it issued) → a file source on the SPEC-0013
+  path; Screen-Recording TCC denial shows the brass steer (→ Settings·Privacy·ScreenRecording) and degrades
+  to paste-an-image (clipboard image, same handle path). Preserves QCAP-2 fast-out/focus-restore. No req changes.
 - 2026-06-08 — **Slice 2 (part 1) implemented** (macOS selection capture + permission UX; fork #2 resolved). The
   agent reads the focused-app text selection on summon via the macOS Accessibility grant (probed, not
   prompted, per summon), BEFORE the sheet steals focus; a denied grant / read failure / non-macOS

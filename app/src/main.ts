@@ -18,8 +18,10 @@ if (started) {
 
 // The main process is the long-lived manager (SPEC-0010 STACK-2). For now it owns the
 // IPC surface and a single window; the headless scheduler/agents grow from here.
+// Tracked so QCAP-11 can restore the SAME window from the menubar instead of spawning a duplicate.
+let mainWindow: BrowserWindow | null = null;
 const createWindow = () => {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 880,
     height: 660,
     webPreferences: {
@@ -34,7 +36,31 @@ const createWindow = () => {
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
     );
   }
+  mainWindow.on('closed', () => {
+    mainWindow = null; // so QCAP-11's restore re-creates rather than touching a destroyed window
+  });
 };
+
+// SPEC-0038 QCAP-11: restore + focus the main window from the menubar — CREATING it if none exists —
+// so the `LSUIElement` accessory (QCAP-4/8) is never a one-way trap: a user who closed/hid the main
+// window can always get back to it. On macOS the agent may have hidden the whole app (QCAP-2 focus-
+// restore), so unhide first, then surface the window front-most.
+function showMainWindow(): void {
+  if (process.platform === 'darwin') {
+    try {
+      app.show(); // undo a prior app.hide() (QCAP-2) so the window can come forward
+    } catch {
+      /* best-effort */
+    }
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    createWindow(); // none open → bring one up
+  }
+}
 
 // SPEC-0038 QCAP: the menubar agent owns the global hotkey + capture sheet, headlessly (QCAP-4) — it
 // starts even before/without a main window. The hotkey applies the shipped default immediately; the
@@ -44,6 +70,7 @@ function startQuickCapture(): void {
   const deps = electronQuickCaptureDeps({
     onOpen: () => qcapAgent?.open(),
     onClose: () => qcapAgent?.close(),
+    onShowMainWindow: () => showMainWindow(), // QCAP-11: tray "Show KB-App" restore
   });
   qcapAgent = new QuickCaptureAgent(deps); // shipped default ⌥Space; conflict-aware + degrades (QCAP-9)
   setQuickCaptureAgent(qcapAgent);
@@ -110,7 +137,5 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  showMainWindow(); // restore/focus the tracked main window (or create one) — never a stray duplicate
 });

@@ -26,6 +26,10 @@ const state = vi.hoisted(() => ({
   stagingRoot: null as string | null, // SPEC-0029: the active staging worktree the activity handlers read
   clipboard: '', // SPEC-0038 QCAP-7: clipboard prefill source
   orch: null as null | { capture: (surface: string, payloads: unknown[]) => Promise<{ ids: string[]; captureBatch: string; committed: boolean }> },
+  // SPEC-0038 QCAP-13: the mocked screenshot module's responses.
+  screenshot: { status: 'unsupported', image: null } as { status: string; image: { handle: string; name: string } | null },
+  screenshotBytes: null as Uint8Array | null, // what consumeScreenshotHandle returns for a valid handle
+  clipboardImage: null as { handle: string; name: string } | null,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -51,6 +55,15 @@ vi.mock('electron', () => ({
   shell: { openExternal: mocks.openExternal },
   clipboard: { readText: (): string => state.clipboard }, // SPEC-0038 QCAP-7
   BrowserWindow: { fromWebContents: (): null => null },
+}));
+
+// SPEC-0038 QCAP-13: mock the screenshot glue so the IPC handlers are tested without spawning
+// `screencapture` / touching the real clipboard image. consumeScreenshotHandle returns bytes only
+// for the registered handle (mirrors the issued-handle security boundary).
+vi.mock('./quickCaptureScreenshot', () => ({
+  captureScreenshot: vi.fn(async () => state.screenshot),
+  consumeScreenshotHandle: vi.fn(async (handle: string) => (state.screenshot.image?.handle === handle ? state.screenshotBytes : null)),
+  clipboardImageHandle: vi.fn(async () => state.clipboardImage),
 }));
 
 vi.mock('./pipeline', () => ({
@@ -95,6 +108,9 @@ beforeEach(async () => {
   state.stagingRoot = null;
   state.clipboard = '';
   state.orch = null;
+  state.screenshot = { status: 'unsupported', image: null };
+  state.screenshotBytes = null;
+  state.clipboardImage = null;
   setQuickCaptureAgent(null); // SPEC-0038: reset the QCAP agent singleton between tests (no cross-leak)
   mocks.startPipeline.mockClear();
   mocks.pipelineControl.mockClear();
@@ -474,7 +490,7 @@ describe('SPEC-0038 QCAP — quick capture IPC', () => {
     state.clipboard = 'something I was reading';
     // No QCAP agent → no summon-time selection → selection null + accessibility unsupported (clipboard-only).
     const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
-    expect(ctx).toEqual({ clipboard: 'something I was reading', selection: null, accessibility: 'unsupported' });
+    expect(ctx).toEqual({ clipboard: 'something I was reading', selection: null, accessibility: 'unsupported', clipboardImage: null, screenshotSupported: process.platform === 'darwin' });
   });
 
   it('QCAP-7/9 (Slice 2): kb:quickCaptureContext folds in the agent selection read at summon time', async () => {
@@ -483,7 +499,7 @@ describe('SPEC-0038 QCAP — quick capture IPC', () => {
     const stub = { takeSelectionContext: (): SelectionRead => ({ status: 'granted', text: 'the highlighted line' }) };
     setQuickCaptureAgent(stub as unknown as QuickCaptureAgent);
     const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
-    expect(ctx).toEqual({ clipboard: 'on the clipboard', selection: 'the highlighted line', accessibility: 'granted' });
+    expect(ctx).toEqual({ clipboard: 'on the clipboard', selection: 'the highlighted line', accessibility: 'granted', clipboardImage: null, screenshotSupported: process.platform === 'darwin' });
   });
 
   it('QCAP-9 (Slice 2): a denied grant degrades — selection null, accessibility denied, clipboard still flows', async () => {
@@ -491,7 +507,59 @@ describe('SPEC-0038 QCAP — quick capture IPC', () => {
     const stub = { takeSelectionContext: (): SelectionRead => ({ status: 'denied', text: null }) };
     setQuickCaptureAgent(stub as unknown as QuickCaptureAgent);
     const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
-    expect(ctx).toEqual({ clipboard: 'fallback text', selection: null, accessibility: 'denied' });
+    expect(ctx).toEqual({ clipboard: 'fallback text', selection: null, accessibility: 'denied', clipboardImage: null, screenshotSupported: process.platform === 'darwin' });
+  });
+
+  it('QCAP-13: kb:quickCaptureContext folds in a clipboard image (the "paste an image" prefill)', async () => {
+    state.clipboardImage = { handle: '/tmp/kb-qcap-shots/clip.png', name: 'pasted-image-1.png' };
+    const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
+    expect(ctx.clipboardImage).toEqual({ handle: '/tmp/kb-qcap-shots/clip.png', name: 'pasted-image-1.png' });
+  });
+
+  it('QCAP-13: kb:quickCaptureScreenshot returns the capture result', async () => {
+    state.screenshot = { status: 'granted', image: { handle: '/tmp/kb-qcap-shots/shot.png', name: 'screenshot-1.png' } };
+    const res = await invoke<{ status: string; image: { handle: string } | null }>('kb:quickCaptureScreenshot', 'region');
+    expect(res).toEqual({ status: 'granted', image: { handle: '/tmp/kb-qcap-shots/shot.png', name: 'screenshot-1.png' } });
+  });
+
+  it('QCAP-13: kb:quickCapture resolves a screenshot input → a file payload on the SPEC-0013 path (surface=quick-capture)', async () => {
+    const capture = vi.fn(async () => ({ ids: ['SHOT1'], captureBatch: 'b1', committed: true }));
+    state.orch = { capture };
+    state.screenshot = { status: 'granted', image: { handle: '/tmp/kb-qcap-shots/shot.png', name: 'screenshot-1.png' } };
+    state.screenshotBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG magic
+    const res = await invoke<CaptureResult>('kb:quickCapture', {
+      inputs: [{ kind: 'screenshot', handle: '/tmp/kb-qcap-shots/shot.png', name: 'screenshot-1.png' }],
+    });
+    expect(res.ok).toBe(true);
+    expect(capture).toHaveBeenCalledTimes(1);
+    const [surface, payloads] = capture.mock.calls[0] as unknown as [string, Array<{ kind: string; name?: string }>];
+    expect(surface).toBe('quick-capture');
+    expect(payloads).toEqual([{ kind: 'file', name: 'screenshot-1.png', data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) }]);
+  });
+
+  it('QCAP-13: a screenshot handle we did NOT issue is ignored (nothing captured) — security boundary', async () => {
+    const capture = vi.fn(async () => ({ ids: ['x'], captureBatch: 'b', committed: true }));
+    state.orch = { capture };
+    state.screenshot = { status: 'granted', image: { handle: '/tmp/kb-qcap-shots/legit.png', name: 'legit.png' } };
+    state.screenshotBytes = new Uint8Array([1, 2, 3]);
+    // A forged handle (not the one the mock "issued") → consume returns null → no payload → nothing captured.
+    const res = await invoke<CaptureResult>('kb:quickCapture', {
+      inputs: [{ kind: 'screenshot', handle: '/etc/passwd', name: 'evil.png' }],
+    });
+    expect(res.ok).toBe(false);
+    expect(res.message).toBe('Nothing to capture.');
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('QCAP-13: kb:openScreenRecordingSettings deep-links to the Screen-Recording anchor, falls back to Privacy', async () => {
+    const ok = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openScreenRecordingSettings');
+    expect(ok).toEqual({ ok: true });
+    expect(mocks.openExternal).toHaveBeenCalledWith('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    mocks.openExternal.mockClear();
+    mocks.openExternal.mockRejectedValueOnce(new Error('anchor not resolvable'));
+    const fb = await invoke<{ ok: boolean; usedFallback?: boolean }>('kb:openScreenRecordingSettings');
+    expect(fb).toEqual({ ok: true, usedFallback: true });
+    expect(mocks.openExternal).toHaveBeenNthCalledWith(2, 'x-apple.systempreferences:com.apple.preference.security?Privacy');
   });
 
   it('QCAP-9 (Slice 2): kb:openAccessibilitySettings deep-links to the Accessibility Privacy anchor', async () => {
