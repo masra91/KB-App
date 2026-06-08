@@ -8,7 +8,7 @@ import { withTimeout, renderLoadError } from '../loadGuard';
 import type { AgentView } from '../../kb/types';
 
 export async function mountAgents(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="muted">Loading…</p></div>`;
+  container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="agent-note">Loading…</p></div>`;
   await render(container);
   const timer = setInterval(() => {
     if (!document.contains(container)) {
