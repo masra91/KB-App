@@ -352,6 +352,37 @@ li.review {
   display: flex;
   gap: 0.5rem;
 }
+/* REVIEW-16 disambiguation candidate rows — visual tokens come from the viz primitives (.viz-spine
+   left rule, .viz-signage name label, .viz-body gloss, .viz-btn--ghost link); only layout lives here. */
+ul.review-candidates {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.review-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.6rem;
+  padding: 0.3rem 0 0.3rem 0.65rem; /* left pad clears the .viz-spine rule */
+}
+.review-candidate-name {
+  flex: 0 0 auto;
+  font-size: 0.74rem;
+  color: var(--viz-ink-muted);
+}
+.review-candidate-gloss {
+  flex: 1 1 12rem;
+  font-size: 0.95rem;
+}
+.review-candidate-open {
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
 button:disabled {
   opacity: 0.5;
   cursor: default;

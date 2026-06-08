@@ -10,6 +10,7 @@ import type { SchedulePreset, AutonomyPosture } from './jobs';
 import type { EgressTier, ResearcherTemplate } from './researchers';
 import type { IntakeConnectorType } from './intakeConnectors';
 import type { SourceSensitivity } from './sensitivityRead';
+import type { ReviewSubjectCandidate } from './reviews';
 import type { AuditEvent, AuditActor, AuditSubjects } from './audit';
 import type { ActivityFilter } from './activityIndex';
 import type { ActivityFeedEntry } from './activityDigest';
@@ -26,6 +27,8 @@ export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsi
 export type { HealthReadout, MemorySample, MemTrend, CrashBreadcrumb };
 // OBS-18 (renderer): the renderer→main error report shape.
 export type { RendererErrorReport };
+// REVIEW-16: per-candidate disambiguation context (name + gloss + source link), rendered as rows.
+export type { ReviewSubjectCandidate };
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -164,6 +167,10 @@ export interface ReviewSummary {
   detail: string; // expandable context (REVIEW-3)
   stage: string; // which stage raised it
   refs: string[]; // subject entity names / mentions
+  // REVIEW-16: decision-grade per-candidate context for a disambiguation review — each row is a
+  // distinguishing gloss + (when known) a working "Open in Obsidian" source link. Absent/empty on
+  // ordinary (non-disambiguation) reviews. Gloss/name are agent-authored → the view MUST esc() them.
+  candidates?: ReviewSubjectCandidate[];
   createdAt: string;
 }
 
