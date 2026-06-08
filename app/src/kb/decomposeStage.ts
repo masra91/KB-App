@@ -77,77 +77,6 @@ async function readDecomposeState(sourceDir: string): Promise<{ terminal: boolea
   return { terminal, failures };
 }
 
-// #256 / ORCH-26: a DURABLE per-source attempt ledger in the always-writable working zone, so the
-// retry/set-aside accounting does NOT depend on the canonical write succeeding. When the shared
-// canonical writer is wedged (#163, e.g. a stale root `.git/index.lock`), the failed-attempt marker
-// can't reach canonical and the audit-derived `failures` count never advances — so without this a
-// source is re-decomposed FOREVER on every sweep (the crash cascade). The ledger increments on every
-// attempt and is consulted at the drain chokepoint (`readDecomposeQueue`): a source sets aside after
-// `maxAttempts` (PRIMARY) OR a resource-independent wall-clock ceiling (BACKSTOP), regardless of
-// marker state. Gitignored (under `.kb/cache/`), never promoted; cleared on a clean success.
-const ATTEMPT_LEDGER_REL = path.join('.kb', 'cache', 'decompose-attempts.json');
-/** Resource-independent wall-clock ceiling (ORCH-26 backstop): a source first seen longer ago than
- *  this sets aside even if its attempt count never reached `maxAttempts`. */
-export const DEFAULT_ATTEMPT_CEILING_MS = 30 * 60_000;
-
-interface AttemptRecord {
-  attempts: number;
-  firstSeenMs: number;
-}
-type AttemptLedger = Record<string, AttemptRecord>;
-
-/** Read the durable attempt ledger; missing/torn → empty (best-effort, never throws into the drain). */
-async function readAttemptLedger(root: string): Promise<AttemptLedger> {
-  try {
-    const raw = await fs.readFile(path.join(path.resolve(root), ATTEMPT_LEDGER_REL), 'utf8');
-    const parsed = JSON.parse(raw) as AttemptLedger;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-// Serialize ledger read-modify-write so a concurrent (cap>1) drain batch can't lose updates. This is
-// an in-process chain, independent of the (possibly wedged) canonical-writer lock — that's the point.
-let ledgerTail: Promise<unknown> = Promise.resolve();
-async function withAttemptLedger<T>(root: string, mutate: (ledger: AttemptLedger) => T): Promise<T> {
-  const run = async (): Promise<T> => {
-    const ledger = await readAttemptLedger(root);
-    const out = mutate(ledger);
-    const file = path.join(path.resolve(root), ATTEMPT_LEDGER_REL);
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(ledger), 'utf8');
-    return out;
-  };
-  const p = ledgerTail.then(run, run);
-  ledgerTail = p.catch(() => {});
-  return p;
-}
-
-/** Record one decompose attempt durably (ORCH-26), BEFORE any throwable work — returns the new count. */
-async function recordDecomposeAttempt(root: string, sourceId: string, nowMs: number): Promise<number> {
-  return withAttemptLedger(root, (l) => {
-    const rec = l[sourceId] ?? { attempts: 0, firstSeenMs: nowMs };
-    rec.attempts += 1;
-    l[sourceId] = rec;
-    return rec.attempts;
-  });
-}
-
-/** Clear a source's attempt record once it has left the queue cleanly (a successful decompose). */
-async function clearDecomposeAttempt(root: string, sourceId: string): Promise<void> {
-  await withAttemptLedger(root, (l) => {
-    delete l[sourceId];
-  });
-}
-
-/** True when the durable ledger says this source is exhausted (ORCH-26) — set aside even when the
- *  canonical `setaside`/`failed` marker could not be written because the writer is wedged. */
-function ledgerExhausted(rec: AttemptRecord | undefined, maxAttempts: number, nowMs: number, ceilingMs: number): boolean {
-  if (!rec) return false;
-  return rec.attempts >= maxAttempts || nowMs - rec.firstSeenMs >= ceilingMs;
-}
-
 /** Recursively find every archived source directory (one containing a `source.md`). */
 export async function findSourceDirs(root: string): Promise<string[]> {
   const sourcesRoot = path.join(path.resolve(root), 'sources');
@@ -176,16 +105,13 @@ export async function findSourceDirs(root: string): Promise<string[]> {
  * and fewer than `maxAttempts` failures. Returned as repo-relative source dirs, sorted by
  * id (ULID dir name) so drains are deterministic.
  */
-export async function readDecomposeQueue(root: string, maxAttempts = DEFAULT_MAX_ATTEMPTS, nowMs: number = Date.now()): Promise<string[]> {
+export async function readDecomposeQueue(root: string, maxAttempts = DEFAULT_MAX_ATTEMPTS): Promise<string[]> {
   root = path.resolve(root);
   const dirs = await findSourceDirs(root);
-  const ledger = await readAttemptLedger(root); // ORCH-26: writer-independent retry/ceiling accounting
   const queued: string[] = [];
   for (const dir of dirs) {
     const { terminal, failures } = await readDecomposeState(dir);
-    // The source dir name IS the sourceId (the ULID), the ledger key.
-    const exhausted = ledgerExhausted(ledger[path.basename(dir)], maxAttempts, nowMs, DEFAULT_ATTEMPT_CEILING_MS);
-    if (terminal || failures >= maxAttempts || exhausted) continue;
+    if (terminal || failures >= maxAttempts) continue;
     queued.push(path.relative(root, dir));
   }
   return queued.sort((a, b) => (path.basename(a) < path.basename(b) ? -1 : 1));
@@ -226,15 +152,9 @@ export async function decomposeOne(
   maxAttempts = DEFAULT_MAX_ATTEMPTS,
   log: DevLog = noopDevLog,
   span: ActiveSpan = noopActiveSpan,
-  nowMs: () => number = () => Date.now(),
 ): Promise<DecomposeOneResult> {
   root = path.resolve(root);
-  const sourceId = path.basename(sourceRel); // dir name == sourceId (ULID) — the durable-ledger key
-  let result: DecomposeOneResult = { sourceId, ok: false, candidateIds: [], setAside: false };
-  // ORCH-26: record this attempt in the durable working-zone ledger FIRST — BEFORE any throwable
-  // work — so the retry/set-aside ceiling holds even when the canonical advance below is wedged and
-  // throws (the `failed` marker never reaching canonical). readDecomposeQueue reads this ledger.
-  await recordDecomposeAttempt(root, sourceId, nowMs());
+  let result: DecomposeOneResult = { sourceId: path.basename(sourceRel), ok: false, candidateIds: [], setAside: false };
 
   // OFF-lock (ORCH-17): sync the worktree to the canonical checkpoint, run cognition, write the
   // candidates + audit, and commit on the work branch. Returns true — there is always work to
@@ -322,9 +242,6 @@ export async function decomposeOne(
   };
 
   await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
-  // On a clean success (or a normal set-aside) the source has left the queue — drop its durable
-  // attempt record so a later, unrelated re-capture of the same id starts fresh (ORCH-26).
-  if (result.ok || result.setAside) await clearDecomposeAttempt(root, sourceId);
   return result;
 }
 
@@ -340,11 +257,20 @@ export class DecomposeStage {
   private readonly cap: number;
   private readonly log: DevLog;
   private readonly tracer: Tracer;
+  private readonly nowMs: () => number;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
   private current: Promise<void> | null = null;
   private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
+  // #256 circuit-breaker: a wedged canonical writer makes every drain fail; back the stage off
+  // (exponential, capped) instead of re-attempting on every sweep forever (which spins cognition +
+  // grows the spans file → the heap-exhaustion crash). A clean drain resets it; items are NOT set
+  // aside (they're recoverable, deferred until the writer heals — e.g. the #163 stale-lock fix).
+  private backoffUntilMs = 0;
+  private consecutiveDrainErrors = 0;
+  private sweepMs = 30_000; // base backoff = one sweep interval; set in start()
+  private static readonly DRAIN_BACKOFF_CAP_MS = 5 * 60_000;
 
   constructor(
     root: string,
@@ -354,6 +280,7 @@ export class DecomposeStage {
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
     tracer: Tracer = noopTracer,
+    nowMs: () => number = () => Date.now(),
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -362,10 +289,12 @@ export class DecomposeStage {
     this.cap = cap;
     this.log = log.child({ scope: 'decompose' });
     this.tracer = tracer;
+    this.nowMs = nowMs;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
   start(sweepMs = 30_000): void {
+    this.sweepMs = sweepMs;
     void this.poke();
     if (this.sweepTimer == null) {
       this.sweepTimer = setInterval(() => void this.poke(), sweepMs);
@@ -392,6 +321,10 @@ export class DecomposeStage {
 
   /** Drain the queue, coalescing concurrent pokes; resolves only once fully idle. */
   poke(): Promise<void> {
+    // #256: while backing off from a wedged canonical writer, a poke is a no-op (no queue read, no
+    // cognition, no spans) — draining can't make progress anyway. The backoff auto-expires so the
+    // stage retries (and resumes cleanly once the writer recovers).
+    if (this.nowMs() < this.backoffUntilMs) return this.current ?? Promise.resolve();
     this.pending = true;
     if (!this.draining) {
       this.draining = true;
@@ -402,10 +335,23 @@ export class DecomposeStage {
   }
 
   private async runDrains(): Promise<void> {
+    let errored = false;
     try {
       while (this.pending) {
         this.pending = false;
-        await this.drainOnce();
+        if (!(await this.drainOnce())) errored = true;
+      }
+      // #256 circuit-breaker: a drain that errored (e.g. the shared canonical writer is wedged so the
+      // advance throws for every item) backs the stage off exponentially (capped) instead of
+      // re-attempting on every 30s sweep forever; a clean drain resets it.
+      if (errored) {
+        this.consecutiveDrainErrors += 1;
+        const backoffMs = Math.min(DecomposeStage.DRAIN_BACKOFF_CAP_MS, this.sweepMs * 2 ** (this.consecutiveDrainErrors - 1));
+        this.backoffUntilMs = this.nowMs() + backoffMs;
+        this.log.warn('decompose.writer-backoff', { consecutiveDrainErrors: this.consecutiveDrainErrors, backoffMs });
+      } else {
+        this.consecutiveDrainErrors = 0;
+        this.backoffUntilMs = 0;
       }
     } finally {
       this.draining = false;
@@ -414,7 +360,9 @@ export class DecomposeStage {
     }
   }
 
-  private async drainOnce(): Promise<void> {
+  /** Drain the queue once. Returns false if the pass errored out (e.g. a wedged canonical writer) so
+   *  {@link runDrains} can back off, true on a clean pass. */
+  private async drainOnce(): Promise<boolean> {
     let queue = await readDecomposeQueue(this.root, this.maxAttempts);
     while (queue.length > 0) {
       // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
@@ -440,10 +388,11 @@ export class DecomposeStage {
           }),
         );
       } catch (err) {
-        this.log.error('decompose.drain-error', { err }); // unexpected — surface it, then let a later poke/sweep retry
-        return;
+        this.log.error('decompose.drain-error', { err }); // unexpected (e.g. wedged writer) — surface it, back off
+        return false;
       }
       queue = await readDecomposeQueue(this.root, this.maxAttempts);
     }
+    return true;
   }
 }
