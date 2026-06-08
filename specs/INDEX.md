@@ -56,8 +56,9 @@ and a unique `key` here.
 | SPEC-0041 | INTAKE  | Proactive Intake                              | feature | draft | `features/` |
 | SPEC-0042 | EVAL    | Evals & Scenario Harness (seeded-KB cognition evaluation) | architecture | draft | `architecture/` |
 | SPEC-0043 | SENSE   | Sensitivity Classification (labels, propagation, the gate comparator) | feature | draft | `features/` |
-| SPEC-0046 | COMPOSE | Encyclopedic Entity Pages (Compose — human-readable top layer) | feature | draft | `features/` |
+| SPEC-0044 | CONCUR  | Stage Concurrency & User-Controlled Parallelism (exploration) | architecture | draft | `architecture/` |
 | SPEC-0045 | QUIESCE | Graceful Shutdown (Quiesce & Drain) | feature | draft | `features/` |
+| SPEC-0046 | COMPOSE | Encyclopedic Entity Pages (Compose — human-readable top layer) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
