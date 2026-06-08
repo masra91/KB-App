@@ -114,7 +114,18 @@ export interface CaptureFileInput {
   name: string; // original filename
   data: Uint8Array; // raw bytes (read in the renderer from the dropped File)
 }
-export type CaptureInput = CaptureTextInput | CaptureFileInput;
+/**
+ * SPEC-0038 QCAP-13: a screenshot / clipboard-image the main process captured to a temp PNG and
+ * handed back as an opaque `handle`. The bytes NEVER pass through the renderer/DOM — on submit the
+ * main process reads the temp file (validating the handle is one IT issued) → a file source on the
+ * SPEC-0013 path, then deletes the temp. `name` is the suggested source filename.
+ */
+export interface CaptureScreenshotInput {
+  kind: 'screenshot';
+  handle: string;
+  name: string;
+}
+export type CaptureInput = CaptureTextInput | CaptureFileInput | CaptureScreenshotInput;
 
 export interface CaptureRequest {
   inputs: CaptureInput[];
@@ -148,6 +159,31 @@ export interface QuickCaptureContext {
   selection: string | null;
   /** Accessibility grant state driving the sheet's permission UX (QCAP-9). */
   accessibility: AccessibilityStatus;
+  /** QCAP-13: an image on the clipboard, captured by main to a temp PNG handle — the "paste an image"
+   *  prefill + the Screen-Recording-denied degrade. Null when the clipboard holds no image. */
+  clipboardImage: ScreenshotHandle | null;
+  /** QCAP-13: whether screenshot capture is available (macOS only) — drives whether the cluster shows. */
+  screenshotSupported: boolean;
+}
+
+/** SPEC-0038 QCAP-13: the three macOS `screencapture` modes (full `-x` / region `-i` / window `-w`). */
+export type ScreenshotMode = 'full' | 'region' | 'window';
+
+/** An opaque temp-PNG handle the main process issued (it alone can read it back to capture). */
+export interface ScreenshotHandle {
+  handle: string;
+  name: string;
+}
+
+/**
+ * SPEC-0038 QCAP-13: outcome of a screenshot capture. `granted` + an `image` handle on success;
+ * `denied` (Screen-Recording TCC not granted → the sheet's brass steer + degrade to paste-image);
+ * `unsupported` (non-macOS); `cancelled` (the user dismissed an interactive region/window pick — a
+ * benign no-op, not an error). The captured PNG bytes stay in main (handle round-trip only).
+ */
+export interface ScreenshotResult {
+  status: 'granted' | 'denied' | 'unsupported' | 'cancelled';
+  image: ScreenshotHandle | null;
 }
 
 /** Minimal pipeline status for the capture panel (SPEC-0014 ORCH-10). */
@@ -512,6 +548,10 @@ export interface KbApi {
   // SPEC-0038 QCAP-9 (Slice 2): open System Settings → Privacy & Security → Accessibility for the
   // denied-selection-capture recovery (the SPEC-0034 steer-to-Settings pattern; never a no-op).
   openAccessibilitySettings(): Promise<OpenSettingsResult>;
+  // SPEC-0038 QCAP-13: capture a screenshot (full/region/window) to a temp PNG handle; open the
+  // Screen-Recording Privacy pane for the denied-recovery steer (brass). Bytes stay in main.
+  quickCaptureScreenshot(mode: ScreenshotMode): Promise<ScreenshotResult>;
+  openScreenRecordingSettings(): Promise<OpenSettingsResult>;
   pipelineStatus(): Promise<PipelineStatus>;
   // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).
   pipelineStatusView(): Promise<PipelineStatusView | null>;

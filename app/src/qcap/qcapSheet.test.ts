@@ -21,16 +21,23 @@ function setApi(
     clipboard?: string;
     selection?: string | null;
     accessibility?: 'granted' | 'denied' | 'unsupported';
+    clipboardImage?: { handle: string; name: string } | null;
+    screenshotSupported?: boolean;
+    screenshot?: { status: 'granted' | 'denied' | 'unsupported' | 'cancelled'; image?: { handle: string; name: string } | null };
   } = {},
 ): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     quickCapture: vi.fn().mockResolvedValue(opts.capture ?? OK),
     quickCaptureClose: vi.fn().mockResolvedValue(undefined),
     openAccessibilitySettings: vi.fn().mockResolvedValue({ ok: true }),
+    openScreenRecordingSettings: vi.fn().mockResolvedValue({ ok: true }),
+    quickCaptureScreenshot: vi.fn().mockResolvedValue(opts.screenshot ?? { status: 'cancelled', image: null }),
     quickCaptureContext: vi.fn().mockResolvedValue({
       clipboard: opts.clipboard ?? '',
       selection: opts.selection ?? null,
       accessibility: opts.accessibility ?? 'unsupported',
+      clipboardImage: opts.clipboardImage ?? null,
+      screenshotSupported: opts.screenshotSupported ?? false,
     } as QuickCaptureContext),
   };
 }
@@ -122,6 +129,98 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     await flush();
     expect((root.querySelector('#qcapText') as HTMLTextAreaElement).value).toBe('on the clipboard');
     expect((root.querySelector('#qcapClipTag') as HTMLElement).textContent).toBe('clipboard');
+  });
+
+  // --- WS4: screenshot capture + the command-bar footer (QCAP-13/12) ---
+
+  it('QCAP-13: the screenshot cluster shows only where supported (macOS); hidden otherwise', async () => {
+    setApi({ screenshotSupported: false });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapShots') as HTMLElement).hidden).toBe(true);
+    root.remove();
+    root = document.createElement('div');
+    document.body.appendChild(root);
+    setApi({ screenshotSupported: true });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapShots') as HTMLElement).hidden).toBe(false);
+    // icon-only buttons carry accessible names
+    expect((root.querySelector('#qcapShotRegion') as HTMLButtonElement).getAttribute('aria-label')).toBe('Capture a region');
+  });
+
+  it('QCAP-13: a granted screenshot loads as a "screenshot"-tagged state and ⏎ saves it as a screenshot input', async () => {
+    setApi({ screenshotSupported: true, screenshot: { status: 'granted', image: { handle: '/tmp/kb-qcap-shots/shot-1.png', name: 'screenshot-1.png' } } });
+    mountQuickCaptureSheet(root);
+    await flush();
+    (root.querySelector('#qcapShotRegion') as HTMLButtonElement).click();
+    await flush();
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).textContent).toBe('screenshot');
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-loaded')).toBe(true);
+    const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
+    enter(ta);
+    await flush();
+    expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({
+      inputs: [{ kind: 'screenshot', handle: '/tmp/kb-qcap-shots/shot-1.png', name: 'screenshot-1.png' }],
+    });
+  });
+
+  it('QCAP-13: a screenshot + a typed caption saves BOTH (image input + text input)', async () => {
+    setApi({ screenshotSupported: true, screenshot: { status: 'granted', image: { handle: '/tmp/h.png', name: 'screenshot-2.png' } } });
+    mountQuickCaptureSheet(root);
+    await flush();
+    (root.querySelector('#qcapShotFull') as HTMLButtonElement).click();
+    await flush();
+    const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
+    ta.value = 'the error dialog';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).hidden).toBe(false); // the image tag persists under a caption
+    enter(ta);
+    await flush();
+    expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({
+      inputs: [
+        { kind: 'screenshot', handle: '/tmp/h.png', name: 'screenshot-2.png' },
+        { kind: 'text', text: 'the error dialog' },
+      ],
+    });
+  });
+
+  it('QCAP-13/9: Screen-Recording DENIED shows the brass steer + degrade hint; clicking it opens Settings', async () => {
+    setApi({ screenshotSupported: true, screenshot: { status: 'denied', image: null } });
+    mountQuickCaptureSheet(root);
+    await flush();
+    (root.querySelector('#qcapShotWindow') as HTMLButtonElement).click();
+    await flush();
+    const steer = root.querySelector('#qcapShotEnable') as HTMLButtonElement;
+    expect(steer.hidden).toBe(false);
+    expect((root.querySelector('#qcapNote') as HTMLElement).textContent).toContain('paste an image'); // graceful degrade
+    steer.click();
+    await flush();
+    expect(api().openScreenRecordingSettings as unknown as Mock).toHaveBeenCalled(); // never a dead end
+  });
+
+  it('QCAP-13: a CANCELLED interactive pick is a benign no-op (no load, no error)', async () => {
+    setApi({ screenshotSupported: true, screenshot: { status: 'cancelled', image: null } });
+    mountQuickCaptureSheet(root);
+    await flush();
+    (root.querySelector('#qcapShotRegion') as HTMLButtonElement).click();
+    await flush();
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-loaded')).toBe(false);
+    expect((root.querySelector('#qcapShotEnable') as HTMLElement).hidden).toBe(true);
+    expect((root.querySelector('#qcapNote') as HTMLElement).textContent).toBe('');
+  });
+
+  it('QCAP-13: a clipboard IMAGE prefills as a loaded image (the "paste an image" degrade path)', async () => {
+    setApi({ screenshotSupported: true, clipboardImage: { handle: '/tmp/clip.png', name: 'pasted-image-9.png' } });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).textContent).toBe('clipboard');
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-loaded')).toBe(true);
+    enter(root.querySelector('#qcapText') as HTMLTextAreaElement);
+    await flush();
+    expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({
+      inputs: [{ kind: 'screenshot', handle: '/tmp/clip.png', name: 'pasted-image-9.png' }],
+    });
   });
 
   it('QCAP-1/2/10: Enter captures (fire-and-forget) then confirms + auto-dismisses', async () => {

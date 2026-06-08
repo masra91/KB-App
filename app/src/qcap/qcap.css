@@ -39,6 +39,29 @@
   display: none;
 }
 
+/* QCAP-13 §3b: the screenshot icon-button cluster — spare ghost glyphs at the head's trailing edge,
+   secondary to the field (muted --viz-ink-muted at rest, ember on hover/focus). Never a toolbar. */
+.qcap-shots {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.qcap-shots[hidden] {
+  display: none;
+}
+.qcap-shot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  line-height: 0;
+  color: var(--viz-ink-muted);
+}
+.qcap-shot:hover,
+.qcap-shot:focus-visible {
+  color: var(--viz-ember);
+}
+
 /* QCAP-9 steer-to-Settings affordance: a quiet brass text button, never a loud blocking banner — a
    denied permission is "waiting on YOU," actionable, NOT an error/crash, so it takes --viz-brass (the
    needs-you/blocked token), not --viz-oxide (error). Mirrors the SPEC-0034 vault-permission steer

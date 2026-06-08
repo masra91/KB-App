@@ -35,6 +35,7 @@ import {
   getActiveSourceSensitivities,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
+import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from './quickCaptureScreenshot';
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
 import { makeReadOnlyTools } from '../kb/recallTools';
@@ -55,6 +56,8 @@ import type {
   CaptureRequest,
   CaptureResult,
   QuickCaptureContext,
+  ScreenshotMode,
+  ScreenshotResult,
   PipelineStatus,
   PipelineStatusView,
   RendererErrorReport,
@@ -197,9 +200,10 @@ export function registerIpc(): void {
       if (input.kind === 'text') {
         // RICHIN-2: carry the original clipboard HTML (if any) so ingest writes the verbatim sidecar.
         if (input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text, ...(input.html ? { html: input.html } : {}) });
-      } else {
+      } else if (input.kind === 'file') {
         payloads.push({ kind: 'file', name: input.name, data: new Uint8Array(input.data) });
       }
+      // (a `screenshot` input is QCAP-only — resolved in kb:quickCapture, never reaches the in-app panel)
     }
     if (payloads.length === 0) {
       return { ...NO_PIPELINE, message: 'Nothing to capture.' };
@@ -218,17 +222,23 @@ export function registerIpc(): void {
     }
   });
 
-  // SPEC-0038 QCAP-1/2/5: fire-and-forget quick capture (text + clipboard) onto the SAME SPEC-0013
-  // capture path, recording provenance surface='quick-capture'. QCAP adds NO preservation logic — it
-  // hands a text payload to the active orchestrator, which returns on preserve+commit and never blocks
-  // on Enrich (CAPTURE-2 fast-out). Fork #3: the frictionless sheet is text-only (files/rich → RICHIN).
+  // SPEC-0038 QCAP-1/2/5: fire-and-forget quick capture (text + clipboard + screenshot) onto the SAME
+  // SPEC-0013 capture path, recording provenance surface='quick-capture'. QCAP adds NO preservation
+  // logic — it hands payloads to the active orchestrator, which returns on preserve+commit and never
+  // blocks on Enrich (CAPTURE-2 fast-out). QCAP-13: a `screenshot` input is a temp-PNG handle main
+  // issued — read it (validating it's ours) into a file payload; the bytes never came through the DOM.
   ipcMain.handle('kb:quickCapture', async (_e, req: CaptureRequest): Promise<CaptureResult> => {
     const orch = activePipeline();
     if (!orch) return NO_PIPELINE;
 
     const payloads: CapturePayload[] = [];
     for (const input of req.inputs) {
-      if (input.kind === 'text' && input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text });
+      if (input.kind === 'text' && input.text.trim().length > 0) {
+        payloads.push({ kind: 'text', text: input.text });
+      } else if (input.kind === 'screenshot') {
+        const bytes = await consumeScreenshotHandle(input.handle); // null if not a handle WE issued
+        if (bytes) payloads.push({ kind: 'file', name: input.name, data: bytes });
+      }
     }
     if (payloads.length === 0) return { ...NO_PIPELINE, message: 'Nothing to capture.' };
 
@@ -258,7 +268,33 @@ export function registerIpc(): void {
       clipboard: clipboard.readText(),
       selection: sel?.text ?? null,
       accessibility: sel?.status ?? 'unsupported',
+      clipboardImage: await clipboardImageHandle(), // QCAP-13: "paste an image" prefill / denied-degrade
+      screenshotSupported: process.platform === 'darwin', // QCAP-13: the cluster shows only where capture works
     };
+  });
+
+  // SPEC-0038 QCAP-13: capture a screenshot (full/region/window) to a temp PNG handle. The bytes stay
+  // in main; the sheet gets only the handle + submits it back. denied → the sheet's brass steer.
+  ipcMain.handle('kb:quickCaptureScreenshot', async (_e, mode: ScreenshotMode): Promise<ScreenshotResult> => {
+    return captureScreenshot(mode);
+  });
+
+  // SPEC-0038 QCAP-13: open System Settings → Privacy & Security → Screen Recording for the denied
+  // recovery steer (the SPEC-0034 / QCAP-9 pattern). Exact anchor → general Privacy fallback, never a no-op.
+  ipcMain.handle('kb:openScreenRecordingSettings', async (): Promise<OpenSettingsResult> => {
+    const SCREEN = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
+    const PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy';
+    try {
+      await shell.openExternal(SCREEN);
+      return { ok: true };
+    } catch {
+      try {
+        await shell.openExternal(PRIVACY);
+        return { ok: true, usedFallback: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    }
   });
 
   // SPEC-0038 QCAP-9 (Slice 2): open macOS System Settings → Privacy & Security → Accessibility for the
