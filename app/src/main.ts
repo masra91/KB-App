@@ -3,7 +3,7 @@ import path from 'node:path';
 import v8 from 'node:v8';
 import started from 'electron-squirrel-startup';
 import { registerIpc, initPipeline } from './main/ipc';
-import { stopPipeline, getActiveInstanceSettings, activeSnapshotDir } from './main/pipeline';
+import { stopPipeline, getActiveInstanceSettings, activeSnapshotDir, pipelineStatusForActive } from './main/pipeline';
 import { startTelemetry, stopTelemetry } from './main/telemetry';
 import { ensurePath } from './main/resolvePath';
 import { createAppDevLog } from './kb/devlog';
@@ -71,6 +71,7 @@ function startQuickCapture(): void {
     onOpen: () => qcapAgent?.open(),
     onClose: () => qcapAgent?.close(),
     onShowMainWindow: () => showMainWindow(), // QCAP-11: tray "Show KB-App" restore
+    getPipelineStatus: () => pipelineStatusForActive(), // QCAP-14: read-only tray live-status readout
   });
   qcapAgent = new QuickCaptureAgent(deps); // shipped default ⌥Space; conflict-aware + degrades (QCAP-9)
   setQuickCaptureAgent(qcapAgent);

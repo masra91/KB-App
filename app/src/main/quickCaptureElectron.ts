@@ -9,6 +9,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { QuickCaptureDeps, SelectionRead } from './quickCaptureAgent';
+import { trayStatusModel } from './trayStatusModel';
+import { buildTrayTemplate } from './trayMenu';
+import type { PipelineStatusView } from '../kb/pipelineStatusView';
 
 const execFileP = promisify(execFile);
 
@@ -77,6 +80,13 @@ export interface ElectronQcapHooks {
   onClose: () => void;
   /** QCAP-11: restore/focus (create-if-none) the main window — the menubar "Show KB-App" item. */
   onShowMainWindow?: () => void;
+  /** QCAP-14: read the OBS pipeline-status view-model for the read-only tray live-status readout.
+   *  Optional — omitted in tests/headless → the readout section is simply absent. Best-effort: a
+   *  rejection/null degrades to no readout, never a dead tray. */
+  getPipelineStatus?: () => Promise<PipelineStatusView | null>;
+  /** Optional appended tray items (DEV-2's QUIESCE-6 "Prepare for shutdown / Resume" fast-follow) —
+   *  the agreed insertion hook; they slot between the capture actions and Quit. */
+  getExtraTrayItems?: () => Electron.MenuItemConstructorOptions[];
   log?: (event: string, data?: Record<string, unknown>) => void;
 }
 
@@ -110,6 +120,74 @@ function createSheetWindow(onBlur: () => void): BrowserWindow {
 export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCaptureDeps {
   let sheet: BrowserWindow | null = null;
   let tray: Tray | null = null;
+  // QCAP-14: cache the last tray state so a status-only refresh (mouse-enter) can rebuild the full
+  // menu, and the last computed status lines for resilience.
+  let lastTrayState: { hotkeyAccelerator: string | null } = { hotkeyAccelerator: null };
+  let lastStatusLines: string[] = [];
+
+  /** The capture ACTION items (DEV-1, QCAP-3/9/11) — Quick Capture · Hotkey-unavailable · Enable-
+   *  selection · Show KB-App — verbatim + in order, composed into the menu's actions section. */
+  function buildActionItems(state: { hotkeyAccelerator: string | null }): Electron.MenuItemConstructorOptions[] {
+    const accel = state.hotkeyAccelerator;
+    // QCAP-9 (Slice 2): when selection-capture isn't yet granted, offer an explicit enable path from
+    // the always-present menubar (never a silent dead feature) — the native prompt + a steer to the
+    // Settings·Privacy·Accessibility pane. Hidden once granted. Off-darwin the item never appears.
+    const needsAccessibility = process.platform === 'darwin' && !accessibilityGranted();
+    return [
+      {
+        label: accel ? `Quick Capture  (${accel})` : 'Quick Capture',
+        ...(accel ? { accelerator: accel } : {}),
+        click: () => hooks.onOpen(),
+      },
+      ...(accel
+        ? []
+        : [{ label: 'Hotkey unavailable — use this menu', enabled: false } as Electron.MenuItemConstructorOptions]),
+      ...(needsAccessibility
+        ? [
+            { type: 'separator' as const },
+            {
+              label: 'Enable selection capture…',
+              click: () => {
+                // Trigger the native Accessibility prompt, then steer to the pane (flaky anchor → fallback).
+                systemPreferences.isTrustedAccessibilityClient(true);
+                void shell.openExternal(ACCESSIBILITY_PANE).catch(() => {
+                  void shell.openExternal(PRIVACY_PANE);
+                });
+              },
+            } as Electron.MenuItemConstructorOptions,
+          ]
+        : []),
+      // QCAP-11: restore the main window from the menubar so the LSUIElement accessory is never a
+      // one-way trap. Plain instrument-voice label (design §4) — no icon/badge. onShowMainWindow
+      // creates the window if none exists; omitted in tests/headless → the item is simply absent.
+      ...(hooks.onShowMainWindow
+        ? [{ label: 'Show KB-App', click: () => hooks.onShowMainWindow?.() } as Electron.MenuItemConstructorOptions]
+        : []),
+    ];
+  }
+
+  /** QCAP-14: rebuild + set the tray context menu — read-only status readout (live OBS view-model) on
+   *  top, then the capture actions, the optional QUIESCE-6 hook items, then Quit. Best-effort: a status
+   *  fetch failure degrades to no readout, never a dead tray. */
+  async function rebuildTrayMenu(): Promise<void> {
+    if (!tray) return;
+    try {
+      const view = hooks.getPipelineStatus ? await hooks.getPipelineStatus() : null;
+      lastStatusLines = trayStatusModel(view);
+    } catch {
+      lastStatusLines = []; // a status read must never break the always-present tray
+    }
+    if (!tray) return; // teardown could race the await
+    tray.setContextMenu(
+      Menu.buildFromTemplate(
+        buildTrayTemplate({
+          statusLines: lastStatusLines,
+          actionItems: buildActionItems(lastTrayState),
+          extraItems: hooks.getExtraTrayItems?.(),
+        }),
+      ),
+    );
+  }
 
   return {
     registerHotkey(accelerator, onTrigger) {
@@ -179,47 +257,12 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
         tray = new Tray(nativeImage.createEmpty());
         tray.setToolTip('KB-App — Quick Capture');
         if (process.platform === 'darwin') tray.setTitle('⤓');
+        // QCAP-14: refresh the live status just before the menu opens — macOS fires mouse-enter ahead
+        // of the click that shows the context menu, so the readout is fresh without a background poll.
+        tray.on('mouse-enter', () => void rebuildTrayMenu());
       }
-      const accel = state.hotkeyAccelerator;
-      // QCAP-9 (Slice 2): when selection-capture isn't yet granted, offer an explicit enable path from
-      // the always-present menubar (never a silent dead feature) — the native prompt + a steer to the
-      // Settings·Privacy·Accessibility pane. Hidden once granted. Off-darwin the item never appears.
-      const needsAccessibility = process.platform === 'darwin' && !accessibilityGranted();
-      const menu = Menu.buildFromTemplate([
-        {
-          label: accel ? `Quick Capture  (${accel})` : 'Quick Capture',
-          ...(accel ? { accelerator: accel } : {}),
-          click: () => hooks.onOpen(),
-        },
-        ...(accel
-          ? []
-          : [{ label: 'Hotkey unavailable — use this menu', enabled: false } as Electron.MenuItemConstructorOptions]),
-        ...(needsAccessibility
-          ? [
-              { type: 'separator' as const },
-              {
-                label: 'Enable selection capture…',
-                click: () => {
-                  // Trigger the native Accessibility prompt, then steer to the pane (flaky anchor → fallback).
-                  systemPreferences.isTrustedAccessibilityClient(true);
-                  void shell.openExternal(ACCESSIBILITY_PANE).catch(() => {
-                    void shell.openExternal(PRIVACY_PANE);
-                  });
-                },
-              } as Electron.MenuItemConstructorOptions,
-            ]
-          : []),
-        { type: 'separator' as const },
-        // QCAP-11: restore the main window from the menubar so the LSUIElement accessory is never a
-        // one-way trap. Plain instrument-voice label (design §4) — no icon/badge. onShowMainWindow
-        // creates the window if none exists; omitted in tests/headless → the item is simply absent.
-        ...(hooks.onShowMainWindow
-          ? [{ label: 'Show KB-App', click: () => hooks.onShowMainWindow?.() } as Electron.MenuItemConstructorOptions]
-          : []),
-        { type: 'separator' as const },
-        { label: 'Quit KB-App', role: 'quit' as const },
-      ]);
-      tray.setContextMenu(menu);
+      lastTrayState = state;
+      void rebuildTrayMenu();
     },
     log: hooks.log,
   };
