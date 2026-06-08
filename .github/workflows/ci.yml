@@ -28,6 +28,20 @@
 
 name: CI
 
+# ── Why a PR can show ZERO checks (and how to clear it) — documented per a root-cause investigation
+#    (PRs #271 / #284 / #290 each OPENED with no checks until a rebase made them appear; the affected
+#    branches have a workflow run ONLY on their rebased SHA, none on the original head):
+#    A `pull_request` workflow runs against the ephemeral MERGE ref (the PR head merged into the base).
+#    When a PR is CONFLICTING / unmergeable (`mergeStateStatus: DIRTY` — its base `main` advanced and the
+#    branch now conflicts), GitHub cannot create that merge ref, so it schedules NOTHING: the PR shows
+#    zero checks — an ABSENCE, not a red. This is GitHub-side behavior, not a workflow misconfig. A merely
+#    STALE-but-clean base is fine (it still triggers on `opened`, e.g. #285); ONLY a real conflict
+#    suppresses checks.
+#    FIX = rebase the branch onto latest `main` (resolve the conflict). The PR becomes mergeable AND the
+#    rebase push fires `synchronize` → CI runs. A conflicting PR must be rebased to merge regardless, so
+#    this isn't CI-induced busywork. We deliberately do NOT add an all-branch `push:` trigger to mask it:
+#    that would run full CI on every push to every WIP/standby branch (cost), and a raw-head run that
+#    omits main's changes is a misleading signal for a PR that can't merge until it's rebased anyway.
 on:
   push:
     branches: [main]
