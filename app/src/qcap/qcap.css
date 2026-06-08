@@ -1,30 +1,71 @@
-/* SPEC-0038 QCAP — the frictionless quick-capture sheet. Minimal, calm, keyboard-first; it's a
-   transient frameless overlay, so it fills its small window edge-to-edge. */
+/* SPEC-0038 QCAP — "the intake slot" (DESIGN-QCAP). A flat-ink instrument panel, NOT a card: the
+   frameless window IS the slot. Built on the _design-system viz tokens. Flat edge = a 1px --viz-rule
+   border + a 2px --viz-ember "live" hairline on top (the instrument is powered) — no drop shadow. */
 .qcap-sheet {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
+  padding: 12px 14px;
   box-sizing: border-box;
   height: 100vh;
+  border: 1px solid var(--viz-rule);
+  border-top: 2px solid var(--viz-ember); /* the live line — capture is powered + listening */
 }
 
-.qcap-input {
+.qcap-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* A whisper of signage, not a form label. */
+.qcap-mark {
+  font-size: 0.66rem;
+  color: var(--viz-ink-muted);
+}
+
+.qcap-cliptag[hidden] {
+  display: none;
+}
+
+.qcap-field {
+  display: block;
   flex: 1;
-  resize: none;
-  font: inherit;
-  font-size: 15px;
-  line-height: 1.4;
-  padding: 10px 12px;
-  border: 1px solid var(--line, #d0d0d0);
-  border-radius: 8px;
-  background: var(--surface, #fff);
-  color: var(--ink, #1a1a1a);
 }
 
-.qcap-input:focus {
-  outline: none;
-  border-color: var(--accent, #3b6ea5);
+/* The hero intake field fills the slot at instrument scale. */
+.qcap-field .qcap-input {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+/* Clipboard "loaded" state: a left rule tick so it reads as loaded material, not typed text. */
+.qcap-field.is-loaded .qcap-input {
+  border-left: 2px solid var(--viz-rule);
+}
+
+/* Save acknowledge — the rule takes the signature ember heat (the billet entered the line). */
+.qcap-field.is-saving .qcap-input {
+  border-color: var(--viz-ember);
+  animation: qcap-ember-sweep var(--viz-dur-index, 220ms) ease-out 1;
+}
+@keyframes qcap-ember-sweep {
+  from {
+    box-shadow: inset 2px 0 0 var(--viz-ember);
+  }
+  to {
+    box-shadow: inset 100% 0 0 -2px var(--viz-ember);
+  }
+}
+
+/* Failure holds in oxide (border/glyph only — text stays --viz-ink per the contrast contract). */
+.qcap-field.is-error .qcap-input {
+  border-color: var(--viz-oxide);
 }
 
 .qcap-row {
@@ -35,6 +76,23 @@
   font-size: 12px;
 }
 
+.qcap-hint {
+  color: var(--viz-ink-muted);
+}
+
 .qcap-note {
+  margin-left: auto;
   white-space: nowrap;
+}
+
+.qcap-save {
+  font-size: 0.62rem;
+}
+
+/* Reduced-motion parity (§5): the save reads via the static ember rule + the `preserved` word — the
+   sweep animation is dropped, nothing lost. */
+@media (prefers-reduced-motion: reduce) {
+  .qcap-field.is-saving .qcap-input {
+    animation: none;
+  }
 }

@@ -40,11 +40,23 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     vi.useRealTimers();
   });
 
-  it('QCAP-7: pre-fills the field from the clipboard and selects it', async () => {
+  it('QCAP-7: pre-fills the field from the clipboard as a tagged "loaded" state', async () => {
     setApi({ clipboard: 'a thought from elsewhere' });
     mountQuickCaptureSheet(root);
     await flush();
     expect((root.querySelector('#qcapText') as HTMLTextAreaElement).value).toBe('a thought from elsewhere');
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).hidden).toBe(false); // "clipboard" tag shown
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-loaded')).toBe(true);
+  });
+
+  it('QCAP-7: editing the loaded text drops the clipboard tag (now typed material)', async () => {
+    setApi({ clipboard: 'loaded' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
+    ta.value = 'loaded + my edit';
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).hidden).toBe(true);
   });
 
   it('QCAP-1/2/10: Enter captures (fire-and-forget) then confirms + auto-dismisses', async () => {
@@ -57,11 +69,21 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     await flush();
 
     expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({ inputs: [{ kind: 'text', text: 'call Steve re: Q3' }] });
-    expect(root.querySelector('#qcapNote')!.textContent).toBe('✓ Saved');
+    expect(root.querySelector('#qcapNote')!.textContent).toBe('preserved'); // ember-acknowledge + patina tick
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-saving')).toBe(true);
     expect(api().quickCaptureClose as unknown as Mock).not.toHaveBeenCalled(); // confirm shows first
 
     vi.advanceTimersByTime(QCAP_CONFIRM_MS);
     expect(api().quickCaptureClose as unknown as Mock).toHaveBeenCalled(); // QCAP-2 auto-dismiss
+  });
+
+  it('the ghost "⏎ save" button submits too (mouse discoverability)', async () => {
+    setApi();
+    mountQuickCaptureSheet(root);
+    (root.querySelector('#qcapText') as HTMLTextAreaElement).value = 'via button';
+    root.querySelector<HTMLButtonElement>('#qcapSave')!.click();
+    await flush();
+    expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({ inputs: [{ kind: 'text', text: 'via button' }] });
   });
 
   it('Shift+Enter does NOT submit (newline for multi-line capture)', async () => {
@@ -104,7 +126,10 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     ta.value = 'keep me';
     enter(ta);
     await flush();
-    expect(root.querySelector('#qcapNote')!.textContent).toContain('No active knowledge base.');
+    const noteText = root.querySelector('#qcapNote')!.textContent ?? '';
+    expect(noteText).toContain("couldn't save"); // held oxide notice with ⏎ retry
+    expect(noteText).toContain('No active knowledge base.'); // the reason is still surfaced
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-error')).toBe(true);
     vi.advanceTimersByTime(QCAP_CONFIRM_MS * 2);
     expect(api().quickCaptureClose as unknown as Mock).not.toHaveBeenCalled(); // sheet stays so the thought survives
   });

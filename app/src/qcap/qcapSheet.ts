@@ -1,39 +1,64 @@
-// Quick Capture sheet (SPEC-0038) — the lightweight, frictionless capture surface the menubar agent
-// summons. Reuses the single renderer bundle via the `#qcap` route (no separate Vite entry), so it
-// shares the preload `kbApi`. Plain DOM, talks ONLY to `window.kbApi`, so it's fully testable in
-// happy-dom. Behavior: prefill from clipboard (QCAP-7) → Enter saves onto the SPEC-0013 path (fire-
-// and-forget, CAPTURE-2) → non-modal "saved" (QCAP-10) → auto-dismiss + focus-restore (QCAP-2);
-// Esc cancels. The capture itself adds no preservation logic — it's surface=quick-capture (QCAP-1/5).
+// Quick Capture sheet (SPEC-0038, visual = DESIGN-QCAP "the intake slot"). The frictionless global
+// capture surface the menubar agent summons. Reuses the single renderer bundle via the `#qcap` route
+// (shared preload `kbApi`), plain DOM, talks ONLY to `window.kbApi` → fully testable in happy-dom.
+//
+// It is NOT a generic capture box (the most-summoned surface — GATE-1 anti-generic): a flat-ink
+// instrument slot built on the WS2 design-system language — a hero EditableField (`.viz-field__input
+// --multiline`) on `--viz-field` ground, a top `--viz-ember` "live" hairline, keyboard-first. Flow:
+// clipboard prefill renders as a tagged "loaded" state (QCAP-7) → Enter saves onto the SPEC-0013 path
+// (fire-and-forget, CAPTURE-2, surface=quick-capture) → the rule takes `--viz-ember` + a `--viz-patina`
+// `preserved` tick (QCAP-10) → auto-dismiss + focus-restore (QCAP-2); Esc cancels; a failure holds in
+// `--viz-oxide` with `⏎ retry` and does NOT auto-dismiss (no silent loss). All state is aria-live announced.
 import { esc } from '../shell/html';
 
-/** How long the "saved" confirmation shows before the sheet auto-dismisses (QCAP-2/10). */
-export const QCAP_CONFIRM_MS = 600;
+/** Auto-dismiss dwell after a successful save — within DESIGN-QCAP §10's 350–500ms band (QCAP-2/10). */
+export const QCAP_CONFIRM_MS = 450;
 
 export function mountQuickCaptureSheet(root: HTMLElement): void {
   root.innerHTML = `
-    <div class="qcap-sheet">
-      <textarea id="qcapText" class="qcap-input" rows="3"
-        placeholder="Capture a thought…"></textarea>
+    <div class="qcap-sheet viz-surface">
+      <div class="qcap-head">
+        <span class="qcap-mark viz-signage">Capture</span>
+        <span id="qcapClipTag" class="viz-chip qcap-cliptag" hidden>clipboard</span>
+      </div>
+      <div class="viz-field qcap-field">
+        <textarea id="qcapText" class="viz-field__input viz-field__input--multiline viz-focusable qcap-input"
+          rows="3" aria-label="Quick capture"></textarea>
+      </div>
       <div class="qcap-row">
-        <span class="qcap-hint muted">Enter to save · Shift+Enter for a newline · Esc to cancel</span>
-        <span id="qcapNote" class="qcap-note muted" aria-live="polite"></span>
+        <span class="qcap-hint viz-numeric">⏎ save · ⇧⏎ newline · esc dismiss</span>
+        <span id="qcapNote" class="qcap-note viz-numeric" role="status" aria-live="assertive"></span>
+        <button id="qcapSave" type="button" class="viz-btn viz-btn--ghost qcap-save">⏎ save</button>
       </div>
     </div>`;
 
+  const field = root.querySelector('.qcap-field') as HTMLElement;
   const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
   const note = root.querySelector('#qcapNote') as HTMLElement;
+  const clipTag = root.querySelector('#qcapClipTag') as HTMLElement;
 
-  // QCAP-7: pre-fill from the current clipboard and select it, so "save what I'm looking at" is a
-  // single gesture (Enter saves it; typing replaces it). Best-effort — never block the sheet on it.
+  // QCAP-7: pre-fill from the clipboard as a "loaded" state — the prefilled text is tagged + selected
+  // so Enter saves it in one gesture; editing/clearing drops the tag (it's now typed material).
   void window.kbApi
     .quickCaptureContext()
     .then((ctx) => {
       if (ctx.clipboard && ta.value.length === 0) {
         ta.value = ctx.clipboard;
         ta.select();
+        clipTag.hidden = false;
+        field.classList.add('is-loaded');
       }
     })
     .catch(() => {});
+
+  ta.addEventListener('input', () => {
+    if (!clipTag.hidden) {
+      clipTag.hidden = true;
+      field.classList.remove('is-loaded');
+    }
+    note.textContent = ''; // a fresh edit clears a prior failure notice
+    note.className = 'qcap-note viz-numeric';
+  });
 
   ta.focus();
 
@@ -50,14 +75,20 @@ export function mountQuickCaptureSheet(root: HTMLElement): void {
     // QCAP-2 fast-out: capture returns on preserve+commit, never blocking on Enrich (CAPTURE-2).
     const res = await window.kbApi.quickCapture({ inputs: [{ kind: 'text', text }] });
     if (res.ok) {
-      note.textContent = '✓ Saved'; // QCAP-10: brief, non-modal confirmation
-      setTimeout(() => void window.kbApi.quickCaptureClose(), QCAP_CONFIRM_MS); // QCAP-2: auto-dismiss
+      // QCAP-10: the rule takes ember + a patina `preserved` tick, then auto-dismiss (the line took it).
+      field.classList.add('is-saving');
+      note.textContent = 'preserved';
+      note.className = 'qcap-note viz-numeric viz-state-settled';
+      setTimeout(() => void window.kbApi.quickCaptureClose(), QCAP_CONFIRM_MS); // QCAP-2 auto-dismiss
     } else {
-      // Keep the sheet open on failure so the thought is never silently lost.
-      note.textContent = `⚠️ ${esc(res.message)}`;
+      // Failure HOLDS in oxide with ⏎ retry — never auto-dismisses, so a lost capture can't be missed.
+      field.classList.add('is-error');
+      note.textContent = `couldn't save — ⏎ retry${res.message ? ` (${esc(res.message)})` : ''}`;
+      note.className = 'qcap-note viz-numeric viz-state-error';
     }
   };
 
+  root.querySelector('#qcapSave')!.addEventListener('click', () => void submit());
   ta.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
