@@ -247,7 +247,7 @@ describe('Settings · Prepare for shutdown (SPEC-0045 QUIESCE-1/3/5/6)', () => {
   afterEach(() => vi.restoreAllMocks());
 
   function setQuiesceApi(over: Partial<KbApi> = {}): { quiesce: ReturnType<typeof vi.fn>; resume: ReturnType<typeof vi.fn> } {
-    const quiesce = vi.fn(async () => ({ quiescing: true, remaining: 3, safe: false, detail: 'Finishing up — 3 tasks remaining…' }));
+    const quiesce = vi.fn(async () => ({ quiescing: true, remaining: 3, safe: false, detail: 'Finishing up — 3 items remaining…' }));
     const resume = vi.fn(async () => ({ quiescing: false, remaining: 0, safe: false, detail: 'Running normally.' }));
     (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
       getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
@@ -279,7 +279,7 @@ describe('Settings · Prepare for shutdown (SPEC-0045 QUIESCE-1/3/5/6)', () => {
     (root.querySelector('#quiesce-btn') as HTMLButtonElement).click();
     await tick();
     expect(quiesce).toHaveBeenCalled();
-    expect(root.querySelector('#quiesce-status')!.textContent).toMatch(/3 tasks remaining/i);
+    expect(root.querySelector('#quiesce-status')!.textContent).toMatch(/3 items remaining/i);
     expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(false);
     expect((root.querySelector('#quiesce-btn') as HTMLElement).hidden).toBe(true);
   });
@@ -301,7 +301,10 @@ describe('Settings · Prepare for shutdown (SPEC-0045 QUIESCE-1/3/5/6)', () => {
     setQuiesceApi({ quiesceStatus: vi.fn(async () => ({ quiescing: true, remaining: 0, safe: true, detail: 'Safe to shut down — all work finished.' })) as KbApi['quiesceStatus'] });
     await mountSettings(root);
     await tick();
-    expect(root.querySelector('#quiesce-status')!.textContent).toMatch(/Safe to shut down/i);
+    const statusEl = root.querySelector('#quiesce-status')!;
+    expect(statusEl.textContent).toMatch(/Safe to shut down/i);
+    expect(statusEl.textContent).not.toMatch(/✅|✔️/); // Design-Lead: monochrome voice, no colored emoji
+    expect(statusEl.classList.contains('viz-state-settled')).toBe(true); // the settled state token instead
     expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(false);
   });
 });

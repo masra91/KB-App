@@ -311,12 +311,16 @@ async function wireQuiesce(container: HTMLElement): Promise<void> {
       btn.hidden = false;
       resumeBtn.hidden = true;
       status.textContent = '';
+      status.classList.remove('viz-state-settled');
       stopQuiescePoll();
       return;
     }
     btn.hidden = true;
     resumeBtn.hidden = false;
-    status.textContent = s.safe ? `✅ ${s.detail}` : s.detail;
+    status.textContent = s.detail;
+    // Design-Lead: the "safe" readout reads in the calm MONOCHROME viz voice — the settled state token,
+    // never a colored emoji.
+    status.classList.toggle('viz-state-settled', s.safe);
     if (s.safe) stopQuiescePoll(); // idle — nothing left to poll for
   };
   const startPoll = (): void => {

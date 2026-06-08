@@ -224,7 +224,7 @@ export async function quiesceStatusForActive(): Promise<QuiesceStatus | null> {
     ? 'Running normally.'
     : safe
       ? 'Safe to shut down — all work finished.'
-      : `Finishing up — ${remaining} task${remaining === 1 ? '' : 's'} remaining…`;
+      : `Finishing up — ${remaining} item${remaining === 1 ? '' : 's'} remaining…`; // "items" matches Status/tray vocab (Design-Lead)
   return { quiescing, remaining, safe, detail };
 }
 
