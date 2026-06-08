@@ -213,10 +213,13 @@ describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 �
     expect(ta.classList.contains('viz-field__input--multiline')).toBe(true);
   });
 
-  it('announces + makes the dropzone reachable — role + aria-label + tabindex (§6 a11y)', () => {
+  it('announces + makes the dropzone reachable — role=region + aria-label + tabindex (§6 a11y)', () => {
     mountCapture(root, '/v', 'KB');
     const dz = root.querySelector<HTMLElement>('#dropzone')!;
-    expect(dz.getAttribute('role')).toBe('button');
+    // role="region" (not "button"): the dropzone has no click/keyboard activation — it's a labelled
+    // drop target, so an announced region is the correct semantic; a role=button with no handler would
+    // be a no-op-button anti-pattern (KB-Lead classify fast-follow on #285).
+    expect(dz.getAttribute('role')).toBe('region');
     expect(dz.getAttribute('aria-label')).toBe('Drop files here to capture them');
     expect(dz.getAttribute('tabindex')).toBe('0'); // keyboard-reachable / announced
   });

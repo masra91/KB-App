@@ -210,7 +210,7 @@ export function mountCapture(container: HTMLElement, vaultPathArg: string, name:
           placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept" aria-label="Capture"></textarea>
       </label>
       <label class="capture-toggle"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
-      <div id="dropzone" class="dropzone viz-focusable" role="button" tabindex="0" aria-label="Drop files here to capture them">Drop files here to capture them</div>
+      <div id="dropzone" class="dropzone viz-focusable" role="region" tabindex="0" aria-label="Drop files here to capture them">Drop files here to capture them</div>
       <ul id="staged" class="staged"></ul>
       <div class="row">
         <button id="capture" class="viz-btn viz-btn--primary viz-focusable">Capture</button>
