@@ -16,6 +16,7 @@
 import { captureToInbox } from './ingest';
 import { appendAuditEvent } from './audit';
 import { admitResearchPass } from './researchCeiling';
+import { deriveNotebook, writeNotebook } from './researchNotebook';
 import { isSafeResearcherId, RESEARCH_INSTANCE_CEILING, RESEARCH_INSTANCE_WINDOW_MS, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
 
 /** What the injected cognition returns. `found:false` = nothing worth recording (audited no-op). */
@@ -51,6 +52,12 @@ export interface RunResearcherDeps {
   instanceCeiling?: number;
   /** Override the per-Instance ceiling's rolling window in ms. Default RESEARCH_INSTANCE_WINDOW_MS. */
   instanceWindowMs?: number;
+  /** Warm-start orient phase (RESEARCH-22) — runs LOCAL (non-egress) before the egress research call and
+   *  returns the request with the chosen gap/angle folded into its context (the egress adapter's
+   *  buildOutboundQuery then includes it). Opaque to keep runResearcher free of the orient/SENSE deps
+   *  (the cycle): the caller (makeResearchDeps) binds the gate + neighborhood reader. Absent → cold start
+   *  (unchanged behavior). Orient reads NEVER touch the egress fetch counter — they're a separate budget. */
+  orient?: (r: ResearcherConfig, req: ResearchRequest) => Promise<{ orientedReq: ResearchRequest; reads: number; angle: string }>;
 }
 
 export interface RunResearcherResult {
@@ -96,7 +103,20 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
     return { sourceIds: [], note: `per-Instance research ceiling reached (${admission.countInWindow}/${admission.ceiling} passes in ${windowMs / 3_600_000}h)`, ceilingReached: true };
   }
 
-  const findings = await deps.research(r, req);
+  // Warm-start orient (RESEARCH-22): a bounded, LOCAL pass before egress that folds the gap/angle into the
+  // request context. Non-egress — runs after the ceiling check (it's not a pass against the ceiling) and
+  // its reads never increment the egress fetch budget. A failure here must never block the research pass
+  // (degrade to a cold start), so it's swallowed to a no-op.
+  let researchReq = req;
+  if (deps.orient) {
+    try {
+      researchReq = (await deps.orient(r, req)).orientedReq;
+    } catch {
+      researchReq = req; // orient is best-effort awareness; never block egress on it
+    }
+  }
+
+  const findings = await deps.research(r, researchReq);
 
   if (findings.failed) {
     // The cognition FAILED (e.g. packaged-app can't spawn the BYOA copilot — #160 / BUG #65), not a
@@ -145,6 +165,16 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
     subjects: { researcherId: r.id, requestId: req.id, sourceId: out.ids[0], ...(req.by.entityId ? { entityId: req.by.entityId } : {}) },
     payload: { what: req.what, why: req.why, query: findings.query, citations: findings.citations, egressTier: r.egressTier, externallySourced: true },
   });
+
+  // Warm-start (RESEARCH-21): refresh the field notebook from the audit (which now includes this
+  // `researched` event) so the NEXT pass's orient sees the just-harvested sources + the drilled area.
+  // Best-effort — a notebook write must never fail the pass (the audit is canonical; the notebook is a
+  // derived cache, self-healing on the next read).
+  try {
+    await writeNotebook(root, r.id, await deriveNotebook(root, r.id, Date.parse(fetchedAt) || Date.now()));
+  } catch {
+    /* notebook is a derived cache — never block the pass on it */
+  }
 
   return { sourceIds: out.ids, note: `secondary source ${out.ids[0]} (${findings.citations.length} citation(s))` };
 }

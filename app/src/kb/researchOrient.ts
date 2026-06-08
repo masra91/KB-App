@@ -145,8 +145,16 @@ export function clampAngle(angle: string): string {
  * bounded by request `what` + ≤500 chars of (clamped) context. No angle → the plain request query.
  */
 export function buildOrientedQuery(req: ResearchRequest, angle: string): string {
+  return buildOutboundQuery(orientedRequest(req, angle));
+}
+
+/** Fold the clamped angle into the request's `context` (bounded — the query-construction guard), returning
+ *  the oriented request the egress pass runs on. `buildOutboundQuery` further caps context to ≤500, so the
+ *  result can never carry a verbatim KB dump. No angle → the request unchanged. The egress adapter calls
+ *  buildOutboundQuery on this, so the oriented steer reaches the live query through the constrained path. */
+export function orientedRequest(req: ResearchRequest, angle: string): ResearchRequest {
   const steer = clampAngle(angle);
-  if (!steer) return buildOutboundQuery(req);
+  if (!steer) return req;
   const context = [req.context.trim(), steer].filter((s) => s.length > 0).join(' · ');
-  return buildOutboundQuery({ ...req, context });
+  return { ...req, context };
 }
