@@ -74,6 +74,11 @@ export class ResearcherScheduler {
     }
   }
 
+  /** Is a researcher pass (or a tick) in flight? (SPEC-0045 QUIESCE-3 — "safe to shut down".) */
+  busy(): boolean {
+    return this.ticking || this.inFlight.size > 0;
+  }
+
   /** One tick: first an inline sweep (route pending `research-request` signals through the
    *  dispatcher, RESEARCH-3), then a standing pass for every enabled+scheduled+due researcher,
    *  serially, each single-flight. Returns the ids of the standing passes it fired. Ticks never

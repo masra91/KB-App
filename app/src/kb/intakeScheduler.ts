@@ -84,6 +84,11 @@ export class IntakeScheduler {
     }
   }
 
+  /** Is a connector pull (or a tick) in flight? (SPEC-0045 QUIESCE-3 — "safe to shut down".) */
+  busy(): boolean {
+    return this.ticking || this.inFlight.size > 0;
+  }
+
   /** One tick: a pull for every enabled+scheduled+due connector, serially, each single-flight.
    *  Returns the ids it fired. Ticks never overlap (`ticking` guard). */
   async tick(now: number = Date.now()): Promise<string[]> {

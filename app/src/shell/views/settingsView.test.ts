@@ -237,3 +237,74 @@ describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)',
     expect(root.textContent).toContain('My KB');
   });
 });
+
+describe('Settings · Prepare for shutdown (SPEC-0045 QUIESCE-1/3/5/6)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function setQuiesceApi(over: Partial<KbApi> = {}): { quiesce: ReturnType<typeof vi.fn>; resume: ReturnType<typeof vi.fn> } {
+    const quiesce = vi.fn(async () => ({ quiescing: true, remaining: 3, safe: false, detail: 'Finishing up — 3 items remaining…' }));
+    const resume = vi.fn(async () => ({ quiescing: false, remaining: 0, safe: false, detail: 'Running normally.' }));
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
+      inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
+      getInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const, quickCaptureAccelerator: 'Alt+Space' })),
+      quiesceStatus: vi.fn(async () => ({ quiescing: false, remaining: 0, safe: false, detail: 'Running normally.' })) as KbApi['quiesceStatus'],
+      quiesce: quiesce as KbApi['quiesce'],
+      resume: resume as KbApi['resume'],
+      ...over,
+    };
+    return { quiesce, resume };
+  }
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('the "Prepare for shutdown" button is a modest, non-danger control (QUIESCE-6)', async () => {
+    setQuiesceApi();
+    await mountSettings(root);
+    await tick();
+    const btn = root.querySelector('#quiesce-btn')!;
+    expect(btn.textContent).toMatch(/Prepare for shutdown/i);
+    expect(btn.classList.contains('viz-btn--danger')).toBe(false); // not destructive-styled
+    expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('clicking Prepare quiesces + shows the drain status + Resume (QUIESCE-1/3)', async () => {
+    const { quiesce } = setQuiesceApi();
+    await mountSettings(root);
+    await tick();
+    (root.querySelector('#quiesce-btn') as HTMLButtonElement).click();
+    await tick();
+    expect(quiesce).toHaveBeenCalled();
+    expect(root.querySelector('#quiesce-status')!.textContent).toMatch(/3 items remaining/i);
+    expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#quiesce-btn') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('Resume un-pauses, restoring the Prepare button (QUIESCE-5)', async () => {
+    const { resume } = setQuiesceApi();
+    await mountSettings(root);
+    await tick();
+    (root.querySelector('#quiesce-btn') as HTMLButtonElement).click();
+    await tick();
+    (root.querySelector('#resume-btn') as HTMLButtonElement).click();
+    await tick();
+    expect(resume).toHaveBeenCalled();
+    expect((root.querySelector('#quiesce-btn') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('reflects an already-safe drain on mount: "Safe to shut down" (QUIESCE-3)', async () => {
+    setQuiesceApi({ quiesceStatus: vi.fn(async () => ({ quiescing: true, remaining: 0, safe: true, detail: 'Safe to shut down — all work finished.' })) as KbApi['quiesceStatus'] });
+    await mountSettings(root);
+    await tick();
+    const statusEl = root.querySelector('#quiesce-status')!;
+    expect(statusEl.textContent).toMatch(/Safe to shut down/i);
+    expect(statusEl.textContent).not.toMatch(/✅|✔️/); // Design-Lead: monochrome voice, no colored emoji
+    expect(statusEl.classList.contains('viz-state-settled')).toBe(true); // the settled state token instead
+    expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(false);
+  });
+});

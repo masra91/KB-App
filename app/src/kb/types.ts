@@ -194,6 +194,16 @@ export interface PipelineStatus {
   updatedAt: string | null;
 }
 
+/** Graceful-shutdown drain status (SPEC-0045 QUIESCE-3). `quiescing` = new work paused + draining;
+ *  `remaining` = tasks still to finish across stages + schedulers; `safe` = true once fully idle (queues
+ *  empty + nothing in flight + writer lock free) so the user can quit cleanly; `detail` = a human line. */
+export interface QuiesceStatus {
+  quiescing: boolean;
+  remaining: number;
+  safe: boolean;
+  detail: string;
+}
+
 // --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
 
 /** One open review as the Reviews view needs it (REVIEW-10). */
@@ -563,6 +573,10 @@ export interface KbApi {
   // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).
   pipelineControl(req: PipelineControlRequest): Promise<PipelineControlResult>;
   fullReplay(): Promise<FullReplayResult>;
+  // SPEC-0045 QUIESCE — graceful "Prepare for shutdown": pause new work + drain, resume, poll drain status.
+  quiesce(): Promise<QuiesceStatus>;
+  resume(): Promise<QuiesceStatus>;
+  quiesceStatus(): Promise<QuiesceStatus | null>;
   ask(req: AskRequest): Promise<AskResult>;
   // SPEC-0026 ASK-6: save a grounded recall answer as a KB Output.
   saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult>;
