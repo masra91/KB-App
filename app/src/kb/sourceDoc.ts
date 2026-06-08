@@ -22,6 +22,22 @@ export function bodyFor(meta: CapturedMeta, textContent: string | null): string 
   return meta.kind === 'text' ? (textContent ?? '') : `![[${meta.raw}]]`;
 }
 
+/**
+ * Re-stamp a `source.md`'s sensitivity to a Principal override (SENSE-7): replace the `sensitivity:`
+ * scalar and reset its `sensitivityMeta` block to `by: principal` + the override `at` (clearing any
+ * `confidence`/`suggested` — D: an override clears the suggestion). Robust to a source archived BEFORE
+ * SENSE landed (no `sensitivityMeta` block yet): the block is injected fresh. Returns the rewritten doc.
+ */
+export function applySensitivityOverrideToSourceMd(content: string, label: string, at: string): string {
+  // Drop any existing sensitivityMeta block (header + its indented children, however many).
+  const withoutMeta = content.replace(/^sensitivityMeta:\n(?: {2}\S.*\n)*/m, '');
+  // Replace the sensitivity scalar line, appending a fresh principal provenance block right after it.
+  // NB: a FUNCTION replacer (not a string) — a label containing `$&`/`$1`/`` $` `` must not trigger JS's
+  // replacement-pattern substitution and corrupt the frontmatter (KB-QD-2 #267).
+  const block = `sensitivity: ${scalar(label)}\nsensitivityMeta:\n  by: principal\n  at: ${at}`;
+  return withoutMeta.replace(/^sensitivity: .*$/m, () => block);
+}
+
 export function renderSourceMd(
   meta: CapturedMeta,
   decision: ArchiveDecision,
@@ -39,7 +55,7 @@ export function renderSourceMd(
     // `suggested` (open Review suggestion) arrive in Slice 2.
     'sensitivityMeta:',
     `  by: ${decision.sensitivityBy}`,
-    `  at: ${archivedAt}`,
+    `  at: ${decision.sensitivityAt ?? archivedAt}`, // override time (sticky on Replay) else archive time
     `raw: ${meta.raw}`,
     `contentHash: ${meta.contentHash}`,
   ];

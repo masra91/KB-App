@@ -513,6 +513,9 @@ export interface KbApi {
   listIntakeConnectors(): Promise<IntakeConnectorView[]>;
   setIntakeConnectorConfig(patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]>;
   runIntakeConnectorNow(id: string): Promise<RunIntakeConnectorResult>;
+  // SPEC-0043 SENSE-7: Principal override of a source's sensitivity label (audited + Replay-sticky).
+  // An empty `label` clears the override. Returns the applied label (or a reason when it couldn't apply).
+  setSourceSensitivity(sourceId: string, label: string): Promise<{ ok: boolean; reason?: string; sensitivity?: string }>;
   // SPEC-0039 EXPLORE: the read-only entity-neighborhood view over the evergreen `entities/` graph.
   // `exploreEntities` feeds the search-to-focus picker; `exploreNeighborhood` returns the focused
   // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).

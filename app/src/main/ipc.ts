@@ -31,6 +31,7 @@ import {
   listIntakeConnectorsForActive,
   setActiveIntakeConnectorConfig,
   runActiveIntakeConnectorNow,
+  setActiveSourceSensitivity,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { recall } from '../kb/recall';
@@ -445,6 +446,15 @@ export function registerIpc(): void {
       return await runActiveIntakeConnectorNow(id);
     } catch {
       return { ran: false, reason: 'not-found' };
+    }
+  });
+
+  // SPEC-0043 SENSE-7: Principal override of a source's sensitivity (audited + Replay-sticky).
+  ipcMain.handle('kb:setSourceSensitivity', async (_e, sourceId: string, label: string): Promise<{ ok: boolean; reason?: string; sensitivity?: string }> => {
+    try {
+      return await setActiveSourceSensitivity(sourceId, label);
+    } catch {
+      return { ok: false, reason: 'error' };
     }
   });
 }
