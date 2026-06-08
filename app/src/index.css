@@ -293,7 +293,7 @@ dl.settings {
 
 dl.settings dt {
   font-size: 0.8rem;
-  color: var(--muted);
+  color: var(--viz-ink-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-top: 0.9rem;
@@ -303,6 +303,13 @@ dl.settings dd {
   margin: 0.25rem 0 0;
   font-size: 0.95rem;
 }
+
+/* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §3): secondary text on --viz-ink-muted (was the
+   legacy global .muted); a label + SegmentedControl share one baseline-aligned row (the autonomy +
+   dev-log controls). The seg / confirm / button visuals come from the blessed primitives
+   (design-system.css) — no new tokens/components (DESIGN-7). */
+.settings-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+.settings-control { display: flex; align-items: center; gap: 0.6rem; margin: 0.6rem 0; flex-wrap: wrap; }
 
 /* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
 ul.review-list {
@@ -471,17 +478,12 @@ button:disabled {
 /* Retryable load-failure fallback (#145) — the Retry button reuses .btn; just space it from the text. */
 .load-error .load-retry { margin-left: 0.5rem; font-size: 0.85em; padding: 0.2rem 0.6rem; }
 
-/* Shared confirm/button styling (also used by the Settings replay flow). */
-.confirm { margin-top: 0.6rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(0, 0, 0, 0.2); display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-/* WS1 #1: the `display: flex` above wins over the default `[hidden]` rule (display: none), so toggling
-   the `hidden` attribute couldn't dismiss the box. Restore that contract. (The Field-Desk `.rdesk-confirm`
-   now composes the `.viz-confirm` primitive, whose own `[hidden]` guard lives in design-system.css.) */
-.confirm[hidden] { display: none; }
-.confirm .warn { flex: 1 1 100%; margin: 0 0 0.2rem; color: var(--fg); }
+/* The Retry fallback button (renderLoadError, loadGuard.ts) is the last consumer of the legacy .btn.
+   The legacy .confirm / .btn-danger were retired in the WS3 migration: Settings (their final consumer)
+   now composes the blessed .viz-confirm / .viz-btn--danger primitives, as Jobs already does. */
 .btn { appearance: none; font: inherit; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); padding: 0.4rem 0.8rem; cursor: pointer; }
 .btn:hover { background: var(--hover); }
-.btn-danger { appearance: none; font: inherit; border: 0; border-radius: 8px; background: var(--error); color: #1a1a1a; padding: 0.4rem 0.8rem; cursor: pointer; font-weight: 600; }
-.btn:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled { opacity: 0.5; cursor: default; }
 
 /* --- Control Panel: Agents / Sources / Settings autonomy (SPEC-0027 slice 2) --- */
 /* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §4): the status chip is the blessed .viz-chip
@@ -506,8 +508,8 @@ button:disabled {
 .agent-meta dt { color: var(--viz-ink-muted); }
 .agent-meta dd { margin: 0; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
-.autonomy-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
-.autonomy-row select { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 0.25rem 0.4rem; }
+/* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
+   controls are SegmentedControls now, laid out by .settings-control above.) */
 
 /* --- Reviews "needs you" count badge on the rail (SPEC-0027 PANEL-8) --- */
 .sidebar .nav-item .nav-badge {
