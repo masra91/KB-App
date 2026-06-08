@@ -10,10 +10,15 @@ import {
   clampToolCalls,
   clampTimeoutMs,
   clampMaxDepth,
+  clampOrientBudget,
   resolveTimeoutMs,
+  resolveOrientBudget,
   MAX_TOOL_CALLS,
   MAX_MAX_DEPTH,
   MIN_MAX_DEPTH,
+  MAX_ORIENT_BUDGET,
+  MIN_ORIENT_BUDGET,
+  DEFAULT_RESEARCHER_ORIENT_BUDGET,
   MIN_SESSION_TIMEOUT_MS,
   MAX_SESSION_TIMEOUT_MS,
   DEFAULT_RESEARCH_SESSION_TIMEOUT_MS,
@@ -97,6 +102,20 @@ describe('clampToolCalls / clampTimeoutMs — editable-bounds at the IPC boundar
     expect(resolveTimeoutMs({ timeoutMs: undefined })).toBe(DEFAULT_RESEARCH_SESSION_TIMEOUT_MS);
     expect(resolveTimeoutMs({ timeoutMs: 99 * 60 * 60_000 })).toBe(MAX_SESSION_TIMEOUT_MS); // clamps a runaway persisted value
     expect(resolveTimeoutMs({ timeoutMs: -5 })).toBe(DEFAULT_RESEARCH_SESSION_TIMEOUT_MS); // invalid → default
+  });
+
+  it('clampOrientBudget: keeps a valid integer; CLAMPS above the cap; REJECTS garbage (warm-start, RESEARCH-22)', () => {
+    expect(clampOrientBudget(8)).toBe(8); // in-range valid
+    expect(clampOrientBudget(1)).toBe(MIN_ORIENT_BUDGET); // min
+    expect(clampOrientBudget(99)).toBe(MAX_ORIENT_BUDGET); // clamped to the orient cap (20)
+    for (const bad of [0, -1, 1.5, NaN, Infinity, '5', null, undefined]) expect(clampOrientBudget(bad as unknown)).toBeUndefined();
+  });
+
+  it('resolveOrientBudget: persisted value (clamped) or the default when absent/invalid', () => {
+    expect(resolveOrientBudget({ orientBudget: 8 })).toBe(8);
+    expect(resolveOrientBudget({ orientBudget: undefined })).toBe(DEFAULT_RESEARCHER_ORIENT_BUDGET);
+    expect(resolveOrientBudget({ orientBudget: 99 })).toBe(MAX_ORIENT_BUDGET); // clamps a runaway persisted value
+    expect(resolveOrientBudget({ orientBudget: -5 })).toBe(DEFAULT_RESEARCHER_ORIENT_BUDGET); // invalid → default
   });
 });
 

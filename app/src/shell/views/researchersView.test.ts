@@ -8,7 +8,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mountResearchers } from './researchersView';
 import type { ResearcherView, KbApi } from '../../kb/types';
 
-const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, timeoutMs: 15 * 60_000, allowedTools: [], lastRun: null };
+const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, timeoutMs: 15 * 60_000, orientBudget: 5, allowedTools: [], lastRun: null };
 const webRow: ResearcherView = { ...base, id: 'web-1', template: 'web', label: 'Prior art', egressTier: 'public-web' };
 const codeRow: ResearcherView = { ...base, id: 'code-1', template: 'code', label: 'Repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', egressTier: 'local-only', topics: [] };
 
@@ -374,19 +374,31 @@ describe('Field Desk — XSS safety', () => {
   });
 });
 
-describe('Field Desk — WS3 editable budget + timeout (RESEARCH-15/18)', () => {
-  it('renders editable reads/pass + timeout + depth fields seeded from the view-model', async () => {
-    const c = await mount(); // webRow: budget.maxToolCalls 8, maxDepth 2, timeoutMs 15min
+describe('Field Desk — WS3/warm-start editable budget + timeout + orient + depth (RESEARCH-15/18/22/11)', () => {
+  it('renders editable reads/pass + orient/pass + timeout + depth fields seeded from the view-model', async () => {
+    const c = await mount(); // webRow: budget.maxToolCalls 8, maxDepth 2, timeoutMs 15min, orientBudget 5
     const calls = c.querySelector<HTMLInputElement>('.researcher-maxcalls');
+    const orient = c.querySelector<HTMLInputElement>('.researcher-orient');
     const timeout = c.querySelector<HTMLInputElement>('.researcher-timeout');
     const depth = c.querySelector<HTMLInputElement>('.researcher-maxdepth');
     expect(calls?.value).toBe('8');
+    expect(orient?.value).toBe('5'); // orient budget (warm-start)
     expect(timeout?.value).toBe('15'); // 15 min
     expect(depth?.value).toBe('2'); // maxDepth (WS3 Slice-2)
     // They use the WS2 EditableField primitive (viz-field__input), not bespoke chrome.
     expect(calls?.classList.contains('viz-field__input')).toBe(true);
+    expect(orient?.classList.contains('viz-field__input')).toBe(true);
     expect(timeout?.classList.contains('viz-field__input')).toBe(true);
     expect(depth?.classList.contains('viz-field__input')).toBe(true);
+  });
+
+  it('editing orient/pass persists via setResearcherConfig({orientBudget}) (warm-start, RESEARCH-22)', async () => {
+    const c = await mount();
+    const orient = c.querySelector<HTMLInputElement>('.researcher-orient')!;
+    orient.value = '8';
+    orient.dispatchEvent(new Event('change'));
+    await flush();
+    expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', orientBudget: 8 });
   });
 
   it('editing reads/pass persists via setResearcherConfig({maxToolCalls})', async () => {
@@ -416,12 +428,12 @@ describe('Field Desk — WS3 editable budget + timeout (RESEARCH-15/18)', () => 
     expect(setResearcherConfig).toHaveBeenCalledWith({ id: 'web-1', maxDepth: 4 });
   });
 
-  it('the tool allowlist stays READ-ONLY — reads/pass + timeout + depth are editable (security/scope)', async () => {
+  it('the tool allowlist stays READ-ONLY — reads/pass + orient + timeout + depth are editable (security/scope)', async () => {
     listResearchers = vi.fn(async () => [{ ...webRow, allowedTools: ['fetch', 'web_search'], budget: { maxToolCalls: 8, maxDepth: 2 } }]);
     setApi();
     const c = await mount();
-    // THREE editable number inputs in the reach readout (reads/pass + timeout + depth) — never one for tools.
-    expect(c.querySelectorAll('.rdesk-reach input').length).toBe(3);
+    // FOUR editable number inputs in the reach readout (reads/pass + orient + timeout + depth) — never one for tools.
+    expect(c.querySelectorAll('.rdesk-reach input').length).toBe(4);
     const ro = c.querySelector('.rdesk-reach-ro');
     expect(ro?.textContent).toMatch(/tools: fetch · web_search/); // allowlist shown as read-only text
     expect(ro?.querySelector('input')).toBeNull(); // no editable control for the tool allowlist (security surface)

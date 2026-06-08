@@ -309,6 +309,9 @@ export interface ResearcherView {
   budget: { maxToolCalls: number; maxDepth: number };
   /** Effective per-pass session timeout in ms (RESEARCH-18) — the persisted value or the default; EDITABLE (WS3). */
   timeoutMs: number;
+  /** Effective per-pass orient/awareness budget (RESEARCH-22) — the persisted value or the default;
+   *  EDITABLE (warm-start). The non-egress awareness cap, separate from `budget.maxToolCalls`. */
+  orientBudget: number;
   /** The researcher's tool/MCP allowlist (RESEARCH-12) — surfaced READ-ONLY in the reach readout so a
    *  researcher's reach is always legible. It is a SECURITY surface and stays non-editable (WS3). */
   allowedTools: string[];
@@ -340,6 +343,8 @@ export interface ResearcherConfigPatch {
   timeoutMs?: number;
   /** Editable chain-depth safety bound (RESEARCH-11, WS3 Slice-2) — clamped/validated at the IPC boundary. */
   maxDepth?: number;
+  /** Editable per-pass orient/awareness budget (RESEARCH-22, warm-start) — clamped/validated at the IPC boundary. */
+  orientBudget?: number;
 }
 
 /** A watched folder's most-recent activity, folded into the view from the `watch` audit (SPEC-0037). */

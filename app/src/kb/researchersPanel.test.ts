@@ -45,6 +45,12 @@ describe('buildResearcherViews (RESEARCH-15)', () => {
     expect(views[1].timeoutMs).toBe(15 * 60_000); // default (RESEARCH-18)
     expect(views[0].budget.maxToolCalls).toBe(8); // budget still surfaced (now editable)
   });
+
+  it('surfaces the editable orientBudget (warm-start): persisted value when set, the default when absent', () => {
+    const views = buildResearcherViews([web({ id: 'a', orientBudget: 8 }), web({ id: 'b' })], {});
+    expect(views[0].orientBudget).toBe(8); // persisted
+    expect(views[1].orientBudget).toBe(5); // default (RESEARCH-22, DEFAULT_RESEARCHER_ORIENT_BUDGET)
+  });
 });
 
 describe(`researcherRunEligibility — honest "Off" is not "won't run" (WS1 #2)`, () => {
@@ -233,5 +239,13 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     expect(events).toHaveLength(1);
     expect(events[0].payload).toMatchObject({ field: 'maxDepth', from: 2, to: 5 });
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', maxDepth: 2 })).toEqual([]); // no-op re-assert
+  });
+
+  it('audits an editable orientBudget change from→to, default as the base when none persisted (warm-start)', () => {
+    const events = researcherConfigAuditEvents(web(), { id: 'web-1', orientBudget: 8 });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ field: 'orientBudget', from: 5, to: 8 }); // base = default (5)
+    const prior = web({ orientBudget: 8 });
+    expect(researcherConfigAuditEvents(prior, { id: 'web-1', orientBudget: 8 })).toEqual([]); // no-op re-assert
   });
 });

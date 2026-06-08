@@ -44,7 +44,7 @@ vi.mock('../kb/watchScheduler', async (orig) => ({ ...(await orig<typeof import(
 import { createKb } from '../kb/vault';
 import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { writeResearcherRegistry, readResearcherRegistry } from '../kb/researcherRegistry';
-import { MAX_TOOL_CALLS, MAX_SESSION_TIMEOUT_MS, MAX_MAX_DEPTH, type ResearcherConfig } from '../kb/researchers';
+import { MAX_TOOL_CALLS, MAX_SESSION_TIMEOUT_MS, MAX_MAX_DEPTH, MAX_ORIENT_BUDGET, type ResearcherConfig } from '../kb/researchers';
 import { startPipeline, setActiveResearcherConfig, stopPipeline } from './pipeline';
 
 const seed: ResearcherConfig = {
@@ -126,5 +126,20 @@ describe('setActiveResearcherConfig — end-to-end clamp wiring (WS3 / RESEARCH-
     expect((await persistedResearcher(staging)).budget.maxDepth).toBe(4);
     await setActiveResearcherConfig({ id: 'web-1', maxDepth: -1 });
     expect((await persistedResearcher(staging)).budget.maxDepth).toBe(4); // garbage dropped → unchanged
+  });
+
+  // Warm-start (RESEARCH-22): orientBudget editable — the #245-lesson end-to-end clamp-wiring + persist-on-read.
+  it('CLAMPS a runaway orientBudget to the cap on persist (99 → 20) and it SURVIVES a re-read', async () => {
+    const staging = await openWithSeededResearcher();
+    await setActiveResearcherConfig({ id: 'web-1', orientBudget: 99 });
+    expect((await persistedResearcher(staging)).orientBudget).toBe(MAX_ORIENT_BUDGET); // 20, NOT 99 — and read back (no #245 drop)
+  });
+
+  it('persists a valid in-range orientBudget (8 → 8) and REJECTS a garbage one (fail-safe, unchanged)', async () => {
+    const staging = await openWithSeededResearcher();
+    await setActiveResearcherConfig({ id: 'web-1', orientBudget: 8 });
+    expect((await persistedResearcher(staging)).orientBudget).toBe(8);
+    await setActiveResearcherConfig({ id: 'web-1', orientBudget: -1 });
+    expect((await persistedResearcher(staging)).orientBudget).toBe(8); // garbage dropped → unchanged
   });
 });

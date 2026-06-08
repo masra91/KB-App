@@ -93,12 +93,18 @@ export const RESEARCH_INSTANCE_WINDOW_MS = 24 * 60 * 60 * 1000;
 //     hard cap — a deep chain fans out egress geometrically, so the editable ceiling is tight (the
 //     per-Instance pass ceiling still backstops TOTAL egress regardless of per-researcher depth). It is
 //     the SAFETY bound (not a quality knob), so the bound is conservative (WS3 Slice-2, RESEARCH-15).
+//   - orientBudget: a small cap on the per-pass LOCAL (non-egress) orient/awareness reads (RESEARCH-22,
+//     warm-start Slice 4b) — SEPARATE from maxToolCalls so awareness never draws down the egress budget.
+//     ≥1 and ≤ a modest ceiling (awareness is cheap KB-local reads, not a runaway).
 export const MIN_TOOL_CALLS = 1;
 export const MAX_TOOL_CALLS = RESEARCH_INSTANCE_CEILING;
 export const MIN_SESSION_TIMEOUT_MS = 30_000;
 export const MAX_SESSION_TIMEOUT_MS = 60 * 60_000;
 export const MIN_MAX_DEPTH = 1;
 export const MAX_MAX_DEPTH = 10; // a research chain ≥10 deep is a runaway; the per-Instance ceiling also backstops
+export const DEFAULT_RESEARCHER_ORIENT_BUDGET = 5;
+export const MIN_ORIENT_BUDGET = 1;
+export const MAX_ORIENT_BUDGET = 20;
 
 /** Sanitize an editable `maxToolCalls` from untrusted IPC input (WS3): a positive INTEGER, CLAMPED to
  *  [MIN_TOOL_CALLS, MAX_TOOL_CALLS]. Non-numeric / non-integer / ≤0 ⇒ `undefined` (rejected → field left
@@ -129,6 +135,19 @@ export function resolveTimeoutMs(r: Pick<ResearcherConfig, 'timeoutMs'>): number
   return clampTimeoutMs(r.timeoutMs) ?? DEFAULT_RESEARCH_SESSION_TIMEOUT_MS;
 }
 
+/** Sanitize an editable `orientBudget` (the non-egress awareness cap, RESEARCH-22) from untrusted IPC
+ *  input (warm-start Slice 4b): a positive INTEGER, CLAMPED to [MIN_ORIENT_BUDGET, MAX_ORIENT_BUDGET].
+ *  Non-numeric / non-integer / ≤0 ⇒ `undefined` (rejected → field unchanged, fail-safe). 99 → 20; 1.5 / 0 → rejected. */
+export function clampOrientBudget(v: unknown): number | undefined {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v <= 0) return undefined;
+  return Math.min(Math.max(v, MIN_ORIENT_BUDGET), MAX_ORIENT_BUDGET);
+}
+
+/** The effective orient budget for a researcher (RESEARCH-22): its persisted `orientBudget`, else the default. */
+export function resolveOrientBudget(r: Pick<ResearcherConfig, 'orientBudget'>): number {
+  return clampOrientBudget(r.orientBudget) ?? DEFAULT_RESEARCHER_ORIENT_BUDGET;
+}
+
 /** Max researchers a single `research-request` may fan out to (RESEARCH-4 max-fan-out). */
 export const DEFAULT_MAX_FANOUT = 4;
 
@@ -155,6 +174,10 @@ export interface ResearcherConfig {
   /** Per-pass live-SDK session timeout in ms (RESEARCH-18) — a stuck-session backstop, user-editable
    *  (RESEARCH-15). Absent ⇒ {@link DEFAULT_RESEARCH_SESSION_TIMEOUT_MS}. Clamped at the IPC boundary. */
   timeoutMs?: number;
+  /** Per-pass LOCAL (non-egress) orient/awareness read cap (RESEARCH-22, warm-start) — user-editable
+   *  (RESEARCH-15), SEPARATE from `budget.maxToolCalls` (awareness never draws the egress budget).
+   *  Absent ⇒ {@link DEFAULT_RESEARCHER_ORIENT_BUDGET}. Clamped at the IPC boundary. */
+  orientBudget?: number;
   /** Cadence for the scheduled path (reuses JOBS presets; `off` = inline/on-demand only). */
   schedule: SchedulePreset;
   /** Autonomy posture (reuses JOBS posture; guarded = findings route to Review by default). */

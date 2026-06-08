@@ -67,7 +67,7 @@ import { DEFAULT_INTAKE_SCOPE, DEFAULT_INTAKE_SENSITIVITY, type IntakeConnectorC
 import { buildIntakeConnectorViews, isIntakeConnectorType, clampMaxItems, intakeConfigAuditEvents } from '../kb/intakeSourcingPanel';
 import type { WatchFolderView, WatchFolderPatch, IntakeConnectorView, IntakeConnectorConfigPatch, RunIntakeConnectorResult } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
-import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, clampOrientBudget, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid, dateShard, isUlid } from '../kb/ulid';
 import { setSensitivityOverride, sensitivityOverridesPath } from '../kb/sensitivityOverride';
 import { applySensitivityOverrideToSourceMd } from '../kb/sourceDoc';
@@ -885,6 +885,8 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
   if (cleanTimeout !== undefined) clean.timeoutMs = cleanTimeout;
   const cleanMaxDepth = clampMaxDepth(patch.maxDepth); // WS3 Slice-2: the chain-depth safety bound (RESEARCH-11)
   if (cleanMaxDepth !== undefined) clean.maxDepth = cleanMaxDepth;
+  const cleanOrient = clampOrientBudget(patch.orientBudget); // RESEARCH-22 warm-start: non-egress awareness cap
+  if (cleanOrient !== undefined) clean.orientBudget = cleanOrient;
 
   let prior: ResearcherConfig | undefined;
   let applied = false;
@@ -912,6 +914,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
             }
           : {}),
         ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
+        ...(clean.orientBudget !== undefined ? { orientBudget: clean.orientBudget } : {}), // RESEARCH-22 warm-start (top-level)
         // Template config: merge repoPath (Code) / tenantId (M365) into the existing config,
         // preserving other config keys.
         ...(clean.repoPath !== undefined || clean.tenantId !== undefined || clean.prRepo !== undefined
@@ -943,6 +946,7 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
           ...(clean.maxDepth !== undefined ? { maxDepth: clean.maxDepth } : {}),
         },
         ...(clean.timeoutMs !== undefined ? { timeoutMs: clean.timeoutMs } : {}),
+        ...(clean.orientBudget !== undefined ? { orientBudget: clean.orientBudget } : {}),
         schedule: clean.schedule ?? 'off',
         posture: clean.posture ?? DEFAULT_POSTURE,
         enabled: clean.enabled ?? false,
