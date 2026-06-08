@@ -8,10 +8,9 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import {
   classifyIndexLock,
   reconcileStaleIndexLock,
-  indexLockPath,
+  resolveIndexLockPath,
   GATE3_STALE_AGE_MS,
   type ClassifyInputs,
-  type LockVerdict,
 } from './canonicalLockHeal';
 import { writeLockMeta, readLockMeta, type CanonicalLockMeta } from './canonicalLockMeta';
 
@@ -28,6 +27,12 @@ const base = (over: Partial<ClassifyInputs> = {}): ClassifyInputs => ({
   ...over,
 });
 const meta = (over: Partial<CanonicalLockMeta> = {}): CanonicalLockMeta => ({ pid: 4242, startedAt: NOW, op: 'advance', timeoutMs: 20_000, ...over });
+// A complete DevLog whose `warn` is a spy (the others noop). `child` returns self so scoped logging works.
+const fakeLog = () => {
+  const warn = vi.fn();
+  const log = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn(), child: () => log, flush: async () => {} };
+  return { log, warn };
+};
 
 describe('ORCH-27 classifyIndexLock (PURE triple-gate truth table)', () => {
   it('no lock on disk → absent (the healthy common case)', () => {
@@ -92,7 +97,7 @@ describe('ORCH-27 reconcileStaleIndexLock (wiring + heal)', () => {
 
   const makeIndexLock = async (r: string): Promise<string> => {
     await fs.mkdir(path.join(r, '.git'), { recursive: true });
-    const p = indexLockPath(r);
+    const p = await resolveIndexLockPath(r);
     await fs.writeFile(p, '', 'utf8');
     return p;
   };
@@ -110,8 +115,7 @@ describe('ORCH-27 reconcileStaleIndexLock (wiring + heal)', () => {
     const lock = await makeIndexLock(root);
     await writeLockMeta(root, { pid: 4242, startedAt: NOW, op: 'advance', timeoutMs: 20_000 });
     const audit = vi.fn();
-    const warn = vi.fn();
-    const log = { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() };
+    const { log, warn } = fakeLog();
 
     const v = await reconcileStaleIndexLock(root, {
       isLiveInProcHolder: () => false,
@@ -151,12 +155,12 @@ describe('ORCH-27 reconcileStaleIndexLock (wiring + heal)', () => {
   it('SAFETY: no sidecar + inconclusive external scan → KEEP + held-stall surfaced (visible)', async () => {
     root = await makeTempDir('kb-heal-');
     const lock = await makeIndexLock(root);
-    const warn = vi.fn();
+    const { log, warn } = fakeLog();
     const v = await reconcileStaleIndexLock(root, {
       isLiveInProcHolder: () => false,
       scanExternalGit: async () => 'inconclusive',
       now: () => NOW,
-      log: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() },
+      log,
     });
     expect(v.action).toBe('keep');
     await expect(fs.access(lock)).resolves.toBeUndefined();

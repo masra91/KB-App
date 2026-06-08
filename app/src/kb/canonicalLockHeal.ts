@@ -12,18 +12,72 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readLockMeta, clearLockMeta, type CanonicalLockMeta } from './canonicalLockMeta';
+import { readLockMeta, writeLockMeta, clearLockMeta, type CanonicalLockMeta } from './canonicalLockMeta';
+import { appendAuditEvent } from './audit';
 import { noopDevLog, type DevLog } from './devlog';
 
 const execFileP = promisify(execFile);
+
+/** Roots with a LIVE in-process boundedGit index-op right now (gate-1). A Set keyed by resolved root —
+ *  the canonical-writer Mutex serializes advances per vault, so at most one live holder per root. */
+const liveIndexHolders = new Set<string>();
+
+/** gate-1 predicate: is THIS process currently holding `root`'s index.lock via a live boundedGit op? */
+export function hasLiveIndexHolder(root: string): boolean {
+  return liveIndexHolders.has(path.resolve(root));
+}
+
+/**
+ * Run `fn` (an index-touching boundedGit op, e.g. the ff/cherry-pick advance) as the registered live
+ * holder of `root`'s `index.lock`: marks the in-process holder (gate-1) + writes the sidecar
+ * {pid, startedAt, op, timeoutMs} so a crash/timeout mid-op leaves the evidence the heal needs.
+ *
+ * On SUCCESS the sidecar is cleared (a clean release leaves nothing stale). On FAILURE it is LEFT in
+ * place on purpose: a boundedGit timeout that kills git can orphan `index.lock`, and the surviving
+ * sidecar (pid==self) lets the NEXT acquire's gate-2 clear it immediately (leaked-by-self) — fast
+ * within-session resume-on-heal — instead of waiting out the conservative no-sidecar age threshold.
+ * The in-process holder flag is always released. The sidecar write is best-effort + never fails `fn`.
+ */
+export async function withCanonicalIndexLock<T>(root: string, op: string, timeoutMs: number, fn: () => Promise<T>): Promise<T> {
+  const r = path.resolve(root);
+  liveIndexHolders.add(r);
+  await writeLockMeta(r, { pid: process.pid, startedAt: Date.now(), op, timeoutMs });
+  try {
+    const result = await fn();
+    await clearLockMeta(r); // clean success → no stale sidecar left behind
+    return result;
+  } finally {
+    liveIndexHolders.delete(r); // always release the in-process holder (gate-1); sidecar persists on failure
+  }
+}
 
 /** KB-Lead Q2: a no-sidecar (external-held) `index.lock` is only assumed stale past this generous age.
  *  `index.lock` is short-lived even for external git (gc/clone use other locks), so 120s is safe. */
 export const GATE3_STALE_AGE_MS = 120_000;
 
-/** Path to the root repo's canonical `index.lock`. */
-export function indexLockPath(root: string): string {
-  return path.join(path.resolve(root), '.git', 'index.lock');
+/**
+ * Resolve the canonical `index.lock` path for `root`, correct for BOTH a plain repo and a linked git
+ * worktree. The canonical writer advances run in the `staging` worktree, whose `.git` is a FILE
+ * (`gitdir: <main>/.git/worktrees/staging`) and whose index.lock lives in that gitdir — NOT at
+ * `<root>/.git/index.lock`. Cheap fs reads (no git spawn): stat `.git`; a dir → `<root>/.git/index.lock`;
+ * a file → parse `gitdir:` → `<gitdir>/index.lock`. Falls back to the plain layout on any read error.
+ */
+export async function resolveIndexLockPath(root: string): Promise<string> {
+  const r = path.resolve(root);
+  const dotGit = path.join(r, '.git');
+  try {
+    const st = await fs.stat(dotGit);
+    if (st.isDirectory()) return path.join(dotGit, 'index.lock');
+    const content = await fs.readFile(dotGit, 'utf8'); // linked worktree → `.git` is a file
+    const m = content.match(/^gitdir:\s*(.+?)\s*$/m);
+    if (m) {
+      const gitdir = path.isAbsolute(m[1]) ? m[1] : path.resolve(r, m[1]);
+      return path.join(gitdir, 'index.lock');
+    }
+  } catch {
+    /* fall through to the plain layout */
+  }
+  return path.join(dotGit, 'index.lock');
 }
 
 /** Best-effort answer to "is a live git process touching this repo?" for the no-sidecar gate-3. */
@@ -157,7 +211,7 @@ export interface ReconcileDeps {
 export async function reconcileStaleIndexLock(root: string, deps: ReconcileDeps): Promise<LockVerdict> {
   const log = deps.log ?? noopDevLog;
   const now = deps.now ?? (() => Date.now());
-  const lockPath = indexLockPath(root);
+  const lockPath = await resolveIndexLockPath(root);
 
   let lockExists = false;
   let lockAgeMs: number | null = null;
@@ -188,7 +242,22 @@ export async function reconcileStaleIndexLock(root: string, deps: ReconcileDeps)
     await fs.rm(lockPath, { force: true });
     await clearLockMeta(root);
     log.warn('orch.lock.healed', { lock: lockPath, reason: verdict.reason, pid: meta?.pid ?? null, op: meta?.op ?? null });
-    await deps.audit?.({ lock: lockPath, reason: verdict.reason, meta });
+    // AUDIT-11: a clear is a repository-state repair → audit it with the why (default → the canonical
+    // control audit log; injectable for tests). Best-effort: an audit failure must not undo the heal.
+    const auditFn =
+      deps.audit ??
+      ((e) =>
+        appendAuditEvent(root, {
+          actor: 'maintenance',
+          subjects: {},
+          eventType: 'lock-healed',
+          payload: { lock: e.lock, reason: e.reason, pid: e.meta?.pid ?? null, op: e.meta?.op ?? null, startedAt: e.meta?.startedAt ?? null },
+        }));
+    try {
+      await auditFn({ lock: lockPath, reason: verdict.reason, meta });
+    } catch {
+      /* audit best-effort — the lock is already healed; a logging failure must not re-wedge */
+    }
   } else if (verdict.action === 'keep') {
     // A present-but-kept lock is a live op or a fail-safe hold — surface it so it's never a silent wedge.
     log.warn('orch.lock.held', { lock: lockPath, reason: verdict.reason });
