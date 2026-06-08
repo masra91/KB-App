@@ -99,6 +99,8 @@ A job run **may do nothing** — finding no actionable work is a normal, common 
 | JOBS-13  | should   | Job runs are **restartable/crash-safe**: an interrupted run leaves the KB consistent (branch state is truth), mirroring ORCH-13/STAGING-8 | none-yet | ORCH-13; STAGING-8 |
 | JOBS-14  | should   | Per-job config (schedule, enabled, knobs) is **editable later via the Control Panel** (VISION-11); v1 may expose a minimal Settings surface | test:jobRegistry.test.ts | VISION-11 |
 | JOBS-15  | must     | Each job has a configurable **autonomy posture** with a **safe default**: **Guarded** (additive auto; destructive/low-confidence → Review) by default; the Principal may opt a job into **Autonomous** (agent judgment governs all dispositions). Part of per-job config | test:jobs.test.ts, jobRegistry.test.ts | AUTO-3,7,12 |
+| JOBS-16  | must     | **One job model, two facings — a researcher is just an externally-facing job.** Every job carries a **`facing: internal \| external`** attribute. **Internal** jobs are inward (operate on the KB itself — Reflect/Rumination, reconcile, maintenance): JOBS-10's no-external-egress holds as-is. **External** jobs are **researchers** (SPEC-0028) — they reach *outside* the KB under an **egress tier + scope/sensitivity gates** (SPEC-0028, SPEC-0043); for `external` jobs JOBS-10 relaxes to **read-only egress within the granted tier** (still **no side-effecting writes to the world**). Both facings share the **same registry, scheduler, single-flight, journal, autonomy posture, audit, promotion, and config surface** (JOBS-1..15, 17) — **the only difference is `facing`** (which gates egress). Researchers are **not a separate subsystem**; they are external jobs on this engine (as Reflect is an internal one). *(Principal: "a job is a cron that is inward facing and a researcher is a job that is externally facing — consistency is key, only difference is inward vs outward facing.")* | none-yet | SPEC-0028; SPEC-0043; AUTO-6; JOBS-1,10 |
+| JOBS-17  | must     | **Configurable work-depth is UNIFORM across all jobs AND all agents — not researcher-only.** Today the **depth / effort budget** (tool-call ceiling, recursion/hops depth, orient budget — SPEC-0028 `maxToolCalls`/`orientBudget`/depth) is exposed **only for researchers**; JOBS-4 gives every job a *generic* bounded budget but no Principal-facing knob. It MUST become a **first-class, Principal-configurable "work depth" control on every job (internal + external) AND every stage agent** (Decompose/Connect/Claims/Reflect — SPEC-0014) — one consistent *"how hard does this work each item"* knob (depth/iterations + tool-call/time ceiling), part of per-job/per-agent `config` (JOBS-1). **Safe default** per agent/job; the Principal may **opt into higher depth with a warning** (mirrors the per-stage concurrency ruling, SPEC-0044/CONCUR — deeper = more thorough but more cost/time), and the **global Copilot ceiling (ORCH-23) stays the hard wall** — depth scales **per-item effort, never total parallelism**, so it can't blow the safety bound. Surfaced + editable in the **Control Panel** (JOBS-14 / SPEC-0027 PANEL). Researchers' existing budget becomes the **external-facing instance of this one knob**, not a parallel mechanism. *(Principal: "configurable work depth for all the agents and jobs too — why just researcher? consistency is key.")* | none-yet | JOBS-1,4,14; SPEC-0028 RESEARCH-15,17; SPEC-0014 ORCH-20,23; SPEC-0044; SPEC-0027; PRIN-5 |
 
 ## 5. Open questions
 
@@ -118,6 +120,16 @@ A job run **may do nothing** — finding no actionable work is a normal, common 
 
 ## 6. Changelog
 
+- 2026-06-08 — **JOBS-16/17: unify the job model (facing) + make work-depth configurable everywhere (Principal).**
+  The Principal's consistency call: *"a job is a cron that is inward facing and a researcher is a job that is
+  externally facing — and I want configurable work depth for all agents and jobs, not just researchers."*
+  **JOBS-16** adds `facing: internal | external` so a researcher (SPEC-0028) is literally an external-facing job
+  on the same engine (egress relaxes JOBS-10 to read-only-within-tier; Reflect is the internal case) — researchers
+  stop being a parallel subsystem. **JOBS-17** generalizes the researcher-only depth/budget (`maxToolCalls`/
+  `orientBudget`/depth) into one Principal-configurable **work-depth** knob on every job AND every stage agent
+  (Decompose/Connect/Claims/Reflect), safe-default + opt-in-higher-with-warning, with the global Copilot ceiling
+  (ORCH-23) still the hard wall (depth = per-item effort, not parallelism). Sibling to per-stage concurrency
+  (SPEC-0044); surfaced in the Control Panel (SPEC-0027).
 - 2026-06-01 — created (draft). The mechanism for **autonomous enrichment**: a job registry +
   recurring scheduler that wakes agents (SPEC-0014 harness) for **bounded**, **concurrent**,
   **single-flight** KB-wide passes, with **rich audit + a per-job run-state journal** (memory
