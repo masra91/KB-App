@@ -15,12 +15,19 @@ export const DEV_LOG_LEVELS = ['info', 'debug'] as const;
 export type DevLogLevel = (typeof DEV_LOG_LEVELS)[number];
 export const DEFAULT_DEV_LOG_LEVEL: DevLogLevel = 'info';
 
+/** Shipped default Quick Capture global hotkey (SPEC-0038 QCAP fork #1 — ⌥Space). Configurable
+ *  (QCAP-6) via Settings; the agent owns full accelerator-grammar validation + conflict-detection
+ *  at registration, so persistence only needs a non-empty string here. */
+export const DEFAULT_QUICK_CAPTURE_ACCELERATOR = 'Alt+Space';
+
 /** Instance-wide settings (PANEL-5). v1 holds the autonomy default; grows as Settings does. */
 export interface InstanceConfig {
   /** The Instance-wide default autonomy posture (AUTO-12). Jobs inherit it unless they override. */
   autonomyDefault: AutonomyPosture;
   /** Dev-log verbosity (OBS-10): `info` (default) or `debug` to troubleshoot. */
   devLogLevel: DevLogLevel;
+  /** Quick Capture global hotkey accelerator (SPEC-0038 QCAP-6), e.g. `Alt+Space`. */
+  quickCaptureAccelerator: string;
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -28,9 +35,9 @@ export function instanceConfigPath(root: string): string {
   return path.join(path.resolve(root), INSTANCE_REL);
 }
 
-/** The safe default Instance config (Guarded autonomy + `info` dev-log verbosity). */
+/** The safe default Instance config (Guarded autonomy + `info` dev-log verbosity + ⌥Space hotkey). */
 export function defaultInstanceConfig(): InstanceConfig {
-  return { autonomyDefault: DEFAULT_POSTURE, devLogLevel: DEFAULT_DEV_LOG_LEVEL };
+  return { autonomyDefault: DEFAULT_POSTURE, devLogLevel: DEFAULT_DEV_LOG_LEVEL, quickCaptureAccelerator: DEFAULT_QUICK_CAPTURE_ACCELERATOR };
 }
 
 /** Read the Instance config (PANEL-5). Missing/malformed file or unknown posture → safe defaults. */
@@ -54,7 +61,13 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
   const devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(o.devLogLevel as string)
     ? (o.devLogLevel as DevLogLevel)
     : DEFAULT_DEV_LOG_LEVEL;
-  return { autonomyDefault, devLogLevel };
+  // QCAP-6: a non-empty string persists; full accelerator-grammar validation + conflict-handling
+  // happen at hotkey registration (the agent), which degrades to the menubar on a bad/clashing value.
+  const quickCaptureAccelerator =
+    typeof o.quickCaptureAccelerator === 'string' && o.quickCaptureAccelerator.trim().length > 0
+      ? o.quickCaptureAccelerator
+      : DEFAULT_QUICK_CAPTURE_ACCELERATOR;
+  return { autonomyDefault, devLogLevel, quickCaptureAccelerator };
 }
 
 /** Write the Instance config (Settings edit, PANEL-5/6) — deterministic, stable key order. */

@@ -1,5 +1,5 @@
 // IPC handlers — the main-process side of the KbApi contract (preload mirrors it).
-import { ipcMain, dialog, shell, BrowserWindow, type OpenDialogOptions } from 'electron';
+import { ipcMain, dialog, shell, BrowserWindow, clipboard, type OpenDialogOptions } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
@@ -32,6 +32,7 @@ import {
   setActiveIntakeConnectorConfig,
   runActiveIntakeConnectorNow,
 } from './pipeline';
+import { getQuickCaptureAgent } from './quickCaptureService';
 import { recall } from '../kb/recall';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
@@ -50,6 +51,7 @@ import type {
   OpenSettingsResult,
   CaptureRequest,
   CaptureResult,
+  QuickCaptureContext,
   PipelineStatus,
   PipelineStatusView,
   ReviewSummary,
@@ -210,6 +212,41 @@ export function registerIpc(): void {
       }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // SPEC-0038 QCAP-1/2/5: fire-and-forget quick capture (text + clipboard) onto the SAME SPEC-0013
+  // capture path, recording provenance surface='quick-capture'. QCAP adds NO preservation logic — it
+  // hands a text payload to the active orchestrator, which returns on preserve+commit and never blocks
+  // on Enrich (CAPTURE-2 fast-out). Fork #3: the frictionless sheet is text-only (files/rich → RICHIN).
+  ipcMain.handle('kb:quickCapture', async (_e, req: CaptureRequest): Promise<CaptureResult> => {
+    const orch = activePipeline();
+    if (!orch) return NO_PIPELINE;
+
+    const payloads: CapturePayload[] = [];
+    for (const input of req.inputs) {
+      if (input.kind === 'text' && input.text.trim().length > 0) payloads.push({ kind: 'text', text: input.text });
+    }
+    if (payloads.length === 0) return { ...NO_PIPELINE, message: 'Nothing to capture.' };
+
+    try {
+      const out = await orch.capture('quick-capture', payloads); // QCAP-5: provenance surface=quick-capture
+      return { ok: true, ids: out.ids, captureBatch: out.captureBatch, committed: out.committed, message: `Captured ${out.ids.length} item(s).` };
+    } catch (err) {
+      if (isPermissionDeniedError(err)) {
+        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+      }
+      return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // QCAP-2: the sheet asks the agent to dismiss + restore focus to the prior app after submit/cancel.
+  ipcMain.handle('kb:quickCaptureClose', async (): Promise<void> => {
+    getQuickCaptureAgent()?.close();
+  });
+
+  // QCAP-7: the sheet pre-fills from the current clipboard so "save what I'm looking at" is one gesture.
+  ipcMain.handle('kb:quickCaptureContext', async (): Promise<QuickCaptureContext> => {
+    return { clipboard: clipboard.readText() };
   });
 
   ipcMain.handle('kb:pipelineStatus', async (): Promise<PipelineStatus> => {

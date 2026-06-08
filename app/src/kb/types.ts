@@ -119,6 +119,11 @@ export interface CaptureResult {
   blocked?: boolean;
 }
 
+/** Context the Quick Capture sheet pre-fills from (SPEC-0038 QCAP-7) — v1 = current clipboard text. */
+export interface QuickCaptureContext {
+  clipboard: string;
+}
+
 /** Minimal pipeline status for the capture panel (SPEC-0014 ORCH-10). */
 export interface PipelineStatus {
   queueDepth: number;
@@ -435,6 +440,8 @@ export interface InstanceSettings {
   autonomyDefault: AutonomyPosture;
   /** Dev-log verbosity (SPEC-0030 OBS-10): `info` (default) or `debug` to troubleshoot. */
   devLogLevel: DevLogLevel;
+  /** Quick Capture global hotkey accelerator (SPEC-0038 QCAP-6), e.g. `Alt+Space`. */
+  quickCaptureAccelerator: string;
 }
 
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
@@ -458,6 +465,12 @@ export interface KbApi {
   probeVaultAccess(vaultPath: string): Promise<ProbeVaultAccessResult>;
   openSystemSettingsPrivacy(): Promise<OpenSettingsResult>;
   capture(req: CaptureRequest): Promise<CaptureResult>;
+  // SPEC-0038 QCAP-1/2/5: fire-and-forget quick capture (text+clipboard) onto the SPEC-0013 path
+  // (surface=quick-capture); quickCaptureClose dismisses the sheet + restores prior-app focus (QCAP-2);
+  // quickCaptureContext supplies the clipboard prefill (QCAP-7).
+  quickCapture(req: CaptureRequest): Promise<CaptureResult>;
+  quickCaptureClose(): Promise<void>;
+  quickCaptureContext(): Promise<QuickCaptureContext>;
   pipelineStatus(): Promise<PipelineStatus>;
   // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).
   pipelineStatusView(): Promise<PipelineStatusView | null>;

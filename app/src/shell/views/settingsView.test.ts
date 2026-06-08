@@ -16,7 +16,7 @@ function setApi(autonomyDefault: 'guarded' | 'autonomous', setSpy?: KbApi['setIn
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
     inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
-    getInstanceSettings: vi.fn(async () => ({ autonomyDefault, devLogLevel: 'info' as const })),
+    getInstanceSettings: vi.fn(async () => ({ autonomyDefault, devLogLevel: 'info' as const, quickCaptureAccelerator: 'Alt+Space' })),
     setInstanceSettings: set as KbApi['setInstanceSettings'],
   };
   return { set };
@@ -54,7 +54,7 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
 
     (root.querySelector('#autonomy-go') as HTMLButtonElement).click();
     await tick();
-    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'info' });
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' });
     expect(root.querySelector('#autonomy-status')?.textContent).toContain('Autonomous');
   });
 
@@ -76,7 +76,7 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
     changeTo(root, 'guarded');
     await tick();
     expect((root.querySelector('#autonomy-confirm') as HTMLElement).hidden).toBe(true);
-    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'guarded', devLogLevel: 'info' });
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' });
   });
 });
 
@@ -99,7 +99,7 @@ describe('Settings · Dev-log verbosity (SPEC-0030 OBS-10)', () => {
     sel.dispatchEvent(new Event('change', { bubbles: true }));
     await tick();
     // The whole settings object is sent — autonomyDefault not clobbered (no confirm; benign toggle).
-    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'debug' });
+    expect(set).toHaveBeenCalledWith({ autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'Alt+Space' });
     expect(root.querySelector('#verbosity-status')?.textContent).toContain('Debug');
   });
 });
@@ -133,7 +133,7 @@ describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)',
     (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
       getState,
       inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
-      getInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const })),
+      getInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const, quickCaptureAccelerator: 'Alt+Space' })),
       setInstanceSettings: vi.fn(async (s: InstanceSettings) => s) as KbApi['setInstanceSettings'],
     };
     root.querySelector<HTMLButtonElement>('.load-retry')!.click();

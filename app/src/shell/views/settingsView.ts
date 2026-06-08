@@ -37,7 +37,9 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     // PANEL-5 / OBS-10: the editable per-Instance settings (autonomy default + dev-log verbosity).
     // Never errors the shell — falls back to safe defaults. Shared mutable object so each control
     // sends the full settings (the IPC contract takes the whole object) without clobbering the other.
-    const settings: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info' };
+    // quickCaptureAccelerator (QCAP-6) isn't edited here yet — it's loaded + sent back unchanged so
+    // each control still sends the whole settings object without clobbering it (preserve-on-omission).
+    const settings: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' };
     try {
       Object.assign(settings, await withTimeout(window.kbApi.getInstanceSettings()));
     } catch {

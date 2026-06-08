@@ -45,7 +45,8 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, type DevLogLevel } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, type DevLogLevel } from '../kb/instanceConfig';
+import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
@@ -650,14 +651,31 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   if (!isAutonomyPosture(settings.autonomyDefault)) return readInstanceConfig(root); // reject invalid
   let prior: InstanceSettings = defaultInstanceConfig();
   let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
+  let quickCaptureAccelerator: string = DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   await active.lock.run(async () => {
     prior = await readInstanceConfig(root);
     // OBS-10: keep a valid level. Server-side merge (QA-2 hardening / the #102 lesson): an
     // omitted/invalid level PRESERVES the prior — no caller can clobber a field by omission.
     devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : prior.devLogLevel;
-    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel });
-    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel}`);
+    // QCAP-6: preserve-on-omission (the #102 merge lesson) — an empty/omitted accelerator keeps prior.
+    quickCaptureAccelerator =
+      typeof settings.quickCaptureAccelerator === 'string' && settings.quickCaptureAccelerator.trim().length > 0
+        ? settings.quickCaptureAccelerator
+        : prior.quickCaptureAccelerator;
+    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel, quickCaptureAccelerator });
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator}`);
   }, 'instance-settings:write');
+  // QCAP-6: apply a changed hotkey live (no restart) — conflict-aware via the agent; degrades to the
+  // menubar if the new accelerator clashes (QCAP-9). No-op when running headless without an agent.
+  if (prior.quickCaptureAccelerator !== quickCaptureAccelerator) {
+    getQuickCaptureAgent()?.setAccelerator(quickCaptureAccelerator);
+    await appendAuditEvent(root, {
+      actor: 'panel',
+      eventType: 'instance-config-change',
+      subjects: {},
+      payload: { field: 'quickCaptureAccelerator', from: prior.quickCaptureAccelerator, to: quickCaptureAccelerator, why: 'Principal change via Control Panel' },
+    });
+  }
   if (prior.autonomyDefault !== settings.autonomyDefault) {
     await appendAuditEvent(root, {
       actor: 'panel',

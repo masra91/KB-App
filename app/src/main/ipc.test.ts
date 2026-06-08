@@ -24,6 +24,8 @@ const state = vi.hoisted(() => ({
   dialogResult: { canceled: false, filePaths: [] as string[] },
   handlers: new Map<string, (event: unknown, ...args: unknown[]) => unknown>(),
   stagingRoot: null as string | null, // SPEC-0029: the active staging worktree the activity handlers read
+  clipboard: '', // SPEC-0038 QCAP-7: clipboard prefill source
+  orch: null as null | { capture: (surface: string, payloads: unknown[]) => Promise<{ ids: string[]; captureBatch: string; committed: boolean }> },
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -47,12 +49,13 @@ vi.mock('electron', () => ({
   ipcMain: { handle: (channel: string, fn: Handler) => state.handlers.set(channel, fn) },
   dialog: { showOpenDialog: vi.fn(async () => state.dialogResult) },
   shell: { openExternal: mocks.openExternal },
+  clipboard: { readText: (): string => state.clipboard }, // SPEC-0038 QCAP-7
   BrowserWindow: { fromWebContents: (): null => null },
 }));
 
 vi.mock('./pipeline', () => ({
   startPipeline: mocks.startPipeline,
-  activePipeline: (): null => null,
+  activePipeline: () => state.orch,
   activeStagingRoot: (): string | null => state.stagingRoot,
   listActiveReviews: async (): Promise<unknown[]> => [],
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
@@ -72,7 +75,7 @@ vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 import { registerIpc, initPipeline } from './ipc';
 import { createKb } from '../kb/vault';
 import { obsidianOpenUri } from '../kb/citationLink';
-import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult } from '../kb/types';
+import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const fn = state.handlers.get(channel);
@@ -88,6 +91,8 @@ beforeEach(async () => {
   state.dialogResult = { canceled: false, filePaths: [] };
   state.handlers.clear();
   state.stagingRoot = null;
+  state.clipboard = '';
+  state.orch = null;
   mocks.startPipeline.mockClear();
   mocks.pipelineControl.mockClear();
   mocks.recall.mockClear();
@@ -423,5 +428,52 @@ describe('SPEC-0030 OBS-17 — kb:pipelineControl delegates set-aside recovery',
     const res = await invoke<{ ok: boolean; message?: string }>('kb:pipelineControl', { action: 'retry', stage: 'claims', itemId: '01ADAID' });
     expect(mocks.pipelineControl).toHaveBeenCalledWith({ action: 'retry', stage: 'claims', itemId: '01ADAID' });
     expect(res).toEqual({ ok: true, message: 'Retrying Ada Lovelace.' });
+  });
+});
+
+describe('SPEC-0038 QCAP — quick capture IPC', () => {
+  it('QCAP-1: with no active KB, kb:quickCapture reports it (never silently drops)', async () => {
+    state.orch = null;
+    const res = await invoke<CaptureResult>('kb:quickCapture', { inputs: [{ kind: 'text', text: 'hi' }] });
+    expect(res.ok).toBe(false);
+  });
+
+  it('QCAP-5/2: delivers onto the SPEC-0013 path with surface=quick-capture (fast-out — delegates to capture())', async () => {
+    const capture = vi.fn(async () => ({ ids: ['Q1'], captureBatch: 'qb', committed: true }));
+    state.orch = { capture };
+    const res = await invoke<CaptureResult>('kb:quickCapture', { inputs: [{ kind: 'text', text: 'mid-read thought' }] });
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(capture).toHaveBeenCalledWith('quick-capture', [{ kind: 'text', text: 'mid-read thought' }]);
+    expect(res).toEqual({ ok: true, ids: ['Q1'], captureBatch: 'qb', committed: true, message: 'Captured 1 item(s).' });
+  });
+
+  it('fork #3: the frictionless sheet is text-only — file inputs are ignored', async () => {
+    const capture = vi.fn(async () => ({ ids: ['Q1'], captureBatch: 'qb', committed: true }));
+    state.orch = { capture };
+    await invoke<CaptureResult>('kb:quickCapture', {
+      inputs: [
+        { kind: 'text', text: 'note' },
+        { kind: 'file', name: 'x.png', data: new Uint8Array([1]) },
+      ],
+    });
+    expect(capture).toHaveBeenCalledWith('quick-capture', [{ kind: 'text', text: 'note' }]);
+  });
+
+  it('empty text → nothing captured', async () => {
+    const capture = vi.fn(async () => ({ ids: [], captureBatch: 'qb', committed: true }));
+    state.orch = { capture };
+    const res = await invoke<CaptureResult>('kb:quickCapture', { inputs: [{ kind: 'text', text: '   ' }] });
+    expect(capture).not.toHaveBeenCalled();
+    expect(res.ok).toBe(false);
+  });
+
+  it('QCAP-7: kb:quickCaptureContext returns the current clipboard for prefill', async () => {
+    state.clipboard = 'something I was reading';
+    const ctx = await invoke<QuickCaptureContext>('kb:quickCaptureContext');
+    expect(ctx).toEqual({ clipboard: 'something I was reading' });
+  });
+
+  it('QCAP-2: kb:quickCaptureClose resolves (no-op when no agent is wired)', async () => {
+    await expect(invoke<void>('kb:quickCaptureClose')).resolves.toBeUndefined();
   });
 });

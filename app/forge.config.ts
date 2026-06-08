@@ -27,6 +27,9 @@ const config: ForgeConfig = {
       NSDocumentsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Documents folder.',
       NSDesktopFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives on your Desktop.',
       NSDownloadsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Downloads folder.',
+      // SPEC-0038 QCAP-4/8: ship as a macOS accessory/menubar agent — no forced dock icon — so the
+      // global hotkey + capture sheet are always available, headless, without a window or dock presence.
+      LSUIElement: true,
     },
     // MACOS-3: sign with the hardened runtime + the non-sandboxed entitlements (opt-in; see above).
     ...(SIGN_MACOS
