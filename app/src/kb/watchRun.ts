@@ -19,6 +19,7 @@ import {
   renderWatchSourceBody,
   isSafeWatchId,
   watchArchiveBase,
+  watchDrains,
   type WatchFolderConfig,
 } from './watchConnectors';
 
@@ -143,9 +144,10 @@ export async function reconcileWatchFolder(root: string, c: WatchFolderConfig, d
     return { sourceIds: [], ingested: 0, skipped: 0, failed: true, error, note: `watch failed: ${error}` };
   }
 
-  // Consume/move-out (WATCH-14): resolve the archive base once and confirm it is OUTSIDE the vault (a
+  // Drain/consume (WATCH-16: drain is the DEFAULT — the folder empties like an inbox; `consume: false`
+  // opts out into copy mode). Resolve the archive base once and confirm it is OUTSIDE the vault (a
   // misconfigured custom archiveDir inside the vault would pollute the KB) — else fall back to plain copy.
-  const consume = c.consume === true;
+  const consume = watchDrains(c);
   let archiveBase: string | undefined;
   if (consume) {
     archiveBase = watchArchiveBase(c);

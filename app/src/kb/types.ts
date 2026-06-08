@@ -345,8 +345,9 @@ export interface WatchFolderView {
   recursive: boolean;
   /** Effective recursion depth cap shown/edited in the view (WATCH-12); 0 when non-recursive. */
   maxDepth: number;
-  /** Opt-in consume/move-out (WATCH-14): the original is moved to the archive after a successful ingest. */
-  consume: boolean;
+  /** WATCH-16: the folder DRAINS (consume/move-out) by default; this is the **copy opt-out** state — true
+   *  iff the folder is in "leave originals in place" mode (the original is NOT moved out after ingest). */
+  leaveOriginals: boolean;
   /** True iff a live watcher is currently active for this folder (enabled + loop-safe). */
   watching: boolean;
   lastEvent: WatchFolderLastEvent | null;
@@ -366,7 +367,7 @@ export interface WatchFolderPatch {
   recursive?: boolean;
   /** Recursion depth cap (WATCH-12); clamped at the IPC boundary. */
   maxDepth?: number;
-  /** Opt into consume/move-out (WATCH-14). */
+  /** WATCH-16 drain/copy mode: `true`/absent → drains (move-out); `false` → copy (leave originals). */
   consume?: boolean;
 }
 

@@ -14,7 +14,7 @@ const rss: IntakeConnectorView = {
 };
 const folder: WatchFolderView = {
   id: 'inbox', folderPath: '/Users/me/KB-Inbox', label: 'inbox', enabled: true, scope: 'global', sensitivity: 'internal',
-  ignoreGlobs: ['*.tmp'], recursive: false, maxDepth: 0, consume: false, watching: true, lastEvent: { ts: '2025-06-03T09:00:00Z', kind: 'watch-ingested', path: 'note.md' },
+  ignoreGlobs: ['*.tmp'], recursive: false, maxDepth: 0, leaveOriginals: false, watching: true, lastEvent: { ts: '2025-06-03T09:00:00Z', kind: 'watch-ingested', path: 'note.md' },
 };
 
 let listIntakeConnectors: ReturnType<typeof vi.fn>;
@@ -236,26 +236,32 @@ describe('Sources view · Slice-2 per-folder rules (WATCH-12/14)', () => {
     expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', maxDepth: 32 }); // clamped
   });
 
-  it('enabling move-out CONFIRMS first (it relocates files), then applies (WATCH-14)', async () => {
+  it('WATCH-16: a folder DRAINS by default — the toggle reads "leave originals: off"', async () => {
+    const c = await mount();
+    const toggle = c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-checked')).toBe('false'); // leaveOriginals false → draining
+    expect(toggle.textContent).toMatch(/Leave originals in place: off/i);
+  });
+
+  it('WATCH-16: turning OFF "leave originals" CONFIRMS (it starts draining/relocating files), then applies consume:true', async () => {
+    listWatchFolders = vi.fn(async () => [{ ...folder, leaveOriginals: true }]); // currently copy mode
+    setApi();
     const c = await mount();
     const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
     (strip.querySelector('.watch-consume') as HTMLButtonElement).click();
     await flush();
-    const confirm = strip.querySelector('.watch-consume-confirm') as HTMLElement;
-    expect(confirm.hidden).toBe(false);
-    expect(strip.querySelector('.watch-consume-confirm-msg')!.textContent).toMatch(/moved into.*\.kb-processed.*never deleted/i);
-    expect(setWatchFolder).not.toHaveBeenCalled(); // gated — not applied yet
+    expect((strip.querySelector('.watch-consume-confirm') as HTMLElement).hidden).toBe(false);
+    expect(strip.querySelector('.watch-consume-confirm-msg')!.textContent).toMatch(/drain.*\.kb-processed.*never deleted/i);
+    expect(setWatchFolder).not.toHaveBeenCalled(); // gated
     (strip.querySelector('.watch-consume-confirm-go') as HTMLButtonElement).click();
     await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: true });
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: true }); // start draining
   });
 
-  it('disabling move-out applies directly — no confirm (turning it off is safe) (WATCH-14)', async () => {
-    listWatchFolders = vi.fn(async () => [{ ...folder, consume: true }]);
-    setApi();
-    const c = await mount();
+  it('WATCH-16: turning ON "leave originals" applies directly — no confirm (stops moving files, safe)', async () => {
+    const c = await mount(); // base fixture drains (leaveOriginals:false) → click opts into copy
     (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement).click();
     await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: false });
+    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: false }); // leave originals
   });
 });

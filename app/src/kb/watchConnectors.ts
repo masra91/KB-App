@@ -50,6 +50,17 @@ export function watchArchiveBase(c: Pick<WatchFolderConfig, 'folderPath' | 'arch
 }
 
 /**
+ * Does this folder DRAIN (consume/move-out) on a successful ingest? (WATCH-16: drain is the DEFAULT —
+ * "drains like an inbox", the Principal's ratified flip of the prior copy-default.) A folder drains
+ * UNLESS it has explicitly opted OUT into copy mode (`consume === false`, the "leave originals in place"
+ * toggle). So an absent flag → drains (the new default); `consume: true` → drains; only `consume: false`
+ * leaves the original in place. This is the single predicate every drain/copy decision reads.
+ */
+export function watchDrains(c: Pick<WatchFolderConfig, 'consume'>): boolean {
+  return c.consume !== false;
+}
+
+/**
  * One registered watched folder (WATCH-1) — a per-vault folder the Principal owns, the parallel sibling
  * of the intake connector registry. `folderPath` is an ABSOLUTE local path; `scope`/`sensitivity` are
  * the defaults applied to every file it ingests; `ignoreGlobs` bound what's watched. v1 is non-recursive
@@ -72,7 +83,10 @@ export interface WatchFolderConfig {
   recursive?: boolean;
   /** Depth cap when `recursive` (WATCH-12). Clamped to `[0, WATCH_MAX_DEPTH_CAP]`; default `5`. */
   maxDepth?: number;
-  /** Opt-in consume/move-out (WATCH-14): MOVE the original out after a successful, non-destructive ingest. */
+  /** Drain vs copy mode (WATCH-16). The folder **drains** (consume/move-out, WATCH-14) by DEFAULT — a
+   *  watched folder empties like an inbox. Set `consume: false` to opt OUT into copy mode (leave the
+   *  original in place). Absent → drains; `true` → drains; only `false` keeps the original. Read via
+   *  `watchDrains()`, never `=== true`. */
   consume?: boolean;
   /** Absolute archive base for consume mode (WATCH-14); default `<folderPath>/.kb-processed`. */
   archiveDir?: string;

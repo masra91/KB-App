@@ -44,13 +44,23 @@ describe.skipIf(!gitAvailable)('reconcileWatchFolder consume/move-out (WATCH-14)
     await fs.rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
-  it('DEFAULT (no consume) leaves the original in place — non-destructive copy (WATCH-4 unchanged)', async () => {
+  it('WATCH-16 DEFAULT DRAINS: no flag → the original is MOVED out (folder empties like an inbox)', async () => {
     const file = path.join(watched, 'note.md');
     await fs.writeFile(file, 'hello');
-    const res = await reconcileWatchFolder(vault, cfg(), { vaultRoot: vault, now: T });
+    const res = await reconcileWatchFolder(vault, cfg(), { vaultRoot: vault, now: T }); // no consume flag
+    expect(res.ingested).toBe(1);
+    expect(res.movedOut).toBe(1); // drains by default now
+    expect(await exists(file)).toBe(false); // the watch root visibly emptied
+    expect(await exists(path.join(archive, 'note.md'))).toBe(true); // moved (never deleted) to .kb-processed
+  });
+
+  it('WATCH-16 copy opt-out (consume:false): the original is LEFT IN PLACE — non-destructive copy', async () => {
+    const file = path.join(watched, 'note.md');
+    await fs.writeFile(file, 'hello');
+    const res = await reconcileWatchFolder(vault, cfg({ consume: false }), { vaultRoot: vault, now: T });
     expect(res.ingested).toBe(1);
     expect(res.movedOut).toBeUndefined();
-    expect(await exists(file)).toBe(true); // original untouched
+    expect(await exists(file)).toBe(true); // original untouched (opt-out honored)
     expect(await exists(archive)).toBe(false); // no archive created
   });
 
