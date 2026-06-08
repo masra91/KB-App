@@ -29,12 +29,28 @@ const LINK_REVIEW: ReviewSummary = {
   createdAt: '2026-06-02T11:00:00.000Z',
 };
 
-function setApi(list: KbApi['listReviews'], answerReview?: KbApi['answerReview']): void {
-  (window as unknown as { kbApi: Pick<KbApi, 'listReviews' | 'answerReview'> }).kbApi = {
+function setApi(list: KbApi['listReviews'], answerReview?: KbApi['answerReview'], openCitation?: KbApi['openCitation']): void {
+  (window as unknown as { kbApi: Pick<KbApi, 'listReviews' | 'answerReview' | 'openCitation'> }).kbApi = {
     listReviews: list,
     answerReview: answerReview ?? vi.fn(async () => ({ ok: true, message: 'answered' })),
+    openCitation: openCitation ?? vi.fn(async () => ({ ok: true as const })),
   };
 }
+
+// REVIEW-16: a disambiguation review — two candidates that share the name "Ada", told apart by their
+// agent-authored glosses, each with a working source link. The view renders these as rows.
+const DISAMBIG_REVIEW: ReviewSummary = {
+  id: 'D1',
+  question: 'Is "Ada" from the fishing trip the same person as "Ada" from Dave\'s wedding?',
+  detail: 'Two sources mention "Ada" in unrelated contexts.',
+  stage: 'connect',
+  refs: ['Ada'],
+  candidates: [
+    { name: 'Ada', gloss: 'from the fishing trip', sourceRel: 'sources/2026/06/01/01ABC' },
+    { name: 'Ada', gloss: "from Dave's wedding", sourceRel: 'sources/2026/06/02/01XYZ' },
+  ],
+  createdAt: '2026-06-02T12:00:00.000Z',
+};
 
 describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
   let root: HTMLElement;
@@ -173,5 +189,66 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     root.remove(); // shell tears the view out
     await vi.advanceTimersByTimeAsync(POLL_MS * 2);
     expect(list.mock.calls.length).toBe(callsAfterMount); // no further polling
+  });
+
+  // --- REVIEW-16: disambiguation candidate rows -------------------------------------------------
+  describe('REVIEW-16 candidate rows', () => {
+    it('renders one row per candidate, gloss-first, so the Principal can tell them apart', async () => {
+      setApi(vi.fn(async () => [DISAMBIG_REVIEW]));
+      await mountReviews(root);
+      const rows = root.querySelectorAll('.review-candidate');
+      expect(rows).toHaveLength(2);
+      const glosses = Array.from(root.querySelectorAll('.review-candidate-gloss')).map((g) => g.textContent);
+      expect(glosses).toEqual(['from the fishing trip', "from Dave's wedding"]);
+      // The shared name is shown as the row label (both are "Ada"); the gloss is what distinguishes.
+      expect(Array.from(root.querySelectorAll('.review-candidate-name')).map((n) => n.textContent)).toEqual(['Ada', 'Ada']);
+    });
+
+    it('"Open in Obsidian" opens that candidate\'s source via openCitation (reuses the EXPLORE-4 IPC)', async () => {
+      const openCitation = vi.fn(async () => ({ ok: true as const }));
+      setApi(vi.fn(async () => [DISAMBIG_REVIEW]), undefined, openCitation);
+      await mountReviews(root);
+      const links = root.querySelectorAll<HTMLButtonElement>('.review-candidate-open');
+      expect(links).toHaveLength(2);
+      links[1].click(); // open the second candidate's source
+      expect(openCitation).toHaveBeenCalledWith('sources/2026/06/02/01XYZ');
+    });
+
+    it('omits the link for a candidate with no known sourceRel (renders gloss only)', async () => {
+      const review: ReviewSummary = {
+        ...DISAMBIG_REVIEW,
+        candidates: [
+          { name: 'Ada', gloss: 'from the fishing trip', sourceRel: 'sources/2026/06/01/01ABC' },
+          { name: 'Ada', gloss: 'mentioned only in passing' }, // no sourceRel
+        ],
+      };
+      setApi(vi.fn(async () => [review]));
+      await mountReviews(root);
+      expect(root.querySelectorAll('.review-candidate')).toHaveLength(2);
+      expect(root.querySelectorAll('.review-candidate-open')).toHaveLength(1); // only the one with a source
+    });
+
+    it('esc()s the agent-authored gloss/name — untrusted LLM text never reaches an HTML sink (XSS)', async () => {
+      const xss = '<img src=x onerror="window.__pwned=1">';
+      const review: ReviewSummary = {
+        ...DISAMBIG_REVIEW,
+        candidates: [{ name: xss, gloss: xss, sourceRel: '"><script>window.__pwned=1</script>' }],
+      };
+      setApi(vi.fn(async () => [review]));
+      await mountReviews(root);
+      // The payload renders as inert text, not DOM: no injected <img>/<script>, and the row is intact.
+      expect(root.querySelector('.review-candidate-gloss')?.textContent).toBe(xss);
+      expect(root.querySelector('.review-candidate-gloss img')).toBeNull();
+      expect(root.querySelector('.review-candidate script')).toBeNull();
+      expect((window as unknown as { __pwned?: number }).__pwned).toBeUndefined();
+      // The malicious sourceRel survives only as an inert data attribute, round-tripped verbatim.
+      expect(root.querySelector<HTMLButtonElement>('.review-candidate-open')?.dataset.rel).toBe('"><script>window.__pwned=1</script>');
+    });
+
+    it('an ordinary review (no candidates) renders no candidate block — unchanged behaviour', async () => {
+      setApi(vi.fn(async () => [CLAIM_REVIEW]));
+      await mountReviews(root);
+      expect(root.querySelector('.review-candidates')).toBeNull();
+    });
   });
 });

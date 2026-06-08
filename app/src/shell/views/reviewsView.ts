@@ -93,6 +93,7 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
       (r) => `
       <li class="review" data-id="${esc(r.id)}">
         <div class="review-q">${esc(r.question)}</div>
+        ${candidatesBlock(r)}
         <details class="review-detail">
           <summary>Why this matters</summary>
           <p>${esc(r.detail)}</p>
@@ -124,6 +125,45 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
       void answer(container, btn.dataset.id!, verdict);
     });
   }
+
+  // REVIEW-16: each candidate row's "Open in Obsidian" opens its source dir in Obsidian. Reuses the
+  // ASK-14/EXPLORE-4 `openCitation` IPC (repo-relative path → obsidian:// deep link in the main
+  // process) — the renderer never builds a URL itself, so the agent-authored `sourceRel` can't reach
+  // a markup/href sink. `data-rel` was esc()'d at render; we read it back as a plain string.
+  for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.review-candidate-open'))) {
+    btn.addEventListener('click', () => {
+      const rel = btn.dataset.rel;
+      if (rel) void window.kbApi.openCitation(rel);
+    });
+  }
+}
+
+/**
+ * REVIEW-16 — the disambiguation candidate rows. A "same entity?" review's candidates usually share
+ * a name, so the distinguishing **gloss** ("from the fishing trip" vs "Dave's wedding") is the star;
+ * each row also offers a working "Open in Obsidian" link to that candidate's source when known. This
+ * enriches the decision *context* only — the Confirm/Reject verdict (REVIEW-2) is unchanged.
+ *
+ * Returns '' for an ordinary review (no candidates) so nothing renders. Name/gloss/sourceRel are
+ * AGENT-AUTHORED (LLM, untrusted) → every interpolation is esc()'d, including the `data-rel` the
+ * click handler reads back (KB-QD-2's forward-flagged XSS).
+ */
+function candidatesBlock(r: ReviewSummary): string {
+  if (!r.candidates?.length) return '';
+  const rows = r.candidates
+    .map((c) => {
+      const link = c.sourceRel
+        ? `<button type="button" class="review-candidate-open viz-btn viz-btn--ghost viz-focusable" data-rel="${esc(c.sourceRel)}" title="Open this candidate's source in Obsidian">Open in Obsidian ↗</button>`
+        : '';
+      return `
+        <li class="review-candidate viz-spine">
+          <span class="review-candidate-name viz-signage">${esc(c.name)}</span>
+          <span class="review-candidate-gloss viz-body">${esc(c.gloss)}</span>
+          ${link}
+        </li>`;
+    })
+    .join('');
+  return `<ul class="review-candidates" aria-label="Candidates to tell apart">${rows}</ul>`;
 }
 
 async function answer(container: HTMLElement, id: string, verdict: 'confirm' | 'reject'): Promise<void> {
