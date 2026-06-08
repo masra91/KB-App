@@ -56,8 +56,11 @@ describe('navigable source link (VAULT-13)', () => {
   it('renders [[<dir>/source.md|<date>]] with the capture date as the display label', () => {
     expect(sourceLink('sources/2026/05/30/01JSRC')).toBe('[[sources/2026/05/30/01JSRC/source.md|2026-05-30]]');
   });
-  it('falls back to the source-dir id when the path is not date-sharded, and is empty for no source', () => {
-    expect(sourceLink('sources/flat/abc123')).toBe('[[sources/flat/abc123/source.md|abc123]]');
+  // PRIN-24 (KB-Lead): the non-date fallback must NEVER emit the source-dir ULID as the label — it
+  // falls back to a neutral 'source' instead (the old `dir.split('/').pop()` leaked the ULID).
+  it('falls back to a neutral non-ULID label when the path is not date-sharded, and is empty for no source', () => {
+    expect(sourceLink('sources/flat/01JSRCULIDABCDEF')).toBe('[[sources/flat/01JSRCULIDABCDEF/source.md|source]]');
+    expect(sourceLink('sources/flat/01JSRCULIDABCDEF')).not.toContain('01JSRCULIDABCDEF/source.md|01'); // the ULID never becomes the label
     expect(sourceLink('')).toBe('');
   });
   it('adds a navigable source citation to each claims-block row when the backlink knows its source', () => {
