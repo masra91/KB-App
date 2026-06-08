@@ -6,7 +6,7 @@ type: design
 status: draft   # awaiting SPEC-0033 gates: GATE 1 (AI-Detector / distinctiveness) + GATE 2 (KB-QD / flow coverage)
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-06-08
 related: [SPEC-0038, SPEC-0033, _design-system, SPEC-0013, SPEC-0032, SPEC-0034]
 gates:
   ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness) — the MOST-summoned surface; must not be a generic capture box
@@ -79,6 +79,57 @@ the same language as everything else, just bigger and barer.
   accidental summon therefore never writes an empty source into the user's vault (KB-QD invariant, #249
   gate-2; implemented + tested in #251).
 
+## 3a. The command bar — a sticky instrument footer (QCAP-12)
+
+The submit affordances (`⏎ save` ghost button + the `⏎ save · esc dismiss` hint + the live status note)
+form a **command bar** that must be **always on-screen** — it can never scroll off, even when pasted/typed
+content overflows the compact ~200px window. Today it can: the field is `flex: 1` with no `min-height: 0`,
+so a tall paste pushes the `.qcap-row` below the fold (`qcap.css:71` row / `:32` field) and the user loses
+the save/cancel actions. That contradicts the command-bar intent (§2): the actions are the instrument's
+**fixed footer rail**, not the tail of a scrolling document.
+
+- **The field flexes and scrolls; the command bar is pinned.** The intake field becomes the *only* region
+  that gives: `flex: 1 1 auto` **+ `min-height: 0`** so it can shrink below its content, and the textarea
+  **scrolls internally** (`overflow-y: auto`) instead of growing the sheet. The command bar is **`flex: none`**
+  — it never shrinks and always sits at the bottom edge of the slot.
+- **A ruled footer, flat (no shadow).** The command bar gets a **1px `--viz-rule` hairline along its TOP**
+  (the footer rail of the instrument — mirrors the §2 top ember hairline at the head), with the existing
+  `8px` rhythm above it. When the field scrolls under it, the rule is the clean visual anchor — never a
+  drop-shadow or a floating-toolbar treatment.
+- **Save = confirm, Esc = cancel — both always reachable.** Keyboard-first stays the protagonist (`⏎`
+  saves, `Esc` cancels), but their on-screen affordances (the ghost `⏎ save` button and the `esc dismiss`
+  hint) are now **guaranteed visible** for mouse/discoverability users. The button keeps its WS2 disabled
+  state on an empty field (§3). No new control — this is the existing `.qcap-row` promoted to a pinned,
+  ruled footer.
+- **Reduced-motion / contrast unaffected** — purely structural; the ember/oxide/patina state treatments
+  (§5) ride on the field rule exactly as before.
+
+## 3b. Screenshot capture — an alternate intake source (QCAP-13)
+
+A second way to *load the slot*: capture a screenshot straight into the field, alongside type / paste /
+clipboard. Three modes — **Full screen · Region · Window** — that trigger the macOS `screencapture` path.
+This stays an **instrument**, not a generic camera widget.
+
+- **A spare icon-button cluster, not a toolbar.** Three **ghost icon-buttons** (`.viz-btn--ghost`,
+  icon-only) grouped at the **trailing edge of the `.qcap-head`** (next to the source tag) — thin,
+  instrument-line template glyphs (a full-frame rect, a crop/region rect, a window rect), **never** a
+  📷/camera emoji or a filled "Capture" button. They're secondary to the field: muted `--viz-ink-muted`
+  ink at rest, ember on hover/focus (the `.viz-focusable` ring), so the keyboard intake stays the hero.
+- **Captured image = a "loaded" state, tagged by source.** A screenshot loads into the slot the same way
+  clipboard/selection do (§3, QCAP-7): the field enters `is-loaded` with a **`screenshot` source tag** —
+  the identical `.viz-chip` + left `--viz-rule` tick pattern as `clipboard` / `selection` (one consistent
+  "this is loaded material" language). `⏎` saves it in one gesture.
+- **Permission UX reuses the QCAP-9 brass semantic.** Screen-Recording TCC not yet granted → the cluster
+  shows the **same quiet brass steer** as the selection-capture affordance (`selection capture off — enable`
+  → Settings · Privacy · Screen Recording): **`--viz-brass` (needs-you), NOT `--viz-oxide`** — a denied
+  permission is *waiting on you*, not a crash (the locked semantic, `macos-permission.md §3/§6`; ratified
+  on PR #258). Denied → **graceful degrade to paste-an-image** (the clipboard path still loads an image),
+  never a dead end. Each button carries an explicit `aria-label` (`Capture full screen` / `Capture a
+  region` / `Capture a window`) — icon-only buttons need an accessible name.
+- **Scope note.** QCAP-13 brings **image-via-screenshot** into the QCAP slot (text · clipboard · selection
+  · screenshot); arbitrary **file-drop / rich payloads remain RICHIN** (§9) — this is a bounded capture
+  source, not a general attachment surface.
+
 ## 4. The menubar presence (always-there, quietly alive — QCAP-3)
 
 - **The mark, not a generic glyph.** The menubar item is the **app's instrument mark** (the same
@@ -146,11 +197,18 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
 7. **Empty `⏎` = frictionless cancel** — `⌥Space` → `⏎` on an empty/whitespace field → no source, no
    acknowledge; the sheet dismisses + restores focus (same as `Esc`). §3. No empty source ever reaches
    the vault. (KB-QD #249 gate-2 invariant; impl/tested in #251)
+8. **Overflowing capture, actions still reachable** — paste/type past the compact window → the field
+   scrolls internally, the **command bar stays pinned** at the bottom; `⏎ save` / `esc dismiss` never
+   scroll off. (QCAP-12, §3a)
+9. **Screenshot → save** — click Region (or Full screen / Window) → `screencapture` → image loads as a
+   tagged `screenshot` "loaded" state → `⏎` saves. (QCAP-13, §3b)
+10. **Screen-Recording denied** — the screenshot cluster shows the **brass** steer (Settings · Privacy ·
+    Screen Recording) and **degrades to paste-an-image**; capture still works, never a dead end. (QCAP-13/9, §3b)
 
 ## 9. Out of scope (deferred to SPEC-0038 later slices / other specs)
 
-- **Selection capture, richer sheet, file-drop** — SPEC-0038 Slice 2 / RICHIN (the sheet stays
-  text+clipboard in v1; this spec designs that v1 surface).
+- **Arbitrary file-drop / rich payloads** — RICHIN. QCAP's bounded intake sources are text · clipboard ·
+  selection (Slice 2) · screenshot (QCAP-13, §3b); general attachment is out of scope here.
 - **Windows/Linux surfaces** — Slice 3+; the visual language ports, the platform chrome differs.
 - **Migrating the in-app SPEC-0013 capture view** onto this language — desirable, but its own pass; out
   of scope here (QCAP is the global surface).
@@ -180,3 +238,12 @@ and it must be **fast** (the sheet auto-dismisses). The signature treatment:
   non-blocking gate-2 note: empty/whitespace `⏎` creates no source, fires no acknowledge, keeps the
   sheet open, and disables the save Button (WS2 disabled state) — so an accidental summon never writes
   an empty source into the vault. Awaiting GATE 1 (AI-Detector).
+- 2026-06-08 — **WS4 visuals added (§3a/§3b — QCAP-12/13)** from the Principal deep-pass (PR #266),
+  authored in parallel for DEV-1 to plumb after Slice 2 (#258). **§3a QCAP-12** — the command bar becomes
+  a **sticky, ruled instrument footer** (field flexes + `min-height:0` + internal scroll; `.qcap-row`
+  `flex:none` + a 1px `--viz-rule` top hairline) so `⏎ save` / `esc dismiss` never scroll off the compact
+  window. **§3b QCAP-13** — **screenshot capture** (Full screen · Region · Window) as a spare ghost
+  icon-button cluster in the head, loading a `screenshot`-tagged "loaded" state (same `.viz-chip` pattern
+  as clipboard/selection); Screen-Recording denial reuses the **brass** denied-permission steer (NOT
+  oxide; the locked `macos-permission.md §3/§6` semantic, ratified on #258) and **degrades to paste-an-
+  image**. No new tokens/components — all blessed primitives. Net-new visual → **KB-Lead classify/gate**.
