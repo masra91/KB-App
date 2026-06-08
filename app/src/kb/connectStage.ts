@@ -40,8 +40,9 @@ import {
 import { mergeNodes } from './mergeNodes';
 import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
-import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef } from './connectAgent';
+import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef, type PriorDisambiguation } from './connectAgent';
 import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
+import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
 import { deriveSourceTitle } from './sourceDoc';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
@@ -589,20 +590,55 @@ export async function connectOne(
   }
 
   try {
+    // CONNECT-21: load the durable disambiguation decisions so they inform BOTH the decider (the
+    // matcher resolves new mentions against known verdicts instead of re-opening) and the post-decision
+    // suppression below. Surface the ones among THIS block's same-key existing nodes as decided pairs.
+    const decisions = await readDisambiguationDecisions(wt);
+    const priorDecisions: PriorDisambiguation[] = [];
+    for (let i = 0; i < sameKeyNodes.length; i++) {
+      for (let j = i + 1; j < sameKeyNodes.length; j++) {
+        const d = decisionForPair(decisions, sameKeyNodes[i].id, sameKeyNodes[j].id);
+        if (d) priorDecisions.push({ a: sameKeyNodes[i].id, b: sameKeyNodes[j].id, verdict: d.verdict });
+      }
+    }
     const set: CandidateSet = {
       blockKey: key,
       kind,
       candidates: setCandidates,
       existingNodes: sameKeyNodes.map((n): ExistingNodeRef => ({ id: n.id, name: n.name })),
+      ...(priorDecisions.length > 0 ? { priorDecisions } : {}),
     };
     const decision = await decider(set, { span });
     const model = decision.agent?.model ?? 'default';
     const nodeById = new Map(nodes.map((n) => [n.id, n] as const));
     const candidateById = new Map(setCandidates.map((c) => [c.id, c] as const));
 
-    // REVIEW-5 / CONNECT-15: if the agent raised reviews, PARK the whole block — apply NO
-    // resolution until answered. Cascade cap (REVIEW-8): too many parks → set aside.
-    if (decision.reviews && decision.reviews.length > 0) {
+    // CONNECT-21: consult durable disambiguation decisions BEFORE raising. A "same entity?" review
+    // whose entity-PAIR already has a recorded verdict (REVIEW-18) is NEVER re-asked — drop it. This is
+    // the missing durable half of CONNECT-15's "resume with the verdict as context": a decided pair
+    // (Leavenworth-company ≠ Leavenworth-WA, …) re-blocked on every later mention and re-raised the
+    // identical Review (the Principal's "the same review over and over"). Suppressing the decided re-asks
+    // lets the queue converge; a genuinely new/undecided pair still raises. Only an undecided review parks.
+    const liveReviews = (decision.reviews ?? []).filter((req) => {
+      if (req.pair) {
+        const decided = decisionForPair(decisions, req.pair[0], req.pair[1]);
+        if (decided) {
+          log.info('connect.disambiguation-suppressed', {
+            runId,
+            itemId: key,
+            pair: req.pair.join(' · '),
+            verdict: decided.verdict,
+            reviewId: decided.reviewId,
+          });
+          return false; // decided pair → don't re-ask (CONNECT-21)
+        }
+      }
+      return true;
+    });
+
+    // REVIEW-5 / CONNECT-15: if any review survives the decision check, PARK the whole block — apply
+    // NO resolution until answered. Cascade cap (REVIEW-8): too many parks → set aside.
+    if (liveReviews.length > 0) {
       const prior = await readConnectState(wt, key);
       let audit = auditLine({ runId, blockKey: key, model, event: 'start' });
       if (prior.rounds >= maxReviewRounds) {
@@ -615,7 +651,7 @@ export async function connectOne(
       }
       const createdAt = new Date().toISOString();
       const reviewIds: string[] = [];
-      for (const req of decision.reviews) {
+      for (const req of liveReviews) {
         const id = ulid();
         // REVIEW-16: enrich the agent's per-candidate glosses into decision-grade subject context —
         // join each {id, gloss} to its candidate's name + resolved source title (PRIN-24: shown, never
@@ -642,7 +678,15 @@ export async function connectOne(
           status: 'open',
           question: req.question,
           detail: req.detail,
-          raisedBy: { stage: STAGE, runId, item: { kind: 'block', ref: key }, auditRel: AUDIT_REL, markerKey: { blockKey: key } },
+          raisedBy: {
+            stage: STAGE,
+            runId,
+            item: { kind: 'block', ref: key },
+            auditRel: AUDIT_REL,
+            // REVIEW-18: a disambiguation review carries the decided entity-PAIR on its markerKey so the
+            // answer path records a durable per-pair decision (`confirm`→same, `reject`→distinct) keyed by it.
+            markerKey: { blockKey: key, ...(req.pair ? { pairA: req.pair[0], pairB: req.pair[1] } : {}) },
+          },
           subject: {
             ...(req.refs ? { refs: req.refs } : {}),
             ...(subjectCandidates.length > 0 ? { candidates: subjectCandidates } : {}),

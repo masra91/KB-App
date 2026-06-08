@@ -11,6 +11,7 @@ import { ulid, dateShard } from './ulid';
 import { renderEntityNode, LINKS_BLOCK_START } from './connectDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
+import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
 import type { DevLog } from './devlog';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
@@ -949,6 +950,114 @@ describe.skipIf(!gitAvailable)('Connect set-aside recovery (OBS-17)', () => {
 
       // A renderer-supplied itemId NOT in the live list resolves to a no-op error (trust boundary).
       expect('error' in planSetAsideAction(targets, { stage: 'connect', action: 'retry', itemId: 'person|ghost' })).toBe(true);
+    });
+  });
+});
+
+// REVIEW-18 / CONNECT-21 — a disambiguation verdict is a DURABLE per-pair decision; a decided pair is
+// never re-asked. The Principal kept getting the SAME "are these the same?" review (Leavenworth, Paris,
+// Gary) on every new mention because the verdict was consumed per-round and forgotten.
+describe.skipIf(!gitAvailable)('REVIEW-18 / CONNECT-21 — durable disambiguation decisions', () => {
+  // Two existing same-key nodes (same name → same blockKey, distinct rels/ids) — the "two Leavenworths".
+  async function seedNodeAt(root: string, rel: string, kind: string, name: string): Promise<{ id: string; rel: string }> {
+    const id = ulid();
+    const dest = path.join(root, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(
+      dest,
+      renderEntityNode({ id, kind, name, confidence: 0.9, aliases: [id], derivedFrom: ['sources/x/01SX'], resolvedFrom: [], tags: [], createdAt: '2026-05-30T00:00:00Z', updatedAt: '2026-05-30T00:00:00Z' }),
+      'utf8',
+    );
+    return { id, rel };
+  }
+  // A decider that resolves the block's candidates into existing node A, AND raises a "same?" review
+  // about the existing pair — i.e. the recurring re-ask. The stage suppresses it once the pair is decided.
+  function pairReviewDecider(pair: [string, string], foldIntoId: string): ConnectDecider {
+    return async (set: CandidateSet): Promise<ConnectDecision> => ({
+      blockKey: set.blockKey,
+      clusters: [{ canonicalName: 'Leavenworth', memberCandidateIds: set.candidates.map((c) => c.id), existingNodeId: foldIntoId, confidence: 0.9 }],
+      reviews: [{ question: 'Is Leavenworth (the company) the same as Leavenworth (the WA town)?', detail: 'Two same-named entities.', pair }],
+      agent: { via: 'copilot', model: 'test' },
+    });
+  }
+
+  it("a 'distinct' verdict suppresses the re-raise on a fresh mention of the same pair (CONNECT-21)", async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const a = await seedNodeAt(root, 'entities/organization/leavenworth.md', 'organization', 'Leavenworth');
+      const b = await seedNodeAt(root, 'entities/organization/leavenworth-wa.md', 'organization', 'Leavenworth');
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC1');
+      await commitAll(root, 'two Leavenworths + a fresh mention');
+      const key = 'organization|leavenworth';
+      const decider = pairReviewDecider([a.id, b.id], a.id);
+
+      // Pass 1: undecided pair → the review IS raised (parked).
+      await connectOne(root, key, decider);
+      const open1 = await findOpenReviews(root);
+      expect(open1).toHaveLength(1);
+      expect(open1[0].raisedBy.markerKey.pairA).toBeDefined(); // carries the pair for the answer to record
+
+      // The Principal answers "different" → durable distinct-from decision recorded at answer-time.
+      await answerReview(root, new Mutex(), open1[0].id, { verdict: 'reject' });
+      const decisions = await readDisambiguationDecisions(root);
+      expect(decisionForPair(decisions, a.id, b.id)?.verdict).toBe('distinct');
+
+      // A FRESH mention of the same name re-blocks the key…
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC2');
+      await commitAll(root, 'a later source mentions Leavenworth again');
+
+      // Pass 2: the decider would re-raise the SAME pair, but CONNECT-21 consults the decision and
+      // SUPPRESSES it → no NEW open review (the queue converges instead of spamming).
+      await connectOne(root, key, decider);
+      const open2 = await findOpenReviews(root);
+      expect(open2).toHaveLength(0); // the decided pair is never re-asked
+    });
+  });
+
+  it('an undecided, never-before-seen pair STILL raises (the memory is per-pair)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const a = await seedNodeAt(root, 'entities/organization/leavenworth.md', 'organization', 'Leavenworth');
+      const b = await seedNodeAt(root, 'entities/organization/leavenworth-wa.md', 'organization', 'Leavenworth');
+      const c = await seedNodeAt(root, 'entities/organization/leavenworth-co.md', 'organization', 'Leavenworth');
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC1');
+      await commitAll(root, 'three Leavenworths');
+      const key = 'organization|leavenworth';
+
+      // Decide (a,b) distinct first.
+      await connectOne(root, key, pairReviewDecider([a.id, b.id], a.id));
+      const open = await findOpenReviews(root);
+      await answerReview(root, new Mutex(), open[0].id, { verdict: 'reject' });
+
+      // A review about a DIFFERENT, undecided pair (a,c) still raises — only (a,b) is settled.
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC2');
+      await commitAll(root, 'fresh mention');
+      await connectOne(root, key, pairReviewDecider([a.id, c.id], a.id));
+      const openAfter = await findOpenReviews(root);
+      expect(openAfter).toHaveLength(1); // the never-decided pair (a,c) is asked
+      expect(decisionForPair(await readDisambiguationDecisions(root), a.id, c.id)).toBeUndefined();
+    });
+  });
+
+  it("a 'same' (confirm) verdict is recorded durably and likewise not re-asked", async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const a = await seedNodeAt(root, 'entities/organization/leavenworth.md', 'organization', 'Leavenworth');
+      const b = await seedNodeAt(root, 'entities/organization/leavenworth-wa.md', 'organization', 'Leavenworth');
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC1');
+      await commitAll(root, 'two Leavenworths');
+      const key = 'organization|leavenworth';
+      const decider = pairReviewDecider([a.id, b.id], a.id);
+
+      await connectOne(root, key, decider);
+      const open = await findOpenReviews(root);
+      await answerReview(root, new Mutex(), open[0].id, { verdict: 'confirm' }); // SAME
+      expect(decisionForPair(await readDisambiguationDecisions(root), a.id, b.id)?.verdict).toBe('same');
+
+      await seedCandidate(root, 'organization', 'Leavenworth', '01SRC2');
+      await commitAll(root, 'fresh mention');
+      await connectOne(root, key, decider);
+      expect(await findOpenReviews(root)).toHaveLength(0); // a decided-same pair is not re-asked either
     });
   });
 });

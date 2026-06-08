@@ -24,12 +24,25 @@ export interface ExistingNodeRef {
   name: string; // its current canonical name
 }
 
+/** A durable prior verdict on a pair of same-block existing nodes (REVIEW-18 / CONNECT-21). */
+export interface PriorDisambiguation {
+  a: string; // existingNodeId
+  b: string; // existingNodeId
+  verdict: 'same' | 'distinct';
+}
+
 /** One bounded candidate set the agent resolves (CONNECT-4): all share `blockKey`. */
 export interface CandidateSet {
   blockKey: string;
   kind: string;
   candidates: Candidate[]; // the unresolved candidates in this block (≥1)
   existingNodes: ExistingNodeRef[]; // already-canonical nodes with the same block key (may be empty)
+  /**
+   * Durable decisions already made about pairs of the existing nodes above (REVIEW-18). The matcher
+   * must RESOLVE against these, not re-open them: a `distinct` pair is settled-separate, a `same` pair
+   * is one node. Do NOT raise a review for a pair listed here — it has already been decided (CONNECT-21).
+   */
+  priorDecisions?: PriorDisambiguation[];
 }
 
 /** A decider maps a candidate set to a validated verdict. May throw (CONNECT-14). */
@@ -77,6 +90,12 @@ export function buildConnectPrompt(set: CandidateSet): string {
     set.existingNodes.length > 0
       ? set.existingNodes.map((n) => `  - existingNodeId: ${n.id}  name: ${JSON.stringify(n.name)}`)
       : ['  (none)'];
+  // REVIEW-18 / CONNECT-21: decisions already made about pairs of the existing nodes — resolve against
+  // them, NEVER re-ask. `distinct` = settled-separate (two real things sharing a name); `same` = one node.
+  const priorDecisionLines =
+    set.priorDecisions && set.priorDecisions.length > 0
+      ? set.priorDecisions.map((d) => `  - ${d.a} and ${d.b}: ALREADY DECIDED ${d.verdict.toUpperCase()} — do NOT raise a review for this pair`)
+      : null;
   return [
     'You are the KB-App Connect librarian. ENTITY RESOLUTION: decide which of these',
     `per-source candidate mentions (all loosely grouped as kind "${set.kind}") refer to the`,
@@ -98,6 +117,9 @@ export function buildConnectPrompt(set: CandidateSet): string {
     ...candidateLines,
     'EXISTING NODES (same block — fold a cluster into one only if truly the same thing):',
     ...existingLines,
+    ...(priorDecisionLines
+      ? ['ALREADY-DECIDED PAIRS (durable verdicts — resolve against these, NEVER re-ask):', ...priorDecisionLines]
+      : []),
     '',
     'Optionally add reviews[] for genuinely ambiguous merges — the affected candidates are',
     'parked, not merged, until answered. For each such review you MUST make the candidates',
@@ -109,13 +131,16 @@ export function buildConnectPrompt(set: CandidateSet): string {
     '  - the question itself MUST use those glosses, NOT bare names — a bare "Is Benton the same',
     '    as Benton?" is undecidable. e.g. "Is Benton (fishing-trip notes) the same person as',
     '    Benton (Dave\'s wedding list)?"',
+    '  - when the ambiguity is between two EXISTING NODES above (e.g. two same-named nodes that may',
+    '    or may not be one), add "pair":["<existingNodeIdA>","<existingNodeIdB>"] — the verdict is then',
+    '    remembered durably for that pair so you are never asked about it again (REVIEW-18).',
     'Optionally add signals[] (typed notes for the audit log only; type is open — note,',
     'possible-duplicate, ambiguity, suggestion). Both are optional and usually unnecessary.',
     '',
     'Do NOT create typed links or resolve relationships — only entity resolution here.',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
+    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"pair":["<existingNodeIdA>","<existingNodeIdB>"],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
   ]
     .filter((l) => l !== '')
     .join('\n');
