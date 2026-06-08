@@ -9,6 +9,7 @@ import {
   buildPerfIndex,
   loadPerfIndex,
   readPerfIndexCache,
+  readSpans,
   spansForItem,
   PERF_INDEX_REL,
   type PerfIndex,
@@ -137,5 +138,28 @@ describe('perf index (SPEC-0030 OBS-14/16)', () => {
     expect(idx.stages).toEqual([]);
     expect(idx.source).toBeNull();
     expect(PERF_INDEX_REL.startsWith(path.join('.kb', 'cache'))).toBe(true);
+  });
+
+  // REGRESSION (#256 / OBS-23): readSpans must read only the TAIL (O(window)), not the whole file.
+  // The whole-file read + per-line parse on every status poll blew the 8000ms status loadGuard and
+  // timed out the Status view once spans.jsonl had grown. A large file must yield only recent spans.
+  it('readSpans reads only the tail, not the whole file (OBS-23)', async () => {
+    root = await makeTempDir('kb-perf-');
+    // Many OLD spans, then a few RECENT ones at the end (newest-last on disk, as the tracer appends).
+    const old = Array.from({ length: 800 }, (_, i) => span({ op: 'stage.run', stage: 'decompose', itemId: `OLD${i}`, durationMs: 1 }));
+    const recent = ['RECENT0', 'RECENT1', 'RECENT2'].map((id) => span({ op: 'stage.run', stage: 'connect', itemId: id, durationMs: 1 }));
+    await writeSpans(root, [...old, ...recent]);
+    const tailBytes = 1024; // far smaller than the file → must force a tail read
+    const fileSize = (await fs.stat(vaultSpansPath(root))).size;
+    expect(fileSize).toBeGreaterThan(tailBytes);
+
+    const spans = await readSpans(root, { tailBytes });
+    const ids = spans.map((s) => s.itemId);
+    // Tail-bounded: the NEWEST span is present, the OLDEST is not read, and the count is O(window) —
+    // NOT the whole 803-span file. Fails-before (whole-file read) returns all 803, incl. OLD0.
+    expect(ids).toContain('RECENT2'); // the most-recent span is always returned
+    expect(ids).not.toContain('OLD0'); // the oldest spans are beyond the tail → never read
+    expect(spans.length).toBeLessThan(50); // O(tail budget), independent of total file size
+    expect(spans.length).toBeLessThan(803);
   });
 });
