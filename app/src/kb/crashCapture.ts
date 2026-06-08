@@ -102,6 +102,35 @@ export async function readLastCrash(userDataDir: string): Promise<CrashBreadcrum
   }
 }
 
+/** A renderer-side uncaught error / unhandled rejection, forwarded to main (the isolated renderer
+ *  has no `process` + no fs, so its `window` error events are reported over IPC — OBS-18 "renderer"). */
+export interface RendererErrorReport {
+  kind: 'error' | 'unhandledrejection';
+  message: string;
+  source?: string;
+  line?: number;
+  col?: number;
+  stack?: string;
+}
+
+/** Map a renderer error report to the app-log event + fields (pure). NOT fatal to the main process —
+ *  a renderer JS error is logged loudly but doesn't tear the app down (render-process-gone handles an
+ *  actual renderer death). It also does not overwrite the last-crash breadcrumb (that's for crashes). */
+export function rendererCrashEvent(report: RendererErrorReport): { event: string; fields: Record<string, unknown> } {
+  return {
+    event: report.kind === 'unhandledrejection' ? 'crash.renderer-unhandled-rejection' : 'crash.renderer-uncaught',
+    fields: {
+      fatal: false,
+      scope: 'renderer',
+      message: report.message,
+      ...(report.source ? { source: report.source } : {}),
+      ...(typeof report.line === 'number' ? { line: report.line } : {}),
+      ...(typeof report.col === 'number' ? { col: report.col } : {}),
+      ...(report.stack ? { stack: report.stack } : {}),
+    },
+  };
+}
+
 /** A minimal `process`-like emitter (injectable for tests). */
 export interface ProcessLike {
   on(event: string, listener: (...args: unknown[]) => void): unknown;

@@ -9,6 +9,7 @@ import {
   writeCrashBreadcrumbSync,
   readLastCrash,
   lastCrashPath,
+  rendererCrashEvent,
   type CrashCaptureDeps,
 } from './crashCapture';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
@@ -61,6 +62,18 @@ describe('crashCapture pure helpers (OBS-18)', () => {
     const fs = await import('node:fs');
     await fs.promises.writeFile(lastCrashPath(dir), '{not json');
     expect(await readLastCrash(dir)).toBeNull();
+  });
+
+  it('rendererCrashEvent maps an uncaught renderer error to a non-fatal app-log entry (OBS-18 renderer)', () => {
+    const e = rendererCrashEvent({ kind: 'error', message: 'boom', source: 'app://renderer.js', line: 12, col: 3, stack: 'Error: boom' });
+    expect(e.event).toBe('crash.renderer-uncaught');
+    expect(e.fields).toMatchObject({ fatal: false, scope: 'renderer', message: 'boom', source: 'app://renderer.js', line: 12, col: 3 });
+  });
+
+  it('rendererCrashEvent maps an unhandled rejection', () => {
+    const e = rendererCrashEvent({ kind: 'unhandledrejection', message: 'nope' });
+    expect(e.event).toBe('crash.renderer-unhandled-rejection');
+    expect(e.fields).toMatchObject({ fatal: false, message: 'nope' });
   });
 });
 

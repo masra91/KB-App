@@ -15,6 +15,7 @@ const kbApi: KbApi = {
   quickCaptureContext: () => ipcRenderer.invoke('kb:quickCaptureContext'),
   pipelineStatus: () => ipcRenderer.invoke('kb:pipelineStatus'),
   pipelineStatusView: () => ipcRenderer.invoke('kb:pipelineStatusView'),
+  reportRendererError: (report) => ipcRenderer.invoke('kb:reportRendererError', report), // OBS-18 (renderer)
   listReviews: () => ipcRenderer.invoke('kb:listReviews'),
   answerReview: (req) => ipcRenderer.invoke('kb:answerReview', req),
   pipelineControl: (req) => ipcRenderer.invoke('kb:pipelineControl', req),

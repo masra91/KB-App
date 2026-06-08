@@ -15,13 +15,15 @@ import type { ActivityFeedEntry } from './activityDigest';
 import type { Lineage } from './lineage';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem, HealthReadout } from './pipelineStatusView';
 import type { MemorySample, MemTrend } from './memorySampler';
-import type { CrashBreadcrumb } from './crashCapture';
+import type { CrashBreadcrumb, RendererErrorReport } from './crashCapture';
 import type { DevLogLevel } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
 export type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem };
 // OBS-22 health readout + its sub-types (memory sample, leak trend, crash breadcrumb) for the renderer.
 export type { HealthReadout, MemorySample, MemTrend, CrashBreadcrumb };
+// OBS-18 (renderer): the renderer→main error report shape.
+export type { RendererErrorReport };
 
 export const KB_CONFIG_VERSION = 1;
 
@@ -478,6 +480,9 @@ export interface KbApi {
   pipelineStatus(): Promise<PipelineStatus>;
   // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).
   pipelineStatusView(): Promise<PipelineStatusView | null>;
+  // SPEC-0030 OBS-18 (renderer): forward a renderer-side uncaught error / unhandled rejection to the
+  // main app-log (the isolated renderer can't write it itself). Fire-and-forget.
+  reportRendererError(report: RendererErrorReport): Promise<void>;
   listReviews(): Promise<ReviewSummary[]>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).

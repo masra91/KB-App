@@ -6,7 +6,7 @@
 // that import pipeline.ts.
 
 import { createMemorySampler, type MemorySampler, type ElectronProcessMetric } from '../kb/memorySampler';
-import { installCrashCapture, readLastCrash, type ProcessLike, type AppEventsLike, type CrashReporterLike } from '../kb/crashCapture';
+import { installCrashCapture, readLastCrash, rendererCrashEvent, type ProcessLike, type AppEventsLike, type CrashReporterLike, type RendererErrorReport } from '../kb/crashCapture';
 import { currentBreadcrumb } from '../kb/activityBreadcrumb';
 import type { DevLog } from '../kb/devlog';
 import type { HealthReadout } from '../kb/pipelineStatusView';
@@ -38,10 +38,12 @@ export interface TelemetryDeps {
 
 let sampler: MemorySampler | null = null;
 let userDataDirRef: string | null = null;
+let appLogRef: DevLog | null = null;
 
 /** Install crash capture + start the memory sampler (OBS-18/20/21). Call once, after app ready. */
 export function startTelemetry(deps: TelemetryDeps): void {
   userDataDirRef = deps.userDataDir;
+  appLogRef = deps.appLog;
 
   installCrashCapture({
     proc: deps.proc,
@@ -72,6 +74,13 @@ export async function telemetryHealth(): Promise<HealthReadout> {
     trend: sampler?.trend() ?? null,
     lastCrash,
   };
+}
+
+/** OBS-18 (renderer): record a renderer-side uncaught error / unhandled rejection, forwarded over IPC
+ *  (the isolated renderer can't write the app-log itself). Logged loudly; not fatal to main. */
+export function noteRendererError(report: RendererErrorReport): void {
+  const { event, fields } = rendererCrashEvent(report);
+  appLogRef?.error(event, fields);
 }
 
 /** Stop the sampler (shutdown). */
