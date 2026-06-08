@@ -624,12 +624,23 @@ option { background: var(--card); color: var(--fg); }
 .src-section:first-of-type { margin-top: 0.6rem; }
 .src-section-head { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--viz-ink-muted); margin: 0 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--viz-rule); }
 
-/* 5. Activity feed — the entry rows were default UA <button>s (light boxes clashing with the dark
-   theme) and the raw JSON a light <pre>. Make them theme-native. */
+/* 5. Activity feed — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §2). Repointed off the legacy
+   palette (--bg/--card/--fg/--muted/--accent/--border) onto the WS2 --viz-* tokens so the view reads as
+   one surface with the rest of the system: flat-ruled entries (no card radius/fill), --viz-field raw-JSON
+   surface, --viz-ink-muted secondary text, ember focus. Markup carries the blessed primitives
+   (.viz-field/.viz-btn--ghost/.viz-chip); these view-local rules supply only layout + the token color. */
 .activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
-.activity-entry { border: 1px solid var(--border); border-radius: 8px; background: var(--card); overflow: hidden; }
+/* Secondary/helper text — the WS2 muted token (was the legacy global .muted → var(--muted)). */
+.activity-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+/* Filter row: the actor select + search field (now .viz-field columns) sit on one baseline-aligned row. */
+.activity-controls { display: flex; gap: 0.8rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.activity-field { flex: 0 1 auto; }
+.activity-field .viz-field__input { min-width: 12rem; }
+/* Flat-ruled entry — no card chrome (DESIGN-LEGACY-VIEWS §2 "flat ruled per WS2"); a top rule separates rows. */
+.activity-entry { border: 0; border-top: 1px solid var(--viz-rule); border-radius: 0; background: transparent; overflow: hidden; }
+.activity-entry:first-child { border-top: 0; }
 /* Header row: the expand toggle fills, the trace-origin action trails — both vertically centered so the
-   trace link is no longer an orphan flush against the entry's left edge (it can't nest in the head button). */
+   trace action is no longer an orphan flush against the entry's left edge (it can't nest in the head button). */
 .activity-entry-row { display: flex; align-items: center; }
 .activity-entry-head {
   appearance: none;
@@ -640,21 +651,25 @@ option { background: var(--card); color: var(--fg); }
   gap: 0.5rem;
   text-align: left;
   font: inherit;
-  color: var(--fg);
+  color: var(--viz-ink);
   background: transparent;
   border: 0;
   padding: 0.55rem 0.7rem;
   cursor: pointer;
 }
-.activity-entry-head:hover { background: var(--hover); }
+.activity-entry-head:hover { background: var(--viz-rule); }
 /* Trailing trace-origin action — inset to the entry's right edge (matching the head's 0.7rem padding),
-   centered with the toggle; specificity beats button.link's padding:0. */
+   centered with the toggle. .viz-btn--ghost zeroes its side padding, so re-inset here. */
 .activity-entry-row .activity-trace { flex: none; padding: 0 0.7rem; white-space: nowrap; }
-.activity-entry-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.activity-actor-badge { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; flex: none; }
+/* Clipped row → keep the ember focus ring inset (the viz-focusable outward offset would be clipped). */
+.activity-entry-head:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: -2px; }
+.activity-actor-badge { flex: none; } /* shape/color from .viz-chip; row just keeps it from stretching */
 .activity-summary { flex: 1; }
-.activity-ts { font-size: 0.78rem; flex: none; }
+.activity-ts, .activity-evcount { color: var(--viz-ink-muted); font-size: 0.78rem; flex: none; }
 .activity-body { padding: 0 0.7rem 0.6rem; }
-.activity-event { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.6rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; }
-.activity-event code { color: var(--fg); }
-.activity-event-src { font-size: 0.75rem; }
+.activity-event { background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.5rem 0.6rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; }
+.activity-event code { color: var(--viz-ink); }
+.activity-event-src { color: var(--viz-ink-muted); font-size: 0.75rem; }
+/* Lineage panel — secondary text on the WS2 muted token (was legacy .muted). */
+.lineage-sources, .lineage-step-ts, .lineage-kind { color: var(--viz-ink-muted); }
+.lineage-decisions-label { color: var(--viz-ink-muted); font-size: 0.7rem; }

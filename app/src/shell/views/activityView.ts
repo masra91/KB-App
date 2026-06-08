@@ -40,7 +40,7 @@ export function mountActivity(container: HTMLElement): void {
   container.innerHTML = `
     <div class="card activity-view">
       <h1>📜 Activity</h1>
-      <p class="muted">What your knowledge base has been doing — and why. Read-only.</p>
+      <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
       <div class="activity-body" id="activityBody"></div>
       <div class="activity-lineage" id="activityLineage"></div>
@@ -148,8 +148,14 @@ export function controlsHtml(actors: readonly string[], f: ActivityFilter): stri
     .concat(actors.map((a) => `<option value="${esc(a)}"${f.actors?.[0] === a ? ' selected' : ''}>${esc(a)}</option>`))
     .join('');
   return `
-    <select id="activityActor" class="activity-actor" aria-label="Filter by actor">${opts}</select>
-    <input id="activitySearch" class="activity-search" type="search" placeholder="Search activity…" aria-label="Search activity" value="${esc(f.text ?? '')}" />`;
+    <label class="viz-field activity-field">
+      <span class="viz-field__label viz-signage">actor</span>
+      <select id="activityActor" class="activity-actor viz-field__input viz-body viz-focusable" aria-label="Filter by actor">${opts}</select>
+    </label>
+    <label class="viz-field activity-field">
+      <span class="viz-field__label viz-signage">search</span>
+      <input id="activitySearch" class="activity-search viz-field__input viz-body viz-focusable" type="search" placeholder="Search activity…" aria-label="Search activity" value="${esc(f.text ?? '')}" />
+    </label>`;
 }
 
 interface BodyState {
@@ -162,14 +168,14 @@ interface BodyState {
 }
 
 export function bodyHtml(s: BodyState): string {
-  if (s.loading) return `<p class="muted">Loading…</p>`;
+  if (s.loading) return `<p class="activity-note">Loading…</p>`;
   // #145: a failed/timed-out load is retryable, never an infinite spinner. The view's header +
   // controls stay mounted around this body, so a button here (not a full renderLoadError) suffices.
-  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="btn load-retry" data-act="retry-load">Retry</button></p>`;
-  if (s.entries.length === 0) return `<p class="muted activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
+  if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="viz-btn viz-btn--sm viz-focusable load-retry" data-act="retry-load">Retry</button></p>`;
+  if (s.entries.length === 0) return `<p class="activity-note activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
   const note = s.truncated
-    ? `<p class="muted activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
-    : `<p class="muted activity-count">${s.total} event${s.total === 1 ? '' : 's'}.</p>`;
+    ? `<p class="activity-note activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
+    : `<p class="activity-note activity-count">${s.total} event${s.total === 1 ? '' : 's'}.</p>`;
   return note + `<ul class="activity-feed">${s.entries.map((e) => entryHtml(e, s.expanded.has(e.id))).join('')}</ul>`;
 }
 
@@ -181,7 +187,7 @@ function traceableSubject(e: ActivityFeedEntry): string | null {
 
 export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const trace = traceableSubject(e);
-  const traceBtn = trace ? `<button class="activity-trace link" data-act="lineage" data-id="${esc(trace)}">trace origin</button>` : '';
+  const traceBtn = trace ? `<button class="activity-trace viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="lineage" data-id="${esc(trace)}" aria-label="Trace the origin of: ${esc(e.summary)}">trace origin</button>` : '';
   const raw = open
     ? `<div class="activity-raw">${e.events.map(rawEventHtml).join('')}</div>`
     : '';
@@ -190,11 +196,11 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   return `
     <li class="activity-entry${open ? ' open' : ''}">
       <div class="activity-entry-row">
-        <button class="activity-entry-head" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-          <span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
+        <button class="activity-entry-head viz-focusable" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
+          <span class="activity-actor-badge viz-chip" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
           <span class="activity-summary">${esc(e.summary)}</span>
-          <span class="activity-ts muted">${esc(formatTimestamp(e.ts))}</span>
-          ${e.eventCount > 1 ? `<span class="activity-evcount muted">${e.eventCount} events</span>` : ''}
+          <span class="activity-ts">${esc(formatTimestamp(e.ts))}</span>
+          ${e.eventCount > 1 ? `<span class="activity-evcount">${e.eventCount} events</span>` : ''}
         </button>
         ${traceBtn}
       </div>
@@ -205,23 +211,23 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
 /** Drill-down: the raw canonical event behind a feed entry (AUDIT-5). */
 export function rawEventHtml(ev: AuditEvent): string {
   const json = JSON.stringify({ ts: ev.ts, actor: ev.actor, eventType: ev.eventType, runId: ev.runId, model: ev.model, subjects: ev.subjects, payload: ev.payload }, null, 2);
-  return `<pre class="activity-event"><code>${esc(json)}</code></pre><div class="activity-event-src muted">${esc(ev.provenance.file)}:${ev.provenance.line}</div>`;
+  return `<pre class="activity-event"><code>${esc(json)}</code></pre><div class="activity-event-src">${esc(ev.provenance.file)}:${ev.provenance.line}</div>`;
 }
 
 export function lineageHtml(l: Lineage): string {
   if (l.events.length === 0) {
-    return `<div class="lineage-panel"><div class="lineage-head"><strong>Lineage:</strong> <code>${esc(l.subjectId)}</code> <button class="link" data-act="clear-lineage">close</button></div><p class="muted">No lineage found for this id.</p></div>`;
+    return `<div class="lineage-panel"><div class="lineage-head"><strong>Lineage:</strong> <code>${esc(l.subjectId)}</code> <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="clear-lineage" aria-label="Close lineage panel">close</button></div><p class="activity-note">No lineage found for this id.</p></div>`;
   }
-  const sources = l.sources.length ? `<div class="lineage-sources muted">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<code>${esc(s)}</code>`).join(', ')}</div>` : '';
+  const sources = l.sources.length ? `<div class="lineage-sources activity-note">From source${l.sources.length === 1 ? '' : 's'}: ${l.sources.map((s) => `<code>${esc(s)}</code>`).join(', ')}</div>` : '';
   const timeline = l.events
-    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="muted">${esc(formatTimestamp(e.ts))}</span></li>`)
+    .map((e) => `<li class="lineage-step"><span class="activity-actor-badge viz-chip" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="lineage-step-ts">${esc(formatTimestamp(e.ts))}</span></li>`)
     .join('');
   const decisions = l.decisions.length
-    ? `<div class="lineage-decisions"><span class="muted">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`
+    ? `<div class="lineage-decisions"><span class="lineage-decisions-label viz-signage">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`
     : '';
   return `
     <div class="lineage-panel">
-      <div class="lineage-head"><strong>Lineage:</strong> <code>${esc(l.subjectId)}</code> <span class="muted">(${esc(l.kind)})</span> <button class="link" data-act="clear-lineage">close</button></div>
+      <div class="lineage-head"><strong>Lineage:</strong> <code>${esc(l.subjectId)}</code> <span class="lineage-kind">(${esc(l.kind)})</span> <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="clear-lineage" aria-label="Close lineage panel">close</button></div>
       ${sources}
       <ol class="lineage-timeline">${timeline}</ol>
       ${decisions}
