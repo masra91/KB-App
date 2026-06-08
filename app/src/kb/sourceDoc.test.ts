@@ -169,4 +169,13 @@ describe('applySensitivityOverrideToSourceMd (SENSE-7)', () => {
     const out = applySensitivityOverrideToSourceMd(md, 'legal: hold', 'now');
     expect(out).toContain('sensitivity: "legal: hold"');
   });
+
+  it('REGRESSION: a label containing $-substitution patterns is written verbatim, not interpreted (KB-QD-2 #267)', () => {
+    const md = renderSourceMd(textMeta, deterministicDecide(textMeta), 'now', 'body');
+    // `$&` would re-insert the whole match, `$1`/`` $` `` other patterns — a string replacer would corrupt
+    // the frontmatter; the function replacer writes the label byte-for-byte (here quoted for the `$`/space).
+    const out = applySensitivityOverrideToSourceMd(md, 'tier-$& $1 $`', 'now');
+    expect(out).toContain('sensitivity: tier-$& $1 $`'); // verbatim ($/backtick aren't YAML-significant → unquoted)
+    expect(out).not.toContain('tier-sensitivity:'); // the `$&` did NOT expand to the matched line
+  });
 });

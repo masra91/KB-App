@@ -32,8 +32,10 @@ export function applySensitivityOverrideToSourceMd(content: string, label: strin
   // Drop any existing sensitivityMeta block (header + its indented children, however many).
   const withoutMeta = content.replace(/^sensitivityMeta:\n(?: {2}\S.*\n)*/m, '');
   // Replace the sensitivity scalar line, appending a fresh principal provenance block right after it.
+  // NB: a FUNCTION replacer (not a string) — a label containing `$&`/`$1`/`` $` `` must not trigger JS's
+  // replacement-pattern substitution and corrupt the frontmatter (KB-QD-2 #267).
   const block = `sensitivity: ${scalar(label)}\nsensitivityMeta:\n  by: principal\n  at: ${at}`;
-  return withoutMeta.replace(/^sensitivity: .*$/m, block);
+  return withoutMeta.replace(/^sensitivity: .*$/m, () => block);
 }
 
 export function renderSourceMd(

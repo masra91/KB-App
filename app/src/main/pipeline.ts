@@ -1106,19 +1106,23 @@ export async function setActiveSourceSensitivity(sourceId: string, label: string
   const clean = typeof label === 'string' ? label.trim() : '';
   const root = active.stagingWt;
   const srcMdRel = path.join('sources', dateShard(sourceId), sourceId, 'source.md');
-  let before: string;
+  const srcMdAbs = path.join(root, srcMdRel);
   try {
-    before = await fs.readFile(path.join(root, srcMdRel), 'utf8');
+    await fs.access(srcMdAbs); // early not-found before taking the lock
   } catch {
     return { ok: false, reason: 'not-found' };
   }
-  const fromLabel = (before.match(/^sensitivity: (.*)$/m)?.[1] ?? '').trim();
   const at = new Date().toISOString();
+  let fromLabel = '';
   await active.lock.run(async () => {
+    // Read the authoritative base INSIDE the lock so a concurrent archive of the same source can't make
+    // the re-stamp clobber a stale base (KB-QD-2 #267).
+    const before = await fs.readFile(srcMdAbs, 'utf8');
+    fromLabel = (before.match(/^sensitivity: (.*)$/m)?.[1] ?? '').trim();
     await setSensitivityOverride(root, sourceId, clean, at); // clean === '' clears the override
     // Setting: re-stamp the live source.md now so the Panel reflects it without a rebuild. Clearing: leave
     // the frontmatter as-is (a later Replay re-derives the classifier/default label).
-    if (clean.length > 0) await fs.writeFile(path.join(root, srcMdRel), applySensitivityOverrideToSourceMd(before, clean, at), 'utf8');
+    if (clean.length > 0) await fs.writeFile(srcMdAbs, applySensitivityOverrideToSourceMd(before, clean, at), 'utf8');
     const git = boundedGit(root);
     await git.add([path.relative(root, sensitivityOverridesPath(root)), srcMdRel]);
     const staged = (await git.diff(['--cached', '--name-only'])).trim();
