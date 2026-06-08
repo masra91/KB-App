@@ -53,7 +53,7 @@ describe('captureToInbox — secondary source (RESEARCH-5)', () => {
 });
 
 describe('renderSourceMd — research provenance block (RESEARCH-6)', () => {
-  const decision: ArchiveDecision = { kind: 'text', class: 'secondary', scope: 'global', sensitivity: 'internal' };
+  const decision: ArchiveDecision = { kind: 'text', class: 'secondary', scope: 'global', sensitivity: 'internal', sensitivityBy: 'default' };
   const baseMeta = {
     id: '01JABCDEF7Q2ABCDEFGHJKMNPQ',
     kind: 'text' as const,

@@ -5,6 +5,7 @@
 // orchestrator code does not change.
 import type { CapturedMeta } from './ingest';
 import type { SpanCtx } from './tracing';
+import { DEFAULT_SENSITIVITY, type SensitivityBy } from './sensitivity';
 
 export interface ArchiveDecision {
   kind: 'text' | 'file';
@@ -14,6 +15,9 @@ export interface ArchiveDecision {
    *  honors — so the field is a string, not the bare default literal. */
   scope: string;
   sensitivity: string;
+  /** How the sensitivity label was assigned (SENSE-8 provenance). A connector-declared default is a
+   *  high-confidence `connector` signal (SENSE-5); the bare fallback is `default` (SENSE-2). */
+  sensitivityBy: SensitivityBy;
   /** Provenance of the decision itself — see AgentTrace (ORCH-16). */
   agent?: AgentTrace;
 }
@@ -44,11 +48,15 @@ export type ArchivistDecider = (meta: CapturedMeta, ctx?: SpanCtx) => ArchiveDec
  * Richer LLM classification + Review routing remain Enrich's job, deferred.
  */
 export function deterministicDecide(meta: CapturedMeta): ArchiveDecision {
+  // SENSE-2/5/8: a connector-declared sensitivity is a high-confidence `connector` signal; absent any
+  // signal, the source lands at the conservative `internal` default with `by: default`. (The classifier —
+  // `by: classifier` — is Slice 2.) A Principal override is re-applied upstream (SENSE-7), not here.
   return {
     kind: meta.kind,
     class: 'primary',
     scope: meta.scope ?? 'global',
-    sensitivity: meta.sensitivity ?? 'internal',
+    sensitivity: meta.sensitivity ?? DEFAULT_SENSITIVITY,
+    sensitivityBy: meta.sensitivity ? 'connector' : 'default',
     agent: { via: 'deterministic' },
   };
 }

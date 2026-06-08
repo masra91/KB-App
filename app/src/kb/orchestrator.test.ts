@@ -51,6 +51,11 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     const sourceMd = await fs.readFile(path.join(dest, 'source.md'), 'utf8');
     expect(sourceMd).toContain('class: primary');
     expect(sourceMd).toContain('surface: in-app-panel');
+    // SENSE-1/2/8 (real path): an un-signalled Principal capture lands at the conservative `internal`
+    // default with `by: default` provenance — the label is now real frontmatter, not a hardcoded constant.
+    expect(sourceMd).toContain('sensitivity: internal');
+    expect(sourceMd).toContain('sensitivityMeta:');
+    expect(sourceMd).toContain('  by: default');
     expect(sourceMd.trimEnd().endsWith('call Steve re: Q3 budget')).toBe(true);
 
     // The inbox unit is gone; the canonical root tree is clean and advanced by a commit.
@@ -63,6 +68,22 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     const audit = await fs.readFile(path.join(dest, 'audit.jsonl'), 'utf8');
     const actions = audit.trim().split('\n').map((l) => JSON.parse(l).action);
     expect(actions).toEqual(['captured', 'archived']);
+  });
+
+  it('SENSE-5 (real path): a connector-declared sensitivity rides capture → archive into source.md as `by: connector`', async () => {
+    // A connector (e.g. an intake feed marked `confidential`) declares its default at capture; that
+    // high-confidence signal must survive to the archived source.md, NOT be down-classified to internal.
+    const { ids } = await captureToInbox(vault, 'intake:work-mail', [{ kind: 'text', text: 'embargoed deal terms' }], Date.now(), { origin: 'external', sensitivity: 'confidential' });
+    const destRel = await archiveOne(vault, ids[0]);
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: confidential');
+    expect(sourceMd).toContain('  by: connector');
+
+    // SENSE-8: the classification is an audited event recording the signal provenance (by + label).
+    const audit = await fs.readFile(path.join(vault, destRel, 'audit.jsonl'), 'utf8');
+    const archived = audit.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.action === 'archived');
+    expect(archived.decision.sensitivity).toBe('confidential');
+    expect(archived.decision.sensitivityBy).toBe('connector');
   });
 
   it('archives a dropped file: embeds raw in source.md, keeps bytes verbatim', async () => {
