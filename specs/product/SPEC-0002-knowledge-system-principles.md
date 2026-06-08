@@ -128,6 +128,7 @@ time.
 | ------- | -------- | ------------------------------------------------- | -------- |
 | PRIN-22 | should   | Workflows, agents, and prompts are observable and evaluable | none-yet |
 | PRIN-23 | should   | Coverage gaps, failures, and lessons learned are captured and fed back | none-yet |
+| PRIN-24 | must     | **Human-readable surfacing — internal IDs NEVER reach the user.** ULIDs / hashes / repo-relative paths are **internal identity** (paths, dedup, provenance, links) and must **never be what a human sees**. **Every** user-facing surface — Reviews, Status/VIZ, the Obsidian vault (filenames, links, graph), Activity, anywhere — shows a **human label** (entity name · source title · gloss · friendly stage/item name); the ID is carried *behind* it (frontmatter, `data-*`, a resolved link target), never *as* the label. **A raw ULID/hash visible in a user surface is a defect.** (Principal, repeatedly, 2026-06-08: *"these are totally meaningless… every time a user sees it it's just garbage and confusing — reviews, status, and god help us Obsidian."*) Corollaries: a link's **display text is the human name** and its **target resolves to the real file** (e.g. `sources/<shard>/<id>/source.md`, not a bare id or a directory); a source without a human title gets one (derived) so it never surfaces as its ULID. | none-yet | LANG-1; PRIN-13; CANON-6; VAULT |
 
 ## 5. Open questions
 
