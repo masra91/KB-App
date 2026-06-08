@@ -2,7 +2,7 @@
 // holds even when many spawners (stages + jobs + researchers) contend at once — the safety bound
 // that makes raising per-stage caps safe. Deterministic: no copilot, just instrumented async work.
 import { describe, it, expect } from 'vitest';
-import { Semaphore, withCopilotSlot, acquireCopilotSlot, copilotSemaphore } from './copilotConcurrency';
+import { Semaphore, withCopilotSlot, acquireCopilotSlot, copilotSemaphore, CopilotCapacityTimeoutError } from './copilotConcurrency';
 
 /** Run `n` tasks concurrently through `gate`, each holding its slot for a tick; return the peak
  *  number ever in-flight simultaneously. */
@@ -71,6 +71,53 @@ describe('Semaphore (copilot concurrency primitive)', () => {
   });
 });
 
+// ASK-16: the interactive PRIORITY lane — a foreground (recall/Ask/Explore) acquire jumps ahead of
+// background (pipeline) waiters, and a bounded acquire fails fast instead of hanging.
+describe('Semaphore priority lane + bounded acquire (ASK-16)', () => {
+  it('serves a PRIORITY waiter before earlier-queued background waiters on the next freed slot', async () => {
+    const sem = new Semaphore(1);
+    const order: string[] = [];
+    const hold = await sem.acquire(); // saturate the only slot (the "pipeline" holds it)
+    // Two BACKGROUND waiters queue first, THEN a PRIORITY (interactive) waiter arrives last.
+    const bg1 = sem.acquire().then((rel) => { order.push('bg1'); rel(); });
+    const bg2 = sem.acquire().then((rel) => { order.push('bg2'); rel(); });
+    const fg = sem.acquire({ priority: true }).then((rel) => { order.push('fg'); rel(); });
+    expect(sem.waiting).toBe(3);
+    expect(sem.priorityWaiting).toBe(1);
+    hold(); // free the slot → the human jumps the queue despite arriving last (background yields)
+    await Promise.all([bg1, bg2, fg]);
+    expect(order[0]).toBe('fg'); // FOREGROUND served first; FAILS-BEFORE (plain FIFO) → 'bg1'
+    expect(order).toEqual(['fg', 'bg1', 'bg2']);
+    expect(sem.active).toBe(0);
+  });
+
+  it('a bounded acquire FAILS FAST (CopilotCapacityTimeoutError) when no slot frees in time', async () => {
+    const sem = new Semaphore(1);
+    const hold = await sem.acquire(); // never released within the bound → saturated/wedged pool
+    await expect(sem.acquire({ priority: true, timeoutMs: 20 })).rejects.toBeInstanceOf(CopilotCapacityTimeoutError);
+    expect(sem.waiting).toBe(0); // the timed-out waiter gave up its place in line (no leak)
+    hold();
+    expect(sem.active).toBe(0);
+  });
+
+  it('a bounded acquire RESOLVES (and cancels its timer) when a slot frees within the bound', async () => {
+    const sem = new Semaphore(1);
+    const hold = await sem.acquire();
+    const fg = sem.acquire({ priority: true, timeoutMs: 1000 });
+    setTimeout(hold, 5); // a background op frees the slot well within the bound
+    const rel = await fg; // resolves, does not reject
+    expect(sem.active).toBe(1);
+    rel();
+    expect(sem.active).toBe(0);
+  });
+
+  it('priority + bounded acquisitions still never exceed the ceiling', async () => {
+    const sem = new Semaphore(2);
+    const peak = await peakConcurrency(20, (fn) => withSemPriority(sem, fn));
+    expect(peak).toBe(2);
+  });
+});
+
 describe('withCopilotSlot / acquireCopilotSlot (the shared global slot)', () => {
   it('a flood of mixed stage+job+researcher spawners never exceeds the global ceiling', async () => {
     const ceiling = copilotSemaphore.ceiling;
@@ -99,6 +146,16 @@ describe('withCopilotSlot / acquireCopilotSlot (the shared global slot)', () => 
 /** Local helper: run `fn` holding one slot of `sem` (mirrors withCopilotSlot but on an explicit instance). */
 async function withSem<T>(sem: Semaphore, fn: () => Promise<T>): Promise<T> {
   const release = await sem.acquire();
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+/** Like {@link withSem} but acquires through the interactive PRIORITY lane (ASK-16). */
+async function withSemPriority<T>(sem: Semaphore, fn: () => Promise<T>): Promise<T> {
+  const release = await sem.acquire({ priority: true });
   try {
     return await fn();
   } finally {

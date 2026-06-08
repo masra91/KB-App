@@ -18,6 +18,7 @@ import path from 'node:path';
 import type { AgentTrace } from './archivist';
 import { makeReadOnlyTools } from './recallTools';
 import { RECALL_SKILL, makeSdkRecallClient } from './recallAgent';
+import { acquireInteractiveCopilotSlot, CopilotCapacityTimeoutError } from './copilotConcurrency';
 
 // ── Question / session ──────────────────────────────────────────────────────────────────────
 
@@ -166,6 +167,13 @@ export interface RecallOptions {
   now?: () => string;
   /** Set false to skip the ASK-11 audit write (tests). Defaults true. */
   audit?: boolean;
+  /**
+   * Acquire a copilot capacity slot before opening the SDK session (ASK-16). Defaults to the
+   * interactive/priority lane ({@link acquireInteractiveCopilotSlot}) so recall NO LONGER bypasses the
+   * global ceiling and a foreground query reserves capacity ahead of background ingestion + fails fast
+   * if it can't. Returns the single-use release (called on session teardown). Tests inject a fake pool.
+   */
+  acquireSlot?: () => Promise<() => void>;
 }
 
 export const DEFAULT_MAX_TOOL_CALLS = 12;
@@ -236,6 +244,7 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   // loop/over-explore. Explicit `opts.maxToolCalls` (callers/tests) still wins.
   const maxToolCalls = opts.maxToolCalls ?? recallBudget(await countEntityNodes(root));
   const clock = opts.now ?? erasedClock;
+  const acquireSlot = opts.acquireSlot ?? acquireInteractiveCopilotSlot;
 
   const budget = { used: 0, truncated: false };
   const captured: Captured = { answered: false, answer: '', citations: [], declaredGrounded: true };
@@ -244,23 +253,37 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   let trace: AgentTrace;
   let result: AskResult | null = null;
   try {
-    const session = await client.createSession({
-      model: opts.model,
-      systemMessage: { mode: 'append', content: RECALL_SKILL },
-      tools: toolDefs,
-      allowedTools: [...TOOL_NAMES, SUBMIT_ANSWER_TOOL],
-    });
+    // ASK-16: recall is INTERACTIVE-PRIORITY — acquire a slot from the global pool (it no longer
+    // bypasses the safety ceiling) through the priority lane, so the human query reserves capacity
+    // ahead of background ingestion and a wedged/saturated pool fails fast (below) instead of the
+    // agent thrashing outside the bound to a 60s `session.idle` hang. Held across the SDK session.
+    const releaseSlot = await acquireSlot();
     try {
-      await session.sendAndWait(buildUserPrompt(question, history));
+      const session = await client.createSession({
+        model: opts.model,
+        systemMessage: { mode: 'append', content: RECALL_SKILL },
+        tools: toolDefs,
+        allowedTools: [...TOOL_NAMES, SUBMIT_ANSWER_TOOL],
+      });
+      try {
+        await session.sendAndWait(buildUserPrompt(question, history));
+      } finally {
+        await session.disconnect?.();
+      }
     } finally {
-      await session.disconnect?.();
+      releaseSlot(); // free the slot the instant the session ends — even on error
     }
     trace = { via: 'copilot', runtime: 'copilot', ok: captured.answered, at: clock() };
   } catch (err) {
-    // SDK/CLI unavailable or session error — honest, ungrounded result; never fabricate (ORCH-7).
+    // ASK-16 honest fast-fail: capacity couldn't be granted in bound → say so plainly + retryable, NOT
+    // a silent hang. Other failures (SDK/CLI unavailable, session error) → honest, ungrounded result;
+    // never fabricate (ORCH-7).
+    const busy = err instanceof CopilotCapacityTimeoutError;
     result = {
       question,
-      answer: `I couldn't run recall: ${err instanceof Error ? err.message : String(err)}`,
+      answer: busy
+        ? 'The KB is busy ingesting right now, so I couldn’t reach a grounded answer in time — please try again in a moment.'
+        : `I couldn't run recall: ${err instanceof Error ? err.message : String(err)}`,
       citations: [],
       grounded: false,
       toolCalls: budget.used,
