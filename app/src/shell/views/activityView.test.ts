@@ -185,6 +185,66 @@ describe('Read-only + XSS-safety (AUDIT-8)', () => {
   });
 });
 
+// WS3 migration (DESIGN-LEGACY-VIEWS §2): Activity moved off the legacy off-system primitives
+// (.muted / button.link / native unstyled controls) onto The Line's blessed .viz-* primitives, plus the
+// a11y sweep (aria-labels on the icon-ish trace + close actions). These are the fails-before/passes-after
+// guards on the CLASS — a regression to .link/.muted, a dropped aria-label, or a broken lineage drill-down
+// (DEV-2's SENSE-1c sensitivity chip hangs on that structure) all trip here.
+describe('WS3 design-system migration (DESIGN-LEGACY-VIEWS §2 — onto The Line)', () => {
+  it('renders the filter controls as blessed .viz-field inputs, accessible names preserved (§7)', async () => {
+    const c = await mount();
+    const actor = c.querySelector<HTMLSelectElement>('#activityActor')!;
+    const search = c.querySelector<HTMLInputElement>('#activitySearch')!;
+    expect(actor.classList.contains('viz-field__input')).toBe(true);
+    expect(search.classList.contains('viz-field__input')).toBe(true);
+    expect(actor.closest('.viz-field')).not.toBeNull(); // each control sits in a .viz-field wrapper
+    expect(search.closest('.viz-field')).not.toBeNull();
+    expect(actor.getAttribute('aria-label')).toBe('Filter by actor'); // regression guard (§7)
+    expect(search.getAttribute('aria-label')).toBe('Search activity');
+  });
+
+  it('renders the trace-origin action as a .viz-btn--ghost with a summary-naming aria-label (a11y §2)', async () => {
+    const c = await mount();
+    const trace = c.querySelector<HTMLButtonElement>('.activity-trace')!;
+    expect(trace.classList.contains('viz-btn')).toBe(true);
+    expect(trace.classList.contains('viz-btn--ghost')).toBe(true);
+    // "trace origin" alone is ambiguous to a screen reader → name it with the entry summary.
+    expect(trace.getAttribute('aria-label')).toBe('Trace the origin of: Claims derived 2 claims about E1');
+  });
+
+  it('renders the lineage close action as a .viz-btn--ghost with an aria-label', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.activity-trace')!.click();
+    await flush();
+    const close = c.querySelector<HTMLButtonElement>('[data-act="clear-lineage"]')!;
+    expect(close.classList.contains('viz-btn--ghost')).toBe(true);
+    expect(close.getAttribute('aria-label')).toBe('Close lineage panel');
+  });
+
+  it('preserves the lineage drill-down structure the SENSE sensitivity chip hangs on (DEV-2 SENSE-1c)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.activity-trace')!.click();
+    await flush();
+    // The panel → head → per-event steps are the stable anchor SENSE-1c will mount the .viz-chip into.
+    expect(c.querySelector('.lineage-panel')).not.toBeNull();
+    expect(c.querySelector('.lineage-head')).not.toBeNull();
+    expect(c.querySelectorAll('.lineage-step').length).toBeGreaterThan(0);
+    expect(c.querySelector('.lineage-step .activity-actor-badge')).not.toBeNull();
+  });
+
+  it('carries NO legacy off-system primitives (.muted / button.link / bare .btn) on any render path', async () => {
+    const c = await mount();
+    // Exercise every render path: expand a raw drill-down AND open the lineage panel.
+    c.querySelector<HTMLButtonElement>('.activity-entry-head')!.click();
+    c.querySelector<HTMLButtonElement>('.activity-trace')!.click();
+    await flush();
+    expect(c.querySelector('.muted')).toBeNull(); // header note / ts / evcount / event-src / lineage meta all migrated
+    expect(c.querySelector('button.link')).toBeNull(); // trace + lineage close are .viz-btn--ghost now
+    // .btn is the legacy button class — distinct from .viz-btn (classList token match won't conflate them).
+    expect([...c.querySelectorAll('button')].some((b) => b.classList.contains('btn'))).toBe(false);
+  });
+});
+
 describe('Activity view · #145 load resilience (no infinite spinner on a hung IPC)', () => {
   let c: HTMLElement;
   beforeEach(() => {
