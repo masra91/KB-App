@@ -11,6 +11,7 @@ import { captureToInbox, readCapturedMeta } from './ingest';
 import { Orchestrator, archiveOne, readQueue, readStatus } from './orchestrator';
 import { makeCopilotDecider } from './copilotAgent';
 import { dateShard } from './ulid';
+import { setSensitivityOverride } from './sensitivityOverride';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 
 function gitInstalledSync(): boolean {
@@ -84,6 +85,29 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     const archived = audit.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.action === 'archived');
     expect(archived.decision.sensitivity).toBe('confidential');
     expect(archived.decision.sensitivityBy).toBe('connector');
+  });
+
+  it('SENSE-7 (real path, Replay-sticky): a Principal override wins over the classifier/default at archive — `by: principal`', async () => {
+    // Capture (default would be `internal`), then the Principal sets an override BEFORE archive and commits
+    // it. archiveOne reads the override from the worktree snapshot — exactly what makes it survive Replay —
+    // and re-applies it OVER the decider, so the classifier never overwrites a `by: principal` label.
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'put this in the external deck' }]);
+    const id = ids[0];
+    await setSensitivityOverride(vault, id, 'shareable', '2026-06-08T09:00:00.000Z');
+    const git = simpleGit(vault);
+    await git.raw('add', '.kb');
+    await git.commit('principal override');
+
+    const destRel = await archiveOne(vault, id);
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: shareable'); // override beat the conservative `internal` default
+    expect(sourceMd).toContain('  by: principal');
+    expect(sourceMd).toContain('  at: 2026-06-08T09:00:00.000Z'); // override time, not archive time
+
+    // The archived audit event records the principal provenance (SENSE-8 override-side).
+    const audit = await fs.readFile(path.join(vault, destRel, 'audit.jsonl'), 'utf8');
+    const archived = audit.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.action === 'archived');
+    expect(archived.decision.sensitivityBy).toBe('principal');
   });
 
   it('archives a dropped file: embeds raw in source.md, keeps bytes verbatim', async () => {

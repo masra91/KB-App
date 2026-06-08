@@ -18,6 +18,9 @@ export interface ArchiveDecision {
   /** How the sensitivity label was assigned (SENSE-8 provenance). A connector-declared default is a
    *  high-confidence `connector` signal (SENSE-5); the bare fallback is `default` (SENSE-2). */
   sensitivityBy: SensitivityBy;
+  /** When the label was assigned (SENSE-7 §7 `sensitivityMeta.at`). Set for a Principal override so the
+   *  override time survives a Replay re-archive; absent → the renderer uses `archivedAt`. */
+  sensitivityAt?: string;
   /** Provenance of the decision itself — see AgentTrace (ORCH-16). */
   agent?: AgentTrace;
 }

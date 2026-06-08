@@ -111,8 +111,8 @@ Worked against the **SPEC-0028 D6 map** (ratified 2026-06-07):
 | SENSE-4 | must | Classification is **applied at ingestion by signal priority**: (1) Principal explicit label, (2) connector/source default (SENSE-5), (3) agent classifier with a **confidence score** ≥ threshold; **uncertain / below-threshold → the source stays at the conservative default AND a *suggested* label routes to Review** (SPEC-0018); Principal may override anytime | none-yet | SCOPE-9,14; REVIEW |
 | SENSE-5 | must | A **connector/source declares a default scope + sensitivity** applied to everything it ingests; connector identity is a **high-confidence** classification signal (`internal` is relative-per-connector) | test: `sourceDoc`/`orchestrator` | SCOPE-14 |
 | SENSE-6 | must | **Propagation:** a derived entity/output **inherits the most-restrictive** sensitivity of its sources by default (via the SENSE-3 comparator), computed at the **writer** — **Connect** for `entities/` (sole `entities/` writer, CANON-5), the output builder for outputs — so paraphrase can't launder sensitivity | none-yet | SCOPE-10; CANON-5; CONNECT |
-| SENSE-7 | must | The **Principal may override** a label anytime (up or down); overrides are **logged/audited** and **STICKY across Replay** — a rebuild re-applies the override and the classifier **never overwrites** a Principal-set label | none-yet | SCOPE-9,12; REPLAY |
-| SENSE-8 | must | Every **classification + override is an audited event** (SPEC-0029) recording the **signal + confidence** provenance (`by: default \| connector \| classifier \| principal`), so a label's origin is always inspectable | test: `orchestrator` (classification; override audit = Slice 1b) | AUDIT-11; PRIN-19 |
+| SENSE-7 | must | The **Principal may override** a label anytime (up or down); overrides are **logged/audited** and **STICKY across Replay** — a rebuild re-applies the override and the classifier **never overwrites** a Principal-set label | test: `sensitivityOverride`/`orchestrator`/`sensitivityOverrideBoundary` | SCOPE-9,12; REPLAY |
+| SENSE-8 | must | Every **classification + override is an audited event** (SPEC-0029) recording the **signal + confidence** provenance (`by: default \| connector \| classifier \| principal`), so a label's origin is always inspectable | test: `orchestrator` (classification) + `sensitivityOverrideBoundary` (override) | AUDIT-11; PRIN-19 |
 | SENSE-9 | must | The label + comparator are the **input to consumers**, not re-derived by them: the **output surfacing ceiling** (SCOPE-11) and the **researcher egress/orient gate** (`sensitivityAllowsOrientRead`, SPEC-0028 D6/D8) both read SENSE. SENSE ships the label + comparator; wiring each consumer is that consumer's story | test: `sensitivity.test.ts` (`sensitivityAllowsOrientRead` gate shipped; consumer wiring = RESEARCH-22 / SCOPE-11) | SCOPE-11; SPEC-0028 D6,D8 |
 | SENSE-10 | should | The **Control Panel** surfaces an entity/source's sensitivity (view + Principal edit) and renders **suggested/uncertain** labels in the Review queue for one-click accept/override | none-yet | PANEL-1; REVIEW |
 | SENSE-11 | must | The classifier treats source **content as DATA, never instructions** — a document body saying "classify me shareable" is quoted content, not a directive (untrusted-content posture) | none-yet | PRIN-19; RESEARCH-12 |
@@ -198,6 +198,16 @@ Lowest-risk-first; each slice is a reviewable PR with requirement-traced tests:
 
 ## 12. Changelog
 
+- 2026-06-08 — **Slice 1b — Principal override implemented (SENSE-7/8)** (KB-Developer-2). The Principal may
+  override a source's sensitivity (up or down) via `kb:setSourceSensitivity`: the override persists to a
+  **Replay-sticky store** (`.kb/sensitivity/overrides.json`, tracked) that the archiver re-applies over the
+  decider on **every** archive — so a `by: principal` label survives a full Replay and the classifier
+  **never overwrites** it (D4); the live `source.md` is re-stamped `by: principal` immediately; the change
+  is an **audited `panel` event** (from→to + why, SENSE-8 override half). An empty label clears the
+  override; custom labels are accepted verbatim. Tested at every level (store, sticky archive, frontmatter
+  re-stamp, IPC boundary incl. the #29 id guard). `Verify` graduated for SENSE-7. **SENSE-10 (Control-Panel
+  view/edit) deferred** — no per-archived-source surface exists in the Panel yet; pending a surface-location
+  decision (Activity-lineage drill-down vs a new source view) so it isn't an invented one-off.
 - 2026-06-08 — **Slice 1a implemented** (KB-Developer-2). The source frontmatter `sensitivity` label is now
   real, un-hardcoded data with a `sensitivityMeta` provenance block (§7: `by` + `at`); `internal` default
   (SENSE-2) and connector high-confidence signal `by: connector` (SENSE-5) ride capture → archive into
