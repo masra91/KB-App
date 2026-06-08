@@ -44,6 +44,7 @@ const kbApi: KbApi = {
   setIntakeConnectorConfig: (patch) => ipcRenderer.invoke('kb:setIntakeConnectorConfig', patch),
   runIntakeConnectorNow: (id) => ipcRenderer.invoke('kb:runIntakeConnectorNow', id),
   setSourceSensitivity: (sourceId, label) => ipcRenderer.invoke('kb:setSourceSensitivity', sourceId, label),
+  getSourceSensitivities: (sourceIds) => ipcRenderer.invoke('kb:getSourceSensitivities', sourceIds),
   exploreEntities: () => ipcRenderer.invoke('kb:exploreEntities'),
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
 };

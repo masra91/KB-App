@@ -70,6 +70,7 @@ import { isSafeGhRepo } from '../kb/ghRead';
 import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, clampOrientBudget, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid, dateShard, isUlid } from '../kb/ulid';
 import { setSensitivityOverride, sensitivityOverridesPath } from '../kb/sensitivityOverride';
+import { readSourceSensitivities, type SourceSensitivity } from '../kb/sensitivityRead';
 import { applySensitivityOverrideToSourceMd } from '../kb/sourceDoc';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
@@ -1152,6 +1153,13 @@ export async function setActiveSourceSensitivity(sourceId: string, label: string
     payload: { field: 'sensitivity', from: fromLabel, to: clean || '(cleared → classifier/default)', by: 'principal', why: 'Principal overrode a source sensitivity via Control Panel' },
   });
   return { ok: true, sensitivity: clean || fromLabel };
+}
+
+/** Read the current sensitivity label + provenance for a set of sources (SENSE-10) — for the Control
+ *  Panel (the Activity-lineage drill-down) to show a chip + offer the Principal an edit. Read-only. */
+export async function getActiveSourceSensitivities(sourceIds: string[]): Promise<Record<string, SourceSensitivity>> {
+  if (!active || !Array.isArray(sourceIds)) return {};
+  return readSourceSensitivities(active.stagingWt, sourceIds.filter((s): s is string => typeof s === 'string'));
 }
 
 /**
