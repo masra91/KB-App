@@ -85,6 +85,7 @@ a larger budget than a stage) equipped with:
 | ASK-13  | should   | Answers use **Wikipedia-style inline numbered citations** (`[1] [2]…`) + a References list; the agent is prompted/skilled to **cite the specific KB source/entity** each claim grounds on, by number | test:app/src/kb/recall.test.ts | ASK-7; VISION-9 |
 | ASK-14  | should   | Citations are **dual-rendered** from one canonical target (the source/entity path): in the **Ask panel** each is a clickable link via the **Obsidian URI** (`obsidian://open?path=…`, opened with `shell.openExternal`) that jumps to the page in Obsidian; in a **saved Output** they are rewritten to native **`[[wikilinks]]`** so they work inside the vault | test:app/src/kb/citationLink.test.ts | ASK-6; ASK-13; VAULT-12,13 |
 | ASK-15  | should   | The Ask panel **renders markdown** (so citations/emphasis/lists display, not raw `**`) via a lightweight pinned renderer | none-yet | SHELL; ENG-2,4 |
+| ASK-16  | must     | **Recall is interactive-priority — a foreground query NEVER starves behind the always-on pipeline.** Recall opens a Copilot SDK session and `sendAndWait`s for `session.idle`, but it **bypasses the global Copilot concurrency pool** (`copilotConcurrency.ts`) that every *pipeline* agent (connect/claims/decompose/reflect/research) acquires a slot from. So while ingestion runs (pool full at the 2–4 ceiling), recall fires an **extra** session *outside* the safety bound → CLI/API rate-limit + CPU/mem thrash (the exact harm the pool exists to prevent) → the agent can't make progress → **60s `session.idle` timeout, no answer.** Required: (a) recall is treated as **foreground/interactive** and acquires Copilot capacity through a **reserved/priority lane that preempts or reserves a slot ahead of background ingestion** — a Principal query gets capacity *promptly* even under continuous pipeline demand (**background yields to the human**, never the reverse); (b) recall **stops bypassing the global ceiling** so total concurrent `copilot` procs stay within the safe bound (no thrash); (c) if capacity genuinely can't be granted within a **bounded** time, recall **fails honestly and fast** — a clear "KB is busy ingesting — retry" or a degraded/ungrounded note (ORCH-7) — **never a silent 60s hang**. Generalizes to other Principal-initiated ops (Ask follow-ups, Explore). Pairs with QUIESCE drain (SPEC-0045) + stage-concurrency (SPEC-0044). *(Principal, 2026-06-08: "queries are timing out always — recall: Timeout after 60000ms waiting for session.idle… it's a read op on the repo root, is it trying to take a lock?" — not a git lock; recall is starving for Copilot capacity behind the pipeline, with no interactive priority.)* | test:app/src/kb/recall.test.ts, copilotConcurrency.test.ts (recall acquires a priority/reserved slot under a saturated pool and resolves within bound — fake pool; + bounded honest-fail when no slot frees) — none-yet | ORCH-20,21,23; AUTO-5; ASK-1; PRIN-5; SPEC-0044; SPEC-0045 |
 
 ## 4a. Design decisions (slice 1 — greenlit by KB-PM 2026-06-02)
 
@@ -178,6 +179,16 @@ behind it substrate-agnostic and unit-testable.
 
 ## 8. Changelog
 
+- 2026-06-08 — **ASK-16: recall is interactive-priority — never starves behind the pipeline (Principal-reported).**
+  Live test: "queries are timing out always — recall: Timeout after 60000ms waiting for session.idle… is it
+  trying to take a lock?" Diagnosed: `session.idle` is the Copilot SDK agent-finished signal (not a git lock),
+  and recall **bypasses the global Copilot concurrency pool** (`copilotConcurrency.ts`) that every pipeline agent
+  acquires from — so under continuous ingestion (pool full at the 2–4 ceiling) recall fires an extra session
+  outside the safety bound → CLI/API throttle + thrash → the agent can't finish in 60s. ASK-16 requires recall to
+  be foreground/interactive: a **reserved/priority Copilot lane** that preempts/reserves capacity ahead of
+  background ingestion (the human never starves behind the pipeline), recall stops bypassing the ceiling, and a
+  bounded **honest fast-fail** replaces the silent 60s hang. Pairs with QUIESCE (SPEC-0045) + stage-concurrency
+  (SPEC-0044). The core "effortless grounded recall out" JTBD was unusable during ingestion — this restores it.
 - 2026-06-02 — **ASK-13 (inline numbered citations) → test:**. The recall agent now emits
   **Wikipedia-style inline `[n]` markers** in the markdown answer (skill instruction added), and the
   engine **guarantees the contract** the dual-render (ASK-14) relies on: `finalizeCitations` verifies
