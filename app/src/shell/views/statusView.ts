@@ -26,6 +26,7 @@ import {
   type CarriageModel,
 } from './theLineModel';
 import { isPermissionDeniedError } from '../../kb/permissions';
+import { OVERALL_LABEL } from '../../kb/pipelineStatusLabels';
 import { DEFAULT_ERROR_FRESH_MS } from '../../kb/pipelineStatusView';
 import type { PipelineStatusView, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
@@ -203,7 +204,7 @@ export function lineBodyHtml(s: BodyState, nowMs: number): string {
 
 /** OBS-5/11: the headline state badge (`◐ RUNNING`). Large display element → state hue allowed (§3). */
 export function overallHtml(v: PipelineStatusView): string {
-  const label = { running: 'Running', idle: 'Idle', stalled: 'Stalled' }[v.overall];
+  const label = OVERALL_LABEL[v.overall];
   const last = v.lastActivity
     ? `<span class="line-lastact viz-body">last activity <span class="viz-numeric">${esc(formatTimestamp(v.lastActivity))}</span></span>`
     : '';
