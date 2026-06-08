@@ -151,18 +151,13 @@ ul.checks li {
 }
 
 /* --- Simple Capture panel (SPEC-0013) --- */
-textarea.capture {
-  display: block;
+/* DESIGN-LEGACY-VIEWS §6: the capture textarea is now the blessed EditableField primitive
+   (.viz-field + .viz-field__label "Capture" + .viz-field__input--multiline; design-system.css owns
+   its styling — flat ink, no rounded card chrome). Only the field-wrapper full-width + top spacing
+   remains here. */
+.capture-field {
   width: 100%;
   margin-top: 1rem;
-  padding: 0.6rem 0.7rem;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.95rem;
-  resize: vertical;
 }
 
 .dropzone {

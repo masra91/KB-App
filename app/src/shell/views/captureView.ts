@@ -204,13 +204,16 @@ export function mountCapture(container: HTMLElement, vaultPathArg: string, name:
     <div class="card">
       <h1>📚 ${esc(name)}</h1>
       <p class="muted path">${esc(vaultPath)}</p>
-      <textarea id="captureText" class="capture" rows="4"
-        placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept"></textarea>
+      <label class="viz-field capture-field">
+        <span class="viz-field__label">Capture</span>
+        <textarea id="captureText" class="viz-field__input viz-field__input--multiline viz-focusable" rows="4"
+          placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept"></textarea>
+      </label>
       <label class="muted toggle"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
-      <div id="dropzone" class="dropzone">Drop files here to capture them</div>
+      <div id="dropzone" class="dropzone viz-focusable" role="button" tabindex="0" aria-label="Drop files here to capture them">Drop files here to capture them</div>
       <ul id="staged" class="staged"></ul>
       <div class="row">
-        <button id="capture" class="primary">Capture</button>
+        <button id="capture" class="viz-btn viz-btn--primary viz-focusable">Capture</button>
         <span id="captureNote" class="muted"></span>
       </div>
       <p id="pipeline" class="muted status"></p>

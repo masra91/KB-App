@@ -176,3 +176,49 @@ describe('captureView — RICHIN rich ingestion (SPEC-0040)', () => {
     expect(root.querySelector('#captureNote')!.textContent).toContain('large file');
   });
 });
+
+// WS3 migration (DESIGN-LEGACY-VIEWS §6/§7): Capture moved off the legacy `.primary` button + the
+// unlabeled `textarea.capture` + the un-announced `.dropzone` onto the blessed EditableField/Button
+// primitives + announced, reachable regions. A11y is the headline (an input surface with no field label
+// and an unreachable dropzone). These are the fails-before/passes-after guards on the CLASS.
+describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6/§7)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    setApi(OK);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+  afterEach(() => {
+    root.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('the Capture button is the blessed .viz-btn--primary, not the legacy .primary (§6 swap + sweep)', () => {
+    mountCapture(root, '/v', 'KB');
+    const btn = root.querySelector<HTMLButtonElement>('#capture')!;
+    expect(btn.classList.contains('viz-btn')).toBe(true);
+    expect(btn.classList.contains('viz-btn--primary')).toBe(true);
+    expect(btn.classList.contains('primary')).toBe(false);
+    expect(root.querySelector('button.primary')).toBeNull(); // no-legacy-primitives sweep
+  });
+
+  it('the capture textarea is the blessed EditableField with a real label, not placeholder-only (§6/§7)', () => {
+    mountCapture(root, '/v', 'KB');
+    const ta = root.querySelector<HTMLTextAreaElement>('#captureText')!;
+    expect(ta.classList.contains('viz-field__input--multiline')).toBe(true);
+    const field = ta.closest('.viz-field');
+    expect(field).not.toBeNull(); // wrapped in the blessed field
+    // a real, associated accessible name (placeholder ≠ label): the wrapping label carries .viz-field__label "Capture"
+    expect(field!.querySelector('.viz-field__label')?.textContent).toBe('Capture');
+    expect(root.querySelector('textarea.capture')).toBeNull(); // legacy primitive gone
+  });
+
+  it('the dropzone is an announced, reachable region (role + aria-label + tabindex) (§6/§7)', () => {
+    mountCapture(root, '/v', 'KB');
+    const dz = root.querySelector<HTMLElement>('#dropzone')!;
+    expect(dz.getAttribute('role')).toBe('button');
+    expect(dz.getAttribute('aria-label')).toBe('Drop files here to capture them');
+    expect(dz.getAttribute('tabindex')).toBe('0'); // keyboard-reachable
+    expect(dz.classList.contains('viz-focusable')).toBe(true); // ember focus ring, not framework indigo
+  });
+});
