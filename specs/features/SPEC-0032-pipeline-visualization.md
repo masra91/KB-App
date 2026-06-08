@@ -84,6 +84,7 @@ drifts into the default AI look); this spec sets the intent and the surface.
 | VIZ-7 | should   | Set-aside/errored items are **visually prominent** and carry the **Retry/Dismiss** actions (OBS-17) | none-yet | OBS-17 |
 | VIZ-8 | should   | The visualization establishes a **distinct visual identity** (motion/color/layout language) so the app is recognizably itself — **not the generic AI-app look**; authored + gated per the design process (SPEC-0033) | none-yet | VISION-13; DESIGN-3 |
 | VIZ-9 | should   | The live view is **smooth/performant** (coalesced/debounced updates, no reflow storms) even with many in-flight items | none-yet | PRIN-5 |
+| VIZ-10 | should  | **Funnel numbers are legible — each declares its role; backlog ≠ projection.** A station stacks **four number-roles** — **volume** (reached-here), **conversion projection** (to-next, the VIZ-3 `+N (×r)`/`−N deduped` caption), **queue** (waiting-here), **latency**. Each MUST **declare its role at a glance**: volume carries its **bucket noun** (`399 entities`); the conversion caption is tied to the **next** stage with a `→ … fan-out`/`deduped` signifier so a **projection can never read as a backlog**; the real **queue** — the *only* actionable backlog — sits in a **distinct typographic lane** (brass when it crosses a concern threshold). A once-per-spine **legend** decodes the caption grammar, and `title=` **decode-on-hover** puts the exact meaning a hover/focus away. *(Principal misread the Linking `+1116 (×3.8)` projection as queue depth — projection and backlog blurred.)* | none-yet | VIZ-3; OBS-5; DESIGN-3 |
 
 ## 7. User flows / surface
 
@@ -113,6 +114,15 @@ drifts into the default AI look); this spec sets the intent and the surface.
 
 ## 10. Changelog
 
+- 2026-06-08 — **VIZ-10: funnel-caption legibility (Principal-reported).** The Principal read the Linking
+  gauge-rail's `399` + `+1116 (×3.8)` as a **queue depth/backlog** — it's actually *volume* (399 entities
+  reached Connect) + a *fan-out projection* into Claims, not live work waiting. The station stacks four
+  number-roles (volume · conversion projection · queue · latency) and two were bare adjacent numerics that
+  blurred. VIZ-10 requires each number to **declare its role** (volume + bucket noun; projection tied to the
+  next stage with `→`/`fan-out`/`deduped` so it can't read as backlog; the real queue in its own lane, brass
+  when concerning; latency labeled) + a once-per-spine **legend** + `title=` decode-on-hover. The design is
+  authored in `specs/design/pipeline-visualization.md` §6 (PR #270, KB-Lead HYBRID-classify PASS — blessed
+  primitives, no new tokens). Pairs with the broader Status clarity/usability pass.
 - 2026-06-02 — created (draft). The **rich, real-time, distinct** visual layer over the OBS
   pipeline data (SPEC-0030): a **per-item "pizza tracker"**, a **funnel/conversion** view, and
   **per-stage** bars, **pivotable**; **event-driven + animated** (fixing the "0 → sudden numbers"
