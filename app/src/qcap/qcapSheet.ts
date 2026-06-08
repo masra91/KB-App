@@ -5,10 +5,12 @@
 // It is NOT a generic capture box (the most-summoned surface — GATE-1 anti-generic): a flat-ink
 // instrument slot built on the WS2 design-system language — a hero EditableField (`.viz-field__input
 // --multiline`) on `--viz-field` ground, a top `--viz-ember` "live" hairline, keyboard-first. Flow:
-// clipboard prefill renders as a tagged "loaded" state (QCAP-7) → Enter saves onto the SPEC-0013 path
-// (fire-and-forget, CAPTURE-2, surface=quick-capture) → the rule takes `--viz-ember` + a `--viz-patina`
-// `preserved` tick (QCAP-10) → auto-dismiss + focus-restore (QCAP-2); Esc cancels; a failure holds in
-// `--viz-oxide` with `⏎ retry` and does NOT auto-dismiss (no silent loss). All state is aria-live announced.
+// the focused-app SELECTION (Slice 2, QCAP-7) — or the clipboard — prefills as a tagged "loaded" state
+// → Enter saves onto the SPEC-0013 path (fire-and-forget, CAPTURE-2, surface=quick-capture) → the rule
+// takes `--viz-ember` + a `--viz-patina` `preserved` tick (QCAP-10) → auto-dismiss + focus-restore
+// (QCAP-2); Esc cancels; a failure holds in `--viz-oxide` with `⏎ retry` and does NOT auto-dismiss (no
+// silent loss). When selection-capture is DENIED (QCAP-9) a subtle steer-to-Settings affordance shows —
+// the sheet still works clipboard-only (graceful degrade). All state is aria-live announced.
 import { esc } from '../shell/html';
 
 /** Auto-dismiss dwell after a successful save — within DESIGN-QCAP §10's 350–500ms band (QCAP-2/10). */
@@ -19,7 +21,11 @@ export function mountQuickCaptureSheet(root: HTMLElement): void {
     <div class="qcap-sheet viz-surface">
       <div class="qcap-head">
         <span class="qcap-mark viz-signage">Capture</span>
-        <span id="qcapClipTag" class="viz-chip qcap-cliptag" hidden>clipboard</span>
+        <span class="qcap-head__meta">
+          <span id="qcapClipTag" class="viz-chip qcap-cliptag" hidden>clipboard</span>
+          <button id="qcapAxEnable" type="button" class="qcap-ax" hidden
+            title="Turn on Accessibility to capture the selected text from any app">selection capture off — enable</button>
+        </span>
       </div>
       <div class="viz-field qcap-field">
         <textarea id="qcapText" class="viz-field__input viz-field__input--multiline viz-focusable qcap-input"
@@ -36,20 +42,37 @@ export function mountQuickCaptureSheet(root: HTMLElement): void {
   const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
   const note = root.querySelector('#qcapNote') as HTMLElement;
   const clipTag = root.querySelector('#qcapClipTag') as HTMLElement;
+  const axEnable = root.querySelector('#qcapAxEnable') as HTMLButtonElement;
 
-  // QCAP-7: pre-fill from the clipboard as a "loaded" state — the prefilled text is tagged + selected
-  // so Enter saves it in one gesture; editing/clearing drops the tag (it's now typed material).
+  // QCAP-7 (Slice 2): pre-fill as a "loaded" state — the focused-app SELECTION takes precedence over the
+  // clipboard ("save what I'm looking at" is one gesture), tagged by source + selected so Enter saves it
+  // in one stroke; editing/clearing drops the tag (it's now typed material). QCAP-9: a denied grant
+  // surfaces the subtle steer-to-Settings affordance, but the clipboard prefill above still works
+  // (graceful degrade — selection just isn't available).
   void window.kbApi
     .quickCaptureContext()
     .then((ctx) => {
-      if (ctx.clipboard && ta.value.length === 0) {
-        ta.value = ctx.clipboard;
+      const prefill =
+        ctx.selection && ctx.selection.length > 0
+          ? { text: ctx.selection, source: 'selection' }
+          : ctx.clipboard && ctx.clipboard.length > 0
+            ? { text: ctx.clipboard, source: 'clipboard' }
+            : null;
+      if (prefill && ta.value.length === 0) {
+        ta.value = prefill.text;
         ta.select();
+        clipTag.textContent = prefill.source; // 'selection' | 'clipboard' — names where the text came from
         clipTag.hidden = false;
         field.classList.add('is-loaded');
       }
+      // QCAP-9: only when the OS could grant selection-capture but hasn't — never on unsupported platforms.
+      if (ctx.accessibility === 'denied') axEnable.hidden = false;
     })
     .catch(() => {});
+
+  // QCAP-9: steer to System Settings → Privacy & Security → Accessibility (the SPEC-0034 pattern); the
+  // main process opens the pane (with a fallback) — never a dead-end. The sheet keeps working meanwhile.
+  axEnable.addEventListener('click', () => void window.kbApi.openAccessibilitySettings());
 
   ta.addEventListener('input', () => {
     if (!clipTag.hidden) {

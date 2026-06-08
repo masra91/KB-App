@@ -247,9 +247,37 @@ export function registerIpc(): void {
     getQuickCaptureAgent()?.close();
   });
 
-  // QCAP-7: the sheet pre-fills from the current clipboard so "save what I'm looking at" is one gesture.
+  // QCAP-7: the sheet pre-fills so "save what I'm looking at" is one gesture. Slice 1 = the current
+  // clipboard; Slice 2 folds in the focused-app `selection` the agent read at summon time (before the
+  // sheet stole focus) + the Accessibility grant state. No agent / no summon → clipboard-only (the
+  // selection is null + unsupported), so this path also serves the non-macOS + headless-test cases.
   ipcMain.handle('kb:quickCaptureContext', async (): Promise<QuickCaptureContext> => {
-    return { clipboard: clipboard.readText() };
+    const sel = getQuickCaptureAgent()?.takeSelectionContext();
+    return {
+      clipboard: clipboard.readText(),
+      selection: sel?.text ?? null,
+      accessibility: sel?.status ?? 'unsupported',
+    };
+  });
+
+  // SPEC-0038 QCAP-9 (Slice 2): open macOS System Settings → Privacy & Security → Accessibility for the
+  // denied-selection-capture recovery. Mirrors kb:openSystemSettingsPrivacy (SPEC-0034 pattern): the
+  // precise Accessibility sub-anchor can be flaky across macOS versions, so a reject falls back to the
+  // general Privacy & Security pane — never a no-op click (the dead-end the design forbids, QCAP-9).
+  ipcMain.handle('kb:openAccessibilitySettings', async (): Promise<OpenSettingsResult> => {
+    const ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
+    const PRIVACY = 'x-apple.systempreferences:com.apple.preference.security?Privacy';
+    try {
+      await shell.openExternal(ACCESSIBILITY);
+      return { ok: true };
+    } catch {
+      try {
+        await shell.openExternal(PRIVACY);
+        return { ok: true, usedFallback: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    }
   });
 
   ipcMain.handle('kb:pipelineStatus', async (): Promise<PipelineStatus> => {

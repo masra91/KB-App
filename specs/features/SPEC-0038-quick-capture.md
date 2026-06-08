@@ -82,11 +82,25 @@ slices of THIS spec — the spine is shared, only the surface is added).
 ## 6. Slices
 
 - **Slice 1 (macOS v1):** menubar agent + configurable global hotkey → text/clipboard capture sheet → SPEC-0013 path → confirm + auto-dismiss; headless; `surface=quick-capture`. Resolves forks #1 (ship a default), #3 (text/clipboard), #4.
-- **Slice 2 (macOS):** selection capture (fork #2, with the permission UX), **screenshot capture (QCAP-13: full/region/window via `screencapture` + Screen-Recording permission)**, the **menubar "Show KB-App" restore (QCAP-11)**, the **sticky-footer sheet (QCAP-12)**, richer sheet, capture-this affordance. *(QCAP-11/12 are small Principal-reported gaps — can land ahead of the rest of Slice 2.)*
+- **Slice 2 (macOS):** ✅ **selection capture (fork #2) + permission UX — done:** the menubar agent reads
+  the focused-app selection on summon (before the sheet steals focus) behind the Accessibility grant;
+  denied → a steer-to-Settings affordance + graceful degrade to clipboard-only (QCAP-9); the sheet
+  prefers the selection over the clipboard as the "capture this" affordance (QCAP-7); the Slice-1
+  fast-out / focus-restore / zero-permission fallback are preserved. **Remaining Slice 2:** **screenshot
+  capture (QCAP-13: full/region/window via `screencapture` + Screen-Recording permission)**, the
+  **menubar "Show KB-App" restore (QCAP-11)**, the **sticky-footer sheet (QCAP-12)**, richer sheet.
+  *(QCAP-11/12 are small Principal-reported gaps — can land ahead of the rest of Slice 2.)*
 - **Slice 3+:** Windows / Linux surfaces over the same spine.
 
 ## 7. Changelog
 
+- 2026-06-08 — **Slice 2 (part 1) implemented** (macOS selection capture + permission UX; fork #2 resolved). The
+  agent reads the focused-app text selection on summon via the macOS Accessibility grant (probed, not
+  prompted, per summon), BEFORE the sheet steals focus; a denied grant / read failure / non-macOS
+  degrades to clipboard-only and surfaces a steer-to-Settings affordance (menubar item + sheet) — never
+  a silently-dead feature (QCAP-9). The sheet prefers the selection over the clipboard (QCAP-7). No
+  native module (synthetic ⌘C with clipboard restore, bounded) — E1-clean. No requirement changes.
+  (QCAP-11/12/13 — menubar restore, sticky-footer, screenshot — remain the rest of Slice 2.)
 - 2026-06-07 — **QCAP-11/12/13: menubar restore + no-scroll sheet + screenshot capture** (Principal, from using Slice 1). Three gaps observed in the shipped menubar agent: (11) the tray menu is **only Capture + Quit** — no way to **restore the main window** from the menubar, so the `LSUIElement` accessory is a one-way trap → add a "Show KB-App" item that creates/shows/focuses the window; (12) the capture sheet's **Save button can require scrolling** (the action row is a flex child, not a pinned footer) → **sticky footer**, Save/Confirm/Cancel always on-screen (DESIGN-QCAP command-bar intent); (13) **screenshot capture** — Full/Region/Window via macOS `screencapture -x/-i/-w` → temp PNG → SPEC-0013 source, behind Screen-Recording permission (QCAP-9 degrade), an opt-in affordance extending the v1 text-only payload (fork #3). QCAP-11/12 are small fixes (can land ahead of Slice 2); QCAP-13 is a Slice-2 capability. Visual layout of the sheet footer + capture buttons → KB-Design-Lead; tray + `screencapture` plumbing → dev.
 - 2026-06-07 — **Forks ratified + cleared for merge/build** (KB-Lead + Principal). (#1) default hotkey = **`⌥Space`** (Principal's pick; configurable via QCAP-6); (#2) v1 **clipboard-only, zero-permission** (selection-capture → Slice 2); (#3) v1 payload **text + clipboard only** (file/rich → RICHIN); (#4) **`LSUIElement` menubar agent** owning the hotkey headlessly. No requirement changes. Cleared to merge + dispatch Slice 1.
 - 2026-06-06 — **Spec created** (Principal — named quick capture as a priority Ingest gap, "highly platform-dependent, start with macOS"). Framed as a surface on the SPEC-0013 → SPEC-0008 capture path (no new preservation logic); macOS-first with other OSes as additive surface slices. Number is SPEC-0038 (SPEC-0037/WATCH reserved in PR #217). Drafted for review — NOT self-merging.

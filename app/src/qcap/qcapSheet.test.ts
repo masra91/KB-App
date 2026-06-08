@@ -15,11 +15,23 @@ const flush = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-function setApi(opts: { capture?: CaptureResult; clipboard?: string } = {}): void {
+function setApi(
+  opts: {
+    capture?: CaptureResult;
+    clipboard?: string;
+    selection?: string | null;
+    accessibility?: 'granted' | 'denied' | 'unsupported';
+  } = {},
+): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     quickCapture: vi.fn().mockResolvedValue(opts.capture ?? OK),
     quickCaptureClose: vi.fn().mockResolvedValue(undefined),
-    quickCaptureContext: vi.fn().mockResolvedValue({ clipboard: opts.clipboard ?? '' } as QuickCaptureContext),
+    openAccessibilitySettings: vi.fn().mockResolvedValue({ ok: true }),
+    quickCaptureContext: vi.fn().mockResolvedValue({
+      clipboard: opts.clipboard ?? '',
+      selection: opts.selection ?? null,
+      accessibility: opts.accessibility ?? 'unsupported',
+    } as QuickCaptureContext),
   };
 }
 const api = () => (window as unknown as { kbApi: KbApi }).kbApi;
@@ -57,6 +69,59 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     ta.value = 'loaded + my edit';
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     expect((root.querySelector('#qcapClipTag') as HTMLElement).hidden).toBe(true);
+  });
+
+  // --- Slice 2: selection capture + permission UX (QCAP-7/9) ---
+
+  it('QCAP-7 (Slice 2): the focused-app selection takes precedence over the clipboard, tagged "selection"', async () => {
+    setApi({ selection: 'the paragraph I had highlighted', clipboard: 'older clipboard text', accessibility: 'granted' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapText') as HTMLTextAreaElement).value).toBe('the paragraph I had highlighted');
+    const tag = root.querySelector('#qcapClipTag') as HTMLElement;
+    expect(tag.hidden).toBe(false);
+    expect(tag.textContent).toBe('selection'); // names the source — not the clipboard
+    expect(root.querySelector('.qcap-field')!.classList.contains('is-loaded')).toBe(true);
+    expect((root.querySelector('#qcapAxEnable') as HTMLElement).hidden).toBe(true); // granted → no steer
+  });
+
+  it('QCAP-1/7 (Slice 2): Enter saves the SELECTION through the real capture path (surface=quick-capture)', async () => {
+    setApi({ selection: 'capture this exact sentence', accessibility: 'granted' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
+    enter(ta); // prefilled + selected → one keystroke saves it
+    await flush();
+    expect(api().quickCapture as unknown as Mock).toHaveBeenCalledWith({ inputs: [{ kind: 'text', text: 'capture this exact sentence' }] });
+  });
+
+  it('QCAP-9 (Slice 2): a DENIED grant shows the steer-to-Settings affordance but still prefills the clipboard (graceful degrade)', async () => {
+    setApi({ selection: null, clipboard: 'clipboard fallback', accessibility: 'denied' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    // The sheet is NOT dead: clipboard prefill still works (selection just wasn't available).
+    expect((root.querySelector('#qcapText') as HTMLTextAreaElement).value).toBe('clipboard fallback');
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).textContent).toBe('clipboard');
+    const ax = root.querySelector('#qcapAxEnable') as HTMLButtonElement;
+    expect(ax.hidden).toBe(false); // the steer is offered
+    ax.click();
+    await flush();
+    expect(api().openAccessibilitySettings as unknown as Mock).toHaveBeenCalled(); // steers to Settings, never a no-op
+  });
+
+  it('QCAP-9 (Slice 2): when selection-capture is unsupported, NO permission steer is shown (no false alarm)', async () => {
+    setApi({ clipboard: 'x', accessibility: 'unsupported' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapAxEnable') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('QCAP-7 (Slice 2): a granted grant with an empty selection falls back to the clipboard', async () => {
+    setApi({ selection: null, clipboard: 'on the clipboard', accessibility: 'granted' });
+    mountQuickCaptureSheet(root);
+    await flush();
+    expect((root.querySelector('#qcapText') as HTMLTextAreaElement).value).toBe('on the clipboard');
+    expect((root.querySelector('#qcapClipTag') as HTMLElement).textContent).toBe('clipboard');
   });
 
   it('QCAP-1/2/10: Enter captures (fire-and-forget) then confirms + auto-dismisses', async () => {

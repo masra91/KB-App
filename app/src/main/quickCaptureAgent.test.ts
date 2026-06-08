@@ -14,12 +14,14 @@ interface FakeLog {
   shown: number;
   hidden: number;
   focusRestored: number;
+  /** Ordered trace of seam calls — load-bearing for the Slice-2 "read selection BEFORE show" invariant. */
+  order: string[];
 }
 type FakeDeps = QuickCaptureDeps & { registered: Map<string, () => void>; calls: FakeLog };
 
 function fakeDeps(overrides: Partial<QuickCaptureDeps> = {}): FakeDeps {
   const registered = new Map<string, () => void>();
-  const log: FakeLog = { tray: [], shown: 0, hidden: 0, focusRestored: 0 };
+  const log: FakeLog = { tray: [], shown: 0, hidden: 0, focusRestored: 0, order: [] };
   const deps: QuickCaptureDeps = {
     registerHotkey: (accel, onTrigger) => {
       registered.set(accel, onTrigger);
@@ -30,6 +32,7 @@ function fakeDeps(overrides: Partial<QuickCaptureDeps> = {}): FakeDeps {
     },
     showSheet: () => {
       log.shown += 1;
+      log.order.push('showSheet');
     },
     hideSheet: () => {
       log.hidden += 1;
@@ -152,5 +155,101 @@ describe('QuickCaptureAgent', () => {
     agent.stop();
     expect(deps.registered.has('Alt+Space')).toBe(false);
     expect(agent.hotkeyActive()).toBe(false);
+  });
+});
+
+describe('QuickCaptureAgent — selection capture (Slice 2, QCAP-7/9)', () => {
+  // A contract-faithful readSelection seam: pushes 'readSelection' onto the call-order trace exactly
+  // as the real Electron dep does (it runs before the sheet is shown), so these tests exercise the
+  // REAL agent summon path — selection is never hand-injected into the context.
+  const selectionDep = (read: () => Promise<{ status: 'granted' | 'denied' | 'unsupported'; text: string | null }>) =>
+    ({
+      readSelection: async () => {
+        const r = await read();
+        return r;
+      },
+    });
+
+  it('QCAP-7: a GRANTED summon reads the selection BEFORE showing the sheet, and hands it to the sheet', async () => {
+    const deps = fakeDeps({
+      readSelection: async () => {
+        deps.calls.order.push('readSelection');
+        return { status: 'granted', text: 'the sentence I had highlighted' };
+      },
+    });
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await agent.open();
+
+    // The ordering invariant: selection MUST be read while the prior app still holds focus.
+    expect(deps.calls.order).toEqual(['readSelection', 'showSheet']);
+    expect(agent.takeSelectionContext()).toEqual({ status: 'granted', text: 'the sentence I had highlighted' });
+  });
+
+  it('the hotkey summon also reads the selection before the sheet (real onTrigger path)', async () => {
+    const deps = fakeDeps({
+      readSelection: async () => {
+        deps.calls.order.push('readSelection');
+        return { status: 'granted', text: 'hotkey selection' };
+      },
+    });
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await deps.registered.get('Alt+Space')!(); // the OS fires the hotkey → onTrigger → open()
+
+    expect(deps.calls.order).toEqual(['readSelection', 'showSheet']);
+    expect(agent.takeSelectionContext()).toEqual({ status: 'granted', text: 'hotkey selection' });
+  });
+
+  it('QCAP-9: a DENIED grant still shows the sheet (degrade to clipboard-only, never silently dead)', async () => {
+    const deps = fakeDeps(selectionDep(async () => ({ status: 'denied', text: null })));
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await agent.open();
+
+    expect(deps.calls.shown).toBe(1); // the sheet opened anyway — capture is never blocked on permission
+    expect(agent.takeSelectionContext()).toEqual({ status: 'denied', text: null });
+  });
+
+  it('no readSelection dep (non-macOS) → selection is unsupported, sheet still opens', async () => {
+    const deps = fakeDeps(); // no selection seam wired
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await agent.open();
+
+    expect(deps.calls.shown).toBe(1);
+    expect(agent.takeSelectionContext()).toEqual({ status: 'unsupported', text: null });
+  });
+
+  // REGRESSION (fails-before/passes-after, the CLASS = "the selection read must never dead-end the
+  // summon"): a readSelection that REJECTS must NOT swallow showSheet — the sheet still opens and the
+  // context degrades to denied. Before the try/catch in open(), a throwing read left the sheet unshown.
+  it('REGRESSION QCAP-9: a readSelection that throws still opens the sheet + degrades (no dead summon)', async () => {
+    const deps = fakeDeps({
+      readSelection: async () => {
+        throw new Error('osascript timed out');
+      },
+    });
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await agent.open();
+
+    expect(deps.calls.shown).toBe(1); // FAILS BEFORE the fix: the throw escaped open() and the sheet never showed
+    expect(agent.takeSelectionContext()).toEqual({ status: 'denied', text: null });
+  });
+
+  it('takeSelectionContext() is consume-once — a stale selection never replays on a second read', async () => {
+    const deps = fakeDeps(selectionDep(async () => ({ status: 'granted', text: 'once' })));
+    const agent = new QuickCaptureAgent(deps, 'Alt+Space');
+    agent.start();
+
+    await agent.open();
+    expect(agent.takeSelectionContext()).toEqual({ status: 'granted', text: 'once' });
+    expect(agent.takeSelectionContext()).toBeNull(); // cleared after the first hand-off
   });
 });

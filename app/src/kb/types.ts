@@ -125,9 +125,24 @@ export interface CaptureResult {
   blocked?: boolean;
 }
 
-/** Context the Quick Capture sheet pre-fills from (SPEC-0038 QCAP-7) — v1 = current clipboard text. */
+/**
+ * macOS Accessibility grant state for selection-capture (SPEC-0038 QCAP-9, Slice 2). Drives the
+ * sheet's permission UX: `granted` → the focused selection can prefill; `denied` → degrade to
+ * clipboard-only + steer to Settings·Privacy·Accessibility; `unsupported` → no platform support.
+ */
+export type AccessibilityStatus = 'granted' | 'denied' | 'unsupported';
+
+/**
+ * Context the Quick Capture sheet pre-fills from (SPEC-0038 QCAP-7). Slice 1 = current clipboard text;
+ * Slice 2 adds the focused-app `selection` (read at summon, before the sheet steals focus) and the
+ * `accessibility` grant state so the sheet can steer to Settings on a denied grant (QCAP-9).
+ */
 export interface QuickCaptureContext {
   clipboard: string;
+  /** The focused-app text selection at summon time, or null (denied/unsupported/empty) — QCAP-7. */
+  selection: string | null;
+  /** Accessibility grant state driving the sheet's permission UX (QCAP-9). */
+  accessibility: AccessibilityStatus;
 }
 
 /** Minimal pipeline status for the capture panel (SPEC-0014 ORCH-10). */
@@ -479,6 +494,9 @@ export interface KbApi {
   quickCapture(req: CaptureRequest): Promise<CaptureResult>;
   quickCaptureClose(): Promise<void>;
   quickCaptureContext(): Promise<QuickCaptureContext>;
+  // SPEC-0038 QCAP-9 (Slice 2): open System Settings → Privacy & Security → Accessibility for the
+  // denied-selection-capture recovery (the SPEC-0034 steer-to-Settings pattern; never a no-op).
+  openAccessibilitySettings(): Promise<OpenSettingsResult>;
   pipelineStatus(): Promise<PipelineStatus>;
   // SPEC-0030 OBS-5/6/7/11/15: the live Pipeline Status view-model (null when no KB is open).
   pipelineStatusView(): Promise<PipelineStatusView | null>;

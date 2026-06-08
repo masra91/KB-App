@@ -3,9 +3,54 @@
 // registration (conflict = register returns false → agent degrades, QCAP-9), the always-present
 // menubar/tray entry (QCAP-3), the frameless capture sheet window (loads the shared renderer at the
 // `#qcap` route, QCAP-4 headless), and focus-restore to the prior app on dismiss (QCAP-2, macOS app.hide).
-import { app, globalShortcut, Tray, Menu, BrowserWindow, nativeImage, screen } from 'electron';
+import { app, globalShortcut, Tray, Menu, BrowserWindow, nativeImage, screen, systemPreferences, clipboard, shell } from 'electron';
 import path from 'node:path';
-import type { QuickCaptureDeps } from './quickCaptureAgent';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
+import type { QuickCaptureDeps, SelectionRead } from './quickCaptureAgent';
+
+const execFileP = promisify(execFile);
+
+/** macOS Privacy panes (SPEC-0034 / QCAP-9 steer-to-Settings) — exact anchor with a general fallback. */
+const ACCESSIBILITY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
+const PRIVACY_PANE = 'x-apple.systempreferences:com.apple.preference.security?Privacy';
+
+/** Is this process a trusted macOS Accessibility client right now? (false off-darwin / when not granted.) */
+function accessibilityGranted(): boolean {
+  return process.platform === 'darwin' && systemPreferences.isTrustedAccessibilityClient(false);
+}
+
+/**
+ * Read the focused app's current text selection on macOS (SPEC-0038 QCAP-7/9, Slice 2). The honest
+ * mechanism with NO native module (per E1 — a native addon also broke the mac package build before):
+ * gate on the Accessibility grant, then post a synthetic ⌘C through System Events (which the grant
+ * unlocks) and read the pasteboard — saving + restoring the user's clipboard so the read is
+ * non-destructive. Bounded by a short timeout so a stuck `osascript` can't stall the summon
+ * (preserves the QCAP-2 fast-out feel). Any failure → degrade to `denied`/`unsupported` (clipboard-only).
+ */
+async function readFocusedSelection(): Promise<SelectionRead> {
+  if (process.platform !== 'darwin') return { status: 'unsupported', text: null };
+  // Probe WITHOUT prompting — a system prompt on every summon would be hostile. The explicit request
+  // lives on the tray's "Enable selection capture…" item + the sheet's steer-to-Settings affordance.
+  if (!systemPreferences.isTrustedAccessibilityClient(false)) return { status: 'denied', text: null };
+
+  const saved = clipboard.readText(); // restore this afterward — selection-read must not eat the clipboard
+  try {
+    await execFileP('osascript', ['-e', 'tell application "System Events" to keystroke "c" using {command down}'], {
+      timeout: 1200,
+    });
+    await delay(120); // give the frontmost app a beat to place the copy on the pasteboard
+    const text = clipboard.readText();
+    clipboard.writeText(saved); // restore the user's clipboard (best-effort, non-destructive)
+    // Unchanged pasteboard = no live selection (or the app ignored ⌘C) → null, sheet falls to clipboard.
+    if (!text || text === saved) return { status: 'granted', text: null };
+    return { status: 'granted', text };
+  } catch {
+    clipboard.writeText(saved); // restore even if the keystroke post / read failed
+    return { status: 'denied', text: null }; // couldn't post the copy → treat as not-granted, degrade
+  }
+}
 
 /** DESIGN-QCAP §2: command-bar proportions — a narrow sheet that reads as a summoned tool. */
 const SHEET_WIDTH = 520;
@@ -120,6 +165,11 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
         }
       }
     },
+    // Slice 2 (QCAP-7/9): the agent calls this on summon, before the sheet steals focus. Never throws
+    // the summon dead — readFocusedSelection degrades to denied/unsupported on any failure.
+    readSelection() {
+      return readFocusedSelection();
+    },
     setTray(state) {
       if (!tray) {
         // An empty image + a short menubar title keeps the entry visible without a bundled icon asset
@@ -129,6 +179,10 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
         if (process.platform === 'darwin') tray.setTitle('⤓');
       }
       const accel = state.hotkeyAccelerator;
+      // QCAP-9 (Slice 2): when selection-capture isn't yet granted, offer an explicit enable path from
+      // the always-present menubar (never a silent dead feature) — the native prompt + a steer to the
+      // Settings·Privacy·Accessibility pane. Hidden once granted. Off-darwin the item never appears.
+      const needsAccessibility = process.platform === 'darwin' && !accessibilityGranted();
       const menu = Menu.buildFromTemplate([
         {
           label: accel ? `Quick Capture  (${accel})` : 'Quick Capture',
@@ -138,6 +192,21 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
         ...(accel
           ? []
           : [{ label: 'Hotkey unavailable — use this menu', enabled: false } as Electron.MenuItemConstructorOptions]),
+        ...(needsAccessibility
+          ? [
+              { type: 'separator' as const },
+              {
+                label: 'Enable selection capture…',
+                click: () => {
+                  // Trigger the native Accessibility prompt, then steer to the pane (flaky anchor → fallback).
+                  systemPreferences.isTrustedAccessibilityClient(true);
+                  void shell.openExternal(ACCESSIBILITY_PANE).catch(() => {
+                    void shell.openExternal(PRIVACY_PANE);
+                  });
+                },
+              } as Electron.MenuItemConstructorOptions,
+            ]
+          : []),
         { type: 'separator' as const },
         { label: 'Quit KB-App', role: 'quit' as const },
       ]);
