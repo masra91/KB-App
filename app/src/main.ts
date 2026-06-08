@@ -11,6 +11,7 @@ import { createAppDevLog } from './kb/devlog';
 import { QuickCaptureAgent } from './main/quickCaptureAgent';
 import { electronQuickCaptureDeps } from './main/quickCaptureElectron';
 import { setQuickCaptureAgent } from './main/quickCaptureService';
+import { shouldQuitOnWindowAllClosed } from './main/lifecycle';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -131,10 +132,12 @@ app.on('will-quit', () => {
   qcapAgent?.stop();
 });
 
-// CAPTURE-12 / ORCH-1: on macOS the app stays alive with no window open, so the
-// orchestrator keeps draining the queue headlessly. Other platforms quit as usual.
+// QCAP-8 dual-model (also CAPTURE-12 / ORCH-1): on macOS the app stays alive with no window open — a
+// persistent Dock + menubar/tray agent, the orchestrator draining the queue headlessly + the global
+// hotkey live; the tray "Show KB-App" (QCAP-11) / hotkey / Dock-icon reopen the window. Other
+// platforms quit as usual. Policy is the pure, unit-tested `shouldQuitOnWindowAllClosed`.
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  if (shouldQuitOnWindowAllClosed(process.platform)) {
     stopPipeline();
     stopTelemetry(); // stop the memory sampler's interval on shutdown (OBS-20)
     app.quit();
