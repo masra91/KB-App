@@ -20,6 +20,7 @@ import {
   lockHtml,
   errorsHtml,
   latencyHtml,
+  healthHtml,
 } from './statusView';
 import { buildStations, splitCarriages } from './theLineModel';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
@@ -423,5 +424,57 @@ describe('mountStatus · #145 hang resilience', () => {
     await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
     expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
     expect(root.querySelector('.line-error')).not.toBeNull(); // surfaced; the poll auto-retries (no button — read-only)
+  });
+});
+
+describe('healthHtml — memory/health readout (OBS-22)', () => {
+  const MB = 1024 * 1024;
+  const withHealth = (health: PipelineStatusView['health']): PipelineStatusView => ({ ...STALLED, health });
+
+  it('renders nothing when no health is present (telemetry not wired)', () => {
+    expect(healthHtml(STALLED)).toBe('');
+  });
+
+  it('shows current RSS/heap when a sample exists', () => {
+    const html = healthHtml(withHealth({ memory: { ts: 'T', rss: 200 * MB, heapUsed: 40 * MB, heapTotal: 55 * MB, external: 3 * MB, arrayBuffers: 0 }, trend: null, lastCrash: null }));
+    expect(html).toContain('Memory &amp; health');
+    expect(html).toContain('200 MB');
+    expect(html).toContain('40/55 MB');
+  });
+
+  it('raises a loud "Memory climbing" alarm when the trend is leaking (OBS-21 surfaced)', () => {
+    const html = healthHtml(withHealth({
+      memory: { ts: 'T', rss: 600 * MB, heapUsed: 80 * MB, heapTotal: 90 * MB, external: 3 * MB, arrayBuffers: 0 },
+      trend: { samples: 6, windowMin: 6, rssDeltaMb: 150, heapDeltaMb: 40, rssSlopeMbPerMin: 25, leaking: true },
+      lastCrash: null,
+    }));
+    expect(html).toContain('line-alarm');
+    expect(html).toContain('Memory climbing');
+    expect(html).toContain('+150 MB');
+  });
+
+  it('shows a steady trend (no alarm) when not leaking', () => {
+    const html = healthHtml(withHealth({ memory: null, trend: { samples: 6, windowMin: 6, rssDeltaMb: 2, heapDeltaMb: 1, rssSlopeMbPerMin: 0.3, leaking: false }, lastCrash: null }));
+    expect(html).toContain('steady');
+    expect(html).not.toContain('Memory climbing');
+  });
+
+  it('shows the last crash breadcrumb — kind + when + where (OBS-18 surfaced)', () => {
+    const html = healthHtml(withHealth({
+      memory: null,
+      trend: null,
+      lastCrash: { ts: '2026-06-07T22:00:00.000Z', kind: 'uncaughtException', reason: 'worker trap', stage: 'decompose', itemId: 'SRC9' },
+    }));
+    expect(html).toContain('Last crash');
+    expect(html).toContain('uncaughtException');
+    expect(html).toContain('decompose');
+    expect(html).toContain('SRC9');
+    expect(html).toContain('worker trap');
+  });
+
+  it('escapes crash fields (XSS-safe)', () => {
+    const html = healthHtml(withHealth({ memory: null, trend: null, lastCrash: { ts: 'T', kind: 'uncaughtException', reason: '<img src=x onerror=alert(1)>', stage: 's', itemId: 'i' } }));
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img');
   });
 });

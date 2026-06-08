@@ -34,6 +34,7 @@ import {
   setActiveSourceSensitivity,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
+import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
@@ -55,6 +56,7 @@ import type {
   QuickCaptureContext,
   PipelineStatus,
   PipelineStatusView,
+  RendererErrorReport,
   ReviewSummary,
   AnswerReviewRequest,
   AnswerReviewResult,
@@ -258,6 +260,12 @@ export function registerIpc(): void {
   // SPEC-0030 OBS-5/6/7/11/15: the live Status view-model (read-only). Null when no KB is open.
   ipcMain.handle('kb:pipelineStatusView', async (): Promise<PipelineStatusView | null> => {
     return pipelineStatusForActive();
+  });
+
+  // SPEC-0030 OBS-18 (renderer): the renderer forwards its uncaught errors / unhandled rejections
+  // here (the isolated renderer can't write the app-log); the telemetry glue logs them loudly.
+  ipcMain.handle('kb:reportRendererError', async (_e, report: RendererErrorReport): Promise<void> => {
+    noteRendererError(report);
   });
 
   // SPEC-0018 REVIEW-10/11: the "needs you" queue + answering, over the typed contract.

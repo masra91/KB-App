@@ -1,8 +1,10 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, crashReporter } from 'electron';
 import path from 'node:path';
+import v8 from 'node:v8';
 import started from 'electron-squirrel-startup';
 import { registerIpc, initPipeline } from './main/ipc';
-import { stopPipeline, getActiveInstanceSettings } from './main/pipeline';
+import { stopPipeline, getActiveInstanceSettings, activeSnapshotDir } from './main/pipeline';
+import { startTelemetry, stopTelemetry } from './main/telemetry';
 import { ensurePath } from './main/resolvePath';
 import { createAppDevLog } from './kb/devlog';
 import { QuickCaptureAgent } from './main/quickCaptureAgent';
@@ -65,6 +67,19 @@ app.on('ready', async () => {
   // a boot failure (e.g. worktree provision) that this fire-and-forget would otherwise swallow —
   // the silent-stall cause that motivated SPEC-0030.
   const appLog = createAppDevLog(app.getPath('userData'));
+  // SPEC-0030 OBS-18/20/21: install crash capture (local minidumps, no upload; uncaught/rejection +
+  // render/child/gpu-process-gone → breadcrumb) and start the memory sampler + leak watchdog. The
+  // electron-free telemetry glue gets the Electron bits passed in (so pipeline.ts stays node-testable).
+  startTelemetry({
+    appLog,
+    userDataDir: app.getPath('userData'),
+    proc: process,
+    appEvents: app,
+    crashReporter,
+    getAppMetrics: () => app.getAppMetrics(),
+    writeHeapSnapshot: (file) => v8.writeHeapSnapshot(file),
+    getSnapshotDir: activeSnapshotDir,
+  });
   void initPipeline()
     .then(async () => {
       // QCAP-6: apply the per-Instance configured hotkey once the active KB has loaded (conflict-aware).
@@ -89,6 +104,7 @@ app.on('will-quit', () => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     stopPipeline();
+    stopTelemetry(); // stop the memory sampler's interval on shutdown (OBS-20)
     app.quit();
   }
 });

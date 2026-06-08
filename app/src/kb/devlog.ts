@@ -38,8 +38,19 @@ export interface DevLog {
   flush(): Promise<void>;
 }
 
+/** The minimal shape `onEmit` observers see for each line — enough to track "the last thing the
+ *  pipeline was doing" (OBS-18 crash breadcrumb) without re-parsing the JSONL. */
+export interface EmitRecord {
+  ts: string;
+  level: LogLevel;
+  event: string;
+  scope?: string;
+  runId?: string;
+  itemId?: string;
+}
+
 export interface DevLogOptions {
-  /** Directory the log file lives in (created on first write). */
+  /** Directory the log file lives in (created on first write, or eagerly when `eager` is set). */
   dir: string;
   /** Base filename. Default `pipeline.log`; rotated files get `.1`, `.2`, … suffixes. */
   file?: string;
@@ -51,6 +62,13 @@ export interface DevLogOptions {
   maxFiles?: number;
   /** Injectable clock for deterministic timestamps in tests. */
   now?: () => string;
+  /** OBS-19: create the sink dir + (empty) file eagerly on construction, instead of lazily on the
+   *  first write. The crash breadcrumb (OBS-18) and pre-vault boot errors vanish if the sink never
+   *  came into existence; eager creation guarantees the file is there to write into. */
+  eager?: boolean;
+  /** OBS-18: a best-effort observer notified of every emitted line's id-bearing fields, so a crash
+   *  handler can read the *last* runId/itemId/stage the pipeline touched. Never throws into logging. */
+  onEmit?: (rec: EmitRecord) => void;
 }
 
 /** Shared, mutable sink state (one per file; children share it). */
@@ -63,6 +81,7 @@ interface Sink {
   now: () => string;
   bytes: number | null; // current active-file size; null until first stat
   tail: Promise<void>; // serialized write chain
+  onEmit?: (rec: EmitRecord) => void; // OBS-18 breadcrumb observer (best-effort)
 }
 
 function normalizeErr(err: unknown): { message: string; stack?: string } | undefined {
@@ -91,6 +110,18 @@ async function rotate(sink: Sink): Promise<void> {
   }
   await fs.rename(base, `${base}.1`).catch(() => {});
   sink.bytes = 0;
+}
+
+/** OBS-19: bring the sink file into existence without writing a log line — `mkdir -p` the dir and
+ *  touch the active file (a no-op append of '' creates it if absent, leaves an existing one intact).
+ *  Best-effort: an eager-init failure must never crash boot; the first real write retries the mkdir. */
+async function ensureSinkFile(sink: Sink): Promise<void> {
+  try {
+    await fs.mkdir(sink.dir, { recursive: true });
+    await fs.appendFile(path.join(sink.dir, sink.file), '');
+  } catch {
+    /* eager creation is best-effort */
+  }
 }
 
 async function writeLine(sink: Sink, line: string): Promise<void> {
@@ -132,6 +163,27 @@ class DevLogImpl implements DevLog {
     const normalized = normalizeErr(err);
     if (normalized) entry.err = normalized;
 
+    // OBS-18: record the id-bearing fields for the crash breadcrumb BEFORE the (async) write — the
+    // observer is synchronous + self-swallowing so a native trap a moment later still has the last
+    // known {stage, runId, itemId}. Never let it throw into the caller's catch block.
+    if (this.sink.onEmit) {
+      try {
+        // Read the merged entry (bound ⊕ per-call fields), so `error('…', { itemId })` is captured
+        // as well as `.child({ runId, itemId })` bindings.
+        const e = entry as { scope?: unknown; runId?: unknown; itemId?: unknown };
+        this.sink.onEmit({
+          ts: entry.ts as string,
+          level,
+          event,
+          ...(typeof e.scope === 'string' ? { scope: e.scope } : {}),
+          ...(typeof e.runId === 'string' ? { runId: e.runId } : {}),
+          ...(typeof e.itemId === 'string' ? { itemId: e.itemId } : {}),
+        });
+      } catch {
+        /* an observer fault must never break logging */
+      }
+    }
+
     const line = JSON.stringify(entry) + '\n';
     // Serialize + swallow: logging must never reject into the caller's catch block.
     this.sink.tail = this.sink.tail.then(() => writeLine(this.sink, line)).catch(() => {});
@@ -171,7 +223,13 @@ export function createDevLog(opts: DevLogOptions): DevLog {
     now: opts.now ?? ((): string => new Date().toISOString()),
     bytes: null,
     tail: Promise.resolve(),
+    ...(opts.onEmit ? { onEmit: opts.onEmit } : {}),
   };
+  // OBS-19: eager creation is enqueued onto the same serialized tail as writes, so it can't race a
+  // first log line and `flush()` awaits it (the regression test relies on this).
+  if (opts.eager) {
+    sink.tail = sink.tail.then(() => ensureSinkFile(sink));
+  }
   return new DevLogImpl(sink, {});
 }
 
@@ -236,9 +294,11 @@ export async function readRecentDevLogEntries(
 }
 
 /** An app-level dev-log in Electron userData, for errors BEFORE a vault is open — setup /
- *  worktree-provision failures on boot that would otherwise vanish (OBS-2). */
+ *  worktree-provision failures on boot that would otherwise vanish (OBS-2). The sink is created
+ *  **eagerly** (OBS-19): forensics 2026-06-07 found `<userData>/logs/` absent in a live install, so a
+ *  boot/crash breadcrumb had nowhere to land. `eager` guarantees `app.log` exists from boot. */
 export function createAppDevLog(userDataDir: string, opts: Omit<DevLogOptions, 'dir' | 'file'> = {}): DevLog {
-  return createDevLog({ ...opts, dir: path.join(userDataDir, 'logs'), file: 'app.log' });
+  return createDevLog({ ...opts, eager: true, dir: path.join(userDataDir, 'logs'), file: 'app.log' });
 }
 
 /** A logger that discards everything — the safe default when no dev-log is wired (tests / standalone stages). */

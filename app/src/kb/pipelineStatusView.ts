@@ -7,6 +7,22 @@
 import type { LockState } from './stageLock';
 import type { PerfIndex } from './perfIndex';
 import type { StageId } from './pipelineStages';
+// Type-only imports (erased at compile) so the renderer never pulls the main-only sampler/crash
+// modules — and thus never `node:v8`/`node:fs` — into its bundle (the #248 renderer boundary).
+import type { MemorySample, MemTrend } from './memorySampler';
+import type { CrashBreadcrumb } from './crashCapture';
+
+/**
+ * OBS-22 — the Status view's memory/health readout: the current RSS/heap sample, the leak/long-run
+ * trend (OBS-21), and the last crash breadcrumb (OBS-18: when/where/last item), so "is memory
+ * climbing / did we recently crash + on what" is answerable at a glance. All fields nullable: a
+ * fresh boot has no trend yet and (ideally) no crash.
+ */
+export interface HealthReadout {
+  memory: MemorySample | null;
+  trend: MemTrend | null;
+  lastCrash: CrashBreadcrumb | null;
+}
 
 /**
  * One set-aside (poison) item as the Status view renders it (OBS-17) — a thin PRESENTATION shape,
@@ -166,6 +182,9 @@ export interface PipelineStatusView {
   conversion: ConversionCounts;
   /** In-flight items (carriages) with their current stage (SPEC-0032 VIZ-2). */
   inFlight: InFlightItem[];
+  /** Memory/health readout — RSS/heap + leak trend + last crash breadcrumb (OBS-22). Optional: a
+   *  build without the telemetry wired (or no sample yet) simply omits it. */
+  health?: HealthReadout;
   /** When this snapshot was assembled (ISO). */
   builtAt: string;
 }
@@ -227,6 +246,8 @@ export interface AssembleParts {
   setAsideItems: SetAsideView[];
   conversion: ConversionCounts;
   inFlight: InFlightItem[];
+  /** Memory/health readout (OBS-22), gathered by the main process from the sampler + last-crash file. */
+  health?: HealthReadout;
   /** Most-recent activity timestamp (ISO) from any source (status, spans, dev log). */
   lastActivity?: string;
 }
@@ -289,6 +310,7 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     setAsideItems: parts.setAsideItems,
     conversion: parts.conversion,
     inFlight: parts.inFlight,
+    ...(parts.health !== undefined ? { health: parts.health } : {}),
     builtAt,
   };
 }

@@ -15,7 +15,7 @@ import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" 
 import './shell/views/showcase.css'; // DESIGN-SHOWCASE — dev-only primitive gallery layout (?showcase)
 import './qcap/qcap.css'; // SPEC-0038 QCAP — the frictionless quick-capture sheet (#qcap route)
 import './index.css';
-import type { PathInspection } from './kb/types';
+import type { PathInspection, RendererErrorReport } from './kb/types';
 import { esc, baseName } from './shell/html';
 import { mountShell } from './shell/shell';
 import { mountShowcase } from './shell/views/showcaseView';
@@ -123,7 +123,34 @@ function qcapRequested(): boolean {
   return location.hash.toLowerCase() === '#qcap';
 }
 
+// SPEC-0030 OBS-18 (renderer): forward uncaught renderer errors / unhandled rejections to the main
+// app-log (the isolated renderer can't write it itself). Fire-and-forget; its own failures swallowed.
+function installRendererErrorForwarding(): void {
+  const report = (r: RendererErrorReport): void => {
+    void window.kbApi?.reportRendererError?.(r).catch(() => {});
+  };
+  window.addEventListener('error', (e: ErrorEvent) => {
+    report({
+      kind: 'error',
+      message: e.message || String((e.error as Error | undefined)?.message ?? 'renderer error'),
+      ...(e.filename ? { source: e.filename } : {}),
+      ...(typeof e.lineno === 'number' ? { line: e.lineno } : {}),
+      ...(typeof e.colno === 'number' ? { col: e.colno } : {}),
+      ...((e.error as Error | undefined)?.stack ? { stack: String((e.error as Error).stack) } : {}),
+    });
+  });
+  window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
+    const reason: unknown = e.reason;
+    report({
+      kind: 'unhandledrejection',
+      message: reason instanceof Error ? reason.message : String(reason),
+      ...(reason instanceof Error && reason.stack ? { stack: reason.stack } : {}),
+    });
+  });
+}
+
 async function init(): Promise<void> {
+  installRendererErrorForwarding(); // OBS-18: always on, before any route (showcase/qcap/shell)
   if (qcapRequested()) {
     mountQuickCaptureSheet(root);
     return;

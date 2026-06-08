@@ -22,6 +22,8 @@ import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectI
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries, type DevLog } from '../kb/devlog';
+import { breadcrumbObserver } from '../kb/activityBreadcrumb';
+import { telemetryHealth } from './telemetry';
 import { researchDepsOptions } from './researchWiring';
 import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
@@ -107,6 +109,12 @@ interface ActivePipeline {
 
 let active: ActivePipeline | null = null;
 
+/** The active vault's `.kb/cache` dir — where OBS-21 writes a heap snapshot (gitignored), or null
+ *  when no vault is open (the sampler then skips the snapshot). Passed to the telemetry glue. */
+export function activeSnapshotDir(): string | null {
+  return active ? path.join(active.vaultPath, '.kb', 'cache') : null;
+}
+
 /** Start every active stage's poke/sweep loop. The SINGLE source of truth for "which stages run"
  *  — both `startPipeline` and `fullReplay`'s resume call this, so a replay can never diverge from
  *  normal startup (e.g. start a stage that startup deliberately leaves dormant). */
@@ -150,7 +158,9 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // The config lives on the persistent `staging` worktree; read best-effort (absent first-run → info).
   // A level change applies on the next pipeline start (vault switch / app restart).
   const stagingInstance = await readInstanceConfig(path.join(vaultPath, '.kb', 'cache', 'worktrees', 'staging'));
-  const log = createVaultDevLog(vaultPath, { level: stagingInstance.devLogLevel });
+  // OBS-18: the breadcrumb observer records the last {stage,runId,itemId} a pipeline line carried, so
+  // a crash handler can name what we were mid-flight on. Best-effort + never throws into logging.
+  const log = createVaultDevLog(vaultPath, { level: stagingInstance.devLogLevel, onEmit: breadcrumbObserver });
   // OBS-12/13: per-vault latency tracer (<vault>/.kb/cache/spans.jsonl, never promoted). Threaded
   // into every stage so each per-item `stage.run` span + its `copilot.invoke` child are recorded;
   // the perf index (perfIndex.ts) aggregates them. Spans also mirror to the dev log at `debug`.
@@ -383,7 +393,10 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
   const spansMtime = perf.source ? new Date(perf.source.mtimeMs).toISOString() : undefined;
   const lastActivity = newestTs([archiveStatus.updatedAt ?? undefined, spansMtime, recentErrors[0]?.ts]);
 
-  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, inFlight, ...(lastActivity ? { lastActivity } : {}) });
+  // OBS-22: the memory/health readout (current RSS/heap + leak trend + last crash breadcrumb).
+  const health = await telemetryHealth();
+
+  return assemblePipelineStatus({ stages, lock: lock.state(), recentErrors, worktrees, perf, setAsideItems, conversion, inFlight, health, ...(lastActivity ? { lastActivity } : {}) });
 }
 
 /**
