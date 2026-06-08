@@ -40,6 +40,14 @@ export interface ReviewRequest {
    * `subject.candidates` ({name, sourceRel, gloss}); the `question` itself should use the glosses.
    */
   candidates?: ReviewCandidateGloss[];
+  /**
+   * The two **existing-entity identities** this disambiguation review decides (REVIEW-18 / CONNECT-21):
+   * `[entityIdA, entityIdB]` — the stable ULIDs of the same-named entities the agent is unsure about
+   * (e.g. the two "Leavenworth" nodes). When present, the verdict is recorded as a DURABLE per-pair
+   * decision at answer-time (`confirm`→same, `reject`→distinct), and the matcher consults it BEFORE
+   * raising so a decided pair is never re-asked. Omit for non-disambiguation reviews.
+   */
+  pair?: [string, string];
 }
 
 /** Decision-grade per-candidate context on a persisted review (REVIEW-16), rendered as a row. */
@@ -132,6 +140,14 @@ export function validReviewRequest(v: unknown, i: number): ReviewRequest {
       return { id: co.id, gloss: co.gloss };
     });
     if (cands.length > 0) req.candidates = cands;
+  }
+  if (o.pair !== undefined) {
+    // REVIEW-18 / CONNECT-21: the two existing-entity ids this disambiguation review decides.
+    if (!Array.isArray(o.pair) || o.pair.length !== 2 || !o.pair.every(isNonEmptyString)) {
+      throw new Error(`review: reviews[${i}].pair must be a 2-tuple of non-empty entity-id strings`);
+    }
+    if (o.pair[0] === o.pair[1]) throw new Error(`review: reviews[${i}].pair must reference two DISTINCT entity ids`);
+    req.pair = [o.pair[0] as string, o.pair[1] as string];
   }
   return req;
 }

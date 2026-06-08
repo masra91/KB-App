@@ -13,6 +13,7 @@ import { dateShard } from './ulid';
 import { ensureGitIdentity } from './vault';
 import { captureToInbox } from './ingest';
 import { validReviewAnswerInput, type Review } from './reviews';
+import { recordDisambiguationDecision, verdictToDisambiguation } from './disambiguationDecisions';
 import type { Mutex } from './stageLock';
 
 /** Repo-relative directory for a review id. */
@@ -128,6 +129,22 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
         ...review.raisedBy.markerKey,
       }) + '\n';
     await fs.appendFile(auditAbs, marker, 'utf8');
+
+    // 3b. REVIEW-18: a disambiguation review (its markerKey carries the decided entity-PAIR) records a
+    // DURABLE, REUSABLE per-pair decision at ANSWER time — `confirm`→same, `reject`→distinct — so the
+    // matcher (CONNECT-21) never re-asks a decided pair. Recorded here, independent of whether a
+    // same-verdict merge write has landed yet (ORCH-26 pending-merge is still "decided"); lands in the
+    // same commit as the answer. Provenance = this reviewId (PRIN-5/6); a later opposite verdict revises.
+    const { pairA, pairB } = review.raisedBy.markerKey;
+    if (pairA && pairB) {
+      await recordDisambiguationDecision(root, {
+        a: pairA,
+        b: pairB,
+        verdict: verdictToDisambiguation(verdict),
+        reviewId: id,
+        decidedAt: answeredAt,
+      });
+    }
 
     // 4. Commit on the canonical tree (serialized by the lock, so no race with stage ff-advances).
     const git = simpleGit(root);
