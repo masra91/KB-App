@@ -20,6 +20,8 @@ import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
+import { ComposeStage, readComposeQueue } from '../kb/composeStage';
+import { makeComposeDecider } from '../kb/composeAgent';
 import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
 import { Mutex } from '../kb/stageLock';
@@ -105,6 +107,7 @@ interface ActivePipeline {
   decompose: DecomposeStage;
   connect: ConnectStage;
   claims: ClaimsStage;
+  compose: ComposeStage; // SPEC-0046: the final Enrich stage — (re)writes entity prose from cited claims
   jobs: JobScheduler; // SPEC-0023: wakes autonomous jobs on a schedule (concurrent, single-flight)
   researchers: ResearcherScheduler; // SPEC-0028: wakes scheduled researchers (standing passes via ingest)
   intake: IntakeScheduler; // SPEC-0041: wakes proactive-intake connectors (feed pulls → primary sources)
@@ -138,6 +141,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.decompose.start();
   a.connect.start();
   a.claims.start();
+  a.compose.start(); // SPEC-0046: the Compose Enrich stage (entity prose from cited claims)
   a.jobs.start(); // SPEC-0023: the autonomous-job scheduler tick (named-preset cadence)
   a.researchers.start(); // SPEC-0028: the scheduled-researcher tick (standing external research)
   a.intake.start(); // SPEC-0041: the proactive-intake tick (scheduled feed pulls → primary sources)
@@ -151,6 +155,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.decompose.stop();
   a.connect.stop();
   a.claims.stop();
+  a.compose.stop();
   a.jobs.stop();
   a.researchers.stop();
   a.intake.stop();
@@ -219,15 +224,16 @@ export function isActiveQuiescing(): boolean {
  */
 export async function quiesceStatusForActive(): Promise<QuiesceStatus | null> {
   if (!active) return null;
-  const { stagingWt, lock, orch, decompose, connect, claims, jobs, researchers, intake, watch, quiescing } = active;
-  const [archiveQ, decompQ, connectQ, claimsQ] = await Promise.all([
+  const { stagingWt, lock, orch, decompose, connect, claims, compose, jobs, researchers, intake, watch, quiescing } = active;
+  const [archiveQ, decompQ, connectQ, claimsQ, composeQ] = await Promise.all([
     readQueue(stagingWt),
     readDecomposeQueue(stagingWt),
     readConnectQueue(stagingWt),
     readClaimsQueue(stagingWt),
+    readComposeQueue(stagingWt),
   ]);
-  const queued = archiveQ.length + decompQ.length + connectQ.length + claimsQ.length;
-  const stagesBusy = [orch, decompose, connect, claims].filter((s) => s.busy()).length;
+  const queued = archiveQ.length + decompQ.length + connectQ.length + claimsQ.length + composeQ.length;
+  const stagesBusy = [orch, decompose, connect, claims, compose].filter((s) => s.busy()).length;
   const schedulersBusy = [jobs, researchers, intake, watch].filter((s) => s.busy()).length;
   const lockBusy = lock.state().held ? 1 : 0;
   // `remaining` counts queued items + everything in flight; the lock being held means a commit is still
@@ -330,10 +336,29 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
   // stays cap=1 until its ephemeral-worktree migration (Phase 2). (STAGE_CAP is module-scoped.)
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
-  const connect = new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer);
+  // SPEC-0046 COMPOSE: the FINAL Enrich stage (after Claims). It (re)writes each entity node's
+  // encyclopedic prose body from that entity's cited claims — idempotent on the claims signature,
+  // with a deterministic blocks-only fallback. Declared first so Claims/Connect can poke it when
+  // the claims/links they own change. Its afterDrain promotes the (re)composed entity nodes to main.
+  const compose = new ComposeStage(stagingWt, makeComposeDecider(), lock, undefined, promoteEvergreen, STAGE_CAP, log, tracer);
+  // Connect's afterDrain promotes the resolved/linked nodes, then pokes Compose: a links change
+  // means the prose's woven cross-links (COMPOSE-4) should be regenerated.
+  const connect = new ConnectStage(
+    stagingWt,
+    makeConnectDecider(),
+    lock,
+    undefined,
+    async () => {
+      await promoteEvergreen();
+      void compose.poke();
+    },
+    log,
+    tracer,
+  );
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
-  // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.)
+  // (CONNECT-12) and promotes the linked nodes. (Connect's own 30s sweep is the backstop.) It also
+  // pokes Compose: new claims → (re)compose the entity's prose (COMPOSE-7).
   const claims = new ClaimsStage(
     stagingWt,
     makeClaimsDecider(),
@@ -342,6 +367,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     async () => {
       await promoteEvergreen();
       void connect.poke();
+      void compose.poke();
     },
     STAGE_CAP,
     log,
@@ -375,7 +401,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // checks watched folders against the REAL vault root (vaultPath), never staging. Inert until the
   // Principal registers + enables a folder in `.kb/watch/registry.json`.
   const watch = new WatchScheduler(stagingWt, vaultPath, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, promoter, log, quiescing: false };
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, compose, jobs, researchers, intake, watch, lock, promoter, log, quiescing: false };
   const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
   // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
   // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
