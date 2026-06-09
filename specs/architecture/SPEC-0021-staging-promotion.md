@@ -132,6 +132,7 @@ more moving parts). Copy-paths is dumb, deterministic, and easy to test.
 | STAGING-9  | should   | A **periodic sweep** re-runs promotion as a backstop (recovers a missed post-drain promotion), mirroring ORCH-15 | none-yet | ORCH-15 |
 | STAGING-10 | must     | **Promotion mirrors deletions**: each promote makes every evergreen path on `main` an *exact mirror* of `staging` (adds, edits, **and removals**), so Connect's merged-away loser nodes and repointed claims (SPEC-0020 §3) are reflected on `main` — a deduped duplicate never lingers. `sources/` is append-only, so mirroring never removes ground truth | test:staging.test.ts, connectPipeline.test.ts | CANON-1,2; CONNECT-3 |
 | STAGING-11 | must     | The **active evergreen set** is exactly `EVERGREEN_PATHS`, and it **grows with its producers**: `entities/` + `claims/` (+ `outputs/`) join the promoted set once CONNECT/Claims write them — `EVERGREEN_PATHS` is the single source of truth for what reaches `main` | test:staging.test.ts, connectPipeline.test.ts | CANON-3,5; CONNECT-3 |
+| STAGING-12 | must     | **Promotion is a good citizen of the LIVE Obsidian vault — coalesce/throttle writes to `main`.** `main` *is* the directory Obsidian has open. Today KB-App commits to it every **~14–46s** (measured live: 40 commits / 42 min, 1–16 files each); Obsidian's file-watcher re-indexes on every write and **never settles → indexing, nav, and file-load HANG** while KB-App runs — recoverable only by quitting KB-App + reopening the Obsidian window. Promotion to `main` MUST be **coalesced/throttled**: batch into **less-frequent, larger atomic commits** (a debounce / quiescent-window cadence, e.g. promote every N seconds or on drain, not per-item), so the watched tree changes in **infrequent bursts, not a continuous stream**. Promotion MUST stay **purely additive forward writes** — never a `checkout`/`reset`/branch-switch that rewrites files Obsidian holds open. Consider an **Obsidian-aware "calm vault" backoff** (slow vault writes while the Principal is actively in Obsidian). The product premise is KB-App sharing the vault **live** with Obsidian — it must not render Obsidian unusable. *(Principal live: "locking issues — when KB-App runs Obsidian indexing hangs, nav hangs, files don't load; fix = quit KB-App then close+reopen the Obsidian window, which rebuilds the index.")* | none-yet | STAGING-3,8; CANON-1; SPEC-0031 (VAULT); SPEC-0045 (QUIESCE); PRIN-5 |
 
 ## 7. Sequencing (honest — this is multi-step)
 
@@ -166,6 +167,12 @@ The full conformance is large; this spec is built in slices, each green + shippa
 
 ## 9. Changelog
 
+- 2026-06-08 — **STAGING-12: promotion must be a good citizen of the live Obsidian vault (Principal-reported P1).**
+  KB-App commits to `main` — the folder Obsidian has open — every ~14–46s (measured live), so Obsidian's watcher
+  re-indexes endlessly and hangs (nav/files/indexing) until KB-App is quit + Obsidian reopened. STAGING-12 requires
+  promotions to be **coalesced/throttled into infrequent atomic bursts** (debounce / quiescent-window, not per-item),
+  stay purely additive-forward (no tree-rewriting checkout/reset), with an optional Obsidian-aware "calm vault" backoff.
+  The whole premise is sharing the vault live with Obsidian — it can't make Obsidian unusable. Held for next-session impl.
 - 2026-05-31 — created (draft). The implementing engine for SPEC-0019: two long-lived branches
   (`staging` = work surface for all stages; `main` = evergreen, written only by the
   **promotion gate**), the evergreen↔working path split, and a **copy-the-evergreen-paths**
