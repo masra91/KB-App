@@ -13,6 +13,7 @@
 import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
+import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
@@ -109,9 +110,17 @@ interface ActivePipeline {
   intake: IntakeScheduler; // SPEC-0041: wakes proactive-intake connectors (feed pulls → primary sources)
   watch: WatchScheduler; // SPEC-0037: live folder watchers (stable files → primary sources, non-destructive)
   lock: Mutex;
+  promoter: CoalescingPromoter; // STAGING-12: coalesces per-drain promotion into infrequent batched bursts
   log: DevLog; // the vault dev-log — reused by Run-now so a researcher failure is logged (#160)
   quiescing: boolean; // SPEC-0045 QUIESCE: true once "Prepare for shutdown" paused new work (drain in progress)
 }
+
+// STAGING-12 promotion cadence — `main` is the live Obsidian vault, so promote in infrequent bursts,
+// not per-drain. Debounce: promote once drains go quiet for QUIESCENT_MS; cap: publish at least every
+// MAX_WAIT_MS under continuous processing so `main` isn't starved. (Tunable; an Obsidian-aware
+// "calm-vault" backoff is the tracked follow-up.)
+const PROMOTE_QUIESCENT_MS = 30_000; // 30s of quiet → promote
+const PROMOTE_MAX_WAIT_MS = 180_000; // …but at least every 3 min under a continuous drain
 
 let active: ActivePipeline | null = null;
 
@@ -146,6 +155,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.researchers.stop();
   a.intake.stop();
   a.watch.stop(); // SPEC-0037: close all live folder watchers
+  a.promoter.stop(); // STAGING-12: cancel a pending promotion timer (no promotes while drains are stopped)
   statusStore.stop(); // OBS-24: halt the background status refresh (retains the in-memory snapshot)
 }
 
@@ -224,12 +234,19 @@ export async function quiesceStatusForActive(): Promise<QuiesceStatus | null> {
   // landing, so it must clear before "safe" even if the queues read empty mid-write.
   const inFlight = stagesBusy + schedulersBusy + lockBusy;
   const remaining = queued + inFlight;
-  const safe = quiescing && remaining === 0;
+  // STAGING-12: a pending coalesced promotion means `main` still owes its last batch — NOT safe to quit
+  // yet. When everything else is idle, flush it now (don't wait the debounce window) so the vault is
+  // current and "safe" is reached promptly + honestly.
+  const promotePending = active.promoter.pending();
+  if (quiescing && remaining === 0 && promotePending) void active.promoter.flushNow();
+  const safe = quiescing && remaining === 0 && !promotePending;
   const detail = !quiescing
     ? 'Running normally.'
     : safe
       ? 'Safe to shut down — all work finished.'
-      : `Finishing up — ${remaining} item${remaining === 1 ? '' : 's'} remaining…`; // "items" matches Status/tray vocab (Design-Lead)
+      : remaining === 0 && promotePending
+        ? 'Publishing the last changes to your vault…'
+        : `Finishing up — ${remaining} item${remaining === 1 ? '' : 's'} remaining…`; // "items" matches Status/tray vocab (Design-Lead)
   return { quiescing, remaining, safe, detail };
 }
 
@@ -278,11 +295,25 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
   // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
   const lock = new Mutex({ log: log.child({ scope: 'lock' }) });
-  // The promotion gate: publish the evergreen subset staging→main, serialized under the lock
-  // (SPEC-0021 STAGING-3/4). A stage runs it after a drain that changed an evergreen path
-  // (archive→sources; connect→entities), so `main` tracks the resolved graph.
+  // STAGING-12: `main` IS the live Obsidian vault folder. Promoting on EVERY drain (~14–46s) made
+  // Obsidian's watcher re-index endlessly → nav/files/indexing HANG. So a stage's afterDrain no longer
+  // promotes directly — it REQUESTS a promotion, and the coalescer publishes in infrequent batched
+  // bursts (debounced by a quiescent window; capped so continuous processing still publishes), each a
+  // single commit run serialized under the canonical-writer lock (STAGING-3). Obsidian settles between.
+  const promoter = createCoalescingPromoter({
+    promote: async () => {
+      await lock.run(() => promote(vaultPath), 'coalesced:promote');
+    },
+    quiescentMs: PROMOTE_QUIESCENT_MS,
+    maxWaitMs: PROMOTE_MAX_WAIT_MS,
+    onError: (err) => log.child({ scope: 'promote' }).warn('promote.coalesced-failed', { itemId: vaultPath, err }),
+  });
+  // The promotion gate: publish the evergreen subset staging→main (SPEC-0021 STAGING-3/4). A stage
+  // runs it after a drain that changed an evergreen path (archive→sources; connect→entities); per
+  // STAGING-12 the per-drain calls coalesce into infrequent bursts (the actual `promote` runs later,
+  // under the lock, inside the coalescer) so `main` tracks the resolved graph without a watcher storm.
   const promoteEvergreen = async (): Promise<void> => {
-    await promote(vaultPath);
+    promoter.request();
   };
   const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, undefined, log, tracer);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
@@ -344,7 +375,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // checks watched folders against the REAL vault root (vaultPath), never staging. Inert until the
   // Principal registers + enables a folder in `.kb/watch/registry.json`.
   const watch = new WatchScheduler(stagingWt, vaultPath, log);
-  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, log, quiescing: false };
+  active = { vaultPath, stagingWt, orch, decompose, connect, claims, jobs, researchers, intake, watch, lock, promoter, log, quiescing: false };
   const readyMs = Date.now() - startedAt; // when the Jobs/read IPC went live — independent of the reap
   // #135 cascade recovery: at boot no ephemeral per-item worktree is legitimately in flight, so reap
   // any leaked `<stage>-<ULID>` worktrees + their `kb/*-work-*` branches left by a crash/kill (the
@@ -1388,7 +1419,14 @@ export async function commitControlFile(root: string, absPath: string, message: 
 
 /** Stop and clear the active pipeline (used on shutdown / vault switch). */
 export function stopPipeline(): void {
-  if (active) stopAllStages(active);
+  if (active) {
+    const { promoter } = active;
+    stopAllStages(active); // also cancels the promotion timer
+    // STAGING-12: publish any pending coalesced batch best-effort (it captures vaultPath + lock, so it
+    // completes independent of `active`). Staging is the durable source of truth — if it doesn't land,
+    // the next session's first drain re-promotes (idempotent + additive), so nothing is lost.
+    void promoter.flushNow();
+  }
   active = null;
 }
 
