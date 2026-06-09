@@ -81,6 +81,8 @@ vi.mock('./pipeline', () => ({
   listWatchFoldersForActive: mocks.listWatchFolders,
   setActiveWatchFolder: mocks.setWatchFolder,
   removeActiveWatchFolder: mocks.removeWatchFolder,
+  // ASK-17: kb:ask reads the configured recall budget from here before calling recall.
+  getActiveInstanceSettings: async () => ({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 }),
 }));
 
 vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
