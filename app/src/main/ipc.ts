@@ -400,7 +400,10 @@ export function registerIpc(): void {
     // BUG #65: hand recall the resolved BYOA `copilot` path so the SDK spawns it in the packaged
     // app (PATH was ensured at boot, STACK-9). Null → SDK default search (dev fallback).
     const cliPath = resolveExecutable('copilot') ?? undefined;
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath });
+    // ASK-17: hand recall the Principal-configured work budget (from Instance Settings on `staging`)
+    // so a real grounded multi-hop has room to finish past the SDK's tight 60s default.
+    const { recallBudgetMs } = await getActiveInstanceSettings();
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs });
   });
 
   // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,

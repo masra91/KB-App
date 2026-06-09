@@ -97,7 +97,9 @@ export function makeSdkRecallClient(opts: SdkRecallClientOptions = {}): RecallCl
       };
       const session = await client.createSession(sessionConfig);
       return {
-        sendAndWait: async (prompt: string): Promise<unknown> => session.sendAndWait(prompt),
+        // ASK-17: forward the recall work budget as the SDK `session.idle` wait timeout (defaults to
+        // the SDK's 60s when omitted). Does not abort in-flight agent work — disconnect (below) does.
+        sendAndWait: async (prompt: string, timeoutMs?: number): Promise<unknown> => session.sendAndWait(prompt, timeoutMs),
         disconnect: async (): Promise<void> => {
           await session.disconnect();
         },
