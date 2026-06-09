@@ -9,6 +9,7 @@ import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir, pathExists, makeTempDir } from '../../test/tempVault';
 import { recall, makeReadOnlyTools, buildRecallToolDefs, recallBudget, countEntityNodes, RECALL_BUDGET, finalizeCitations, type RecallClient, type RecallSessionConfig, type Citation } from './recall';
 import { CopilotCapacityTimeoutError } from './copilotConcurrency';
+import { DEFAULT_RECALL_BUDGET_MS } from './instanceConfig';
 import { createKb } from './vault';
 
 interface ScriptStep {
@@ -414,5 +415,95 @@ describe('recall is interactive-priority (ASK-16)', () => {
     };
     const res = await recall(v.root, 'Who was Ada?', { client, acquireSlot, now: fixedNow });
     expect(res.grounded).toBe(true); // got the slot promptly, then answered
+  });
+});
+
+// ASK-17 — recall has a real, CONFIGURABLE work budget (not a hard 60s) + returns an honest grounded
+// partial on exhaustion. ASK-16 fixed capacity; the bottleneck then moved to session-completion: the
+// SDK session timed out at 60s before the agent finished a grounded multi-hop over a large KB.
+describe('recall work budget (ASK-17)', () => {
+  let v: RecallVault | undefined;
+  afterEach(async () => {
+    if (v) await rmTempDir(v.root);
+    v = undefined;
+  });
+
+  // A client that records the timeout `sendAndWait` was called with, then scripts a grounded answer.
+  function budgetRecordingClient(answerCitationRef: string): { client: RecallClient; timeout: () => number | undefined } {
+    let received: number | undefined;
+    const client: RecallClient = {
+      async createSession(config) {
+        const byName = new Map((config.tools ?? []).map((t) => [t.name, t]));
+        return {
+          async sendAndWait(_prompt: string, timeoutMs?: number): Promise<unknown> {
+            received = timeoutMs;
+            await byName.get('submitAnswer')!.handler({ answer: 'Answer [1].', citations: [{ kind: 'claim', ref: answerCitationRef }], grounded: true }, {});
+            return { type: 'assistant.message' };
+          },
+          async disconnect(): Promise<void> {},
+        };
+      },
+      async disconnect(): Promise<void> {},
+    };
+    return { client, timeout: () => received };
+  }
+
+  it('passes the CONFIGURED budget to the SDK session (a query needing > the old 60s gets room)', async () => {
+    v = await buildRecallVault();
+    const rec = budgetRecordingClient(v.claimRel);
+    const res = await recall(v.root, 'Who was Ada?', { client: rec.client, sessionBudgetMs: 180_000, now: fixedNow });
+    expect(rec.timeout()).toBe(180_000); // the raised budget reached the SDK, not the hard 60s
+    expect(res.grounded).toBe(true);
+  });
+
+  it('defaults the budget WELL ABOVE the old 60s when the caller does not specify one', async () => {
+    v = await buildRecallVault();
+    const rec = budgetRecordingClient(v.claimRel);
+    await recall(v.root, 'Who was Ada?', { client: rec.client, now: fixedNow });
+    expect(rec.timeout()).toBe(DEFAULT_RECALL_BUDGET_MS);
+    expect(DEFAULT_RECALL_BUDGET_MS).toBeGreaterThan(60_000);
+  });
+
+  it('on budget exhaustion AFTER a partial answer, returns the grounded PARTIAL + honest "incomplete" — not a bare throw', async () => {
+    v = await buildRecallVault();
+    const client: RecallClient = {
+      async createSession(config) {
+        const byName = new Map((config.tools ?? []).map((t) => [t.name, t]));
+        return {
+          async sendAndWait(): Promise<unknown> {
+            // The agent submits a grounded partial, then the session runs out of budget mid-exploration.
+            await byName.get('submitAnswer')!.handler({ answer: 'You stayed in Tulum [1].', citations: [{ kind: 'claim', ref: v!.claimRel }], grounded: true }, {});
+            throw new Error('Timeout after 240000ms waiting for session.idle');
+          },
+          async disconnect(): Promise<void> {},
+        };
+      },
+      async disconnect(): Promise<void> {},
+    };
+    const res = await recall(v.root, 'where did i stay in mexico in 2025', { client, now: fixedNow });
+    expect(res.grounded).toBe(true); // the captured partial WAS grounded — not discarded
+    expect(res.citations).toHaveLength(1);
+    expect(res.truncated).toBe(true); // flagged incomplete
+    expect(res.answer).toMatch(/incomplete|ran out of time/i); // honest note appended (ORCH-7)
+    expect(res.answer).toContain('Tulum'); // the partial answer is preserved
+  });
+
+  it('on budget exhaustion with NOTHING captured, returns an honest ungrounded result (never throws)', async () => {
+    v = await buildRecallVault();
+    const client: RecallClient = {
+      async createSession(): Promise<import('./recall').RecallSession> {
+        return {
+          async sendAndWait(): Promise<unknown> {
+            throw new Error('Timeout after 240000ms waiting for session.idle'); // timed out before any answer
+          },
+          async disconnect(): Promise<void> {},
+        };
+      },
+      async disconnect(): Promise<void> {},
+    };
+    const res = await recall(v.root, 'an impossible question', { client, now: fixedNow });
+    expect(res.grounded).toBe(false);
+    expect(res.truncated).toBe(true);
+    expect(res.answer).toMatch(/couldn't reach a grounded answer in time/i); // honest, retryable — not a throw
   });
 });

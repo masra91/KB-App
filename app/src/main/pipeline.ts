@@ -52,7 +52,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, type DevLogLevel } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel } from '../kb/instanceConfig';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { appendAuditEvent } from '../kb/audit';
@@ -884,6 +884,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   let prior: InstanceSettings = defaultInstanceConfig();
   let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
   let quickCaptureAccelerator: string = DEFAULT_QUICK_CAPTURE_ACCELERATOR;
+  let recallBudgetMs: number = DEFAULT_RECALL_BUDGET_MS;
   await active.lock.run(async () => {
     prior = await readInstanceConfig(root);
     // OBS-10: keep a valid level. Server-side merge (QA-2 hardening / the #102 lesson): an
@@ -894,8 +895,11 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       typeof settings.quickCaptureAccelerator === 'string' && settings.quickCaptureAccelerator.trim().length > 0
         ? settings.quickCaptureAccelerator
         : prior.quickCaptureAccelerator;
-    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel, quickCaptureAccelerator });
-    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator}`);
+    // ASK-17: preserve-on-omission — an omitted recall budget keeps prior; a provided one is clamped to
+    // the sane bounds. (prior.recallBudgetMs is always set: readInstanceConfig fills it.)
+    recallBudgetMs = settings.recallBudgetMs === undefined ? (prior.recallBudgetMs ?? DEFAULT_RECALL_BUDGET_MS) : clampRecallBudgetMs(settings.recallBudgetMs);
+    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs });
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs}`);
   }, 'instance-settings:write');
   // QCAP-6: apply a changed hotkey live (no restart) — conflict-aware via the agent; degrades to the
   // menubar if the new accelerator clashes (QCAP-9). No-op when running headless without an agent.

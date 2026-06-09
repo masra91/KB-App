@@ -9,6 +9,10 @@ import {
   defaultInstanceConfig,
   instanceConfigPath,
   resolveJobPosture,
+  clampRecallBudgetMs,
+  DEFAULT_RECALL_BUDGET_MS,
+  RECALL_BUDGET_MS_MIN,
+  RECALL_BUDGET_MS_MAX,
 } from './instanceConfig';
 
 let root: string;
@@ -19,7 +23,7 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true });
 });
 
-const DEF = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' } as const;
+const DEF = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS } as const;
 
 describe('instance config store (PANEL-5)', () => {
   it('defaults to Guarded + info verbosity + ⌥Space hotkey when no file exists', async () => {
@@ -28,8 +32,8 @@ describe('instance config store (PANEL-5)', () => {
   });
 
   it('round-trips a written config', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K' });
-    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K' });
+    await writeInstanceConfig(root, { autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
+    expect(await readInstanceConfig(root)).toEqual({ autonomyDefault: 'autonomous', devLogLevel: 'debug', quickCaptureAccelerator: 'CommandOrControl+Shift+K', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
     // Stored under .kb/instance.json (per-vault, never the app config).
     expect(instanceConfigPath(root).endsWith(path.join('.kb', 'instance.json'))).toBe(true);
   });
@@ -38,25 +42,50 @@ describe('instance config store (PANEL-5)', () => {
     await fs.mkdir(path.join(root, '.kb'), { recursive: true });
     await fs.writeFile(instanceConfigPath(root), '{ not json', 'utf8');
     expect(await readInstanceConfig(root)).toEqual(DEF);
-    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never, devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' });
+    await writeInstanceConfig(root, { autonomyDefault: 'reckless' as never, devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
     expect((await readInstanceConfig(root)).autonomyDefault).toBe('guarded');
   });
 
   it('OBS-10: devLogLevel round-trips and an unknown level falls back to info', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'debug', quickCaptureAccelerator: 'Alt+Space' });
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'debug', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
     expect((await readInstanceConfig(root)).devLogLevel).toBe('debug');
-    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'screaming' as never, quickCaptureAccelerator: 'Alt+Space' });
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'screaming' as never, quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
     expect((await readInstanceConfig(root)).devLogLevel).toBe('info'); // unknown → safe default
   });
 
   it('QCAP-6: quickCaptureAccelerator round-trips; empty/non-string falls back to the ⌥Space default', async () => {
-    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Control+Alt+Q' });
+    await writeInstanceConfig(root, { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Control+Alt+Q', recallBudgetMs: DEFAULT_RECALL_BUDGET_MS });
     expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Control+Alt+Q');
     // An empty/garbage stored value is replaced by the default (full grammar validation is at register).
     await fs.writeFile(instanceConfigPath(root), JSON.stringify({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: '' }), 'utf8');
     expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Alt+Space');
     await fs.writeFile(instanceConfigPath(root), JSON.stringify({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 42 }), 'utf8');
     expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Alt+Space');
+  });
+
+  it('ASK-17: recallBudgetMs round-trips, clamps out-of-range, and a legacy file (no field) → default', async () => {
+    await writeInstanceConfig(root, { ...DEF, recallBudgetMs: 300_000 });
+    expect((await readInstanceConfig(root)).recallBudgetMs).toBe(300_000); // an in-range value round-trips
+
+    // Out-of-range values clamp to the sane bounds (never below the old 60s, never an unbounded hang).
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallBudgetMs: 5_000 }), 'utf8');
+    expect((await readInstanceConfig(root)).recallBudgetMs).toBe(RECALL_BUDGET_MS_MIN);
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallBudgetMs: 9_999_999 }), 'utf8');
+    expect((await readInstanceConfig(root)).recallBudgetMs).toBe(RECALL_BUDGET_MS_MAX);
+
+    // A legacy/garbled value (or a config written before ASK-17) reads back as the raised default.
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' }), 'utf8');
+    expect((await readInstanceConfig(root)).recallBudgetMs).toBe(DEFAULT_RECALL_BUDGET_MS);
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallBudgetMs: 'soon' }), 'utf8');
+    expect((await readInstanceConfig(root)).recallBudgetMs).toBe(DEFAULT_RECALL_BUDGET_MS);
+  });
+
+  it('ASK-17: clampRecallBudgetMs bounds the value (default ≥ 60s, ≤ 10min)', () => {
+    expect(clampRecallBudgetMs(240_000)).toBe(240_000);
+    expect(clampRecallBudgetMs(1)).toBe(RECALL_BUDGET_MS_MIN);
+    expect(clampRecallBudgetMs(99_999_999)).toBe(RECALL_BUDGET_MS_MAX);
+    expect(clampRecallBudgetMs('nope')).toBe(DEFAULT_RECALL_BUDGET_MS);
+    expect(DEFAULT_RECALL_BUDGET_MS).toBeGreaterThan(60_000); // the old hard 60s was too tight
   });
 });
 

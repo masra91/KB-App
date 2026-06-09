@@ -19,6 +19,7 @@ import type { AgentTrace } from './archivist';
 import { makeReadOnlyTools } from './recallTools';
 import { RECALL_SKILL, makeSdkRecallClient } from './recallAgent';
 import { acquireInteractiveCopilotSlot, CopilotCapacityTimeoutError } from './copilotConcurrency';
+import { DEFAULT_RECALL_BUDGET_MS } from './instanceConfig';
 
 // ── Question / session ──────────────────────────────────────────────────────────────────────
 
@@ -139,8 +140,13 @@ export interface RecallSessionConfig {
 }
 
 export interface RecallSession {
-  /** Send the question and resolve when the agent is idle (it answers via the submitAnswer tool). */
-  sendAndWait(prompt: string): Promise<unknown>;
+  /**
+   * Send the question and resolve when the agent is idle (it answers via the submitAnswer tool).
+   * `timeoutMs` is the work budget (ASK-17): how long to wait for `session.idle` before giving up —
+   * the SDK throws if it's reached. Defaults to the SDK's 60s when omitted; recall passes the
+   * configured budget so a real grounded multi-hop has room to finish.
+   */
+  sendAndWait(prompt: string, timeoutMs?: number): Promise<unknown>;
   disconnect?(): Promise<void> | void;
 }
 
@@ -174,6 +180,14 @@ export interface RecallOptions {
    * if it can't. Returns the single-use release (called on session teardown). Tests inject a fake pool.
    */
   acquireSlot?: () => Promise<() => void>;
+  /**
+   * Recall's interactive work budget in ms (ASK-17): how long the SDK `session.idle` wait is given
+   * before recall stops and returns its best grounded partial. The shipped 60s SDK default was too
+   * tight for a real multi-hop over a large KB; the main process passes the Principal-configured value
+   * ({@link DEFAULT_RECALL_BUDGET_MS}). On exhaustion recall returns a grounded PARTIAL + honest
+   * "incomplete" (ORCH-7), never a bare timeout.
+   */
+  sessionBudgetMs?: number;
 }
 
 export const DEFAULT_MAX_TOOL_CALLS = 12;
@@ -245,6 +259,9 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
   const maxToolCalls = opts.maxToolCalls ?? recallBudget(await countEntityNodes(root));
   const clock = opts.now ?? erasedClock;
   const acquireSlot = opts.acquireSlot ?? acquireInteractiveCopilotSlot;
+  // ASK-17: the recall work budget — well above the SDK's tight 60s default so a real grounded
+  // multi-hop has room to converge; the main process passes the Principal-configured value.
+  const sessionBudgetMs = opts.sessionBudgetMs ?? DEFAULT_RECALL_BUDGET_MS;
 
   const budget = { used: 0, truncated: false };
   const captured: Captured = { answered: false, answer: '', citations: [], declaredGrounded: true };
@@ -252,6 +269,7 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
 
   let trace: AgentTrace;
   let result: AskResult | null = null;
+  let sessionIncomplete = false; // ASK-17(c): the session ran out of budget mid-flight after a partial
   try {
     // ASK-16: recall is INTERACTIVE-PRIORITY — acquire a slot from the global pool (it no longer
     // bypasses the safety ceiling) through the priority lane, so the human query reserves capacity
@@ -266,7 +284,8 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
         allowedTools: [...TOOL_NAMES, SUBMIT_ANSWER_TOOL],
       });
       try {
-        await session.sendAndWait(buildUserPrompt(question, history));
+        // ASK-17: wait up to the configured budget for `session.idle` (vs the SDK's tight 60s default).
+        await session.sendAndWait(buildUserPrompt(question, history), sessionBudgetMs);
       } finally {
         await session.disconnect?.();
       }
@@ -275,21 +294,28 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
     }
     trace = { via: 'copilot', runtime: 'copilot', ok: captured.answered, at: clock() };
   } catch (err) {
-    // ASK-16 honest fast-fail: capacity couldn't be granted in bound → say so plainly + retryable, NOT
-    // a silent hang. Other failures (SDK/CLI unavailable, session error) → honest, ungrounded result;
-    // never fabricate (ORCH-7).
     const busy = err instanceof CopilotCapacityTimeoutError;
-    result = {
-      question,
-      answer: busy
-        ? 'The KB is busy ingesting right now, so I couldn’t reach a grounded answer in time — please try again in a moment.'
-        : `I couldn't run recall: ${err instanceof Error ? err.message : String(err)}`,
-      citations: [],
-      grounded: false,
-      toolCalls: budget.used,
-      truncated: budget.truncated,
-      trace: { via: 'copilot', ok: false, error: err instanceof Error ? err.message : String(err), at: clock() },
-    };
+    if (!busy && captured.answered) {
+      // ASK-17(c): the session hit its budget (or errored) AFTER the agent had already submitted an
+      // answer — keep that best grounded PARTIAL + flag it incomplete; fall through to finalize. Never
+      // discard real grounded work for a bare timeout throw (ORCH-7).
+      sessionIncomplete = true;
+      trace = { via: 'copilot', runtime: 'copilot', ok: true, at: clock() };
+    } else {
+      // ASK-16 honest fast-fail (capacity) OR a hard failure with nothing captured (SDK/CLI unavailable,
+      // a budget exhausted before any answer) → honest, ungrounded result; never fabricate (ORCH-7).
+      result = {
+        question,
+        answer: busy
+          ? 'The KB is busy ingesting right now, so I couldn’t reach a grounded answer in time — please try again in a moment.'
+          : `I couldn't reach a grounded answer in time (${err instanceof Error ? err.message : String(err)}). The KB may be large — try a more specific question or raise the recall budget in Settings.`,
+        citations: [],
+        grounded: false,
+        toolCalls: budget.used,
+        truncated: true,
+        trace: { via: 'copilot', ok: false, error: err instanceof Error ? err.message : String(err), at: clock() },
+      };
+    }
   }
 
   if (!result) {
@@ -298,13 +324,18 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
     const finalized = captured.answered
       ? await finalizeCitations(tools, captured.answer, captured.citations)
       : { answer: 'I could not reach a grounded answer within the retrieval budget.', citations: [] as Citation[] };
+    // ASK-17(c): a budget-exhausted run that DID capture a partial answer is returned grounded-as-far-as-
+    // it-got with an honest "incomplete" note appended — never silently presented as complete.
+    const answer = sessionIncomplete
+      ? `${finalized.answer}\n\n_(Recall ran out of time before fully exploring the KB — this answer may be incomplete. Ask a more specific question or raise the recall budget in Settings.)_`
+      : finalized.answer;
     result = {
       question,
-      answer: finalized.answer,
+      answer,
       citations: finalized.citations,
       grounded: finalized.citations.length > 0 && captured.declaredGrounded,
       toolCalls: budget.used,
-      truncated: budget.truncated || !captured.answered,
+      truncated: budget.truncated || !captured.answered || sessionIncomplete,
       trace: trace!,
     };
   }

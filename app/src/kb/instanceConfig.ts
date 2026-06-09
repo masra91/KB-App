@@ -20,6 +20,15 @@ export const DEFAULT_DEV_LOG_LEVEL: DevLogLevel = 'info';
  *  at registration, so persistence only needs a non-empty string here. */
 export const DEFAULT_QUICK_CAPTURE_ACCELERATOR = 'Alt+Space';
 
+/** Recall's interactive work budget (ASK-17): the wall-clock the SDK `session.idle` wait is given
+ *  before recall stops and returns its best grounded partial. The interactive instance of the
+ *  JOBS-17 work-depth knob. The shipped 60s default was too tight for a real grounded multi-hop over
+ *  a large KB (1007 entities) — raised to 4min. Principal-configurable (Settings) within sane bounds:
+ *  a query the human is actively waiting on should finish, but never hang unboundedly. */
+export const DEFAULT_RECALL_BUDGET_MS = 240_000;
+export const RECALL_BUDGET_MS_MIN = 60_000; // never below the old hard 60s
+export const RECALL_BUDGET_MS_MAX = 600_000; // 10min ceiling — an interactive op must stay bounded
+
 /** Instance-wide settings (PANEL-5). v1 holds the autonomy default; grows as Settings does. */
 export interface InstanceConfig {
   /** The Instance-wide default autonomy posture (AUTO-12). Jobs inherit it unless they override. */
@@ -28,6 +37,10 @@ export interface InstanceConfig {
   devLogLevel: DevLogLevel;
   /** Quick Capture global hotkey accelerator (SPEC-0038 QCAP-6), e.g. `Alt+Space`. */
   quickCaptureAccelerator: string;
+  /** Recall interactive work budget in ms (ASK-17 / JOBS-17): the `session.idle` wall-clock before
+   *  recall returns its best grounded partial. Default {@link DEFAULT_RECALL_BUDGET_MS}; clamped to
+   *  [{@link RECALL_BUDGET_MS_MIN}, {@link RECALL_BUDGET_MS_MAX}]. */
+  recallBudgetMs: number;
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -37,7 +50,19 @@ export function instanceConfigPath(root: string): string {
 
 /** The safe default Instance config (Guarded autonomy + `info` dev-log verbosity + ⌥Space hotkey). */
 export function defaultInstanceConfig(): InstanceConfig {
-  return { autonomyDefault: DEFAULT_POSTURE, devLogLevel: DEFAULT_DEV_LOG_LEVEL, quickCaptureAccelerator: DEFAULT_QUICK_CAPTURE_ACCELERATOR };
+  return {
+    autonomyDefault: DEFAULT_POSTURE,
+    devLogLevel: DEFAULT_DEV_LOG_LEVEL,
+    quickCaptureAccelerator: DEFAULT_QUICK_CAPTURE_ACCELERATOR,
+    recallBudgetMs: DEFAULT_RECALL_BUDGET_MS,
+  };
+}
+
+/** Clamp a configured recall budget into the sane bounds (ASK-17); a non-finite value → default. */
+export function clampRecallBudgetMs(v: unknown): number {
+  const n = typeof v === 'number' ? v : Number.NaN;
+  if (!Number.isFinite(n)) return DEFAULT_RECALL_BUDGET_MS;
+  return Math.max(RECALL_BUDGET_MS_MIN, Math.min(RECALL_BUDGET_MS_MAX, n));
 }
 
 /** Read the Instance config (PANEL-5). Missing/malformed file or unknown posture → safe defaults. */
@@ -67,7 +92,8 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
     typeof o.quickCaptureAccelerator === 'string' && o.quickCaptureAccelerator.trim().length > 0
       ? o.quickCaptureAccelerator
       : DEFAULT_QUICK_CAPTURE_ACCELERATOR;
-  return { autonomyDefault, devLogLevel, quickCaptureAccelerator };
+  const recallBudgetMs = clampRecallBudgetMs(o.recallBudgetMs); // ASK-17: absent/garbled/out-of-range → safe
+  return { autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs };
 }
 
 /** Write the Instance config (Settings edit, PANEL-5/6) — deterministic, stable key order. */

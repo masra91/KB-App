@@ -540,6 +540,9 @@ export interface InstanceSettings {
   devLogLevel: DevLogLevel;
   /** Quick Capture global hotkey accelerator (SPEC-0038 QCAP-6), e.g. `Alt+Space`. */
   quickCaptureAccelerator: string;
+  /** Recall interactive work budget in ms (ASK-17 / JOBS-17): how long a grounded query may run
+   *  before returning its best partial. Optional in the edit contract (preserve-on-omission). */
+  recallBudgetMs?: number;
 }
 
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
