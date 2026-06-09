@@ -249,14 +249,24 @@ export function stepperCells(stage: StageId): CellRole[] {
   return STAGE_ORDER.map((_, i) => (i < cur ? 'done' : i === cur ? 'current' : 'pending'));
 }
 
+/** A single item lingering on one station past this isn't live work — it's a stale/wedged in-progress
+ *  marker (OBS-26): a finished-but-not-cleared drain, or a worker that died without clearing its mark.
+ *  Beyond it the dwell reads as a questioning "stalled?" rather than an ever-growing seconds counter
+ *  that looks like a catastrophic live hang. Generous (10×–120× a normal per-item op) so a genuinely
+ *  slow-but-live item is never mislabelled. */
+export const MAX_PLAUSIBLE_DWELL_MS = 10 * 60_000; // 10 minutes
+
 /** The carriage's current-station dwell caption ("12s on Copilot") from its `sinceTs` (§2). Only the
- *  active (draining) carriage carries `sinceTs`, so queued carriages get ''. NaN/absent → ''. */
+ *  active (draining) carriage carries `sinceTs`, so queued carriages get ''. NaN/absent → ''. Past
+ *  {@link MAX_PLAUSIBLE_DWELL_MS} it renders "stalled? · Nm" (OBS-26) — the marker has outlived any
+ *  plausible per-item runtime, so no live worker backs it; show a bounded concern, not a growing number. */
 export function dwellLabel(sinceTs: string | undefined, nowMs: number): string {
   if (!sinceTs) return '';
   const ms = Date.parse(sinceTs);
   if (!Number.isFinite(ms)) return '';
-  const secs = Math.max(0, Math.round((nowMs - ms) / 1000));
-  return `${secs}s on Copilot`;
+  const elapsed = Math.max(0, nowMs - ms);
+  if (elapsed > MAX_PLAUSIBLE_DWELL_MS) return `stalled? · ${Math.round(elapsed / 60_000)}m`;
+  return `${Math.round(elapsed / 1000)}s on Copilot`;
 }
 
 /** Max carriages rendered before the rest collapse into a "+K more in flight" row (§5 VIZ-9 — keeps

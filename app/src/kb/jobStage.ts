@@ -19,6 +19,7 @@ import type { Review } from './reviews';
 import {
   effectiveDisposition,
   isSafeJobId,
+  normalizeJournalEntry,
   type JobConfig,
   type JobBehavior,
   type JournalEntry,
@@ -88,7 +89,9 @@ export async function readJournal(root: string, jobId: string): Promise<JournalE
   for (const line of raw.split('\n')) {
     if (line.trim().length === 0) continue;
     try {
-      out.push(JSON.parse(line) as JournalEntry);
+      // Normalize at the read boundary (JOBS-8): a legacy/partial line missing the run-summary fields
+      // must not surface as "undefined" in the run detail — coerce to a well-formed entry.
+      out.push(normalizeJournalEntry(JSON.parse(line)));
     } catch {
       /* skip a malformed line — never crash continuity on a bad journal entry */
     }

@@ -478,17 +478,23 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
   // names bake into the cached snapshot and flow to The Line + the Status stations + the tray.
   // Connect/claims ids are block keys / entity ids (not ULIDs), so they don't resolve to a source and
   // the renderer guard (`displayItemName`) shows them as-is — never a raw ULID.
+  // OBS-26: only treat archive's persisted `processing` as a live current-item when a worker actually
+  // backs it (`orch.busy()`). The status file can retain `processing` if the orchestrator was killed
+  // mid-item — without this gate it shows as a perpetual in-progress ghost (a growing-forever dwell).
+  // No live drain ⇒ no current item / no in-flight carriage for it.
+  const orchBusy = orch.busy();
+  const archiveProcessing = orchBusy ? archiveStatus.processing : null;
   const sourceTitles = await readSourceTitles(vaultPath, [
-    ...(archiveStatus.processing ? [archiveStatus.processing] : []),
+    ...(archiveProcessing ? [archiveProcessing] : []),
     ...archiveQ,
     ...decompQ,
   ]);
-  const archiveCurrent = archiveStatus.processing
-    ? displayItemName(sourceTitles.get(archiveStatus.processing), archiveStatus.processing)
+  const archiveCurrent = archiveProcessing
+    ? displayItemName(sourceTitles.get(archiveProcessing), archiveProcessing)
     : undefined;
 
   const stages: StageInput[] = [
-    { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orch.busy(), hasError: hasErrorFor('archive'), ...(archiveCurrent ? { currentItem: archiveCurrent } : {}) },
+    { stage: 'archive', queueDepth: archiveQ.length, setAside: setAsideFor('archive'), busy: orchBusy, hasError: hasErrorFor('archive'), ...(archiveCurrent ? { currentItem: archiveCurrent } : {}) },
     { stage: 'decompose', queueDepth: decompQ.length, setAside: setAsideFor('decompose'), busy: decompose.busy(), hasError: hasErrorFor('decompose') },
     { stage: 'connect', queueDepth: connectQ.length, setAside: setAsideFor('connect'), busy: connect.busy(), hasError: hasErrorFor('connect') },
     { stage: 'claims', queueDepth: claimsQ.length, setAside: setAsideFor('claims'), busy: claims.busy(), hasError: hasErrorFor('claims') },
@@ -496,13 +502,13 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
 
   // SPEC-0032 VIZ-2: in-flight carriages — each stage's queue items, `active` = the draining batch
   // (`busy && index < cap`; the drain processes `queue[0..cap)`). Archive's active item is its
-  // `processing` (prepended; cap=1); connect drains 1 block at a time (cap=1); decompose/claims = STAGE_CAP.
-  // Source-keyed items (archive/decompose) carry the resolved title as `name` (PRIN-24).
+  // `processing` (prepended; cap=1, only when a live worker backs it — OBS-26); connect drains 1 block
+  // at a time (cap=1); decompose/claims = STAGE_CAP. Source-keyed items carry the resolved title (PRIN-24).
   const inFlight = buildInFlightRoster([
     {
       stage: 'archive',
-      items: [...(archiveStatus.processing ? [{ id: archiveStatus.processing, name: sourceTitles.get(archiveStatus.processing) }] : []), ...archiveQ.map((id) => ({ id, name: sourceTitles.get(id) }))],
-      busy: orch.busy(), cap: 1, since: archiveStatus.updatedAt ?? null,
+      items: [...(archiveProcessing ? [{ id: archiveProcessing, name: sourceTitles.get(archiveProcessing) }] : []), ...archiveQ.map((id) => ({ id, name: sourceTitles.get(id) }))],
+      busy: orchBusy, cap: 1, since: archiveStatus.updatedAt ?? null,
     },
     { stage: 'decompose', items: decompQ.map((id) => ({ id, name: sourceTitles.get(id) })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
     { stage: 'connect', items: connectQ.map((cs) => ({ id: cs.blockKey })), busy: connect.busy(), cap: 1, since: connect.currentSince() },

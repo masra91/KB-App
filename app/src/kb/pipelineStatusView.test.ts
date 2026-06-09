@@ -111,6 +111,17 @@ describe('assemblePipelineStatus (OBS-5/11)', () => {
     expect(v.overall).toBe('idle');
   });
 
+  it('OBS-26: a stage surfaces currentItem ONLY when busy — a marker with no live worker is dropped', () => {
+    // A busy stage shows its current item…
+    const live = assemblePipelineStatus(parts({ stages: [stage({ stage: 'archive', busy: true, currentItem: 'Quarterly Report' })] }));
+    expect(live.stages[0].currentItem).toBe('Quarterly Report');
+    // …but a NOT-busy stage carrying a (persisted, stale) currentItem must NOT — no backing worker, no
+    // perpetual in-progress ghost. Regression for the "caroline linking for 4602s" ghost (the orch was
+    // killed mid-item; the status file kept `processing`, but nothing was draining).
+    const ghost = assemblePipelineStatus(parts({ stages: [stage({ stage: 'archive', busy: false, currentItem: 'caroline' })] }));
+    expect(ghost.stages[0].currentItem).toBeUndefined();
+  });
+
   it('overall=stalled when work is queued but last activity is older than the threshold (OBS-11)', () => {
     const now = '2026-06-02T00:10:00.000Z';
     const v = assemblePipelineStatus(
