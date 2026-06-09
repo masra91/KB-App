@@ -11,6 +11,7 @@ import {
   slowestStage,
   stepperCells,
   dwellLabel,
+  MAX_PLAUSIBLE_DWELL_MS,
   splitCarriages,
   STATION_GLYPH,
   OVERALL_GLYPH,
@@ -186,6 +187,18 @@ describe('theLineModel — carriages (VIZ-2 stepper, VIZ-9 virtualization)', () 
     expect(dwellLabel(undefined, now)).toBe('');
     expect(dwellLabel('not-a-date', now)).toBe('');
     expect(dwellLabel('2026-06-02T00:00:30.000Z', now)).toBe('0s on Copilot'); // future ts floored at 0
+  });
+
+  it('OBS-26: a dwell past the max plausible runtime reads as "stalled?", not an ever-growing number', () => {
+    // Regression for the ghost: "caroline linking for 4602s" (~77 min) — a stale/wedged in-progress
+    // marker with no live worker. Before: a forever-growing seconds counter that looks like a
+    // catastrophic live hang. After: a bounded, questioning "stalled? · Nm".
+    const start = '2026-06-02T00:00:00.000Z';
+    const startMs = Date.parse(start);
+    expect(dwellLabel(start, startMs + 4602_000)).toBe('stalled? · 77m'); // the reported ghost
+    expect(dwellLabel(start, startMs + MAX_PLAUSIBLE_DWELL_MS + 1)).toContain('stalled?'); // just past the cap
+    expect(dwellLabel(start, startMs + MAX_PLAUSIBLE_DWELL_MS - 1)).toContain('on Copilot'); // just under → live
+    expect(dwellLabel(start, startMs + 70 * 60_000)).not.toContain('4200s'); // never the raw growing seconds
   });
 
   it('splitCarriages builds carriage models, active-first, with the stepper + dwell only on active', () => {

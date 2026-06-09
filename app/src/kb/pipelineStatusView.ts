@@ -281,7 +281,11 @@ export function assemblePipelineStatus(parts: AssembleParts, opts: AssembleOptio
     state: deriveStageState(s),
     queueDepth: s.queueDepth,
     setAside: s.setAside,
-    ...(s.currentItem !== undefined ? { currentItem: s.currentItem } : {}),
+    // OBS-26: a `currentItem` is "the item a live worker is processing" — only surface it when the
+    // stage is actually `busy`. A marker read from a persisted status file (archive `processing`) can
+    // outlive its run if the worker was killed mid-item; without this gate it shows as a perpetual
+    // in-progress ghost (no backing worker). No worker ⇒ no current item.
+    ...(s.currentItem !== undefined && s.busy ? { currentItem: s.currentItem } : {}),
   }));
 
   const anyRunning = parts.stages.some((s) => s.busy) || parts.lock.held;

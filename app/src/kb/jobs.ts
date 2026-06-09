@@ -112,6 +112,29 @@ export interface JournalEntry {
 }
 
 /**
+ * Coerce a journal line parsed off disk into a well-formed {@link JournalEntry} (JOBS-8). The journal
+ * is read with an unchecked `JSON.parse(...)`, so a **legacy or partial** line (written before the
+ * JOBS-8 run-summary fields existed, or hand-edited) may be missing `inspected`/`applied`/`deferred`
+ * — which surfaced as a literal **"undefined"** in the Jobs run detail. Normalizing here means every
+ * consumer (the run-detail view AND the next run's continuity read) sees real values: a missing/wrong-
+ * typed count becomes `0`, a missing `inspected` becomes `''` (the render shows a neutral dash). The
+ * write path already populates these; this protects the READ against any non-conforming entry.
+ */
+export function normalizeJournalEntry(raw: unknown): JournalEntry {
+  const e = (raw && typeof raw === 'object' ? raw : {}) as Partial<JournalEntry> & Record<string, unknown>;
+  return {
+    ts: typeof e.ts === 'string' ? e.ts : '',
+    runId: typeof e.runId === 'string' ? e.runId : '',
+    inspected: typeof e.inspected === 'string' ? e.inspected : '',
+    applied: typeof e.applied === 'number' && Number.isFinite(e.applied) ? e.applied : 0,
+    deferred: typeof e.deferred === 'number' && Number.isFinite(e.deferred) ? e.deferred : 0,
+    ...(Array.isArray(e.findings) ? { findings: e.findings as AuditedFinding[] } : {}),
+    ...(e.cursor && typeof e.cursor === 'object' ? { cursor: e.cursor as Record<string, unknown> } : {}),
+    ...(typeof e.note === 'string' ? { note: e.note } : {}),
+  };
+}
+
+/**
  * Enforce posture on a finding's disposition (JOBS-9/15). Guarded: only additive + high-confidence
  * auto-applies; everything else (destructive, or low-confidence) → Review, never guessed. Autonomous:
  * the behavior's proposed disposition governs. The single source of truth for "auto vs Review".

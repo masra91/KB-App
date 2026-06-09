@@ -71,6 +71,27 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     expect(li(root, 'reflect').querySelector('.job-lastrun')?.textContent).toContain('Never run');
   });
 
+  it('ENG-16: a legacy/partial last-run (missing JOBS-8 counts) renders neutral, never "undefined"', async () => {
+    // Regression: the run detail read "inspected undefined; undefined applied, undefined deferred"
+    // when a legacy journal entry reached the view without the counts. The render must default — a
+    // missing count → 0, a missing/blank inspected → "—" — never the literal "undefined".
+    setApi({
+      listJobs: vi.fn(async () => [
+        // A legacy entry that slipped past read-normalization — only ts/runId, no counts. Cast through
+        // unknown to model the malformed shape the trust boundary must tolerate.
+        job({ id: 'reflect', lastRun: { ts: '2026-06-01T00:00:00.000Z', runId: 'OLD' } as unknown as JobView['lastRun'] }),
+      ]),
+      setJobConfig: vi.fn(),
+      runJobNow: vi.fn(),
+    });
+    await mountJobs(root);
+
+    const text = li(root, 'reflect').querySelector('.job-lastrun')?.textContent ?? '';
+    expect(text).not.toContain('undefined');
+    expect(text).toContain('0 applied, 0 deferred');
+    expect(text).toContain('inspected —');
+  });
+
   it('shows a friendly empty state when there are no jobs (PANEL-9)', async () => {
     setApi({ listJobs: vi.fn(async () => []), setJobConfig: vi.fn(), runJobNow: vi.fn() });
     await mountJobs(root);

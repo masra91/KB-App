@@ -63,13 +63,19 @@ function segment(groupCls: string, label: string, options: readonly { value: str
  *  Run-now Button, with the ConfirmInline consequence gate. */
 function jobItem(j: JobView): string {
   const badge = j.production ? '' : ` <span class="viz-chip job-badge" title="A reference/non-production job">reference</span>`;
-  // #205: the journal is parsed off disk with an unchecked `JSON.parse(...) as JournalEntry`, so a
-  // legacy/untyped entry may carry a non-string field (e.g. a numeric `inspected`). `esc` calls
-  // `.replace` and throws on a non-string, which — building the row HTML — would strand the view on
-  // "Loading…". Coerce to string at this trust boundary so a stray entry renders as text, not a crash.
-  const last = j.lastRun
-    ? `Last run ${esc(String(j.lastRun.ts))} — inspected ${esc(String(j.lastRun.inspected))}; ${j.lastRun.applied} applied, ${j.lastRun.deferred} deferred${
-        j.lastRun.note ? ` (${esc(String(j.lastRun.note))})` : ''
+  // #205 / ENG-16: the journal is parsed off disk with an unchecked `JSON.parse(...) as JournalEntry`,
+  // so a legacy/partial entry may carry a non-string field (a numeric `inspected` → `esc` throws,
+  // stranding the view on "Loading…") OR be missing the JOBS-8 run-summary counts entirely (which
+  // rendered as the literal "inspected undefined; undefined applied, undefined deferred"). Coerce +
+  // default at this trust boundary so a stray entry renders as neutral text — never a crash, never
+  // "undefined". (Read-side `normalizeJournalEntry` already coerces these; this is the last defense.)
+  const lr = j.lastRun;
+  const inspectedLabel = lr && String(lr.inspected ?? '').trim() ? esc(String(lr.inspected)) : '—';
+  const appliedCount = lr && Number.isFinite(lr.applied) ? lr.applied : 0;
+  const deferredCount = lr && Number.isFinite(lr.deferred) ? lr.deferred : 0;
+  const last = lr
+    ? `Last run ${esc(String(lr.ts))} — inspected ${inspectedLabel}; ${appliedCount} applied, ${deferredCount} deferred${
+        lr.note ? ` (${esc(String(lr.note))})` : ''
       }`
     : 'Never run';
 

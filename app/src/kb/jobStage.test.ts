@@ -12,7 +12,7 @@ import { createKb } from './vault';
 import { Mutex } from './stageLock';
 import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
-import { runJobOnce, JobRunner, readJournal } from './jobStage';
+import { runJobOnce, JobRunner, readJournal, journalRel } from './jobStage';
 import { exampleJobBehavior, EXAMPLE_CENSUS_REL, EXAMPLE_JOB_TYPE } from './exampleJob';
 import type { JobConfig, JobBehavior } from './jobs';
 
@@ -51,6 +51,32 @@ async function withVault(fn: (root: string, stagingWt: string, lock: Mutex) => P
     await rmTempDir(dir);
   }
 }
+
+describe('readJournal — read-boundary normalization (no git; JOBS-8 "undefined" fix)', () => {
+  it('normalizes a legacy/partial line, keeps a well-formed one, and skips malformed JSON', async () => {
+    const root = await makeTempDir();
+    try {
+      const jp = path.join(root, journalRel('reflect'));
+      await fs.mkdir(path.dirname(jp), { recursive: true });
+      // Line 1: legacy (no JOBS-8 counts). Line 2: current. Line 3: malformed (not JSON).
+      await fs.writeFile(
+        jp,
+        `{"ts":"2026-06-01T00:00:00.000Z","runId":"OLD"}\n` +
+          `{"ts":"2026-06-02T00:00:00.000Z","runId":"NEW","inspected":"entities/ (3)","applied":2,"deferred":1}\n` +
+          `{not json\n`,
+        'utf8',
+      );
+      const journal = await readJournal(root, 'reflect');
+      expect(journal).toHaveLength(2); // malformed line skipped, never crashes continuity
+      // Legacy line: counts coerced to 0, inspected '' — never undefined (the run-detail "undefined" bug).
+      expect(journal[0]).toEqual({ ts: '2026-06-01T00:00:00.000Z', runId: 'OLD', inspected: '', applied: 0, deferred: 0 });
+      expect(journal[1].applied).toBe(2);
+      expect(journal[1].deferred).toBe(1);
+    } finally {
+      await rmTempDir(root);
+    }
+  });
+});
 
 describe.skipIf(!gitAvailable)('runJobOnce — bounded pass, journal, promotion (SPEC-0023)', () => {
   it('runs the example job: census applied on staging, promoted to main; journal stays on staging only', async () => {
