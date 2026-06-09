@@ -97,14 +97,14 @@ the gate (CANON). Bounded + audited like every stage.
 
 | ID | Priority | Statement (short) | Verify | Traces |
 | -- | -------- | ----------------- | ------ | ------ |
-| COMPOSE-1 | must | Entity pages carry a **human-readable prose body** — an intro/lede + **section headers** + the entity's substance in flowing prose — *not* a bare links+claims dump. Reads encyclopedically in Obsidian | none-yet | PRIN-13; VAULT; VISION |
-| COMPOSE-2 | must | **Inline citations + References:** prose statements carry inline `[n]`/`[^n]` markers; a **References** section maps each to its **source (human title, never a ULID)**, de-duplicated. Mirrors the cited-query style (SPEC-0026 ASK) | none-yet | PRIN-2,10; ASK-7; PRIN-24 |
-| COMPOSE-3 | must | **Grounded — synthesis, not generation:** the prose is composed **only from the entity's existing cited claims** (SPEC-0016); Compose **may not introduce a fact that isn't a claim**; every prose sentence **traces to a claim → a source**; an un-cited prose statement is a **defect**; **no new egress** | test: every prose sentence resolves to a claim/source | PRIN-1,2,9,10; CLAIMS |
-| COMPOSE-4 | must | **Links woven into the prose** — entity cross-links (`[[Other Entity]]`) appear **in the prose where they're mentioned**, not only as a block at the top; the page reads as connected text | none-yet | CONNECT-12; VAULT |
-| COMPOSE-5 | must | **Keep the structured blocks for RAG** — the delimited `kb:links` / `kb:claims` blocks remain (**below** the prose) so the machine/retrieval layer is intact; the prose is the human layer, the blocks the index. Both regenerate idempotently | none-yet | DATA; ASK; CONNECT-12; CLAIMS-9 |
+| COMPOSE-1 | must | Entity pages carry a **human-readable prose body** — an intro/lede + **section headers** + the entity's substance in flowing prose — *not* a bare links+claims dump. Reads encyclopedically in Obsidian | test: composeDoc.test.ts (renderProse lede + `##` sections) + composeStage.test.ts (composeOne writes the prose body) | PRIN-13; VAULT; VISION |
+| COMPOSE-2 | must | **Inline citations + References:** prose statements carry inline `[n]`/`[^n]` markers; a **References** section maps each to its **source (human title, never a ULID)**, de-duplicated. Mirrors the cited-query style (SPEC-0026 ASK) | test: composeDoc.test.ts (source-level `[^n]` dedup + References by title) + composeStage.test.ts (titled, navigable References) | PRIN-2,10; ASK-7; PRIN-24 |
+| COMPOSE-3 | must | **Grounded — synthesis, not generation:** the prose is composed **only from the entity's existing cited claims** (SPEC-0016); Compose **may not introduce a fact that isn't a claim**; every prose sentence **traces to a claim → a source**; an un-cited prose statement is a **defect**; **no new egress** | test: every prose sentence resolves to a claim/source — compose.test.ts (`validateGrounding`/`parseComposeDecision` REJECT an un-cited or out-of-range sentence) + composeAgent.test.ts (rejected through the real decider parse path) | PRIN-1,2,9,10; CLAIMS |
+| COMPOSE-4 | must | **Links woven into the prose** — entity cross-links (`[[Other Entity]]`) appear **in the prose where they're mentioned**, not only as a block at the top; the page reads as connected text | test: composeStage.test.ts (`linkedEntityNames` feeds the agent; woven `[[Apple]]` renders in the prose) | CONNECT-12; VAULT |
+| COMPOSE-5 | must | **Keep the structured blocks for RAG** — the delimited `kb:links` / `kb:claims` blocks remain (**below** the prose) so the machine/retrieval layer is intact; the prose is the human layer, the blocks the index. Both regenerate idempotently | test: composeDoc.test.ts (`applyProse` keeps the kb:links/kb:claims blocks below, idempotent + whole-regenerate) + composeStage.test.ts (claims block preserved) | DATA; ASK; CONNECT-12; CLAIMS-9 |
 | COMPOSE-6 | must | **Human Title-Case filenames** (honor CANON-6 + PRIN-24): entity files are the **natural name** (`Steve Jobs.md`), spaces + real case — **not** a kebab-slug (`steve-jobs.md`); the ULID stays `id:` + alias (links survive renames). The kebab-slug `slugify` (connectDoc.ts) is the change point | test: connectDoc.test.ts (`entityFileName`/`entityFileRel`) + connectStage.test.ts (born-resolved node lands at `entities/<kind>/<Human Name>.md`) | CANON-6,7; PRIN-24; DATA-5 |
-| COMPOSE-7 | must | A new **"Compose" Enrich stage** (after Claims) (re)writes the prose body from the entity's cited claims — **idempotent** (regenerated on claim change), behind the agent seam with a **deterministic fallback** (Compose-unavailable → structured blocks alone, never a hard failure); works on `staging`, promotes via the gate; bounded + audited | none-yet | ORCH-9,21; CANON-1,3; SPEC-0024 |
-| COMPOSE-8 | should | **Sources surface a human title too** (PRIN-24 reach): a source's `source.md` carries a human title (derived if absent) so a `[[…]]` reference + the References section read as titles, never `sources/<shard>/<ULID>` | none-yet | PRIN-24; VAULT; SPEC-0031 |
+| COMPOSE-7 | must | A new **"Compose" Enrich stage** (after Claims) (re)writes the prose body from the entity's cited claims — **idempotent** (regenerated on claim change), behind the agent seam with a **deterministic fallback** (Compose-unavailable → structured blocks alone, never a hard failure); works on `staging`, promotes via the gate; bounded + audited | test: composeStage.test.ts (queue, idempotent no-op, re-queue on claim-change, blocks-only fallback, set-aside after K, stage drain + afterDrain promote) | ORCH-9,21; CANON-1,3; SPEC-0024 |
+| COMPOSE-8 | should | **Sources surface a human title too** (PRIN-24 reach): a source's `source.md` carries a human title (derived if absent) so a `[[…]]` reference + the References section read as titles, never `sources/<shard>/<ULID>` | test: composeStage.test.ts (References resolve each source via `deriveSourceTitle` — titled, navigable, never a ULID label) | PRIN-24; VAULT; SPEC-0031 |
 
 ## 6. User flow
 
@@ -157,3 +157,21 @@ the gate (CANON). Bounded + audited like every stage.
   `<Human Name> (<id6>).md` (never a ULID-only filename, CANON-7). Existing entities keep their stored `rel`
   (ULID identity persists → no mass-rename); only new files get the human name. COMPOSE-7 (the Compose stage)
   + the prose/citations/grounding/woven-links layer (COMPOSE-1..5,8) follow as Slice 2.
+- 2026-06-08 — **Slice 2 (COMPOSE-1..5,7,8) implemented**: the **Compose Enrich stage** (after Claims).
+  It (re)writes each entity node's encyclopedic **prose body** from that entity's **cited claims** —
+  a lede + `##` sections in flowing prose (COMPOSE-1), inline source-level `[^n]` citations → a
+  **References** section of cited sources by **human title** (`deriveSourceTitle`, never a ULID —
+  COMPOSE-2/8), entity cross-links woven into the prose (COMPOSE-4) — while keeping the structured
+  `kb:links`/`kb:claims` blocks **below**, untouched (COMPOSE-5). **Grounding (COMPOSE-3)** is enforced
+  structurally: the agent returns sentences each tagged with the claim number(s) it draws on, and the
+  parse seam REJECTS an un-cited or out-of-range sentence, so un-grounded prose can never be written;
+  the renderer (not the agent) emits the `[^n]` markers so every citation traces to a real source.
+  The stage (COMPOSE-7) is **idempotent on the claims signature** (recomposing identical claims is a
+  no-op; a claim change re-composes), behind the ORCH-21 agent seam with a **deterministic blocks-only
+  fallback** (agent unavailable/errors/un-grounded → record the attempt, leave today's blocks-only
+  node, set aside after K — never a hard failure, NO egress), bounded + audited (actor `compose`).
+  New: compose.ts (types + grounding validator), composeDoc.ts (render + idempotent prose-region
+  surgery), composeAgent.ts (compose/v1 seam), composeStage.ts (stage + queue + fallback); wired after
+  Claims in pipeline.ts (Claims/Connect poke it; its afterDrain promotes to main). Deferred: a Compose
+  **station on The Line** (Status UI) — a small net-new-visual fast-follow (Design-Lead gate), the
+  stage already runs + promotes + audits headlessly.

@@ -26,6 +26,7 @@ export const AUDIT_ACTORS = [
   'decompose',
   'claims',
   'connect',
+  'compose',
   'job',
   'recall',
   'replay',
@@ -326,6 +327,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true,
     carriesWhy: true, // resolved carries merged/candidates; review-answered carries the verdict
     traces: ['AUDIT-1', 'AUDIT-2', 'CONNECT-10', 'CONNECT-11', 'REVIEW-6'],
+  },
+  {
+    actor: 'compose',
+    what: 'Composes an entity\'s encyclopedic prose from its cited claims (SPEC-0046); records the composed claims-signature (the why = which claims grounded it) + failed/setaside attempts.',
+    emitters: ['composeStage'],
+    auditPath: 'sources/<shard>/<id>/audit.jsonl',
+    mutating: true,
+    carriesWhy: true, // the `composed` marker records the claims signature it synthesized from
+    traces: ['AUDIT-1', 'AUDIT-2', 'COMPOSE-7'],
   },
   {
     actor: 'job',
