@@ -350,7 +350,7 @@ export class ComposeStage {
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
   private readonly afterDrain?: () => Promise<void>;
-  private readonly cap: number;
+  private cap: number; // mutable for SPEC-0048 SCALE-4 live-apply (see setCap)
   private readonly log: DevLog;
   private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -379,7 +379,7 @@ export class ComposeStage {
     this.lock = lock;
     this.maxAttempts = maxAttempts;
     this.afterDrain = afterDrain;
-    this.cap = cap;
+    this.cap = Math.max(1, Math.floor(cap));
     this.log = log.child({ scope: 'compose' });
     this.tracer = tracer;
   }
@@ -397,6 +397,17 @@ export class ComposeStage {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
     }
+  }
+
+  /** Live-set the per-stage concurrency cap (SPEC-0048 SCALE-4): read on the NEXT batch, so a Settings
+   *  change applies without a restart. */
+  setCap(cap: number): void {
+    this.cap = Math.max(1, Math.floor(cap));
+  }
+
+  /** The current per-stage concurrency cap (for Status display / SPEC-0048 Settings). */
+  getCap(): number {
+    return this.cap;
   }
 
   busy(): boolean {

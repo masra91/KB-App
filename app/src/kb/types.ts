@@ -19,7 +19,7 @@ import type { Lineage } from './lineage';
 import type { PipelineStatusView, StageStatus, RecentError, WorktreeInfo, SetAsideView, ConversionCounts, InFlightItem, HealthReadout } from './pipelineStatusView';
 import type { MemorySample, MemTrend } from './memorySampler';
 import type { CrashBreadcrumb, RendererErrorReport } from './crashCapture';
-import type { DevLogLevel } from './instanceConfig';
+import type { DevLogLevel, ScaleStage } from './instanceConfig';
 
 export type { AuditEvent, AuditActor, AuditSubjects, ActivityFilter, ActivityFeedEntry, Lineage };
 export type { SourceSensitivity };
@@ -575,6 +575,12 @@ export interface InstanceSettings {
   /** Recall interactive work budget in ms (ASK-17 / JOBS-17): how long a grounded query may run
    *  before returning its best partial. Optional in the edit contract (preserve-on-omission). */
   recallBudgetMs?: number;
+  /** SPEC-0048 SCALE-2: per-stage concurrency cap overrides. Absent keys ⇒ today's default; Connect
+   *  is pinned to 1 (SCALE-5). Optional in the edit contract (preserve-on-omission). */
+  stageCaps?: Partial<Record<ScaleStage, number>>;
+  /** SPEC-0048 SCALE-1: the global Copilot concurrency ceiling override. Omitted ⇒ cores-derived
+   *  default; env still wins. Optional in the edit contract (preserve-on-omission). */
+  copilotCeiling?: number;
 }
 
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
