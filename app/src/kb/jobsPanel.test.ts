@@ -14,12 +14,12 @@ import type { JobConfig, JournalEntry } from './jobs';
 import type { JobView, JobConfigPatch } from './types';
 
 const CATALOG: JobCatalogEntry[] = [
-  { type: 'example', label: 'Entity census', description: 'reference', production: false },
-  { type: 'reflect', label: 'Reflect', description: 'rumination', production: true },
+  { type: 'example', label: 'Entity census', description: 'reference', production: false, facing: 'internal' },
+  { type: 'reflect', label: 'Reflect', description: 'rumination', production: true, facing: 'internal' },
 ];
 
 function cfg(over: Partial<JobConfig> & Pick<JobConfig, 'id' | 'type'>): JobConfig {
-  return { schedule: 'off', enabled: false, posture: 'guarded', ...over };
+  return { schedule: 'off', enabled: false, posture: 'guarded', facing: 'internal', ...over };
 }
 
 describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
@@ -55,6 +55,14 @@ describe('buildJobViews — catalog ∪ registry (PANEL-2)', () => {
     expect(reflect).toMatchObject({ registered: true, enabled: true, schedule: 'hourly', posture: 'autonomous' });
     // The unregistered catalog job still shows its defaults.
     expect(views.find((v) => v.id === 'example')!.registered).toBe(false);
+  });
+
+  // JOBS-16/17: the view surfaces the catalog facing + the stored work-depth (null when unset).
+  it('surfaces facing (catalog) + workDepth (stored config, null when unset)', () => {
+    const registry = [cfg({ id: 'reflect', type: 'reflect', workDepth: { level: 'deep' } })];
+    const views = buildJobViews(CATALOG, registry, {}, 'guarded');
+    expect(views.find((v) => v.id === 'reflect')).toMatchObject({ facing: 'internal', workDepth: { level: 'deep' } });
+    expect(views.find((v) => v.id === 'example')).toMatchObject({ facing: 'internal', workDepth: null });
   });
 
   it('lists a registered job that has no catalog entry (never hide a runnable job), after catalog rows', () => {

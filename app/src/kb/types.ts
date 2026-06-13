@@ -6,7 +6,8 @@
 // pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
 // type` is erased at build time.
 import type { ExploreEntityRef, ExploreNeighborhood } from './explorePanel';
-import type { SchedulePreset, AutonomyPosture } from './jobs';
+import type { SchedulePreset, AutonomyPosture, Facing } from './jobs';
+import type { WorkDepthConfig } from './workDepth';
 import type { EgressTier, ResearcherTemplate } from './researchers';
 import type { IntakeConnectorType } from './intakeConnectors';
 import type { SourceSensitivity } from './sensitivityRead';
@@ -319,6 +320,8 @@ export interface JobView {
   enabled: boolean;
   schedule: SchedulePreset;
   posture: AutonomyPosture;
+  facing: Facing; // JOBS-16: internal (no egress) | external (researcher). Built-in's catalog facing.
+  workDepth: WorkDepthConfig | null; // JOBS-17: stored per-item depth config; null = the kind's default
   lastRun: JobLastRun | null; // null = never run
 }
 
@@ -330,6 +333,9 @@ export interface JobConfigPatch {
   enabled?: boolean;
   schedule?: SchedulePreset;
   posture?: AutonomyPosture;
+  /** JOBS-17: edit the per-item work-depth (level + optional explicit overrides). Sanitized + clamped
+   *  main-side; absent leaves it unchanged. (Facing is catalog-fixed in slice 1 — authoring lands in JOBS-18.) */
+  workDepth?: WorkDepthConfig;
 }
 
 /** Outcome of a manual "Run now" (PANEL-2; JOBS-11). `ran:false` carries why it didn't run. */

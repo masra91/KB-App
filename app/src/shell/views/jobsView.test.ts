@@ -20,6 +20,8 @@ function job(over: Partial<JobView> & Pick<JobView, 'id'>): JobView {
     enabled: false,
     schedule: 'off',
     posture: 'guarded',
+    facing: 'internal',
+    workDepth: null,
     lastRun: null,
     ...over,
   };

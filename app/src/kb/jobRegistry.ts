@@ -10,11 +10,15 @@ import {
   SCHEDULE_PRESETS,
   AUTONOMY_POSTURES,
   DEFAULT_POSTURE,
+  FACINGS,
+  DEFAULT_FACING,
   isSafeJobId,
   type JobConfig,
   type SchedulePreset,
   type AutonomyPosture,
+  type Facing,
 } from './jobs';
+import { asWorkDepthConfig } from './workDepth';
 import { noopDevLog, type DevLog } from './devlog';
 
 const REGISTRY_REL = path.join('.kb', 'jobs', 'registry.json');
@@ -40,13 +44,19 @@ function validJob(v: unknown): JobConfig | null {
   const posture: AutonomyPosture = (AUTONOMY_POSTURES as readonly string[]).includes(o.posture as string)
     ? (o.posture as AutonomyPosture)
     : DEFAULT_POSTURE;
+  // JOBS-16: facing falls back to the safe default (`internal` = no egress) on an unknown/absent value.
+  const facing: Facing = (FACINGS as readonly string[]).includes(o.facing as string) ? (o.facing as Facing) : DEFAULT_FACING;
   const job: JobConfig = {
     id: o.id,
     type: o.type,
     schedule,
     enabled: o.enabled === true,
     posture,
+    facing,
   };
+  // JOBS-17: per-item work-depth (sanitized — drops junk numbers/levels; absent = the kind default).
+  const workDepth = asWorkDepthConfig(o.workDepth);
+  if (workDepth) job.workDepth = workDepth;
   if (o.config && typeof o.config === 'object') job.config = o.config as Record<string, unknown>;
   return job;
 }
@@ -125,7 +135,7 @@ export async function upsertJob(root: string, job: JobConfig): Promise<JobConfig
 export async function patchJob(
   root: string,
   id: string,
-  patch: Partial<Pick<JobConfig, 'enabled' | 'schedule' | 'posture' | 'config'>>,
+  patch: Partial<Pick<JobConfig, 'enabled' | 'schedule' | 'posture' | 'facing' | 'workDepth' | 'config'>>,
 ): Promise<JobConfig[]> {
   if (!isSafeJobId(id)) throw new Error(`refusing to patch job with unsafe id: ${JSON.stringify(id)}`);
   const jobs = await readJobRegistry(root);
@@ -134,6 +144,10 @@ export async function patchJob(
     if (patch.enabled !== undefined) job.enabled = patch.enabled;
     if (patch.schedule !== undefined) job.schedule = patch.schedule;
     if (patch.posture !== undefined) job.posture = patch.posture;
+    // JOBS-16: facing only flips via a deliberate patch (user-authored jobs, JOBS-18); built-ins keep
+    // their catalog facing. JOBS-17: workDepth is the Principal's editable per-item effort knob.
+    if (patch.facing !== undefined && (FACINGS as readonly string[]).includes(patch.facing)) job.facing = patch.facing;
+    if (patch.workDepth !== undefined) job.workDepth = asWorkDepthConfig(patch.workDepth);
     if (patch.config !== undefined) job.config = patch.config;
     await writeJobRegistry(root, jobs);
   }

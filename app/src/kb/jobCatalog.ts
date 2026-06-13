@@ -10,6 +10,7 @@
 // (SPEC-0024). Later jobs add their catalog entry alongside their behavior when they land.
 import { EXAMPLE_JOB_TYPE } from './exampleJob';
 import { REFLECT_JOB_TYPE } from './reflectJob';
+import { DEFAULT_FACING, type Facing } from './jobs';
 
 /** One entry in the known-job catalog — display metadata for a manageable job type. */
 export interface JobCatalogEntry {
@@ -21,6 +22,9 @@ export interface JobCatalogEntry {
   description: string;
   /** False marks a reference / non-production behavior (the `example` job) so the UI can flag it. */
   production: boolean;
+  /** JOBS-16: which way this built-in faces — `internal` (no egress) | `external` (researcher).
+   *  The built-in's fixed facing; user-authored jobs (JOBS-18) set their own. Default `internal`. */
+  facing: Facing;
 }
 
 /** The known job types the Control Panel surfaces, in display order (SPEC-0027 PANEL-2). */
@@ -32,6 +36,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
       'Periodically reviews your KB for missed structure, connections, and stale topics, proposing ' +
       'improvements. Additive, high-confidence changes apply automatically; anything risky is sent to Reviews.',
     production: true,
+    facing: 'internal', // JOBS-16: Reflect operates on the KB itself — no external egress
   },
   {
     type: EXAMPLE_JOB_TYPE,
@@ -40,8 +45,15 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
       'Reference job — counts canonical entities and maintains a census note when the count changes. ' +
       'Demonstrates the autonomous-jobs engine end to end; not a production enrichment job.',
     production: false,
+    facing: 'internal',
   },
 ];
+
+/** The facing for a job `type` — the catalog entry's, or the safe default (`internal`) for an
+ *  unknown/user-authored type until JOBS-18 lets the Principal set it. */
+export function facingForType(type: string): Facing {
+  return catalogEntry(type)?.facing ?? DEFAULT_FACING;
+}
 
 /** Look up a catalog entry by job `type`, or undefined if the type is not in the catalog. */
 export function catalogEntry(type: string): JobCatalogEntry | undefined {
