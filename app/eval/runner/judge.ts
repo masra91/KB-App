@@ -12,9 +12,12 @@ import type { VaultSnapshot } from './snapshot';
 // Fork #2 (ratified): the judge model is PINNED, distinct from the SUT, recorded in the EVAL-9 manifest,
 // and env-overridable. The default is "a strong frontier model distinct from the SUT default" — the exact
 // id is BYOA-Copilot-SDK-specific + not load-bearing (the Principal can name one), so it's overridable.
-// NOTE: must be a copilot-CLI-valid id (validated pre-flight) — `claude-opus-4` was rejected by CLI
-// 0.0.373; `claude-opus-4.5` is the validated Opus. Mirror of `DEFAULT_COPILOT_MODEL` in copilotModel.ts.
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';
+// NOTE: must be a copilot-CLI-valid id (validated pre-flight; validity is CLI-version-coupled — don't
+// trust the CLI's own --help example). `claude-opus-4.8` = newest verified-accepted Opus on CLI 1.0.62
+// (KB-Lead probe + end-to-end smoke). Deliberately NOT mirrored to copilotModel.ts's prod floor: the
+// eval judge runs in a pinned container (no distribution concern), so it takes the newest id directly,
+// whereas the prod floor stays 4.5 (broadly compatible) and reaches 4.8 via #342's runtime probe.
+export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.8';
 /** The pinned judge model id (env override wins) — recorded in the reproducibility manifest (EVAL-9). */
 export function resolveJudgeModel(): string {
   return process.env.KB_EVAL_JUDGE_MODEL || DEFAULT_JUDGE_MODEL;
@@ -28,7 +31,7 @@ export function resolveSutModel(): string {
 /**
  * HARD integrity guard (EVAL-4, KB-Lead-required): the judge model MUST differ from the system-under-test
  * model — a model cannot grade its own homework. Refuses to run on resolved-string equality (e.g. an
- * explicit `KB_COPILOT_MODEL=claude-opus-4` colliding with the judge default). A hard refuse beats
+ * explicit `KB_COPILOT_MODEL=claude-opus-4.8` colliding with the judge default). A hard refuse beats
  * audit-after-the-fact; both ids are still recorded in the EVAL-9 manifest.
  */
 export function assertJudgeDistinctFromSut(): void {
