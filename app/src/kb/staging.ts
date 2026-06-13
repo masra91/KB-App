@@ -6,7 +6,9 @@
 // stageLock Mutex (SPEC-0014 §5); these helpers are the ref-level mechanics under it.
 import path from 'node:path';
 import simpleGit from 'simple-git';
-import { boundedGit } from './canonicalAdvance';
+import { boundedGit, WORKTREE_GIT_TIMEOUT_MS } from './canonicalAdvance';
+import { reconcileStaleIndexLock, hasLiveIndexHolder, withCanonicalIndexLock } from './canonicalLockHeal';
+import { noopDevLog, type DevLog } from './devlog';
 import { ensureGitIdentity } from './vault';
 
 export const STAGING_BRANCH = 'staging';
@@ -56,30 +58,47 @@ export async function advanceStaging(root: string, ref: string): Promise<void> {
  *
  * MUST be called serialized via the shared canonical-writer lock so it never races a stage's
  * ref advance.
+ *
+ * ORCH-27 stale-lock self-heal: `promote` is the canonical writer to `main` — the LIVE repo Obsidian
+ * has open at the vault ROOT. A crashed / boundedGit-timed-out prior root git op can orphan
+ * `<root>/.git/index.lock`, which makes every future promote fatal and silently WEDGES THE WHOLE VAULT
+ * until someone manually `rm`s it (the Jun-10 orphan lock blocked a build). So before the index ops we
+ * heal a PROVEN-stale (no-live-holder) root lock — and run the index ops as the registered live holder
+ * so a crash mid-promote leaves the sidecar evidence the next heal needs. The triple-gate NEVER clears
+ * a live lock; a genuinely-live one is KEPT and the bounded op below fails + surfaces (the stuck-section
+ * watchdog) rather than corrupting a live write. Mirrors `advanceOrCollide`'s acquire-finds-stale heal.
  */
-export async function promote(root: string, paths: readonly string[] = EVERGREEN_PATHS, timeoutMs?: number): Promise<boolean> {
+export async function promote(root: string, paths: readonly string[] = EVERGREEN_PATHS, timeoutMs?: number, log: DevLog = noopDevLog): Promise<boolean> {
   root = path.resolve(root);
-  // Time-bounded (#163): promote is the sole writer of `main` and ALWAYS runs under the canonical-
-  // writer lock (afterDrain / consolidation / recall / replay). A git op that blocks indefinitely
-  // here would wedge the lock forever and silently. A bounded client makes a hang throw → the
-  // section releases → the watchdog surfaces it, rather than a permanent deadlock.
-  const git = boundedGit(root, timeoutMs);
-  await ensureGitIdentity(git);
-  for (const p of paths) {
-    // Drop main's current tracked copy of P (worktree + index) so removals mirror. `--ignore-unmatch`
-    // makes a never-yet-promoted (absent) path exit 0 — the expected no-op case — so we do NOT
-    // swallow errors here: an UNEXPECTED `git rm` failure must surface, because silently eating it
-    // could skip a deletion and leave a stale duplicate on `main` (the sole evergreen writer must
-    // not fail quietly). Consistent with the uncaught checkout/status/commit calls below.
-    await git.raw('rm', '-r', '-f', '--ignore-unmatch', '--quiet', '--', p);
-    try {
-      await git.raw('checkout', STAGING_BRANCH, '--', p); // restore staging's P (index + worktree)
-    } catch {
-      /* P absent on staging — nothing to publish; it correctly stays removed from main */
+  const effectiveTimeout = timeoutMs ?? WORKTREE_GIT_TIMEOUT_MS;
+  // Heal a stale root `index.lock` (no live holder) BEFORE the index-touching ops — else an orphan lock
+  // makes every promote fatal and wedges the live vault. Never clears a live lock (ORCH-27 triple-gate).
+  await reconcileStaleIndexLock(root, { isLiveInProcHolder: () => hasLiveIndexHolder(root), log });
+  // The whole index-touching promote runs as the registered live holder: writes the {pid,op} sidecar so
+  // a crash mid-promote is identifiable (gate-2 self-leak fast-path) + clears it on clean success.
+  return withCanonicalIndexLock(root, 'promote', effectiveTimeout, async () => {
+    // Time-bounded (#163): promote is the sole writer of `main` and ALWAYS runs under the canonical-
+    // writer lock (afterDrain / consolidation / recall / replay). A git op that blocks indefinitely
+    // here would wedge the lock forever and silently. A bounded client makes a hang throw → the
+    // section releases → the watchdog surfaces it, rather than a permanent deadlock.
+    const git = boundedGit(root, timeoutMs);
+    await ensureGitIdentity(git);
+    for (const p of paths) {
+      // Drop main's current tracked copy of P (worktree + index) so removals mirror. `--ignore-unmatch`
+      // makes a never-yet-promoted (absent) path exit 0 — the expected no-op case — so we do NOT
+      // swallow errors here: an UNEXPECTED `git rm` failure must surface, because silently eating it
+      // could skip a deletion and leave a stale duplicate on `main` (the sole evergreen writer must
+      // not fail quietly). Consistent with the uncaught checkout/status/commit calls below.
+      await git.raw('rm', '-r', '-f', '--ignore-unmatch', '--quiet', '--', p);
+      try {
+        await git.raw('checkout', STAGING_BRANCH, '--', p); // restore staging's P (index + worktree)
+      } catch {
+        /* P absent on staging — nothing to publish; it correctly stays removed from main */
+      }
     }
-  }
-  const status = await git.status();
-  if (status.files.length === 0) return false; // idempotent: nothing evergreen changed
-  await git.commit('promote: evergreen → main'); // commits the staged add/update/delete set
-  return true;
+    const status = await git.status();
+    if (status.files.length === 0) return false; // idempotent: nothing evergreen changed
+    await git.commit('promote: evergreen → main'); // commits the staged add/update/delete set
+    return true;
+  });
 }

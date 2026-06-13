@@ -9,6 +9,9 @@ import simpleGit from 'simple-git';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 import { createKb, ensureGitIdentity } from './vault';
 import { ensureStagingBranch, advanceStaging, promote, STAGING_BRANCH } from './staging';
+import { resolveIndexLockPath } from './canonicalLockHeal';
+import { writeLockMeta } from './canonicalLockMeta';
+import type { DevLog } from './devlog';
 
 function gitInstalledSync(): boolean {
   try {
@@ -175,6 +178,60 @@ describe.skipIf(!gitAvailable)('promote — the evergreen gate (STAGING-3/4/6)',
       expect(await pathExists(path.join(root, 'entities/person/steven-jobs.md'))).toBe(false);
       expect(await pathExists(path.join(root, 'entities/person/steve-jobs.md'))).toBe(true);
       expect((await simpleGit(root).status()).isClean()).toBe(true);
+    });
+  });
+});
+
+// ORCH-27 stale `index.lock` self-heal on the canonical writer to `main` (the vault ROOT — the live
+// repo Obsidian has open). A crashed/timed-out prior root git op orphans `<root>/.git/index.lock` and
+// wedges EVERY future promote (the Jun-10 orphan lock blocked a build). `promote` now heals a
+// PROVEN-stale (no-live-holder) root lock first — but NEVER stomps a not-proven-stale (possibly-live)
+// lock. fails-before/passes-after, on the class.
+describe.skipIf(!gitAvailable)('promote — stale index.lock self-heal (STAGING-12 / ORCH-27)', () => {
+  /** A DevLog that records events so the heal can be asserted as surfaced (acceptance: clear + LOG). */
+  function captureLog(sink: Array<{ event: string }>): DevLog {
+    const rec = (event: string): void => {
+      sink.push({ event });
+    };
+    const self: DevLog = { debug: rec, info: rec, warn: rec, error: rec, child: () => self, flush: () => Promise.resolve() };
+    return self;
+  }
+
+  it('heals a stale no-live-holder root index.lock + proceeds — was: orphan lock wedges every promote', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await ensureStagingBranch(root);
+      await commitOnStaging(root, { 'sources/2026/05/31/A/source.md': 'ground truth' });
+
+      // Simulate a crashed prior promote: an orphan index.lock at the vault root + a self-pid sidecar
+      // with no live in-proc op → ORCH-27 gate-2(a) "leaked by self" → proven stale, safe to clear.
+      const lockPath = await resolveIndexLockPath(root);
+      await fs.writeFile(lockPath, '', 'utf8');
+      await writeLockMeta(root, { pid: process.pid, startedAt: Date.now() - 5_000, op: 'promote', timeoutMs: 20_000 });
+
+      const events: Array<{ event: string }> = [];
+      const promoted = await promote(root, undefined, undefined, captureLog(events));
+
+      expect(promoted).toBe(true); // proceeded — the orphan lock no longer wedges promote (fails-before)
+      expect(await pathExists(lockPath)).toBe(false); // the stale lock was cleared
+      expect(await pathExists(path.join(root, 'sources/2026/05/31/A/source.md'))).toBe(true); // evergreen reached main
+      expect(events.some((e) => e.event === 'orch.lock.healed')).toBe(true); // the self-heal is LOGGED (acceptance)
+    });
+  });
+
+  it('NEVER stomps a not-proven-stale (possibly-live) root lock — leaves it + fails rather than corrupting a live write', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await ensureStagingBranch(root);
+      await commitOnStaging(root, { 'sources/2026/05/31/A/source.md': 'ground truth' });
+
+      // A FRESH root index.lock with NO sidecar — gate-3 treats it as possibly-live (too fresh to assume
+      // stale, fail-safe) → KEEP. The heal must NOT clear it; promote then fails on the held lock.
+      const lockPath = await resolveIndexLockPath(root);
+      await fs.writeFile(lockPath, '', 'utf8');
+
+      await expect(promote(root)).rejects.toThrow(); // git can't take the held index.lock → surfaces, never stomps
+      expect(await pathExists(lockPath)).toBe(true); // the live/unproven lock is UNTOUCHED (no corruption)
     });
   });
 });
