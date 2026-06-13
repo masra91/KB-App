@@ -116,7 +116,7 @@ drifts into the default AI look); this spec sets the intent and the surface.
 
 ## 10. Changelog
 
-- 2026-06-13 — **The Line motion — slice 1 (KB-Developer-4 → PR #TBD, visual gate KB-Design-Lead, code
+- 2026-06-13 — **The Line motion — slice 1 (KB-Developer-4 → PR #338, visual gate KB-Design-Lead, code
   gate-2 KB-QD-2).** The §5 motion layer the spec called for but was never built. `lineMotion.ts` applies
   two JS-driven motions after each (change-guarded, full-innerHTML) repaint, carrying the prior value in
   a keyed store so a roll/index survives the node-destroying repaint: **odometer** (VIZ-1) — the funnel
