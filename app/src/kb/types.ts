@@ -256,6 +256,18 @@ export interface FullReplayResult {
   message: string;
 }
 
+// SPEC-0046 COMPOSE-9: the "backfill the vault" coverage + one-shot trigger result. `total` = entities
+// with cited claims; `composed` = of those, how many already read as an article; `remaining` = still
+// block-only. `reopened` (trigger only) = set-aside entities re-queued for a fresh attempt.
+export interface ComposeBacklogResult {
+  ok: boolean;
+  total?: number;
+  composed?: number;
+  remaining?: number;
+  reopened?: number;
+  message: string;
+}
+
 // --- Ask & Recall (SPEC-0026 ASK) ---
 
 // The recall engine owns these shapes; re-exported here so the renderer/IPC contract has one
@@ -590,6 +602,10 @@ export interface KbApi {
   // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).
   pipelineControl(req: PipelineControlRequest): Promise<PipelineControlResult>;
   fullReplay(): Promise<FullReplayResult>;
+  // SPEC-0046 COMPOSE-9 — backfill the vault: kick a bounded, coalesced recompose of the uncomposed
+  // backlog (re-attempting any set-aside) and report coverage; the read-only status just reports it.
+  composeBacklog(): Promise<ComposeBacklogResult>;
+  composeBacklogStatus(): Promise<ComposeBacklogResult>;
   // SPEC-0045 QUIESCE — graceful "Prepare for shutdown": pause new work + drain, resume, poll drain status.
   quiesce(): Promise<QuiesceStatus>;
   resume(): Promise<QuiesceStatus>;

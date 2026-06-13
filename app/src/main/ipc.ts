@@ -15,6 +15,8 @@ import {
   answerActiveReview,
   saveRecallOutput,
   fullReplay,
+  composeBacklog,
+  composeBacklogStatus,
   listJobsForActive,
   setActiveJobConfig,
   runActiveJobNow,
@@ -73,6 +75,7 @@ import type {
   PipelineControlResult,
   QuiesceStatus,
   FullReplayResult,
+  ComposeBacklogResult,
   AskRequest,
   AskResult,
   SaveRecallOutputResult,
@@ -382,6 +385,23 @@ export function registerIpc(): void {
   ipcMain.handle('kb:fullReplay', async (): Promise<FullReplayResult> => {
     try {
       return await fullReplay();
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // SPEC-0046 COMPOSE-9: backfill the vault — kick a bounded, coalesced recompose of the uncomposed
+  // backlog (re-attempting any set-aside); the read-only status just reports coverage.
+  ipcMain.handle('kb:composeBacklog', async (): Promise<ComposeBacklogResult> => {
+    try {
+      return await composeBacklog();
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  ipcMain.handle('kb:composeBacklogStatus', async (): Promise<ComposeBacklogResult> => {
+    try {
+      return await composeBacklogStatus();
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }

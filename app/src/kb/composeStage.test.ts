@@ -25,6 +25,8 @@ import {
   claimsBlockSig,
   linkedEntityNames,
   hasClaims,
+  composeBacklogStats,
+  reopenComposeSetAside,
   DEFAULT_MAX_ATTEMPTS,
 } from './composeStage';
 import { hasProse } from './composeDoc';
@@ -221,6 +223,94 @@ describe.skipIf(!gitAvailable)('ComposeStage drain', () => {
       expect(promoted).toBeGreaterThan(0);
       expect(hasProse(await fs.readFile(path.join(root, e1), 'utf8'))).toBe(true);
       expect(await readComposeQueue(root)).toHaveLength(0);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('backfill the vault (COMPOSE-9 — incremental, bounded, coalesced)', () => {
+  it('composes a backlog of pre-existing uncomposed entities and publishes INCREMENTALLY (per batch, not once at the end)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // A pre-existing backlog: 3 claim-bearing entities, none composed (the COMPOSE-9 situation).
+      await composeReady(root, 'Apple Keynote Notes\n\nA.', 'Steve Jobs');
+      await composeReady(root, 'Pixar Memo\n\nB.', 'Ed Catmull');
+      await composeReady(root, 'NeXT Note\n\nC.', 'Steve Wozniak');
+      expect((await composeBacklogStats(root)).remaining).toBe(3);
+
+      // cap=1 so each batch is one entity — afterDrain (the coalesced promote request) must fire per
+      // batch, and each firing must see MORE composed than the last (incremental publish), never a
+      // single promote after the whole backlog.
+      const progressAtPromote: number[] = [];
+      const stage = new ComposeStage(root, composeDeciderFor(LEDE), undefined, DEFAULT_MAX_ATTEMPTS, async () => {
+        progressAtPromote.push((await composeBacklogStats(root)).composed);
+      }, 1);
+      await stage.poke();
+
+      expect(progressAtPromote).toHaveLength(3); // one coalesced promote request PER batch (incremental)
+      expect(progressAtPromote).toEqual([1, 2, 3]); // strictly growing — articles publish as they're composed
+      expect(await composeBacklogStats(root)).toEqual({ total: 3, composed: 3, remaining: 0 });
+      expect(await readComposeQueue(root)).toHaveLength(0);
+    });
+  });
+
+  it('is idempotent — a second backfill pass composes nothing (no re-promote) for unchanged claims', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await composeReady(root, 'Apple Keynote Notes\n\nA.', 'Steve Jobs');
+      let promotes = 0;
+      const stage = new ComposeStage(root, composeDeciderFor(LEDE), undefined, DEFAULT_MAX_ATTEMPTS, async () => {
+        promotes += 1;
+      }, 1);
+      await stage.poke();
+      expect(promotes).toBe(1);
+      await stage.poke(); // nothing changed → nothing to compose → no promote
+      expect(promotes).toBe(1);
+      expect((await composeBacklogStats(root)).remaining).toBe(0);
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('composeBacklogStats (COMPOSE-9 observability)', () => {
+  it('counts only claim-bearing entities, split by whether they have a composed article', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const withClaims1 = await composeReady(root, 'Apple Keynote Notes\n\nA.', 'Steve Jobs');
+      await composeReady(root, 'Pixar Memo\n\nB.', 'Ed Catmull');
+      // a claim-less entity is NOT part of the backlog universe
+      const src = await archiveText(root, 'Empty.');
+      await seedEntity(root, src, 'Tim Cook');
+
+      expect(await composeBacklogStats(root)).toEqual({ total: 2, composed: 0, remaining: 2 });
+      await composeOne(root, withClaims1, composeDeciderFor(LEDE));
+      expect(await composeBacklogStats(root)).toEqual({ total: 2, composed: 1, remaining: 1 });
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('reopenComposeSetAside (COMPOSE-9 one-shot trigger — guaranteed completion)', () => {
+  it('re-queues a set-aside entity so a transiently-failed compose retries', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const entityRel = await composeReady(root, 'Apple Keynote Notes\n\nA.', 'Steve Jobs');
+      const throwing: ComposeDecider = async () => {
+        throw new Error('compose: copilot unavailable');
+      };
+      for (let i = 0; i < DEFAULT_MAX_ATTEMPTS; i++) await composeOne(root, entityRel, throwing);
+      expect(await readComposeQueue(root)).not.toContain(entityRel); // set aside → out of the queue
+
+      const reopened = await reopenComposeSetAside(root);
+      expect(reopened).toBe(1);
+      expect(await readComposeQueue(root)).toContain(entityRel); // re-queued → will retry on the next drain
+      await composeOne(root, entityRel, composeDeciderFor(LEDE)); // copilot back → composes
+      expect(hasProse(await fs.readFile(path.join(root, entityRel), 'utf8'))).toBe(true);
+    });
+  });
+
+  it('is a no-op when nothing is set aside', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await composeReady(root, 'X\n\nY.', 'Steve Jobs');
+      expect(await reopenComposeSetAside(root)).toBe(0);
     });
   });
 });
