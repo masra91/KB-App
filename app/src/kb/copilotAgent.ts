@@ -16,23 +16,27 @@ import { type ArchiveDecision, type ArchivistDecider, deterministicDecide } from
 import { COPILOT_OP } from './tracing';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
+import { runWithModelFallback } from './copilotLaunch';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 60_000;
 
-/** Injectable runner: given the composed prompt (+ optional working directory), return the
- *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
-export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
+/** Injectable runner: given the composed prompt (+ optional working directory + model override),
+ *  return the session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree; `model`
+ *  (when given) is the exact `--model` id to launch with — the model-fallback wrapper passes `auto`
+ *  here on a retry. Omitting `model` falls back to the in-app pin. */
+export type CopilotRunner = (prompt: string, cwd?: string, model?: string) => Promise<string>;
 
 /** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace. The model is
  *  pinned in-app (ORCH-16) — see `copilotModel.ts`. Because we always pass `--model`, prod no
  *  longer silently inherits `~/.copilot/settings.json` and the recorded model is the real one
- *  that ran (never `default`); the eval harness still overrides it per variant. */
-function launchFlags(): string[] {
-  return ['--no-ask-user', '--model', resolveCopilotModel()];
+ *  that ran (never `default`); the eval harness still overrides it per variant. `model` lets the
+ *  fallback wrapper launch with `auto` when the pinned id is rejected (recorded as the real model). */
+function launchFlags(model: string = resolveCopilotModel()): string[] {
+  return ['--no-ask-user', '--model', model];
 }
 
-const defaultRunner: CopilotRunner = async (prompt, cwd) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
   // Acquire one global copilot slot so concurrent (cap>1) stage drains can't fan out past the
   // process-wide ceiling (dogfood #4 / copilotConcurrency).
   withCopilotSlot(async () => {
@@ -41,7 +45,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd) =>
       // scan (`tgrep count-files`) is rooted here, NOT the filesystem root. With no cwd the
       // subprocess inherits Electron's cwd (`/` in a packaged app) → a runaway root scan.
       // `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
-      const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
+      const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags(model)], {
         timeout: COPILOT_TIMEOUT_MS,
         maxBuffer: 4 * 1024 * 1024,
         cwd,
@@ -120,23 +124,27 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
       return { ...deterministicDecide(meta), agent: { via: 'deterministic', error: 'copilot unavailable' } };
     }
 
-    // ORCH-16: record what we launched and what happened on every model invocation.
-    const model = resolveCopilotModel();
-    const params = launchFlags();
+    // ORCH-16: record what we launched and what happened on every model invocation. `modelUsed`
+    // starts at the pin and is rewritten to `auto` if the pinned id is rejected and we fall back —
+    // so the trace records the model that ACTUALLY ran, making a silent pin-drift visible.
+    let modelUsed = resolveCopilotModel();
     const at = new Date().toISOString();
     const t0 = Date.now();
     // OBS-13: time the Copilot call as a child of the stage's run span (failures included; the
     // archivist falls back rather than throwing, so the span ends `error` without re-throwing).
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
-      const decision = parseDecision(await run(buildPrompt(meta), cwd), meta);
+      const decision = parseDecision(
+        await runWithModelFallback((m) => run(buildPrompt(meta), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
+        meta,
+      );
       cs?.end('ok');
-      return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at } };
+      return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at } };
     } catch (err) {
       // ORCH-8 resilience: fall back, but record the failure for posterity.
       cs?.end('error');
       const error = err instanceof Error ? err.message : String(err);
-      return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model, params, ok: false, error, ms: Date.now() - t0, at } };
+      return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: false, error, ms: Date.now() - t0, at } };
     }
   };
 }

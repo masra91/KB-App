@@ -162,4 +162,38 @@ describe('makeCopilotDecider (ORCH-5/8)', () => {
     const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
     expect(opts?.cwd).toBeUndefined();
   });
+
+  // MODEL-AUTO-FALLBACK (ORCH-16 fast-follow): if copilot rejects the pinned model pre-flight, the
+  // decider retries once with `--model auto` and records the REAL model (`auto`) in the trace.
+  it('retries with `auto` when the pinned model is rejected, and records auto in the trace', async () => {
+    vi.stubEnv('KB_COPILOT_MODEL', ''); // exercise the in-app pin → first attempt uses it, not auto
+    try {
+      const run = vi.fn(async (_p: string, _cwd?: string, model?: string) => {
+        if (model !== 'auto') throw new Error('Error: Model "claude-opus-4" from --model flag is not available.');
+        return VALID;
+      });
+      const d = await makeCopilotDecider({ available: true, run })(textMeta);
+      expect(run).toHaveBeenCalledTimes(2); // pinned (rejected) → auto
+      expect(d.agent?.via).toBe('copilot'); // succeeded on the retry, not the deterministic fallback
+      expect(d.agent?.model).toBe('auto'); // trace records the model that actually ran
+      expect(d.agent?.params).toEqual(['--no-ask-user', '--model', 'auto']);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('does NOT retry on a non-model error — falls back deterministic, records the pinned model', async () => {
+    vi.stubEnv('KB_COPILOT_MODEL', '');
+    try {
+      const run = vi.fn(async () => {
+        throw new Error('ENOENT: copilot not found');
+      });
+      const d = await makeCopilotDecider({ available: true, run })(textMeta);
+      expect(run).toHaveBeenCalledTimes(1); // no auto-retry on a non-model error
+      expect(d.agent?.via).toBe('deterministic');
+      expect(d.agent?.model).toBe(DEFAULT_COPILOT_MODEL); // never swapped to auto
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
+import { runWithModelFallback } from './copilotLaunch';
 import { parseComposeDecision, type ComposeDecision } from './compose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -42,15 +43,16 @@ export type ComposeDecider = (input: ComposeInput, ctx?: SpanCtx) => Promise<Com
 
 /** Injectable runner: given the composed prompt (+ optional working directory), return the
  *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
-export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
+export type CopilotRunner = (prompt: string, cwd?: string, model?: string) => Promise<string>;
 
 /** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace (ORCH-16). The
- *  model is pinned in-app so prod never silently inherits `~/.copilot/settings.json`. */
-function launchFlags(): string[] {
-  return ['--no-ask-user', '--model', resolveCopilotModel()];
+ *  model is pinned in-app so prod never silently inherits `~/.copilot/settings.json`. `model` lets
+ *  the fallback wrapper launch with `auto` when the pinned id is rejected (recorded as the real model). */
+function launchFlags(model: string = resolveCopilotModel()): string[] {
+  return ['--no-ask-user', '--model', model];
 }
 
-const defaultRunner: CopilotRunner = async (prompt, cwd) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
   // One global copilot slot so concurrent stage drains can't fan out past the process-wide ceiling.
   withCopilotSlot(async () => {
     try {
@@ -58,7 +60,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd) =>
       // scan (`tgrep count-files`) is rooted here, NOT the filesystem root. With no cwd the
       // subprocess inherits Electron's cwd (`/` in a packaged app) → a runaway root scan.
       // `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
-      const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
+      const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags(model)], {
         timeout: COPILOT_TIMEOUT_MS,
         maxBuffer: 8 * 1024 * 1024,
         cwd,
@@ -148,15 +150,20 @@ export function makeComposeDecider(opts: ComposeDeciderOptions = {}): ComposeDec
     }
     if (!available) throw new Error('compose: copilot unavailable');
 
-    const model = resolveCopilotModel();
-    const params = launchFlags();
+    // ORCH-16: `modelUsed` starts at the pin and is rewritten to `auto` if the pinned id is rejected
+    // and we fall back — so the trace records the model that ACTUALLY ran (a silent pin-drift is visible).
+    let modelUsed = resolveCopilotModel();
     const at = new Date().toISOString();
     const t0 = Date.now();
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
-      const decision = parseComposeDecision(await run(buildComposePrompt(input), cwd), input.entityId, input.claims.length);
+      const decision = parseComposeDecision(
+        await runWithModelFallback((m) => run(buildComposePrompt(input), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
+        input.entityId,
+        input.claims.length,
+      );
       cs?.end('ok');
-      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at };
       return { ...decision, agent };
     } catch (e) {
       cs?.end('error');

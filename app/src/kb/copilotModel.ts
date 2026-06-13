@@ -32,3 +32,28 @@ export function resolveCopilotModel(env: NodeJS.ProcessEnv = process.env): strin
   const override = env.KB_COPILOT_MODEL;
   return override && override.trim().length > 0 ? override : DEFAULT_COPILOT_MODEL;
 }
+
+/** The resilience fallback model. `copilot --model auto` lets Copilot pick from its own catalog;
+ *  verified accepted by the CLI (0.0.373, `--help`: "use 'auto' to let Copilot pick automatically").
+ *  If a PINNED id is ever rejected pre-flight, falling back to `auto` restores the unpinned-but-working
+ *  behavior prod had before #340 — so a model-id drift can never hard-break the whole pipeline. */
+export const COPILOT_MODEL_AUTO = 'auto';
+
+/**
+ * True when `err` is Copilot's PRE-FLIGHT model-rejection — the failure mode that makes a stale
+ * pinned id (e.g. `claude-opus-4`) throw on every launch and kill the pipeline. Copilot reports it as
+ * `Error: Model "X" from --model flag is not available.` on stderr; execFile rejects with that on
+ * `err.message` and/or `err.stderr`. Matched narrowly so a genuine model/content error (auth, network,
+ * a bad JSON parse downstream) does NOT trigger the auto-fallback — only an unavailable-model rejection.
+ */
+export function isModelUnavailableError(err: unknown): boolean {
+  if (err == null) return false;
+  const parts: string[] = [];
+  if (err instanceof Error && typeof err.message === 'string') parts.push(err.message);
+  const stderr = (err as { stderr?: unknown }).stderr;
+  if (typeof stderr === 'string') parts.push(stderr);
+  const hay = parts.join('\n');
+  if (!hay) return false;
+  // The canonical phrasing, plus a tolerant variant in case the CLI wording shifts ("model ... not available").
+  return /from --model flag is not available/i.test(hay) || /\bmodel\b[^\n]*\bis not available\b/i.test(hay) || /\bmodel\b[^\n]*\bnot available\b/i.test(hay);
+}

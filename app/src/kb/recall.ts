@@ -19,6 +19,7 @@ import type { AgentTrace } from './archivist';
 import { makeReadOnlyTools } from './recallTools';
 import { RECALL_SKILL, makeSdkRecallClient } from './recallAgent';
 import { acquireInteractiveCopilotSlot, CopilotCapacityTimeoutError } from './copilotConcurrency';
+import { isModelUnavailableError, COPILOT_MODEL_AUTO } from './copilotModel';
 import { DEFAULT_RECALL_BUDGET_MS } from './instanceConfig';
 
 // ── Question / session ──────────────────────────────────────────────────────────────────────
@@ -275,22 +276,35 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
     // bypasses the safety ceiling) through the priority lane, so the human query reserves capacity
     // ahead of background ingestion and a wedged/saturated pool fails fast (below) instead of the
     // agent thrashing outside the bound to a 60s `session.idle` hang. Held across the SDK session.
-    const releaseSlot = await acquireSlot();
-    try {
-      const session = await client.createSession({
-        model: opts.model,
-        systemMessage: { mode: 'append', content: RECALL_SKILL },
-        tools: toolDefs,
-        allowedTools: [...TOOL_NAMES, SUBMIT_ANSWER_TOOL],
-      });
+    // One SDK session attempt with a given model id. Acquires/releases its own interactive slot so a
+    // model-fallback retry (below) gets a fresh slot rather than holding one across both attempts.
+    const runSession = async (model: string | undefined): Promise<void> => {
+      const releaseSlot = await acquireSlot();
       try {
-        // ASK-17: wait up to the configured budget for `session.idle` (vs the SDK's tight 60s default).
-        await session.sendAndWait(buildUserPrompt(question, history), sessionBudgetMs);
+        const session = await client.createSession({
+          model,
+          systemMessage: { mode: 'append', content: RECALL_SKILL },
+          tools: toolDefs,
+          allowedTools: [...TOOL_NAMES, SUBMIT_ANSWER_TOOL],
+        });
+        try {
+          // ASK-17: wait up to the configured budget for `session.idle` (vs the SDK's tight 60s default).
+          await session.sendAndWait(buildUserPrompt(question, history), sessionBudgetMs);
+        } finally {
+          await session.disconnect?.();
+        }
       } finally {
-        await session.disconnect?.();
+        releaseSlot(); // free the slot the instant the session ends — even on error
       }
-    } finally {
-      releaseSlot(); // free the slot the instant the session ends — even on error
+    };
+    // Model-pin resilience (ORCH-16 fast-follow): attempt with the resolved pin; if copilot rejects it
+    // pre-flight as unavailable, retry ONCE with `--model auto` so a stale pin can't hard-break recall.
+    // The rejection happens at session-creation (before any tool call), so the retry starts clean.
+    try {
+      await runSession(opts.model);
+    } catch (err) {
+      if (!isModelUnavailableError(err)) throw err;
+      await runSession(COPILOT_MODEL_AUTO);
     }
     trace = { via: 'copilot', runtime: 'copilot', ok: captured.answered, at: clock() };
   } catch (err) {

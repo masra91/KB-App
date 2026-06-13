@@ -104,4 +104,22 @@ describe('makeDecomposeDecider (DECOMP-3, DECOMP-6)', () => {
   it('THROWS on bad output rather than inventing a decision (DECOMP-6)', async () => {
     await expect(makeDecomposeDecider({ available: true, run: async () => 'not json' })(input())).rejects.toThrow();
   });
+
+  // MODEL-AUTO-FALLBACK (ORCH-16 fast-follow): a pinned-model rejection retries once with `auto`,
+  // and the throw-style AgentTrace records the real model (`auto`) that ran.
+  it('retries with `auto` when the pinned model is rejected, recording auto in the AgentTrace', async () => {
+    vi.stubEnv('KB_COPILOT_MODEL', '');
+    try {
+      const run = vi.fn(async (_p: string, _cwd?: string, model?: string) => {
+        if (model !== 'auto') throw new Error('Model "claude-opus-4" from --model flag is not available.');
+        return '{"sourceId":"01JSRC","entities":[{"kind":"person","name":"Steve","confidence":0.9,"mentions":["call Steve"]}]}';
+      });
+      const d = await makeDecomposeDecider({ available: true, run })(input());
+      expect(run).toHaveBeenCalledTimes(2); // pinned (rejected) → auto
+      expect(d.agent?.model).toBe('auto');
+      expect(d.agent?.ok).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
