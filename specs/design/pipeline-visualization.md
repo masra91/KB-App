@@ -215,11 +215,48 @@ The motion vocabulary is tiny and purposeful (VIZ-1, VIZ-6, VIZ-9). Three verbs,
 
 - **Station node** — `◐/▣/○/✓/✕` glyph + UPPERCASE signage + gauge-rail. State = glyph + color +
   fill. The one *running* station embers + breathes.
-- **Gauge-rail** — vertical fill bar (volume) with a **directional** conversion-delta caption to
+- **Gauge-rail** — vertical fill bar with a **directional** conversion-delta caption to
   the next station (`−N (deduped)` at reductions, `+N (×ratio)` at fan-outs like Connect→Claims);
   the **terminal PROMOTE rail shows a completion ratio** (`promoted/captured`, e.g. `5/10 · 50%`),
   not a delta — see §2 funnel unit logic. The slowest station's rail tints toward oxide and shows
-  its `p95` Copilot latency (VIZ-4, the spatial "where time goes").
+  its `p95` Copilot latency (VIZ-4, the spatial "where time goes"). **The bar's primary fill is the
+  pending-work bar (below, VIZ-12); the cumulative conversion *volume* is the secondary lens** — its
+  count + projection caption stay in the rail's number lane (VIZ-10), and the cumulative *bar* reads
+  in the funnel/per-stage pivot, not as the live headline.
+
+- **Pending-work bar (VIZ-12) — the live headline fill.** The Principal's model: *"what I want in
+  the bars is pending items — a bar that shows all pending, with a slight fade / colour difference
+  for the in-progress ones."* So the rail's primary fill is **work-in-motion**, not the cumulative
+  end-state total (which read as a stuck/stale final tally). Per station, from
+  `pendingForStage(view.inFlight, stage)` → `{queued, inProgress}`:
+  - **The bar is a two-segment stack of *pending* (`queued + inProgress`).** Its **total height
+    scales to the peak pending across all six stations** (relative backlog — the fullest stage reads
+    tallest, so "where's it piling up" is a glance), `0` pending → empty rail track (calm, no fill).
+  - **In-progress segment = the warm base**, anchored at the spine: **`--viz-ember` + the ember
+    *breathe*** (the existing ambient, opacity `0.6↔1.0 / 1.8s` — *this is the Principal's "fade"*).
+    It is the items the stage is actively draining (`InFlightItem.active`), so it is alive on three
+    channels at once — **hue (ember), motion (breathe), and position (the base segment)** — never
+    colour alone (§3).
+  - **Queued segment = stacked above, still + cool**: `--viz-idle` slate, no motion (waiting, not
+    worked). It tints **`--viz-brass`** *only* when the station is **`queueConcerning`** (stuck/
+    errored stage, or pipeline `stalled`, with a backlog — the VIZ-10/OBS-11 rule), **never on depth
+    alone** (a deep-but-draining queue stays calm slate — the cry-wolf guard).
+  - This makes the read **emergent + legible**: ember base + thin cool cap = healthy draining;
+    **tall cool, little/no ember = a backlog not moving** (brass when stuck); pure ember = working,
+    nothing waiting; empty = idle. The in-progress is distinct *because* it embers + breathes while
+    the queued sits still.
+  - **Numbers stay in the live-state lane (ink, §3):** the existing `queue N` (queued) gains a
+    sibling **`▣ N active`** (the `▣` glyph carries ember; the count is ink-numeric, `active` is
+    signage) — both in the LIVE-STATE cluster (the only *actionable, sitting-here* numbers), apart
+    from the rail's cumulative volume+projection (which is a *projection*, never live work — VIZ-10).
+  - **Live + never stale-stuck (the whole point):** the segments read the maintained snapshot off
+    `view.inFlight` and update by push (SHELL-12/OBS-24); the ember segment is present **iff**
+    something is genuinely `active`, so a frozen breathing bar with no live worker can't appear (a
+    stale pending bar is the bug, not the feature). **Null/partial-tolerant (ENG-15/16):** an absent/
+    empty `inFlight`, or a legacy item missing `active`, collapses to `queued` (no false ember) — a
+    malformed item never breaks the bar or the station row.
+  - **Reduced-motion (§5 parity):** breathe → a static ember fill; in-progress stays distinct by
+    hue + segment + the `▣ active` count. Full functional parity, nothing by motion alone.
 - **Carriage** — `▸ name` + a six-cell stepper `[██████▣·····]` + current dwell ("12s on Copilot").
   Filled = done (patina), `▣` lit = current (ember), `·` = pending. Expandable to the per-hop
   trace.
@@ -435,6 +472,19 @@ requires are **not yet exposed** — flagged for the implementer + KB-Lead/PM (t
   the push channel / keyed-DOM diffing; a change-guard keeps the ambient motion smooth across unchanged
   polls (VIZ-9); (3) the **carriage → per-hop trace drill-down** (VIZ-2 expand) — needs an OBS-16
   `spansForItem` IPC not yet exposed. Tests trace to VIZ-1/2/3/4/5/6/7/9 + OBS-5/6/7/11/15/17.
+- 2026-06-13 — **VIZ-12 pending-work bar authored** (§6) — re-orients the rail's primary fill from the
+  cumulative end-state volume (which read as a stuck/stale final total) to **work-in-motion**: a
+  two-segment **pending** bar (`queued + inProgress` from `pendingForStage`), height scaled to the peak
+  pending across stations. **In-progress = ember base + breathe** (the Principal's "fade" = the existing
+  ambient pulse; distinct by hue + motion + position, never colour alone); **queued = still slate**,
+  brass only when `queueConcerning` (VIZ-10/OBS-11 stuck-gate, never on depth). Cumulative volume demoted
+  to the secondary funnel/pivot lens; a `▣ N active` count joins `queue N` in the ink live-state lane.
+  Live off the maintained snapshot (SHELL-12/OBS-24) so it's never stale-stuck; ENG-15/16 null-tolerant;
+  reduced-motion → static ember parity. **Net-new visual → KB-Lead HYBRID**; the queued-vs-in-progress
+  **bars** are KB-Developer-6's build (consuming `view.inFlight`), the funnel/pivot/carriages/motion stay
+  KB-Developer-4's — DEV-6 owns the bar *fill geometry* + the `▣ active` count, DEV-4 owns the rail
+  *caption numbers* + cumulative funnel, so they don't double-edit the station render. Gates: Design-Lead
+  visual + KB-QD-2 code.
 - 2026-06-08 — **Funnel-caption legibility clarity pass added** (§6) — Principal read the Linking
   gauge-rail `399` + `+1116 (×3.8)` as *queue depth*; it's volume + a fan-out *projection*. The station
   stacks four number-roles (volume · projection · queue · latency) and two were bare adjacent numerics.
