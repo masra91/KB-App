@@ -7,6 +7,7 @@ import {
   setAsideReason,
   toSetAsideViews,
   buildInFlightRoster,
+  pendingForStage,
   DEFAULT_STALL_MS,
   DEFAULT_ERROR_FRESH_MS,
   type AssembleParts,
@@ -200,6 +201,32 @@ describe('set-aside view mapping (OBS-17 / CLAIMS-20)', () => {
 
   it('toSetAsideViews is empty for no items', () => {
     expect(toSetAsideViews([], 'claims')).toEqual([]);
+  });
+});
+
+describe('pendingForStage (VIZ-12 — pending work, not cumulative totals)', () => {
+  it('splits a stage into in-progress (active) vs queued (waiting) from the roster', () => {
+    const roster = buildInFlightRoster([
+      { stage: 'claims', items: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }], busy: true, cap: 3, since: 'T1' },
+    ]);
+    // cap=3 busy → first 3 active (in-progress), 1 waiting.
+    expect(pendingForStage(roster, 'claims')).toEqual({ inProgress: 3, queued: 1 });
+  });
+
+  it('counts archive’s separately-prepended processing item as in-progress (exact, not derived from queueDepth)', () => {
+    const roster = buildInFlightRoster([
+      // archive prepends its `processing` item then the queue; cap=1 busy → processing is the only active one.
+      { stage: 'archive', items: [{ id: 'PROCESSING' }, { id: 'q1' }, { id: 'q2' }], busy: true, cap: 1, since: 'T0' },
+    ]);
+    expect(pendingForStage(roster, 'archive')).toEqual({ inProgress: 1, queued: 2 });
+  });
+
+  it('an idle stage is all-queued (busy=false → nothing in progress); an empty stage is zeroes', () => {
+    const roster = buildInFlightRoster([
+      { stage: 'decompose', items: [{ id: 'x' }, { id: 'y' }], busy: false, cap: 2, since: null },
+    ]);
+    expect(pendingForStage(roster, 'decompose')).toEqual({ inProgress: 0, queued: 2 });
+    expect(pendingForStage(roster, 'connect')).toEqual({ inProgress: 0, queued: 0 }); // stage not in roster
   });
 });
 

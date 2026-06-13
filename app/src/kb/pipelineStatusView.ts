@@ -164,6 +164,20 @@ export function buildInFlightRoster(stages: StageRoster[]): InFlightItem[] {
   return out;
 }
 
+/** VIZ-12: count a stage's PENDING WORK from the in-flight roster — `inProgress` = the active draining
+ *  batch (`active`), `queued` = the rest waiting. Exact (the roster is the source of truth, incl.
+ *  archive's separately-prepended `processing` item), so the bar can render in-progress distinctly. */
+export function pendingForStage(inFlight: InFlightItem[], stage: string): { queued: number; inProgress: number } {
+  let queued = 0;
+  let inProgress = 0;
+  for (const it of inFlight) {
+    if (it.stage !== stage) continue;
+    if (it.active) inProgress += 1;
+    else queued += 1;
+  }
+  return { queued, inProgress };
+}
+
 /** The assembled Status view-model (OBS-5/6/7/11/15). */
 export interface PipelineStatusView {
   /** Overall state (OBS-5/11). */
