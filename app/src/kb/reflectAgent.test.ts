@@ -1,6 +1,14 @@
 // Reflect decider prompt + parse (SPEC-0024 REFLECT-3). Pure functions, no copilot/FS.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import { buildReflectPrompt, parseReflectResult, makeReflectDecider, type ReflectContext } from './reflectAgent';
+
+// COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process to drive the REAL defaultRunner and
+// assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site).
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  return { ...actual, execFile: vi.fn() };
+});
 
 const ctx: ReflectContext = {
   workingSet: [{ rel: 'entities/person/steve.md', name: 'Steve', kind: 'person', tags: ['type/person'], excerpt: 'Founder.' }],
@@ -70,5 +78,27 @@ describe('makeReflectDecider', () => {
   it('throws when copilot is unavailable (no fabrication)', async () => {
     const decider = makeReflectDecider({ available: false });
     await expect(decider(ctx)).rejects.toThrow(/unavailable/);
+  });
+
+  // COPILOT-CONTEXT-SCOPE-BUG regression (fail-before/pass-after): the real defaultRunner must pass
+  // the threaded vaultPath to execFile as `cwd` so Copilot scans the staging worktree, not `/`.
+  it('runs the real Copilot subprocess in the threaded vaultPath (execFile cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeReflectDecider({ available: true, vaultPath: '/vault/.kb/cache/worktrees/staging' })(ctx).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBe('/vault/.kb/cache/worktrees/staging');
+  });
+
+  it('leaves execFile cwd undefined when no vaultPath is set (unscoped)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeReflectDecider({ available: true })(ctx).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBeUndefined();
   });
 });

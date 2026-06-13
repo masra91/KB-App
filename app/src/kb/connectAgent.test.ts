@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import { buildConnectPrompt, makeConnectDecider, type CandidateSet } from './connectAgent';
 import type { Candidate } from './connect';
+
+// COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process so we can drive the REAL defaultRunner
+// and assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site —
+// an injected runner would bypass it). Everything else in the module is preserved.
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  return { ...actual, execFile: vi.fn() };
+});
 
 const cand = (id: string, name: string, source: string): Candidate => ({
   id,
@@ -96,6 +105,31 @@ describe('makeConnectDecider (CONNECT-5/14)', () => {
 
   it('THROWS when copilot is unavailable — never fabricates a resolution (CONNECT-14)', async () => {
     await expect(makeConnectDecider({ available: false })(set())).rejects.toThrow(/unavailable/);
+  });
+
+  // COPILOT-CONTEXT-SCOPE-BUG regression (fail-before/pass-after): the REAL defaultRunner must pass
+  // the threaded vaultPath (the staging worktree) to execFile as `cwd`, so Copilot's workspace scan
+  // stays scoped — not a filesystem-root scan. #333 threaded vaultPath into options but nothing
+  // consumed it; before this fix execFile is called with no cwd. We only assert the execFile call
+  // args, so the parse outcome is irrelevant (swallowed).
+  it('runs the real Copilot subprocess in the threaded vaultPath (execFile cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeConnectDecider({ available: true, vaultPath: '/vault/.kb/cache/worktrees/staging' })(set()).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBe('/vault/.kb/cache/worktrees/staging');
+  });
+
+  it('leaves execFile cwd undefined when no vaultPath is set (unscoped — inherits parent cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeConnectDecider({ available: true })(set()).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBeUndefined();
   });
 
   it('THROWS when the verdict does not partition the set (a dropped candidate)', async () => {
