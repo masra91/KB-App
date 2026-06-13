@@ -168,6 +168,20 @@
 .line-cell-breathe {
   animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite;
 }
+/* §5 signature "index" — when a carriage advances a station, its now-current cell seats forward with a
+   weighted settle (a hint of overshoot, like a stepper motor). `lineMotion.applyIndex` adds the class
+   only on an actual advance; the next repaint recreates the cell so it plays once. transform-only
+   (VIZ-9, no layout). Reduced-motion (design-system `.viz-surface *` reset) zeroes it → the cell still
+   snaps lit (parity — state also reads via fill + hue). */
+.line-cell-indexing {
+  animation: line-index var(--viz-dur-index) var(--viz-ease-index);
+  will-change: transform;
+}
+@keyframes line-index {
+  from { transform: translateX(-45%); }
+  60% { transform: translateX(4%); }
+  to { transform: translateX(0); }
+}
 .line-station-name {
   font-size: 0.72rem;
   color: var(--viz-ink);

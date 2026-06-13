@@ -131,6 +131,14 @@ describe('The Line — station spine + gauge-rails (§2/§6, VIZ-3/4)', () => {
     expect(h).toContain('line-station-glyph viz-state-error'); // its glyph carries oxide (large element — allowed)
   });
 
+  it('the station volume count carries the per-stage odometer hook (VIZ-1 roll, not snap)', () => {
+    const h = spine();
+    // The volume number is its own [data-odo] span keyed per stage, so lineMotion rolls it from its
+    // prior value across a repaint (fixing the "0 → sudden numbers" jank) — not the wrapping noun.
+    expect(h).toContain('<span class="line-num" data-odo data-odo-key="vol-decompose">');
+    expect(h).toContain('data-odo-key="vol-promote"');
+  });
+
   it('gauge-rail shows the role-declaring conversion projections (→ −deduped, → +×ratio fan-out, completion ratio · complete)', () => {
     const h = spine(); // conversion 10/30/7/22/6
     expect(h).toContain('→ −23 deduped'); // decompose candidates(30) → connect entities(7)
@@ -207,7 +215,10 @@ describe('The Line — in-flight carriages (VIZ-2/9)', () => {
     expect(h).toContain('▸ SRC9');
     expect(h).toContain('line-cell-current line-cell-breathe'); // active → the lit step breathes
     expect(h).toContain('30s on Copilot'); // dwell from sinceTs (00:02:30) to NOW (00:03:00)
-    expect(h).toContain('In flight (<span class="viz-numeric">1</span>)');
+    // VIZ-1: the in-flight total carries the odometer hook so it rolls (not snaps); the carriage
+    // carries its id + stepper position for the §5 index motion.
+    expect(h).toContain('In flight (<span class="viz-numeric" data-odo data-odo-key="inflight-total">1</span>)');
+    expect(h).toContain('data-carriage-id="SRC9" data-step="2"');
   });
 
   it('collapses a large roster into a "+K more in flight" row (VIZ-9 virtualization)', () => {
@@ -215,7 +226,7 @@ describe('The Line — in-flight carriages (VIZ-2/9)', () => {
     const { shown, more } = splitCarriages(many, NOW);
     const h = carriagesHtml(shown, more);
     expect(h).toContain('more in flight');
-    expect(h).toContain('In flight (<span class="viz-numeric">15</span>)'); // total still honest
+    expect(h).toContain('In flight (<span class="viz-numeric" data-odo data-odo-key="inflight-total">15</span>)'); // total still honest, now odometer-rolled
   });
 
   it('shows a calm empty state when nothing is on the line', () => {
