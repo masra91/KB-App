@@ -28,6 +28,7 @@ import {
 import { isPermissionDeniedError } from '../../kb/permissions';
 import { OVERALL_LABEL } from '../../kb/pipelineStatusLabels';
 import { DEFAULT_ERROR_FRESH_MS } from '../../kb/pipelineStatusView';
+import { applyLineMotion, createMotionStores, type MotionStores } from './lineMotion';
 import type { PipelineStatusView, RecentError, WorktreeInfo, SetAsideView, PipelineControlRequest } from '../../kb/types';
 
 const POLL_MS = 2500;
@@ -46,6 +47,9 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let actionMsg = ''; // transient outcome of the last OBS-17 retry/dismiss
 let acting = false; // a recovery action is in flight — disable the buttons so it can't double-fire
 let lastHtml = ''; // change-guard: skip re-rendering identical HTML so CSS motion doesn't restart (VIZ-9)
+// §5 motion carry-over: the last odometer value per key + the last stepper position per carriage, so
+// a repaint can roll the number / index the advance from where it was (not snap). Reset on mount.
+let motionStores: MotionStores = createMotionStores();
 
 export function mountStatus(container: HTMLElement): void {
   view = null;
@@ -56,6 +60,7 @@ export function mountStatus(container: HTMLElement): void {
   actionMsg = '';
   acting = false;
   lastHtml = '';
+  motionStores = createMotionStores(); // fresh motion history per mount (no carry-over across vault switches)
   container.innerHTML = `<div class="viz-surface the-line"><div class="line-body" id="lineBody"></div></div>`;
   wire(container);
   void load(container);
@@ -167,6 +172,10 @@ function renderBody(container: HTMLElement): void {
   if (html !== lastHtml) {
     el.innerHTML = html;
     lastHtml = html;
+    // §5 motion (VIZ-1/signature): roll the funnel/in-flight counts from their prior values + index
+    // any carriage that advanced a station. Applied AFTER the repaint (which destroyed the nodes), so
+    // the stores carry the prior value across it; reduced-motion snaps. Only on an actual change.
+    applyLineMotion(el, motionStores);
   }
 }
 
@@ -293,7 +302,7 @@ function stationHtml(st: StationModel): string {
   const r = st.rail;
   // Lane 1 — RAIL: volume (count + bucket noun, role 1) then the projection caption (role 2). Each
   // carries a decode-on-hover `title=`.
-  const count = `<span class="line-rail-count viz-numeric" title="${esc(r.countTitle)}">${r.count} <span class="line-rail-noun viz-signage">${esc(r.noun)}</span></span>`;
+  const count = `<span class="line-rail-count viz-numeric" title="${esc(r.countTitle)}"><span class="line-num" data-odo data-odo-key="vol-${esc(st.stage)}">${r.count}</span> <span class="line-rail-noun viz-signage">${esc(r.noun)}</span></span>`;
   const caption = r.caption
     ? `<span class="line-rail-caption line-cap-${r.captionKind} viz-numeric"${r.captionTitle ? ` title="${esc(r.captionTitle)}"` : ''}>${esc(r.caption)}</span>`
     : '';
@@ -329,7 +338,7 @@ export function carriagesHtml(shown: CarriageModel[], more: number): string {
   }
   const rows = shown.map(carriageHtml).join('');
   const moreRow = more > 0 ? `<li class="line-carriage line-carriage-more viz-body">+<span class="viz-numeric">${more}</span> more in flight</li>` : '';
-  return `<section class="line-flight"><h2 class="line-h2 viz-signage">In flight (<span class="viz-numeric">${shown.length + more}</span>)</h2><ul class="line-carriages">${rows}${moreRow}</ul></section>`;
+  return `<section class="line-flight"><h2 class="line-h2 viz-signage">In flight (<span class="viz-numeric" data-odo data-odo-key="inflight-total">${shown.length + more}</span>)</h2><ul class="line-carriages">${rows}${moreRow}</ul></section>`;
 }
 
 function carriageHtml(c: CarriageModel): string {
@@ -338,7 +347,8 @@ function carriageHtml(c: CarriageModel): string {
     .map((role) => `<span class="line-cell line-cell-${role}${role === 'current' && c.active ? ' line-cell-breathe' : ''}" aria-hidden="true"></span>`)
     .join('');
   const dwell = c.dwell ? `<span class="line-carriage-dwell viz-numeric">${esc(c.dwell)}</span>` : '';
-  return `<li class="line-carriage${c.active ? ' line-carriage-active' : ''}">
+  // data-carriage-id + data-step let the §5 index motion detect a station advance across repaints.
+  return `<li class="line-carriage${c.active ? ' line-carriage-active' : ''}" data-carriage-id="${esc(c.itemId)}" data-step="${cur}">
     <span class="line-carriage-name viz-body">▸ ${esc(c.name)}</span>
     <span class="line-stepper" role="img" aria-label="${esc(c.stageName)} — step ${cur + 1} of 6">${cells}</span>
     <span class="line-carriage-stage viz-signage">${esc(c.stageName)}</span>
