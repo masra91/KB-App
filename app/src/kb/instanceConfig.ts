@@ -46,6 +46,11 @@ export interface InstanceConfig {
    *  ⇒ the code default (`copilotModelProbe.DEFAULT_MODEL_PREFERENCES`). The startup probe resolves the
    *  first entry the live CLI accepts; `auto` is the implicit last resort. */
   modelPreferences?: string[];
+  /** SPEC-0048: the Principal's explicit global model choice (Agents-view picker). When set AND accepted
+   *  by the live CLI it wins over `modelPreferences`; an unaccepted value is rejected at startup (WARN)
+   *  and the preference-list resolution is used instead — a stale pick can never hard-break the pipeline.
+   *  Omitted ⇒ no override (the preference-list probe drives). */
+  model?: string;
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -105,7 +110,17 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
     const cleaned = o.modelPreferences.filter((m): m is string => typeof m === 'string' && m.trim().length > 0).map((m) => m.trim());
     if (cleaned.length > 0) modelPreferences = cleaned;
   }
-  return { autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs, ...(modelPreferences ? { modelPreferences } : {}) };
+  // SPEC-0048: the global model override — a non-empty string persists; validation against the live CLI
+  // catalog happens at startup (initLaunchModel) / at set-time (the picker IPC), not here.
+  const model = typeof o.model === 'string' && o.model.trim().length > 0 ? o.model.trim() : undefined;
+  return {
+    autonomyDefault,
+    devLogLevel,
+    quickCaptureAccelerator,
+    recallBudgetMs,
+    ...(modelPreferences ? { modelPreferences } : {}),
+    ...(model ? { model } : {}),
+  };
 }
 
 /** Write the Instance config (Settings edit, PANEL-5/6) — deterministic, stable key order. */

@@ -55,7 +55,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry, facingForType } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type InstanceConfig } from '../kb/instanceConfig';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { resolveCopilotModel } from '../kb/copilotModel';
@@ -295,7 +295,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // reject pre-flight and kill the pipeline. Best-effort + never throws (a probe failure leaves the
   // floor pin in place); a below-top-tier pick is logged loud (no silent downgrade). The eval
   // `KB_COPILOT_MODEL` override still wins over the probed model.
-  await initLaunchModel({ preferences: stagingInstance.modelPreferences, log: log.child({ scope: 'model' }) }).catch((err) =>
+  await initLaunchModel({ preferences: stagingInstance.modelPreferences, override: stagingInstance.model, log: log.child({ scope: 'model' }) }).catch((err) =>
     log.child({ scope: 'model' }).warn('model.probe-failed', { itemId: vaultPath, err }),
   );
   const startedAt = Date.now();
@@ -1001,7 +1001,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   if (!active) return defaultInstanceConfig();
   const root = active.stagingWt;
   if (!isAutonomyPosture(settings.autonomyDefault)) return readInstanceConfig(root); // reject invalid
-  let prior: InstanceSettings = defaultInstanceConfig();
+  let prior: InstanceConfig = defaultInstanceConfig();
   let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
   let quickCaptureAccelerator: string = DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   let recallBudgetMs: number = DEFAULT_RECALL_BUDGET_MS;
@@ -1018,7 +1018,17 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
     // ASK-17: preserve-on-omission — an omitted recall budget keeps prior; a provided one is clamped to
     // the sane bounds. (prior.recallBudgetMs is always set: readInstanceConfig fills it.)
     recallBudgetMs = settings.recallBudgetMs === undefined ? (prior.recallBudgetMs ?? DEFAULT_RECALL_BUDGET_MS) : clampRecallBudgetMs(settings.recallBudgetMs);
-    await writeInstanceConfig(root, { autonomyDefault: settings.autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs });
+    // SPEC-0048: preserve the model override + preference list on a settings save (preserve-on-omission,
+    // #102) — InstanceSettings (the Settings surface) doesn't carry them, so an omitted value must keep
+    // prior, never wipe the Principal's model pick.
+    await writeInstanceConfig(root, {
+      autonomyDefault: settings.autonomyDefault,
+      devLogLevel,
+      quickCaptureAccelerator,
+      recallBudgetMs,
+      ...(prior.modelPreferences ? { modelPreferences: prior.modelPreferences } : {}),
+      ...(prior.model ? { model: prior.model } : {}),
+    });
     await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs}`);
   }, 'instance-settings:write');
   // QCAP-6: apply a changed hotkey live (no restart) — conflict-aware via the agent; degrades to the
