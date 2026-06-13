@@ -70,7 +70,7 @@ vi.mock('./pipeline', () => ({
   startPipeline: mocks.startPipeline,
   activePipeline: () => state.orch,
   activeStagingRoot: (): string | null => state.stagingRoot,
-  listActiveReviews: async (): Promise<unknown[]> => [],
+  reviewProjectionForActive: (): null => null, // SHELL-12: kb:listReviews now reads the maintained projection
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),

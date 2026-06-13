@@ -13,6 +13,7 @@
 import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
+import { createProjectionStore, type ProjectionStore, type Projection } from './projectionStore';
 import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
@@ -82,9 +83,10 @@ import { applySensitivityOverrideToSourceMd } from '../kb/sourceDoc';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
 import type { Review } from '../kb/reviews';
+import { reviewToSummary } from '../kb/reviewSummary';
 import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
-import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus } from '../kb/types';
+import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus, ReviewSummary } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
@@ -147,6 +149,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.intake.start(); // SPEC-0041: the proactive-intake tick (scheduled feed pulls → primary sources)
   a.watch.start(); // SPEC-0037: live folder watchers (startup reconcile + chokidar stable-file events)
   statusStore.start(); // OBS-24: maintain the status snapshot off the render path (seed from persisted, then live)
+  reviewStore.start(); // SHELL-12: maintain the review-queue projection off the render path
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -162,6 +165,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.watch.stop(); // SPEC-0037: close all live folder watchers
   a.promoter.stop(); // STAGING-12: cancel a pending promotion timer (no promotes while drains are stopped)
   statusStore.stop(); // OBS-24: halt the background status refresh (retains the in-memory snapshot)
+  reviewStore.stop(); // SHELL-12: halt the review-queue projection refresh (retains the in-memory projection)
 }
 
 // ── SPEC-0045 QUIESCE — graceful shutdown (drain, don't kill) ───────────────────────────────────
@@ -640,6 +644,42 @@ export async function pipelineStatusForActive(): Promise<PipelineStatusView | nu
  *  status update). Never called on the render path. */
 export function refreshStatusSnapshot(): Promise<void> {
   return statusStore.refreshNow();
+}
+
+// ── SHELL-12: the maintained REVIEW-QUEUE projection ─────────────────────────────────────────────
+// The render path (`kb:listReviews` + the rail badge) reads this last-known-good projection INSTANTLY
+// — zero git/fs on the render path, so a busy stage or held canonical-writer lock can never stall the
+// Reviews surface. SHELL-12 (c) "update by push" is satisfied by the existing cheap poll now reading
+// the INSTANT projection (no live recompute the user waits on); a real main→renderer push is a ready
+// follow-on via the spine's `onUpdate` hook. The answer path (REVIEW-20, DEV-6) calls
+// `refreshReviewProjection()` after its fast verdict write so the next read sees fresh data.
+const REVIEW_REFRESH_MS = 2500;
+
+/** The review-queue compute (background cadence): the open "needs you" queue mapped to the view's
+ *  summary shape. Null when no KB is open (the projection then shows nothing). */
+async function computeReviewSummaries(): Promise<ReviewSummary[] | null> {
+  if (!active) return null;
+  const reviews = await listActiveReviews();
+  return reviews.map(reviewToSummary); // pure, ENG-16-hardened fold (empty/missing subject can't throw)
+}
+
+/** The maintained review-queue projection (SHELL-12). Started/stopped with the stage sweeps. */
+const reviewStore: ProjectionStore<ReviewSummary[]> = createProjectionStore<ReviewSummary[]>({
+  compute: computeReviewSummaries,
+  intervalMs: REVIEW_REFRESH_MS,
+  onError: (err) => active?.log.child({ scope: 'reviews' }).warn('reviews.projection-refresh-failed', { err }),
+});
+
+/** The render-path review-queue read (SHELL-12): the background-maintained last-known-good projection,
+ *  INSTANT — no git/fs/compute, so a Reviews read can never block on the backend. Null until first build. */
+export function reviewProjectionForActive(): Projection<ReviewSummary[]> | null {
+  return active ? reviewStore.current() : null; // no active KB → null (don't serve a closed vault's queue)
+}
+
+/** Post-answer refresh seam (REVIEW-20 / DEV-6): re-read the queue + push, so the renderer's optimistic
+ *  remove reconciles against fresh data. Mirrors `refreshStatusSnapshot`. Never on the render path. */
+export function refreshReviewProjection(): Promise<void> {
+  return reviewStore.refreshNow();
 }
 
 /**

@@ -204,6 +204,20 @@ export interface QuiesceStatus {
   detail: string;
 }
 
+// --- SHELL-12: the cached-projection envelope (the cross-boundary contract) ---
+
+/** The uniform envelope every surface reads off the maintained cached-projection backbone (SHELL-12).
+ *  `data` is the last-known-good view-model the surface renders INSTANTLY (the render path does zero
+ *  git/fs/lock/recompute); `builtAt` is the "as of" ISO timestamp; `stale` is true when the most recent
+ *  background refresh errored — the data is retained but may be behind. A consumer MUST honor `stale`
+ *  with a visible "as of / updating…" affordance: stale-but-fast is honest, a frozen-but-looks-fresh UI
+ *  is the failure mode SHELL-12 kills. The store (`main/projectionStore.ts`) owns the mechanics. */
+export interface Projection<T> {
+  data: T;
+  builtAt: string;
+  stale: boolean;
+}
+
 // --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
 
 /** One open review as the Reviews view needs it (REVIEW-10). */
@@ -598,6 +612,9 @@ export interface KbApi {
   // main app-log (the isolated renderer can't write it itself). Fire-and-forget.
   reportRendererError(report: RendererErrorReport): Promise<void>;
   listReviews(): Promise<ReviewSummary[]>;
+  /** SHELL-12: the review queue WITH its freshness envelope (`builtAt`/`stale`) so the surface can show
+   *  an "as of / updating…" affordance. `listReviews` stays the plain instant queue read. */
+  reviewProjection(): Promise<Projection<ReviewSummary[]> | null>;
   answerReview(req: AnswerReviewRequest): Promise<AnswerReviewResult>;
   // SPEC-0030 OBS-17: retry / dismiss a set-aside (poison) item from the Status view (claims-only v1).
   pipelineControl(req: PipelineControlRequest): Promise<PipelineControlResult>;
