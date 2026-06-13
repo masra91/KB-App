@@ -13,13 +13,22 @@ import os from 'node:os';
 /** Resolve the global ceiling. Env override wins (tests/measure/future per-Instance setting);
  *  else cores-aware, clamped to a small range so a many-core box can't fan out unbounded. */
 function resolveCeiling(): number {
-  const raw = process.env.KB_COPILOT_MAX_CONCURRENCY;
-  if (raw !== undefined) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n >= 1) return n;
-  }
+  return envCeilingOverride() ?? coresDerivedCeiling();
+}
+
+/** The cores-derived ceiling — SCALE-1's "current cores-derived default" (no env, no Settings). */
+export function coresDerivedCeiling(): number {
   const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
   return Math.max(2, Math.min(4, cores - 1));
+}
+
+/** The env ceiling override (`KB_COPILOT_MAX_CONCURRENCY`) if a valid ≥1 int, else undefined. SCALE-1:
+ *  env still WINS over the Settings value (tests/measure keep their hard override). */
+export function envCeilingOverride(): number | undefined {
+  const raw = process.env.KB_COPILOT_MAX_CONCURRENCY;
+  if (raw === undefined) return undefined;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 1 ? n : undefined;
 }
 
 /** Options for {@link Semaphore.acquire}. */
@@ -57,7 +66,29 @@ export class Semaphore {
   private inFlight = 0;
   private readonly waiters: Array<() => void> = []; // background, FIFO
   private readonly priorityWaiters: Array<() => void> = []; // interactive/foreground, served before background
-  constructor(public readonly ceiling: number) {}
+  /** The live concurrency ceiling. Mutable for SPEC-0048 SCALE-1 (Settings-driven ceiling, live-applied
+   *  without a restart). `acquire` reads it dynamically, so a resize takes effect on the next acquire. */
+  public ceiling: number;
+  constructor(ceiling: number) {
+    this.ceiling = ceiling;
+  }
+
+  /**
+   * Resize the ceiling live (SCALE-1/4). Raising it immediately grants the freed capacity to queued
+   * waiters (priority first), so a "run harder" change takes effect at once. Lowering it never
+   * force-releases an in-flight slot — `inFlight` simply drains below the new ceiling as holders
+   * finish, and no new slot is granted until there's room. A no-op when unchanged.
+   */
+  resize(ceiling: number): void {
+    const next = Math.max(1, Math.floor(ceiling));
+    if (next === this.ceiling) return;
+    this.ceiling = next;
+    while (this.inFlight < this.ceiling) {
+      const grantNext = this.priorityWaiters.shift() ?? this.waiters.shift();
+      if (!grantNext) break;
+      grantNext(); // grants + increments inFlight (still ≤ the new ceiling)
+    }
+  }
 
   acquire(opts: AcquireOptions = {}): Promise<() => void> {
     return new Promise<() => void>((resolve, reject) => {
@@ -115,6 +146,23 @@ export class Semaphore {
 
 /** The ONE process-wide copilot semaphore. Every copilot spawner shares this instance. */
 export const copilotSemaphore = new Semaphore(resolveCeiling());
+
+/**
+ * Apply the effective global ceiling to the shared semaphore (SPEC-0048 SCALE-1/4), precedence
+ * **env > Settings(`configured`) > cores-derived**. Called on pipeline start with the `instance.json`
+ * value, and again live on a Settings change (resizes without a restart). Returns the effective value
+ * so the caller can record/surface it.
+ */
+export function applyCopilotCeiling(configured?: number): number {
+  const effective = envCeilingOverride() ?? (configured !== undefined && configured >= 1 ? Math.floor(configured) : coresDerivedCeiling());
+  copilotSemaphore.resize(effective);
+  return effective;
+}
+
+/** The current effective ceiling (for Settings display / status). */
+export function currentCopilotCeiling(): number {
+  return copilotSemaphore.ceiling;
+}
 
 /**
  * Run `fn` while holding one global copilot slot — the standard wrapper for a one-shot `copilot -p`
