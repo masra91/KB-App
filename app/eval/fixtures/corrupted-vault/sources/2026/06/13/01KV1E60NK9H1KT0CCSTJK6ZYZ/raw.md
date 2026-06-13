@@ -1,0 +1,1 @@
+Ada Lovelace wrote the first published algorithm intended for Charles Babbage’s Analytical Engine.

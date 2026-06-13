@@ -18,7 +18,7 @@ import { ConnectStage } from '../../src/kb/connectStage';
 import { makeConnectDecider } from '../../src/kb/connectAgent';
 import { ClaimsStage } from '../../src/kb/claimsStage';
 import { makeClaimsDecider } from '../../src/kb/claimsAgent';
-import { createVaultTracer, type Tracer } from '../../src/kb/tracing';
+import { createVaultTracer, STAGE_RUN_OP, type Tracer } from '../../src/kb/tracing';
 import { createVaultDevLog, type DevLog } from '../../src/kb/devlog';
 import { DEFAULT_STAGE_CAP } from '../../src/kb/canonicalAdvance';
 import { recall, type AskResult } from '../../src/kb/recall';
@@ -75,6 +75,10 @@ function resolveEvalJobBehavior(type: string): JobBehavior | null {
  * (`makeXDecider` → BYOA copilot) — the model-under-test is never mocked. Mirrors enrichE2eDogfood's
  * capture→drain→recall flow; Slice-3 adds research (via the egress cassette) + jobs (the JOBS engine).
  */
+/** Max decompose re-attempt passes per drain (mirrors the stage sweep): K=3 set-aside attempts + a
+ *  small buffer, so a dangling-ref source reaches its terminal set-aside without an unbounded loop. */
+const DECOMPOSE_DRAIN_PASSES = 5;
+
 export async function makeInProcessDriver(opts: InProcessDriverOptions): Promise<ActionDriver> {
   const root = opts.root;
   await createKb({ path: root, initGitIfNeeded: true });
@@ -119,7 +123,21 @@ export async function makeInProcessDriver(opts: InProcessDriverOptions): Promise
       await orch.poke(); // archive captured notes → sources/ → decompose queue
       for (const stage of a.stages) {
         if (stage === 'decompose') {
-          for (const srcRel of await readDecomposeQueue(stagingWt)) await decomposeOne(stagingWt, srcRel, makeDecomposeDecider(), lock, undefined, log);
+          // Drain decompose to quiescence (mirrors the real DecomposeStage sweep): a good source leaves
+          // the queue after one success; a dangling-ref source is re-attempted across passes until its
+          // K-bounded set-aside (DECOMP-6) — so a robustness scenario can assert the `setaside` outcome,
+          // not just a single `error`. Bounded by DECOMPOSE_DRAIN_PASSES so a never-terminating item
+          // can't hang the run. Each item is wrapped in a stage.run span (as the stage does in prod) so
+          // the scenario can assert its telemetry outcome (`ok`/`setaside`/`error`).
+          let q = await readDecomposeQueue(stagingWt);
+          for (let pass = 0; q.length > 0 && pass < DECOMPOSE_DRAIN_PASSES; pass++) {
+            for (const srcRel of q) {
+              const span = tracer.start(STAGE_RUN_OP, { stage: 'decompose', itemId: path.basename(srcRel) });
+              const r = await decomposeOne(stagingWt, srcRel, makeDecomposeDecider(), lock, undefined, log, span);
+              span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error');
+            }
+            q = await readDecomposeQueue(stagingWt);
+          }
         } else if (stage === 'connect') {
           await connectPoke();
         } else if (stage === 'claims') {

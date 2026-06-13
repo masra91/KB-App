@@ -82,6 +82,8 @@ fails loud** — a typo can never read as a pass.
 | `fileContains` | `{ path, text }` | a vault file contains text — artifact content |
 | `sourcesContain` | `{ text }` | ≥1 source body contains text — a finding carrying its fact/origin (RESEARCH-6) |
 | `auditEvents` | `{ eventType, min }` | ≥ `min` audit events of a type fired |
+| `spanOutcome` | `{ outcome, stage?, min }` | ≥ `min` operational spans ended with `outcome` (`ok`/`setaside`/`error`) — robustness: a corrupted item set aside *gracefully* (`setaside`) while good items still complete (`ok`) |
+| `telemetryError` | `{ contains?, min? }` | ≥ `min` (default 1) dev-log `error` entries (optionally `contains` a substring) — robustness: a failure was *surfaced in telemetry* with a message, never swallowed silently |
 
 **Need a new check?** Add one function to the `VALIDATORS` registry in `runner/validators.ts` (+ a
 unit test in `runner/validators.test.ts`); it's then available to every scenario.
