@@ -9,7 +9,7 @@ import type { VaultSnapshot } from './snapshot';
 import type { AskResult } from '../../src/kb/recall';
 
 function snap(over: Partial<VaultSnapshot> = {}): VaultSnapshot {
-  return { root: '/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], ...over };
+  return { root: '/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], spans: [], devLog: [], ...over };
 }
 const ask = (over: Partial<AskResult> = {}): AskResult => ({ question: 'q', answer: 'a', citations: [], grounded: false, toolCalls: 0, truncated: false, ...over });
 
@@ -96,5 +96,49 @@ describe('runDeterministicChecks + scorecard', () => {
     expect(out).toMatch(/✗ demo/);
     expect(out).toMatch(/✓ entitiesInclude/);
     expect(out).toMatch(/✗ entitiesInclude/);
+  });
+});
+
+// SPEC-0042 robustness (corrupted-vault eval) — the crash-class guard: a corrupted item must set
+// aside gracefully (a `setaside` span) and its failure must be surfaced in telemetry (a dev-log
+// `error` with a message), never a silent fatal drain crash.
+describe('spanOutcome (robustness — graceful set-aside via telemetry)', () => {
+  const span = (over: Record<string, unknown> = {}) => ({ spanId: '1', op: 'stage.run', stage: 'connect', startTs: 't0', endTs: 't1', durationMs: 1, outcome: 'ok', ...over }) as VaultSnapshot['spans'][number];
+
+  it('passes when ≥min spans carry the outcome (a corrupted item was set aside; good items completed)', () => {
+    const s = snap({ spans: [span({ spanId: 'a', itemId: 'bad', outcome: 'setaside' }), span({ spanId: 'b', itemId: 'good', outcome: 'ok' })] });
+    expect(VALIDATORS.spanOutcome(s, { outcome: 'setaside', min: 1 }).pass).toBe(true);
+    expect(VALIDATORS.spanOutcome(s, { outcome: 'ok', min: 1 }).pass).toBe(true);
+  });
+
+  it('FAILS when no span carries the outcome — the regression: drain died with no graceful set-aside span', () => {
+    const s = snap({ spans: [span({ outcome: 'ok' })] });
+    expect(VALIDATORS.spanOutcome(s, { outcome: 'setaside' }).pass).toBe(false);
+  });
+
+  it('scopes to a stage when given', () => {
+    const s = snap({ spans: [span({ stage: 'claims', outcome: 'setaside' })] });
+    expect(VALIDATORS.spanOutcome(s, { outcome: 'setaside', stage: 'connect' }).pass).toBe(false);
+    expect(VALIDATORS.spanOutcome(s, { outcome: 'setaside', stage: 'claims' }).pass).toBe(true);
+  });
+});
+
+describe('telemetryError (robustness — failure surfaced with a message)', () => {
+  const errEntry = (over: Record<string, unknown> = {}) => ({ ts: 't', level: 'error', event: 'connect.link-error', err: { message: 'ENOENT: missing source dir' }, ...over }) as VaultSnapshot['devLog'][number];
+
+  it('passes when ≥min dev-log error entries exist (failure logged, not swallowed)', () => {
+    expect(VALIDATORS.telemetryError(snap({ devLog: [errEntry()] }), {}).pass).toBe(true);
+  });
+
+  it('matches a `contains` substring across the entry (message / event / item id)', () => {
+    const s = snap({ devLog: [errEntry()] });
+    expect(VALIDATORS.telemetryError(s, { contains: 'ENOENT' }).pass).toBe(true);
+    expect(VALIDATORS.telemetryError(s, { contains: 'link-error' }).pass).toBe(true);
+    expect(VALIDATORS.telemetryError(s, { contains: 'not-present' }).pass).toBe(false);
+  });
+
+  it('FAILS when the failure was swallowed — the "errors logged nowhere" gap (no error entries)', () => {
+    const s = snap({ devLog: [{ ts: 't', level: 'warn', event: 'noise' } as VaultSnapshot['devLog'][number]] });
+    expect(VALIDATORS.telemetryError(s, {}).pass).toBe(false);
   });
 });

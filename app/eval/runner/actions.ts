@@ -18,6 +18,9 @@ import { ConnectStage } from '../../src/kb/connectStage';
 import { makeConnectDecider } from '../../src/kb/connectAgent';
 import { ClaimsStage } from '../../src/kb/claimsStage';
 import { makeClaimsDecider } from '../../src/kb/claimsAgent';
+import { createVaultTracer, type Tracer } from '../../src/kb/tracing';
+import { createVaultDevLog, type DevLog } from '../../src/kb/devlog';
+import { DEFAULT_STAGE_CAP } from '../../src/kb/canonicalAdvance';
 import { recall, type AskResult } from '../../src/kb/recall';
 import { readResearcherRegistry } from '../../src/kb/researcherRegistry';
 import { runResearcher } from '../../src/kb/researchRun';
@@ -92,10 +95,16 @@ export async function makeInProcessDriver(opts: InProcessDriverOptions): Promise
   const promoteEvergreen = async (): Promise<void> => {
     await promote(root);
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen);
+  // SPEC-0042 robustness: wire the REAL telemetry sinks (pointed at the eval vault root, where the
+  // snapshot reads them) so a scenario can assert that a corrupted item was gracefully set aside
+  // (`setaside` span) and its failure was SURFACED in telemetry (an `error` dev-log entry carrying
+  // the message) — not swallowed into a fatal drain crash. `awaitDrain` flushes both before returning.
+  const log: DevLog = createVaultDevLog(root, { level: 'info' });
+  const tracer: Tracer = createVaultTracer(root, { log });
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, DEFAULT_STAGE_CAP, log, tracer);
   let lastRecall: AskResult | null = null;
   let captureN = 0;
-  const connectPoke = (): Promise<void> => new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen).poke();
+  const connectPoke = (): Promise<void> => new ConnectStage(stagingWt, makeConnectDecider(), lock, undefined, promoteEvergreen, log, tracer).poke();
 
   return {
     rootPath: root,
@@ -110,17 +119,21 @@ export async function makeInProcessDriver(opts: InProcessDriverOptions): Promise
       await orch.poke(); // archive captured notes → sources/ → decompose queue
       for (const stage of a.stages) {
         if (stage === 'decompose') {
-          for (const srcRel of await readDecomposeQueue(stagingWt)) await decomposeOne(stagingWt, srcRel, makeDecomposeDecider());
+          for (const srcRel of await readDecomposeQueue(stagingWt)) await decomposeOne(stagingWt, srcRel, makeDecomposeDecider(), lock, undefined, log);
         } else if (stage === 'connect') {
           await connectPoke();
         } else if (stage === 'claims') {
-          await new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, promoteEvergreen).poke();
+          await new ClaimsStage(stagingWt, makeClaimsDecider(), lock, undefined, promoteEvergreen, DEFAULT_STAGE_CAP, log, tracer).poke();
         }
       }
       // Settle link-promotion (relatesTo → [[wikilinks]]) at top level after claims drains, lock-free —
       // claims' afterDrain can't await connect under the canonical-writer lock (deadlock); enrichE2eDogfood
       // does the same explicit settle.
       if (a.stages.includes('claims') && a.stages.includes('connect')) await connectPoke();
+      // Persist telemetry before the snapshot reads it (the spans/dev-log writes are async, serialized
+      // tails) — so a robustness scenario's spans/devLog assertions are never flaky on write timing.
+      await tracer.flush();
+      await log.flush();
     },
     async ask(a) {
       lastRecall = await recall(root, a.query, {
