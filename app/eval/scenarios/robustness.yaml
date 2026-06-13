@@ -1,0 +1,32 @@
+# SPEC-0042 EVAL — capability: decompose (robustness / corrupted-vault). Drives the REAL drain over a
+# vault containing a dangling/missing file-ref (a source whose meta.raw points at a now-MISSING raw.md —
+# the 06-12 replay crash class). Asserts the fix (DEV-5 #341 — drain-tolerates-dangling-file-ref +
+# error-message-in-telemetry): the bad source is set aside GRACEFULLY (not a fatal drain crash that trips
+# the #256 systemic breaker + head-of-line-blocks the good source), the drain COMPLETES THE REST (the
+# good source still decomposes → an entity), and the failure is SURFACED in telemetry with a message.
+# Fails-before/passes-after the fix. Shared fixture: fixtures/corrupted-vault (one good source + one whose
+# raw.md was deleted post-archive — the exact dangling meta.raw ENOENT).
+id: robustness-corrupted-vault
+capability: decompose
+seed:
+  kind: files
+  ref: corrupted-vault
+actions:
+  - awaitDrain:
+      stages: [decompose, connect, claims]
+expect:
+  deterministic:
+    # GRACEFUL set-aside: the corrupted source (missing raw.md → ENOENT) ends in a `setaside` span —
+    # per-item locus, NOT a fatal crash that trips the #256 systemic circuit-breaker (DEV-5 #341).
+    - check: spanOutcome
+      args: { outcome: setaside, stage: decompose, min: 1 }
+    # DRAIN COMPLETES THE REST: the good source still decomposed (the bad item didn't head-of-line-block) …
+    - check: spanOutcome
+      args: { outcome: ok, stage: decompose, min: 1 }
+    # … and produced >=1 entity downstream — the pipeline wasn't taken down by the bad item.
+    - check: countBounds
+      args: { dir: entities, min: 1 }
+    # FAILURE SURFACED IN TELEMETRY with a message (the dangling-ref ENOENT) — never swallowed (the
+    # "errors logged nowhere" gap). Reads dev-log `error` entries (DEV-5: app.log + Span.error carry it).
+    - check: telemetryError
+      args: { contains: enoent, min: 1 }

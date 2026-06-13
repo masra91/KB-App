@@ -1,0 +1,2 @@
+{"action":"captured","id":"01KV1E60NK9H1KT0CCSTJK6ZYZ","kind":"text","raw":"raw.md","contentHash":"sha256:5ff1b3f9456014eb179927edbebdc90e978e7c245a786505b21035bb651a1cd4","capturedAt":"2026-06-13T21:28:37.811Z","surface":"eval","captureBatch":"01KV1E60NKDQHCE13PG2YTM3JA","mimeType":"text/markdown"}
+{"action":"archived","id":"01KV1E60NK9H1KT0CCSTJK6ZYZ","archivedAt":"2026-06-13T21:28:38.185Z","decision":{"kind":"text","class":"primary","scope":"global","sensitivity":"internal","sensitivityBy":"default"},"agent":{"via":"deterministic"}}

@@ -7,6 +7,8 @@ import path from 'node:path';
 import { readEvents } from '../../src/kb/activityIndex';
 import type { AuditEvent } from '../../src/kb/audit';
 import type { AskResult } from '../../src/kb/recall';
+import { vaultSpansPath, type Span } from '../../src/kb/tracing';
+import { readRecentDevLogEntries, type DevLogEntry } from '../../src/kb/devlog';
 
 /** One markdown file in the vault (its repo-relative path + raw body). */
 export interface VaultFile {
@@ -28,6 +30,36 @@ export interface VaultSnapshot {
   recall: AskResult | null;
   /** The vault's audit events (newest-first), for audit/span validators. */
   audit: AuditEvent[];
+  /** Operational spans (`.kb/cache/spans.jsonl`) — `outcome` includes `setaside`/`error`, so a
+   *  robustness scenario can assert a corrupted item was gracefully set aside (not a fatal crash).
+   *  Empty unless the driver wired a tracer (EVAL robustness, SPEC-0042). */
+  spans: Span[];
+  /** Recent dev-log entries (the vault `pipeline.log`), warn+ — an `error` entry carries the failure
+   *  MESSAGE, so a scenario can assert a failure was SURFACED in telemetry (not swallowed silently).
+   *  Empty unless the driver wired a dev-log. */
+  devLog: DevLogEntry[];
+}
+
+/** Read + parse the spans JSONL (`.kb/cache/spans.jsonl`); missing/empty → []. Lines that don't parse
+ *  are skipped (the file is append-only + self-swallowing, so a torn tail line is possible). */
+async function readSpans(root: string): Promise<Span[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(vaultSpansPath(root), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: Span[] = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (t.length === 0) continue;
+    try {
+      out.push(JSON.parse(t) as Span);
+    } catch {
+      /* torn/partial line — skip */
+    }
+  }
+  return out;
 }
 
 /** Recursively collect `.md` files under `<root>/<sub>` as repo-relative VaultFiles (missing dir → []). */
@@ -59,5 +91,14 @@ export async function captureSnapshot(root: string, opts: { recall?: AskResult |
   } catch {
     audit = [];
   }
-  return { root, entities, claims, sources, outputs, recall: opts.recall ?? null, audit };
+  const spans = await readSpans(root);
+  // Capture warn+ telemetry; a robustness scenario asserts an `error` entry (the surfaced failure
+  // message) + a `setaside` span. Limit generously so a whole drain's telemetry is in-frame.
+  let devLog: DevLogEntry[] = [];
+  try {
+    devLog = await readRecentDevLogEntries(root, { minLevel: 'warn', limit: 1000 });
+  } catch {
+    devLog = [];
+  }
+  return { root, entities, claims, sources, outputs, recall: opts.recall ?? null, audit, spans, devLog };
 }

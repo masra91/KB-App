@@ -133,6 +133,34 @@ export const VALIDATORS: Record<string, Validator> = {
     const n = snap.audit.filter((e) => e.eventType === eventType).length;
     return n >= min ? pass('auditEvents', `${n} '${eventType}' event(s) (≥${min})`) : fail('auditEvents', `${n} '${eventType}' event(s) (<${min})`);
   },
+  // SPEC-0042 robustness (corrupted-vault eval): ≥`min` operational spans ended with `outcome` —
+  // `setaside` proves a corrupted item was GRACEFULLY set aside (not a fatal drain crash); `ok`
+  // proves the good items still completed (the drain finished the rest). Optional `stage` scopes it.
+  spanOutcome(snap, args) {
+    const a = (args ?? {}) as { outcome?: unknown; stage?: unknown; min?: unknown };
+    const outcome = String(a.outcome ?? '');
+    const stage = a.stage === undefined ? undefined : String(a.stage);
+    const min = typeof a.min === 'number' ? a.min : 1;
+    const n = snap.spans.filter((s) => s.outcome === outcome && (stage === undefined || s.stage === stage)).length;
+    const where = stage ? ` (stage '${stage}')` : '';
+    return n >= min
+      ? pass('spanOutcome', `${n} span(s) outcome '${outcome}'${where} (≥${min})`)
+      : fail('spanOutcome', `${n} span(s) outcome '${outcome}'${where} (<${min}) — telemetry didn't record it`);
+  },
+  // SPEC-0042 robustness: a failure was SURFACED in telemetry with a MESSAGE — ≥`min` (default 1)
+  // dev-log `error` entries, optionally `contains` a substring (the error text / event / item id).
+  // Guards the "errors logged nowhere" gap: a swallowed/silent failure → zero error entries → FAIL.
+  telemetryError(snap, args) {
+    const a = (args ?? {}) as { contains?: unknown; min?: unknown };
+    const contains = a.contains === undefined ? undefined : String(a.contains).toLowerCase();
+    const min = typeof a.min === 'number' ? a.min : 1;
+    const errors = snap.devLog.filter((e) => e.level === 'error');
+    const matched = contains === undefined ? errors : errors.filter((e) => JSON.stringify(e).toLowerCase().includes(contains));
+    const tail = contains ? ` containing "${contains}"` : '';
+    return matched.length >= min
+      ? pass('telemetryError', `${matched.length} dev-log error(s)${tail} (≥${min}) — failure surfaced with a message`)
+      : fail('telemetryError', `${matched.length} dev-log error(s)${tail} (<${min}) — failure not surfaced in telemetry`);
+  },
 };
 
 /** Run a scenario's deterministic checks against the snapshot (EVAL-3). An unknown check name FAILS

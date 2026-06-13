@@ -5,7 +5,7 @@ import { VALIDATORS } from './validators';
 import type { VaultSnapshot } from './snapshot';
 
 function snap(partial: Partial<VaultSnapshot>): VaultSnapshot {
-  return { root: '/tmp/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], ...partial };
+  return { root: '/tmp/v', entities: [], claims: [], sources: [], outputs: [], recall: null, audit: [], spans: [], devLog: [], ...partial };
 }
 
 describe('fileExists', () => {
