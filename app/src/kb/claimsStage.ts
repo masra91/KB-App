@@ -354,6 +354,9 @@ export interface ClaimsOneResult {
   setAside: boolean;
   /** True when the agent raised a review and the item was parked (REVIEW-5), not claimed. */
   parked?: boolean;
+  /** On a failed/set-aside outcome, the failure message — threaded onto the stage's error span so a
+   *  failed entity is diagnosable from the span alone (SPEC-0030 robustness batch). */
+  error?: string;
 }
 
 /**
@@ -514,7 +517,7 @@ export async function claimsOne(
       log.error('claims.failed', { runId, itemId: entityId, attempt, setAside, err });
       await wtGit.raw('add', '-A');
       await wtGit.commit(`claims: failed ${entityId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-      result = { entityId, ok: false, claimIds: [], setAside };
+      result = { entityId, ok: false, claimIds: [], setAside, error };
       return true;
     }
   };
@@ -735,6 +738,11 @@ export class ClaimsStage {
         this.pending = false;
         await this.drainOnce();
       }
+    } catch (err) {
+      // A SYSTEMIC drain failure (e.g. the queue read / canonical writer is wedged) must NOT escape as
+      // an unhandledRejection through a fire-and-forget `void poke()` (SPEC-0030 robustness). Surface it
+      // loudly; a later poke/sweep retries. Per-item failures are isolated in drainOnce and never reach here.
+      this.log.error('claims.drain-fatal', { err });
     } finally {
       this.draining = false;
       this.drainStartedAt = null;
@@ -748,29 +756,33 @@ export class ClaimsStage {
     while (queue.length > 0) {
       // ORCH-17/18/20: process up to `cap` entities concurrently (each in its own ephemeral worktree;
       // cap=1 ⇒ serial). claimsOne handles its own failures + same-source-audit collisions (re-sync +
-      // retry), so a settled batch never rejects; an unexpected throw stops this pass for a later sweep.
+      // retry), so a settled batch never rejects.
       const batch = queue.slice(0, this.cap);
       try {
         // OBS-12: each entity gets a `stage.run` span wrapping its decider's `copilot.invoke` child.
+        // LOCUS DISTINCTION: claimsOne RETURNS for a per-item failure it could record (set aside after
+        // K) — its message rides onto the error span (robustness batch). It THROWS only when it could
+        // NOT record (a wedged writer — systemic), handled by the catch.
         await Promise.all(
           batch.map((entityRel) => {
-            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: path.basename(entityRel, '.md') });
+            const itemId = path.basename(entityRel, '.md');
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId });
             return claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log, span).then(
               (r) => {
                 // A park (review raised) is a successful outcome, not an error.
-                span.end(r.ok || r.parked ? 'ok' : r.setAside ? 'setaside' : 'error');
-                return r;
+                span.end(r.ok || r.parked ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
+                worked = true;
               },
               (err) => {
-                span.end('error');
+                // Systemic (wedged writer): end the span WITH the message, then propagate to the catch.
+                span.end('error', err instanceof Error ? err.message : String(err));
                 throw err;
               },
             );
           }),
         );
-        worked = true;
       } catch (err) {
-        this.log.error('claims.drain-error', { err });
+        this.log.error('claims.drain-error', { err }); // systemic — stop this pass; a later poke/sweep retries
         return;
       }
       queue = await readClaimsQueue(this.root, this.maxAttempts);

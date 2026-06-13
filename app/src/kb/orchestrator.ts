@@ -233,6 +233,11 @@ export class Orchestrator {
         this.pending = false;
         await this.drainOnce();
       }
+    } catch (err) {
+      // A SYSTEMIC drain failure (e.g. the inbox normalize / queue read is wedged) must NOT escape as an
+      // unhandledRejection through a fire-and-forget `void poke()` (SPEC-0030 robustness). Surface it
+      // loudly; a later poke/sweep retries. Per-item failures are isolated in drainOnce and never reach here.
+      this.log.error('archive.drain-fatal', { err });
     } finally {
       this.draining = false;
       this.current = null;
@@ -257,21 +262,21 @@ export class Orchestrator {
           batch.map((id) => {
             const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
             return archiveOne(this.root, id, this.decider, this.lock, span).then(
-              (r) => {
+              () => {
                 span.end('ok');
-                return r;
+                this.lastArchived = id;
               },
               (err) => {
-                span.end('error');
+                // Surface the cause on the span (robustness batch), then propagate to stop this pass.
+                span.end('error', err instanceof Error ? err.message : String(err));
                 throw err;
               },
             );
           }),
         );
-        this.lastArchived = batch[batch.length - 1];
       } catch (err) {
-        // OBS-4: archive failed — the item stays in the inbox (ORCH-12). Surface the cause so this
-        // is never a silent "N in queue, nothing happened" stall (the bug that motivated SPEC-0030).
+        // OBS-4: archive failed — the item stays in the inbox (ORCH-12). Surface the cause so this is
+        // never a silent "N in queue, nothing happened" stall (the bug that motivated SPEC-0030).
         this.log.error('archive.drain-error', { itemId: batch[0], err });
         await this.updateStatus(queue.length, null);
         return;

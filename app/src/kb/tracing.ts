@@ -41,6 +41,11 @@ export interface Span {
   endTs: string;
   durationMs: number;
   outcome: SpanOutcome;
+  /** On an `error` outcome, the failure's message (SPEC-0030 robustness batch): a failed stage was
+   *  previously invisible in the span — `outcome:'error'` with no *why*. Threaded from the caught
+   *  error so a failed `stage.run`/`copilot.invoke` is diagnosable from the span alone (no need to
+   *  cross-read app.log). Omitted when there is no error. Never set for `ok`/`setaside`. */
+  error?: string;
 }
 
 /** Binding carried onto every span a tracer (or active span) emits. */
@@ -55,8 +60,9 @@ export interface ActiveSpan {
   readonly id: string;
   /** Start a child span (its `parentSpanId` is this span's id). */
   child(op: string, fields?: Omit<SpanFields, 'parentSpanId'>): ActiveSpan;
-  /** Stamp `endTs`/`durationMs` and record the span. Idempotent (a second call is a no-op). */
-  end(outcome?: SpanOutcome): void;
+  /** Stamp `endTs`/`durationMs` and record the span. Idempotent (a second call is a no-op). On an
+   *  `error` outcome, pass the failure `message` so the span carries *why* it failed (OBS robustness). */
+  end(outcome?: SpanOutcome, error?: string): void;
 }
 
 /** Span context handed to an agent decider so it can time its Copilot call as a CHILD of the
@@ -178,7 +184,7 @@ class ActiveSpanImpl implements ActiveSpan {
     );
   }
 
-  end(outcome: SpanOutcome = 'ok'): void {
+  end(outcome: SpanOutcome = 'ok', error?: string): void {
     if (this.ended) return;
     this.ended = true;
     const endTs = this.sink.now().toISOString();
@@ -193,6 +199,9 @@ class ActiveSpanImpl implements ActiveSpan {
       endTs,
       durationMs,
       outcome,
+      // Carry the failure message on an error span (robustness batch); a stray message on a non-error
+      // outcome is dropped so the span's `error` field means exactly "this is why it failed".
+      ...(outcome === 'error' && error ? { error } : {}),
     });
   }
 }
@@ -239,7 +248,7 @@ export function createVaultTracer(vaultPath: string, opts: Omit<TracerOptions, '
 export const noopActiveSpan: ActiveSpan = {
   id: '',
   child: () => noopActiveSpan,
-  end: () => {},
+  end: (_outcome?: SpanOutcome, _error?: string) => {},
 };
 
 /** A tracer that discards everything — the safe default when no tracer is wired (tests / standalone). */
