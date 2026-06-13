@@ -59,6 +59,7 @@ import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJob
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { resolveCopilotModel } from '../kb/copilotModel';
+import { initLaunchModel } from '../kb/copilotModelProbe';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
@@ -288,6 +289,15 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // into every stage so each per-item `stage.run` span + its `copilot.invoke` child are recorded;
   // the perf index (perfIndex.ts) aggregates them. Spans also mirror to the dev log at `debug`.
   const tracer = createVaultTracer(vaultPath, { log });
+  // ORCH-28 model-resilience: probe the live copilot CLI's accepted-model catalog and resolve the
+  // launch model from the (config-overridable) preference list BEFORE any decider is built, so every
+  // stage launches with a model THIS CLI version accepts — never a stale hardcoded pin that would
+  // reject pre-flight and kill the pipeline. Best-effort + never throws (a probe failure leaves the
+  // floor pin in place); a below-top-tier pick is logged loud (no silent downgrade). The eval
+  // `KB_COPILOT_MODEL` override still wins over the probed model.
+  await initLaunchModel({ preferences: stagingInstance.modelPreferences, log: log.child({ scope: 'model' }) }).catch((err) =>
+    log.child({ scope: 'model' }).warn('model.probe-failed', { itemId: vaultPath, err }),
+  );
   const startedAt = Date.now();
   let stagingWt: string;
   try {

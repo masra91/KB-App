@@ -41,6 +41,11 @@ export interface InstanceConfig {
    *  recall returns its best grounded partial. Default {@link DEFAULT_RECALL_BUDGET_MS}; clamped to
    *  [{@link RECALL_BUDGET_MS_MIN}, {@link RECALL_BUDGET_MS_MAX}]. */
   recallBudgetMs: number;
+  /** ORCH-28 model-resilience: an ordered launch-model preference list overriding the in-app default
+   *  (the catalog moves faster than our releases, so re-pinning must not need a code release). Omitted
+   *  ⇒ the code default (`copilotModelProbe.DEFAULT_MODEL_PREFERENCES`). The startup probe resolves the
+   *  first entry the live CLI accepts; `auto` is the implicit last resort. */
+  modelPreferences?: string[];
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -93,7 +98,14 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
       ? o.quickCaptureAccelerator
       : DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   const recallBudgetMs = clampRecallBudgetMs(o.recallBudgetMs); // ASK-17: absent/garbled/out-of-range → safe
-  return { autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs };
+  // ORCH-28: a configured preference list must be a non-empty array of non-empty strings, else omit
+  // (→ the code default). Trimmed; junk entries dropped; an all-junk/empty result is treated as absent.
+  let modelPreferences: string[] | undefined;
+  if (Array.isArray(o.modelPreferences)) {
+    const cleaned = o.modelPreferences.filter((m): m is string => typeof m === 'string' && m.trim().length > 0).map((m) => m.trim());
+    if (cleaned.length > 0) modelPreferences = cleaned;
+  }
+  return { autonomyDefault, devLogLevel, quickCaptureAccelerator, recallBudgetMs, ...(modelPreferences ? { modelPreferences } : {}) };
 }
 
 /** Write the Instance config (Settings edit, PANEL-5/6) — deterministic, stable key order. */

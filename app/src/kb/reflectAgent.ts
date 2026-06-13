@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
+import { runWithModelFallback } from './copilotLaunch';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000;
@@ -52,21 +53,22 @@ export type ReflectDecider = (ctx: ReflectContext) => Promise<ReflectResult>;
 
 /** Injected runner: given the composed prompt (+ optional working directory), return the session's
  *  stdout (tests stub this). `cwd` scopes the Copilot subprocess to the staging worktree. */
-export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
+export type CopilotRunner = (prompt: string, cwd?: string, model?: string) => Promise<string>;
 
 /** Launch flags (excludes `-p <prompt>`). The model is pinned in-app (ORCH-16) so prod never
- *  silently inherits `~/.copilot/settings.json`. */
-function launchFlags(): string[] {
-  return ['--no-ask-user', '--model', resolveCopilotModel()];
+ *  silently inherits `~/.copilot/settings.json`. `model` lets the fallback wrapper launch with
+ *  `auto` when the pinned id is rejected. */
+function launchFlags(model: string = resolveCopilotModel()): string[] {
+  return ['--no-ask-user', '--model', model];
 }
-const defaultRunner: CopilotRunner = async (prompt, cwd) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
   // Acquire one global copilot slot so concurrent (cap>1) job/stage drains can't fan out past the
   // process-wide ceiling (dogfood #4 / copilotConcurrency).
   withCopilotSlot(async () => {
     // COPILOT-CONTEXT-SCOPE-BUG: run in the staging worktree (`cwd`) so Copilot's workspace scan
     // (`tgrep count-files`) is rooted here, not the filesystem root (inherited `/` in a packaged
     // app). `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
-    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, cwd });
+    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags(model)], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, cwd });
     return stdout;
   });
 
@@ -184,6 +186,8 @@ export function makeReflectDecider(opts: ReflectDeciderOptions = {}): ReflectDec
       }
     }
     if (!available) throw new Error('reflect: copilot unavailable');
-    return parseReflectResult(await run(buildReflectPrompt(ctx), cwd));
+    // Model-pin resilience: retry once with `--model auto` if the pinned id is rejected pre-flight
+    // (a job pass should not hard-fail just because a pinned model drifted out of the catalog).
+    return parseReflectResult(await runWithModelFallback((m) => run(buildReflectPrompt(ctx), cwd, m)));
   };
 }

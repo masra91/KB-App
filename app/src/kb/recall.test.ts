@@ -80,6 +80,45 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     expect(audit.citations).toContain(`claim:${v.claimRel}`);
   });
 
+  // MODEL-AUTO-FALLBACK (ORCH-16 fast-follow): if copilot rejects the pinned model pre-flight at
+  // session creation, recall retries ONCE with `--model auto` so a stale pin can't hard-break Q&A.
+  it('retries the session with `auto` when the pinned model is rejected pre-flight', async () => {
+    v = await buildRecallVault();
+    const base = fakeClient([
+      { tool: 'entityLookup', args: { query: 'Ada' } },
+      { tool: 'claimsForEntity', args: { entity: v.adaRel } },
+      { tool: 'submitAnswer', args: { answer: 'Ada Lovelace, the first programmer [1].', citations: [{ kind: 'claim', ref: v.claimRel, label: 'first programmer' }], grounded: true } },
+    ]);
+    const models: (string | undefined)[] = [];
+    const client: RecallClient = {
+      async createSession(config) {
+        models.push(config.model);
+        if (config.model !== 'auto') throw new Error('Model "claude-opus-4" from --model flag is not available.');
+        return base.client.createSession(config);
+      },
+      async disconnect(): Promise<void> {},
+    };
+    const res = await recall(v.root, 'Who was Ada Lovelace?', { client, model: 'claude-opus-4', now: fixedNow });
+    expect(models).toEqual(['claude-opus-4', 'auto']); // pinned rejected → retried once with auto
+    expect(res.grounded).toBe(true); // the auto retry produced the grounded answer
+    expect(res.citations[0]?.ref).toBe(v.claimRel);
+  });
+
+  it('does NOT retry on a non-model session error — honest ungrounded, one attempt (ASK-7)', async () => {
+    v = await buildRecallVault();
+    const models: (string | undefined)[] = [];
+    const client: RecallClient = {
+      async createSession(config): Promise<never> {
+        models.push(config.model);
+        throw new Error('copilot CLI unavailable'); // not a model rejection → must not auto-retry
+      },
+      async disconnect(): Promise<void> {},
+    };
+    const res = await recall(v.root, 'q', { client, model: 'claude-opus-4', now: fixedNow });
+    expect(models).toEqual(['claude-opus-4']); // single attempt — no spurious auto-retry
+    expect(res.grounded).toBe(false);
+  });
+
   it('drops citations that do not resolve on disk → not grounded (ASK-7 honesty)', async () => {
     v = await buildRecallVault();
     const { client } = fakeClient([
