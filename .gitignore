@@ -11,3 +11,11 @@
 #  MCP config. Tracked skills under .claude/skills/ are intentionally NOT ignored.)
 .claude/scheduled_tasks.lock
 .mcp.json
+
+# Root-level build artifacts & local junk that must never be committed (the app lives
+# in app/; its real lockfile is app/package-lock.json, which IS tracked). These leaked
+# in via #333 and were removed in the cleanup; ignore them so they can't return.
+# (app's own build output — app/dist — is ignored by app/.gitignore.)
+node_modules/
+test-results/
+/package-lock.json

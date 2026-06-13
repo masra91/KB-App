@@ -87,6 +87,9 @@ typings/
 
 # Vite
 .vite/
+# Vite build output (the renderer bundle/fonts/css). The Forge template only ignored
+# `out/`, so this dir leaked into the tree via #333 — ignore it explicitly.
+dist/
 
 # Electron-Forge
 out/
