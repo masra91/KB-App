@@ -121,7 +121,7 @@ A job run **may do nothing** — finding no actionable work is a normal, common 
 
 ## 6. Changelog
 
-- 2026-06-09 — **JOBS-16/17 slice 1 IMPLEMENTED (KB-Developer-4 → PR #TBD, → KB-QD-2).** Foundational
+- 2026-06-09 — **JOBS-16/17 slice 1 IMPLEMENTED (KB-Developer-4 → PR #328, → KB-QD-2).** Foundational
   model + the reusable depth interface. **JOBS-17 keystone** `kb/workDepth.ts`: one `WorkDepth` knob —
   a work-kind declares a `WorkDepthSpec` (default level + per-level profiles + hard per-item ceiling);
   `resolveWorkDepth` returns a concrete, clamped `ResolvedWorkDepth` with an opt-in-deeper **warning**.
