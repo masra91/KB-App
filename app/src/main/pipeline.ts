@@ -94,13 +94,15 @@ import { lastRunFromEvent } from '../kb/researchersPanel';
  *  Module-scoped so the Status roster (SPEC-0032 VIZ-2) can mark the active draining batch. */
 const STAGE_CAP = 3;
 
-/** Resolve a registered job's `type` to its behavior (SPEC-0023). v1 ships the deterministic
- *  example job and **Reflect** (SPEC-0024, the first real job); later job types register here as
- *  they land. An unknown type returns null and the scheduler skips it. */
-function resolveJobBehavior(type: string): JobBehavior | null {
-  if (type === EXAMPLE_JOB_TYPE) return exampleJobBehavior;
-  if (type === REFLECT_JOB_TYPE) return makeReflectJobBehavior(makeReflectDecider());
-  return null;
+/** Factory to create a job behavior resolver with scoped vaultPath (SPEC-0023, Copilot context scope).
+ *  v1 ships the deterministic example job and **Reflect** (SPEC-0024, the first real job);
+ *  later job types register here as they land. An unknown type returns null and the scheduler skips it. */
+function createJobBehaviorResolver(vaultPath: string): (type: string) => JobBehavior | null {
+  return (type: string): JobBehavior | null => {
+    if (type === EXAMPLE_JOB_TYPE) return exampleJobBehavior;
+    if (type === REFLECT_JOB_TYPE) return makeReflectJobBehavior(makeReflectDecider({ vaultPath }));
+    return null;
+  };
 }
 
 interface ActivePipeline {
@@ -326,7 +328,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const promoteEvergreen = async (): Promise<void> => {
     promoter.request();
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider(), lock, promoteEvergreen, undefined, log, tracer);
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, undefined, log, tracer);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen
@@ -340,17 +342,17 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
   // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
   // stays cap=1 until its ephemeral-worktree migration (Phase 2). (STAGE_CAP is module-scoped.)
-  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider(), lock, undefined, STAGE_CAP, log, tracer);
+  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider({ vaultPath: stagingWt }), lock, undefined, STAGE_CAP, log, tracer);
   // SPEC-0046 COMPOSE: the FINAL Enrich stage (after Claims). It (re)writes each entity node's
   // encyclopedic prose body from that entity's cited claims — idempotent on the claims signature,
   // with a deterministic blocks-only fallback. Declared first so Claims/Connect can poke it when
   // the claims/links they own change. Its afterDrain promotes the (re)composed entity nodes to main.
-  const compose = new ComposeStage(stagingWt, makeComposeDecider(), lock, undefined, promoteEvergreen, STAGE_CAP, log, tracer);
+  const compose = new ComposeStage(stagingWt, makeComposeDecider({ vaultPath: stagingWt }), lock, undefined, promoteEvergreen, STAGE_CAP, log, tracer);
   // Connect's afterDrain promotes the resolved/linked nodes, then pokes Compose: a links change
   // means the prose's woven cross-links (COMPOSE-4) should be regenerated.
   const connect = new ConnectStage(
     stagingWt,
-    makeConnectDecider(),
+    makeConnectDecider({ vaultPath: stagingWt }),
     lock,
     undefined,
     async () => {
@@ -366,7 +368,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // pokes Compose: new claims → (re)compose the entity's prose (COMPOSE-7).
   const claims = new ClaimsStage(
     stagingWt,
-    makeClaimsDecider(),
+    makeClaimsDecider({ vaultPath: stagingWt }),
     lock,
     undefined,
     async () => {
@@ -383,7 +385,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // job's ff-advance never races a stage's; ORCH-18) and the promotion gate (evergreen job outputs
   // reach `main`). Jobs run concurrently with the live pipeline (ORCH-17) — never blocking
   // capture/Enrich. Inert until the Principal enables a job in the registry.
-  const jobs = new JobScheduler(stagingWt, resolveJobBehavior, lock, promoteEvergreen, log);
+  const jobs = new JobScheduler(stagingWt, createJobBehaviorResolver(stagingWt), lock, promoteEvergreen, log);
   // SPEC-0028 RESEARCH-2/3: the researcher tick. Each tick first runs an inline sweep (routes any
   // pending `research-request` signals a stage emitted through the dedup dispatcher), then a standing
   // pass for every due scheduled researcher. Both execute via runResearcher — output is a cited

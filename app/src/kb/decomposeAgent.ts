@@ -140,6 +140,8 @@ export interface DecomposeDeciderOptions {
   available?: boolean;
   /** Injected runner (tests). Defaults to shelling out to `copilot -p`. */
   run?: CopilotRunner;
+  /** Directory context for Copilot (scopes --add-dir to avoid filesystem-wide scan). */
+  vaultPath?: string;
 }
 
 /**
