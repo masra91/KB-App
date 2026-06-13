@@ -160,6 +160,8 @@ export function parseReflectResult(stdout: string): ReflectResult {
 export interface ReflectDeciderOptions {
   available?: boolean;
   run?: CopilotRunner;
+  /** Directory context for Copilot (scopes --add-dir to avoid filesystem-wide scan). */
+  vaultPath?: string;
 }
 
 /** Build the production Reflect decider: a fresh Copilot session per pass. Throws when Copilot is
