@@ -44,6 +44,7 @@ import { getQuickCaptureAgent } from './quickCaptureService';
 import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from './quickCaptureScreenshot';
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
+import { resolveCopilotModel } from '../kb/copilotModel';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
 import { resolveContainedRel } from '../kb/pathContainment';
@@ -419,7 +420,9 @@ export function registerIpc(): void {
     // ASK-17: hand recall the Principal-configured work budget (from Instance Settings on `staging`)
     // so a real grounded multi-hop has room to finish past the SDK's tight 60s default.
     const { recallBudgetMs } = await getActiveInstanceSettings();
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs });
+    // ORCH-16: pin the model recall's SDK session runs on, same as the enrich deciders — prod
+    // otherwise passed no model and the SDK inherited `~/.copilot/settings.json` (model-pin gap).
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, model: resolveCopilotModel() });
   });
 
   // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,

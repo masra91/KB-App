@@ -10,6 +10,7 @@ import { createKb } from './vault';
 import { captureToInbox, readCapturedMeta } from './ingest';
 import { Orchestrator, archiveOne, readQueue, readStatus } from './orchestrator';
 import { makeCopilotDecider } from './copilotAgent';
+import { DEFAULT_COPILOT_MODEL } from './copilotModel';
 import { dateShard } from './ulid';
 import { setSensitivityOverride } from './sensitivityOverride';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
@@ -33,6 +34,7 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     await createKb({ path: vault, initGitIfNeeded: true });
   });
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await rmTempDir(dir);
   });
 
@@ -231,22 +233,24 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
       { kind: 'text', text: 'a' },
       { kind: 'text', text: 'b' },
     ]);
+    vi.stubEnv('KB_COPILOT_MODEL', ''); // no override → exercise the in-app pin deterministically
     const run = vi.fn(async () => '{"kind":"text","class":"primary","scope":"global","sensitivity":"internal"}');
     await new Orchestrator(vault, makeCopilotDecider({ available: true, run })).poke();
 
     expect(await readQueue(vault)).toEqual([]);
     expect(run).toHaveBeenCalledTimes(2); // ORCH-5: a disposable session per item
 
-    // ORCH-16: the invocation is recorded in source.md and the archived audit event.
+    // ORCH-16: the invocation is recorded in source.md and the archived audit event, with the
+    // in-app pinned model (no longer `default` — prod always pins so the trace is the real model).
     const docs = await collectSourceDocs(vault);
-    expect(await fs.readFile(docs[0], 'utf8')).toContain('archivedBy: copilot (default)');
+    expect(await fs.readFile(docs[0], 'utf8')).toContain(`archivedBy: copilot (${DEFAULT_COPILOT_MODEL})`);
     const audit = await fs.readFile(path.join(path.dirname(docs[0]), 'audit.jsonl'), 'utf8');
     const archived = audit
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l))
       .find((e) => e.action === 'archived');
-    expect(archived.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true });
+    expect(archived.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: DEFAULT_COPILOT_MODEL, ok: true });
   });
 
   it('archives via ephemeral per-item worktrees, leaving none behind (ORCH-20)', async () => {

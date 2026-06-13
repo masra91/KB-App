@@ -15,6 +15,7 @@ import type { CapturedMeta } from './ingest';
 import { type ArchiveDecision, type ArchivistDecider, deterministicDecide } from './archivist';
 import { COPILOT_OP } from './tracing';
 import { detectCopilot } from './copilot';
+import { resolveCopilotModel } from './copilotModel';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 60_000;
@@ -23,17 +24,12 @@ const COPILOT_TIMEOUT_MS = 60_000;
  *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
 export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
-/** The model we launch with, or undefined to let Copilot pick its own default. We can
- *  faithfully record the *requested* model; the *resolved* model Copilot chooses when
- *  unpinned is not reported back to us, so it reads as `default` until pinned (ORCH-16). */
-function requestedModel(): string | undefined {
-  return process.env.KB_COPILOT_MODEL || undefined;
-}
-
-/** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace. */
+/** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace. The model is
+ *  pinned in-app (ORCH-16) — see `copilotModel.ts`. Because we always pass `--model`, prod no
+ *  longer silently inherits `~/.copilot/settings.json` and the recorded model is the real one
+ *  that ran (never `default`); the eval harness still overrides it per variant. */
 function launchFlags(): string[] {
-  const model = requestedModel();
-  return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
+  return ['--no-ask-user', '--model', resolveCopilotModel()];
 }
 
 const defaultRunner: CopilotRunner = async (prompt, cwd) =>
@@ -125,7 +121,7 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
     }
 
     // ORCH-16: record what we launched and what happened on every model invocation.
-    const model = requestedModel() ?? 'default';
+    const model = resolveCopilotModel();
     const params = launchFlags();
     const at = new Date().toISOString();
     const t0 = Date.now();

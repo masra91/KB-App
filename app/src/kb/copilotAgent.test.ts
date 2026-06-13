@@ -17,6 +17,7 @@ vi.mock('node:child_process', async (importActual) => {
 
 import { execFile } from 'node:child_process';
 import { buildPrompt, parseDecision, makeCopilotDecider } from './copilotAgent';
+import { DEFAULT_COPILOT_MODEL } from './copilotModel';
 import type { CapturedMeta } from './ingest';
 
 const textMeta: CapturedMeta = {
@@ -66,17 +67,36 @@ describe('parseDecision (ORCH-8)', () => {
 
 describe('makeCopilotDecider (ORCH-5/8)', () => {
   it('uses the Copilot session result when available, one fresh session per item, and records the trace (ORCH-5/16)', async () => {
-    const run = vi.fn(async () => VALID);
-    const decide = makeCopilotDecider({ available: true, run });
-    const d = await decide(textMeta);
-    await decide(fileMeta);
-    expect(run).toHaveBeenCalledTimes(2); // a disposable session per item (ORCH-5)
-    expect(d.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: 'default', ok: true, params: ['--no-ask-user'] });
-    expect(typeof d.agent?.ms).toBe('number');
-    expect(typeof d.agent?.at).toBe('string');
+    vi.stubEnv('KB_COPILOT_MODEL', ''); // no override → exercise the in-app pin deterministically
+    try {
+      const run = vi.fn(async () => VALID);
+      const decide = makeCopilotDecider({ available: true, run });
+      const d = await decide(textMeta);
+      await decide(fileMeta);
+      expect(run).toHaveBeenCalledTimes(2); // a disposable session per item (ORCH-5)
+      expect(d.agent).toMatchObject({ via: 'copilot', runtime: 'copilot', model: DEFAULT_COPILOT_MODEL, ok: true });
+      expect(typeof d.agent?.ms).toBe('number');
+      expect(typeof d.agent?.at).toBe('string');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
-  it('ORCH-16: records the requested model when KB_COPILOT_MODEL is set', async () => {
+  it('ORCH-16: pins the in-app default model + always passes --model when KB_COPILOT_MODEL is unset (model-pin gap)', async () => {
+    // Regression for the prod model-pin gap: before the pin, an unset env launched with NO
+    // `--model` flag (the CLI silently inherited ~/.copilot/settings.json) and the trace recorded
+    // `default`. Now prod always pins, so the launch is concrete and the trace records the real model.
+    vi.stubEnv('KB_COPILOT_MODEL', '');
+    try {
+      const d = await makeCopilotDecider({ available: true, run: async () => VALID })(textMeta);
+      expect(d.agent?.model).toBe(DEFAULT_COPILOT_MODEL);
+      expect(d.agent?.params).toEqual(['--no-ask-user', '--model', DEFAULT_COPILOT_MODEL]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('ORCH-16: records the requested model when KB_COPILOT_MODEL is set (eval override wins)', async () => {
     vi.stubEnv('KB_COPILOT_MODEL', 'claude-x');
     try {
       const d = await makeCopilotDecider({ available: true, run: async () => VALID })(textMeta);

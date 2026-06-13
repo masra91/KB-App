@@ -12,7 +12,9 @@ import type { VaultSnapshot } from './snapshot';
 // Fork #2 (ratified): the judge model is PINNED, distinct from the SUT, recorded in the EVAL-9 manifest,
 // and env-overridable. The default is "a strong frontier model distinct from the SUT default" — the exact
 // id is BYOA-Copilot-SDK-specific + not load-bearing (the Principal can name one), so it's overridable.
-export const DEFAULT_JUDGE_MODEL = 'claude-opus-4';
+// NOTE: must be a copilot-CLI-valid id (validated pre-flight) — `claude-opus-4` was rejected by CLI
+// 0.0.373; `claude-opus-4.5` is the validated Opus. Mirror of `DEFAULT_COPILOT_MODEL` in copilotModel.ts.
+export const DEFAULT_JUDGE_MODEL = 'claude-opus-4.5';
 /** The pinned judge model id (env override wins) — recorded in the reproducibility manifest (EVAL-9). */
 export function resolveJudgeModel(): string {
   return process.env.KB_EVAL_JUDGE_MODEL || DEFAULT_JUDGE_MODEL;

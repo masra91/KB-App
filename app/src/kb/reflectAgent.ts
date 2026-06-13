@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
+import { resolveCopilotModel } from './copilotModel';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000;
@@ -53,12 +54,10 @@ export type ReflectDecider = (ctx: ReflectContext) => Promise<ReflectResult>;
  *  stdout (tests stub this). `cwd` scopes the Copilot subprocess to the staging worktree. */
 export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
-function requestedModel(): string | undefined {
-  return process.env.KB_COPILOT_MODEL || undefined;
-}
+/** Launch flags (excludes `-p <prompt>`). The model is pinned in-app (ORCH-16) so prod never
+ *  silently inherits `~/.copilot/settings.json`. */
 function launchFlags(): string[] {
-  const model = requestedModel();
-  return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
+  return ['--no-ask-user', '--model', resolveCopilotModel()];
 }
 const defaultRunner: CopilotRunner = async (prompt, cwd) =>
   // Acquire one global copilot slot so concurrent (cap>1) job/stage drains can't fan out past the
