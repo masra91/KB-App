@@ -277,15 +277,15 @@
   min-height: 1px;
   background: var(--viz-ember);
   /* the ambient ember breathe (§5) — opacity-only; the global reduced-motion reset zeroes it (static
-     ember fill stays distinct by hue + segment + the `▣ active` count). */
+     ember fill stays distinct by hue + segment + the `▣ active` count). No height transition — animating
+     a height change triggers layout (VIZ-9 wants transform/opacity-only motion); the bar snaps to its
+     new fill on each push. */
   animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite;
-  transition: height var(--viz-dur-odometer) ease-out;
 }
 .line-pending-queued {
   width: 100%;
   min-height: 1px;
-  background: var(--viz-idle); /* waiting — a settled cool slate, still (no motion) */
-  transition: height var(--viz-dur-odometer) ease-out;
+  background: var(--viz-idle); /* waiting — a settled cool slate, still (no motion, no height transition) */
 }
 .line-pending-queued.line-queue-concern {
   background: var(--viz-brass); /* the backlog here is actually stuck → needs-you brass (VIZ-10/OBS-11) */
