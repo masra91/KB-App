@@ -16,3 +16,6 @@ expect:
     # Every claim cites its source (CLAIMS / DATA-10 / VAULT-13) — no uncited assertion.
     - check: claimCitations
       args: { required: true }
+    # SPEC-0049 toss-rate (converge, never toss): good sources converge through decompose+claims — 0% toss.
+    - check: setAsideRate
+      args: { max: 0 }

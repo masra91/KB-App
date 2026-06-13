@@ -18,3 +18,6 @@ expect:
     # The relatesTo hint (Curie worked at the university) became a real [[wikilink]] (CONNECT-12).
     - check: wikilinkRendered
       args: { from: "Marie Curie", to: "University of Paris" }
+    # SPEC-0049 toss-rate (converge, never toss): good sources converge through decompose+connect+claims — 0% toss.
+    - check: setAsideRate
+      args: { max: 0 }

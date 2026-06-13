@@ -142,3 +142,60 @@ describe('telemetryError (robustness — failure surfaced with a message)', () =
     expect(VALIDATORS.telemetryError(s, {}).pass).toBe(false);
   });
 });
+
+describe('setAsideRate (SPEC-0049 toss-rate metric — converge, never toss)', () => {
+  const span = (over: Record<string, unknown> = {}) => ({ spanId: '1', op: 'stage.run', stage: 'decompose', startTs: 't0', endTs: 't1', durationMs: 1, outcome: 'ok', ...over }) as VaultSnapshot['spans'][number];
+  // n items, `tossed` of them set aside, the rest ok — the canonical toss-rate shape.
+  const runs = (n: number, tossed: number, over: Record<string, unknown> = {}) =>
+    Array.from({ length: n }, (_, i) => span({ spanId: `s${i}`, itemId: `it${i}`, outcome: i < tossed ? 'setaside' : 'ok', ...over }));
+
+  it('passes at the success bar: 0% set-aside (max 0) — every item converged', () => {
+    const s = snap({ spans: runs(5, 0) });
+    expect(VALIDATORS.setAsideRate(s, { max: 0 }).pass).toBe(true);
+  });
+
+  it('FAILS when any item is tossed against a zero ceiling — the regression the self-repair round must close', () => {
+    const s = snap({ spans: runs(10, 3) }); // 30% tossed
+    const r = VALIDATORS.setAsideRate(s, { max: 0 });
+    expect(r.pass).toBe(false);
+    expect(r.detail).toContain('30.0%');
+  });
+
+  it('honors a non-zero ceiling (rate ≤ max passes, rate > max fails)', () => {
+    const s = snap({ spans: runs(100, 1) }); // 1%
+    expect(VALIDATORS.setAsideRate(s, { max: 0.01 }).pass).toBe(true);
+    expect(VALIDATORS.setAsideRate(s, { max: 0.005 }).pass).toBe(false);
+  });
+
+  it('counts only per-item stage-run spans — nested copilot.invoke spans are not double-counted', () => {
+    const s = snap({
+      spans: [
+        span({ spanId: 'r', itemId: 'a', outcome: 'setaside' }),
+        // a nested copilot span under the same item must NOT inflate the denominator
+        span({ spanId: 'c', op: 'copilot.invoke', itemId: 'a', outcome: 'ok' }),
+      ],
+    });
+    const r = VALIDATORS.setAsideRate(s, { max: 0 });
+    expect(r.pass).toBe(false);
+    expect(r.detail).toContain('1/1'); // one stage-run span, one set aside → 100%
+  });
+
+  it('scopes to a stage when given', () => {
+    const s = snap({ spans: [span({ stage: 'connect', outcome: 'setaside' }), span({ stage: 'decompose', outcome: 'ok' })] });
+    expect(VALIDATORS.setAsideRate(s, { stage: 'decompose', max: 0 }).pass).toBe(true);
+    expect(VALIDATORS.setAsideRate(s, { stage: 'connect', max: 0 }).pass).toBe(false);
+  });
+
+  it('excludes `error` from the denominator by default, includes it with includeError', () => {
+    // 1 setaside + 1 error: default denom = {setaside} → 1/1 = 100%; includeError denom = {setaside,error} → 1/2 = 50%
+    const s = snap({ spans: [span({ spanId: 'x', outcome: 'setaside' }), span({ spanId: 'y', outcome: 'error', error: 'boom' })] });
+    expect(VALIDATORS.setAsideRate(s, { max: 0.6 }).detail).toContain('1/1');
+    expect(VALIDATORS.setAsideRate(s, { max: 0.6, includeError: true }).detail).toContain('1/2');
+  });
+
+  it('FAILS on an empty denominator (nothing processed → cannot prove toss→0) unless allowEmpty', () => {
+    const s = snap({ spans: [] });
+    expect(VALIDATORS.setAsideRate(s, { max: 0 }).pass).toBe(false);
+    expect(VALIDATORS.setAsideRate(s, { max: 0, allowEmpty: true }).pass).toBe(true);
+  });
+});

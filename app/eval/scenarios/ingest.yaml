@@ -18,3 +18,6 @@ expect:
     # …and entered the pipeline: the genuine entity is a node (DECOMP-17).
     - check: entitiesInclude
       args: ["Ada Lovelace"]
+    # SPEC-0049 toss-rate (converge, never toss): a good source must NEVER be set aside — 0% toss.
+    - check: setAsideRate
+      args: { max: 0 }
