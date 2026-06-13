@@ -338,4 +338,112 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       expect(root.querySelectorAll('.review-confirm').length).toBeGreaterThanOrEqual(2); // good items still answerable
     });
   });
+
+  // REVIEW-20 (#322 UI-never-blocks): answering is OPTIMISTIC — the item leaves the queue the INSTANT
+  // the Principal clicks; the verdict IPC + backend resume/merge run async (the UI never waits). The
+  // P1 was "confirm/deny takes forever to disappear, waiting on the backend." On async failure we
+  // reconcile honestly: re-surface the item with a retryable error affordance.
+  describe('REVIEW-20 — optimistic confirm/deny (UI never waits on the backend)', () => {
+    /** An answerReview whose promise we resolve by hand — to assert UI state WHILE the IPC is pending.
+     *  `resolve` is a STABLE wrapper (the inner resolver is bound lazily when `fn` is first called). */
+    function deferredAnswer(): { fn: KbApi['answerReview']; resolve: (ok: boolean) => void } {
+      let inner: ((v: { ok: boolean; message: string }) => void) | undefined;
+      const fn = vi.fn(
+        () => new Promise<{ ok: boolean; message: string }>((res) => { inner = res; }),
+      ) as unknown as KbApi['answerReview'];
+      return { fn, resolve: (ok) => inner?.({ ok, message: ok ? 'answered' : 'failed' }) };
+    }
+
+    it('removes the row IMMEDIATELY on click — before the answer IPC resolves (fails-before: old code awaited it)', async () => {
+      const { fn: answerReview, resolve } = deferredAnswer();
+      setApi(vi.fn(async () => [CLAIM_REVIEW]), answerReview);
+      await mountReviews(root);
+      expect(root.querySelector('.review[data-id="R1"]')).not.toBeNull();
+
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click();
+      // Synchronously after the click — the row is gone though the IPC promise is still PENDING.
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull();
+      expect(answerReview).toHaveBeenCalledWith({ id: 'R1', verdict: 'confirm', note: undefined });
+      expect(root.textContent).toContain('Nothing needs you'); // last item → empty state instantly
+
+      resolve(true); // the backend finally acks — nothing more to paint, the item was already gone
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull();
+    });
+
+    it('the optimistic removal SURVIVES a reconcile poll that still lists the item (no flicker-back)', async () => {
+      // The async answer is slow and the 2.5s SHELL-12 projection hasn't dropped the item yet, so a 5s
+      // poll still returns it. The suppression must keep it removed until the backend catches up.
+      const { fn: answerReview, resolve } = deferredAnswer();
+      setApi(vi.fn(async () => [CLAIM_REVIEW]), answerReview); // projection still has it
+      await mountReviews(root);
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click();
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(POLL_MS); // a reconcile poll fires while the answer is in flight
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull(); // STILL gone — no flicker-back
+      expect(root.textContent).toContain('Nothing needs you');
+      resolve(true);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    it('a rejected (ok:false) answer restores the item with a retryable error affordance', async () => {
+      const answerReview = vi.fn(async () => ({ ok: false, message: 'canonical lock busy' }));
+      setApi(vi.fn(async () => [CLAIM_REVIEW]), answerReview); // still open on the backend (write failed)
+      await mountReviews(root);
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click();
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull(); // optimistically gone
+
+      await vi.advanceTimersByTimeAsync(0); // flush the failed IPC + the reconcile refresh
+      // Restored — the item is back, carries an honest alert, and stays actionable (retry).
+      expect(root.querySelector('.review[data-id="R1"]')).not.toBeNull();
+      const err = root.querySelector('.review-error');
+      expect(err?.getAttribute('role')).toBe('alert');
+      expect(err?.textContent).toContain('try again');
+      expect(root.querySelector('.review-confirm')).not.toBeNull();
+    });
+
+    it('a THROWN answer IPC also restores the item (honest rollback, not a silent drop)', async () => {
+      const answerReview = vi.fn(async () => { throw new Error('ipc channel died'); });
+      setApi(vi.fn(async () => [CLAIM_REVIEW]), answerReview);
+      await mountReviews(root);
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.querySelector('.review[data-id="R1"]')).not.toBeNull();
+      expect(root.querySelector('.review-error')).not.toBeNull();
+    });
+
+    it('retrying after a failure clears the error banner and re-optimistically removes the row', async () => {
+      const answerReview = vi
+        .fn<KbApi['answerReview']>()
+        .mockResolvedValueOnce({ ok: false, message: 'busy' })
+        .mockResolvedValueOnce({ ok: true, message: 'answered' });
+      setApi(vi.fn(async () => [CLAIM_REVIEW]), answerReview);
+      await mountReviews(root);
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(root.querySelector('.review-error')).not.toBeNull(); // failed → banner
+
+      root.querySelector<HTMLButtonElement>('.review-confirm')!.click(); // retry
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull(); // optimistically gone again
+      expect(root.querySelector('.review-error')).toBeNull(); // banner cleared on the fresh attempt
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    it('answering one of several items removes only that row — the others (and their notes) are untouched', async () => {
+      setApi(vi.fn(async () => [CLAIM_REVIEW, LINK_REVIEW]), vi.fn(async () => ({ ok: true, message: 'answered' })));
+      await mountReviews(root);
+      // Type a note on the OTHER item — answering R1 must not clobber it.
+      const linkNote = root.querySelector<HTMLTextAreaElement>('.review[data-id="L1"] .review-note')!;
+      linkNote.value = 'half-written note on the link review';
+
+      root.querySelector<HTMLButtonElement>('.review[data-id="R1"] .review-confirm')!.click();
+      expect(root.querySelector('.review[data-id="R1"]')).toBeNull(); // answered row gone
+      expect(root.querySelector('.review[data-id="L1"]')).not.toBeNull(); // sibling stays
+      expect(root.querySelector<HTMLTextAreaElement>('.review[data-id="L1"] .review-note')!.value).toBe(
+        'half-written note on the link review',
+      ); // sibling's in-progress note preserved (no full repaint)
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  });
 });

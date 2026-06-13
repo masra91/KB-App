@@ -734,37 +734,68 @@ export async function listActiveReviews(): Promise<Review[]> {
 }
 
 /**
- * Answer an open review (REVIEW-6) on `staging`: records the verdict (+ optional note → primary
- * source), supersedes the park, then pokes the owning stage so the parked item resumes.
+ * Answer an open review (REVIEW-6) on `staging`. REVIEW-20: the UI NEVER waits on the backend. The
+ * answer resolves on the **fast, bounded verdict write** alone — record the verdict (+ optional note
+ * → primary source), supersede the park, commit — and then we:
+ *  1. push the review-queue projection (SHELL-12) so the renderer's optimistic remove reconciles
+ *     against fresh data the instant it re-reads (the answered item drops from the queue);
+ *  2. poke the owning stage so the parked item resumes promptly (REVIEW-6);
+ *  3. run the **heavy effects DECOUPLED in the background** (a Reflect-approved consolidation merge +
+ *     promote; a confirmed research depth-escalation continuation) — these used to run *inside* this
+ *     awaited call, holding the canonical-writer lock while the Principal's confirm/deny "took forever
+ *     to disappear" (the #322 P1). They now run after the ack returns; failures are logged + surface
+ *     via the pipeline's own telemetry, never on the (already-returned) UI path.
  */
 export async function answerActiveReview(id: string, answerInput: unknown): Promise<AnswerReviewResult> {
-  if (!active) return { ok: false, message: 'No active knowledge base.' };
-  const result = await answerReviewInVault(active.stagingWt, active.lock, id, answerInput);
-  // Resume the parked item PROMPTLY (REVIEW-6) by poking the stage that raised the review (#46).
+  const a = active;
+  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  const result = await answerReviewInVault(a.stagingWt, a.lock, id, answerInput);
   if (result.ok) {
+    // SHELL-12 seam: re-read + push the queue so the next instant read (the renderer's reconcile poll
+    // / the rail badge) no longer shows the answered item. Best-effort — the 2.5s cadence also catches up.
+    void refreshReviewProjection().catch(() => {});
+    // Resume the parked item PROMPTLY (REVIEW-6) by poking the stage that raised the review (#46).
     const resume = reviewResumeStage(result.stage);
-    if (resume === 'claims') void active.claims.poke();
-    else if (resume === 'connect') void active.connect.poke();
-  }
-  // SPEC-0024 REFLECT-5/7: if this Review was a Reflect-proposed consolidation that the Principal
-  // just APPROVED, execute the merge now — the ONLY point a Reflect destructive merge ever runs
-  // (never autonomously). `executeApprovedConsolidation` self-gates (a safe no-op for any non-
-  // approved / non-consolidation review), so calling it for every answered review is correct; we
-  // promote ONLY when it actually merged, so the loser-node deletions mirror to `main` via the
-  // deletion-aware gate (STAGING-10). Promote under the shared lock, like the stages' afterDrain.
-  if (result.ok) {
-    const consolidation = await executeApprovedConsolidation(active.stagingWt, id, active.lock);
-    if (consolidation.executed) await active.lock.run(() => promote(active.vaultPath), 'consolidation:promote');
-  }
-  // SPEC-0028 RESEARCH-11 (D7 fast-follow): if this Review was a CONFIRMED research depth-limit
-  // escalation, continue the chain one level deeper now — so the "Continue researching X?" control
-  // actually continues (no dead affordance). Self-gating (no-op for any other review), so it's safe to
-  // call unconditionally. Uses the same cliPath+dev-log wiring as the scheduler/Run-now (#160).
-  if (result.ok) {
-    const resumed = await resumeApprovedResearchEscalation(active.stagingWt, id, researchDepsOptions(active.log));
-    if (resumed.resumed) active.log.child({ scope: 'research' }).info('research.resumed-after-confirm', { reviewId: id, sources: resumed.sourceIds?.length ?? 0 });
+    if (resume === 'claims') void a.claims.poke();
+    else if (resume === 'connect') void a.connect.poke();
+    // Heavy effects run in the background — the UI ack has already returned (REVIEW-20).
+    void runAnsweredReviewEffects(a, id);
   }
   return result;
+}
+
+/**
+ * REVIEW-20 — the heavy, DECOUPLED effects of answering a review, run in the background so the UI
+ * never waits (they hold the canonical-writer lock; awaiting them is what made confirm/deny "take
+ * forever to disappear"). Both are self-gating no-ops for an ordinary review, so calling them for
+ * every answered review is correct. Errors are logged (and reflected in pipeline telemetry / set-aside)
+ * but never reach the already-returned answer ack. The active instance is passed in explicitly so a
+ * later KB close/swap can't repoint `active` out from under the background work.
+ */
+async function runAnsweredReviewEffects(a: ActivePipeline, id: string): Promise<void> {
+  // SPEC-0024 REFLECT-5/7: a Reflect-proposed consolidation the Principal just APPROVED — the ONLY
+  // point a Reflect destructive merge ever runs (never autonomously). Promote ONLY when it actually
+  // merged, so the loser-node deletions mirror to `main` via the deletion-aware gate (STAGING-10).
+  // Promote under the shared lock, like the stages' afterDrain.
+  try {
+    const consolidation = await executeApprovedConsolidation(a.stagingWt, id, a.lock);
+    if (consolidation.executed) {
+      await a.lock.run(() => promote(a.vaultPath), 'consolidation:promote');
+      // A merge can re-shape the open queue (loser reviews retired) → push the fresh projection.
+      void refreshReviewProjection().catch(() => {});
+    }
+  } catch (err) {
+    a.log.child({ scope: 'reviews' }).warn('reviews.consolidation-effect-failed', { reviewId: id, err });
+  }
+  // SPEC-0028 RESEARCH-11 (D7 fast-follow): a CONFIRMED research depth-limit escalation continues the
+  // chain one level deeper, so "Continue researching X?" actually continues (no dead affordance).
+  // Self-gating (no-op for any other review). Same cliPath+dev-log wiring as the scheduler/Run-now (#160).
+  try {
+    const resumed = await resumeApprovedResearchEscalation(a.stagingWt, id, researchDepsOptions(a.log));
+    if (resumed.resumed) a.log.child({ scope: 'research' }).info('research.resumed-after-confirm', { reviewId: id, sources: resumed.sourceIds?.length ?? 0 });
+  } catch (err) {
+    a.log.child({ scope: 'research' }).warn('research.resume-effect-failed', { reviewId: id, err });
+  }
 }
 
 /**
