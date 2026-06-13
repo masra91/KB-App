@@ -8,7 +8,7 @@ import path from 'node:path';
 import { findEntityFiles } from './claimsStage';
 import { parseEntityNode } from './connectDoc';
 import type { JobBehavior, JobFinding, JobPassResult } from './jobs';
-import type { ReflectDecider, ReflectNode } from './reflectAgent';
+import type { ReflectDecider, ReflectNode, ReflectResult } from './reflectAgent';
 
 /** The registry `type` that selects the Reflect behavior (SPEC-0024). */
 export const REFLECT_JOB_TYPE = 'reflect';
@@ -70,7 +70,23 @@ export function makeReflectJobBehavior(decider: ReflectDecider): JobBehavior {
     const journalNotes = ctx.journal.slice(-3).map((j) => `${j.ts}: ${j.inspected}`);
     if (rels.length > prevCount) journalNotes.push(`(churn) KB grew ${prevCount}→${rels.length} entities since last run — favor newly-emerged structure`);
 
-    const result = await decider({ workingSet, journalNotes });
+    const nextOffset = (offset + REFLECT_WORKING_SET_SIZE) % rels.length;
+
+    // REFLECT-18 crash-robustness: a bad agent pass (unparseable output → the live `job.failed
+    // JSON.parse SyntaxError`, or any decider/agent error) must NOT kill the Reflect job. Set this
+    // slice ASIDE — advance the cursor so the next scheduled pass moves on (not re-stuck on the same
+    // ~2% of nodes) — journal the skip, and continue. The slice is naturally revisited next full cycle
+    // (aged sampling wraps). Never fabricate a finding from a failed pass.
+    let result: ReflectResult;
+    try {
+      result = await decider({ workingSet, journalNotes });
+    } catch (err) {
+      return {
+        inspected: `reflect: skipped a slice — agent pass failed (${err instanceof Error ? err.message : String(err)}) [${workingSet.length}/${rels.length} nodes @offset ${offset}]`,
+        findings: [],
+        cursor: { offset: nextOffset, count: rels.length },
+      };
+    }
 
     const findings: JobFinding[] = result.findings.map((f) => ({
       summary: f.summary,
@@ -81,7 +97,6 @@ export function makeReflectJobBehavior(decider: ReflectDecider): JobBehavior {
       ...(f.review ? { review: f.review } : {}),
     }));
 
-    const nextOffset = (offset + REFLECT_WORKING_SET_SIZE) % rels.length;
     return {
       inspected: `${result.inspected} [${workingSet.length}/${rels.length} nodes @offset ${offset}]`,
       findings,

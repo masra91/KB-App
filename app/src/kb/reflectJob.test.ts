@@ -13,6 +13,7 @@ import { ensureStagingWorktree } from './stagingWorktree';
 import { promote } from './staging';
 import { runJobOnce, readJournal } from './jobStage';
 import { makeReflectJobBehavior, REFLECT_WORKING_SET_SIZE, REFLECT_JOB_TYPE } from './reflectJob';
+import { makeReflectDecider } from './reflectAgent';
 import type { ReflectContext, ReflectDecider, ReflectFinding } from './reflectAgent';
 import type { JobConfig, JobPassContext, JournalEntry } from './jobs';
 
@@ -156,6 +157,44 @@ describe.skipIf(!gitAvailable)('Reflect job e2e through the JOBS engine (SPEC-00
       expect(await pathExists(path.join(stagingWt, 'reviews'))).toBe(true); // destructive raised a Review
       const journal = await readJournal(stagingWt, 'reflect');
       expect(journal[0].cursor?.count).toBe(1); // working-set cursor journaled (REFLECT-8)
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+// REFLECT-18 — a bad agent pass must NOT crash the Reflect job. KB-Lead saw it live: `job.failed
+// JSON.parse SyntaxError` from unparseable agent output. The pass sets the slice aside (advances the
+// cursor so the next run moves on, not re-stuck) and continues; never fabricates a finding.
+describe.skipIf(!gitAvailable)('makeReflectJobBehavior — crash-robustness (REFLECT-18)', () => {
+  it('an UNPARSEABLE agent pass (through the real decider) sets the slice aside + advances, never throws', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await seedEntities(root, REFLECT_WORKING_SET_SIZE + 5); // 20 nodes
+      // The REAL agent path: makeReflectDecider over an injected runner returning non-JSON output → its
+      // parseReflectResult throws. FAILS-BEFORE: that throw propagated out → job.failed. PASSES-AFTER:
+      // the behavior catches it and returns a graceful skipped-slice pass.
+      const decider = makeReflectDecider({ available: true, run: async () => 'I pondered the graph but emitted { not json' });
+      const res = await makeReflectJobBehavior(decider)(ctxWith(root)); // must NOT throw
+      expect(res.findings).toEqual([]); // no fabricated findings from a failed pass
+      expect(res.cursor).toEqual({ offset: REFLECT_WORKING_SET_SIZE, count: 20 }); // advanced — slice set aside, next run moves on
+      expect(res.inspected).toMatch(/skipped a slice|agent pass failed/i); // honestly journaled
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('a decider that THROWS (agent/runtime error, not just a parse) is also caught — the run continues', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await seedEntities(root, 20);
+      const throwing: ReflectDecider = async () => { throw new Error('reflect: copilot session crashed'); };
+      const res = await makeReflectJobBehavior(throwing)(ctxWith(root));
+      expect(res.findings).toEqual([]);
+      expect(res.cursor.offset).toBe(REFLECT_WORKING_SET_SIZE); // advanced
+      expect(res.inspected).toMatch(/skipped a slice|session crashed/i);
     } finally {
       await rmTempDir(dir);
     }

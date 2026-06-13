@@ -43,6 +43,22 @@ describe('parseReflectResult', () => {
     expect(() => parseReflectResult('{"inspected":"x","findings":[{"summary":"s","kind":"additive","confidence":2}]}')).toThrow(/confidence/);
     expect(() => parseReflectResult('{"inspected":"x","findings":[{"summary":"s","kind":"additive","confidence":1,"writes":[{"rel":"r"}]}]}')).toThrow(/writes/);
   });
+
+  it('REFLECT-18: wraps a JSON.parse SyntaxError into a CLEAR reflect error (not a raw crash)', () => {
+    // Brace-ish but invalid JSON — the exact live failure (`job.failed JSON.parse SyntaxError`). The
+    // greedy `{…}` regex MATCHES, then JSON.parse throws; we surface a controlled reflect error the job catches.
+    expect(() => parseReflectResult('{not valid json}')).toThrow(/not valid JSON/);
+    expect(() => parseReflectResult('here is a thought { "inspected": }')).toThrow(/not valid JSON/); // matched-but-invalid
+    // FAILS-BEFORE: a raw SyntaxError would escape (its name is "SyntaxError"); we now never let that out.
+    try {
+      parseReflectResult('{oops}');
+      throw new Error('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(Error);
+      expect((e as Error).name).not.toBe('SyntaxError');
+      expect((e as Error).message).toMatch(/not valid JSON/);
+    }
+  });
 });
 
 describe('makeReflectDecider', () => {
