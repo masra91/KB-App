@@ -23,7 +23,7 @@ describe('resolveCopilotModel (ORCH-16 model pin)', () => {
     expect(resolved).not.toBe('default');
   });
 
-  it('the pinned default is a real model id, not a placeholder', () => {
-    expect(DEFAULT_COPILOT_MODEL).toBe('claude-opus-4');
+  it('the pinned default is a copilot-CLI-valid model id (claude-opus-4 was rejected pre-flight)', () => {
+    expect(DEFAULT_COPILOT_MODEL).toBe('claude-opus-4.5');
   });
 });

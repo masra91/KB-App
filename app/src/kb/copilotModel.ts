@@ -11,10 +11,15 @@
 // each run), so eval behavior is unchanged. Because the launch is now always pinned, the
 // model recorded in every trace is the real, resolved model — no more `default`.
 
-/** The Copilot model KB-App pins when nothing overrides it. `claude-opus-4` is the strongest
+/** The Copilot model KB-App pins when nothing overrides it. `claude-opus-4.5` is the strongest
  *  model for the archival/enrich reasoning the pipeline does and matches the eval judge default
- *  (`eval/runner/judge.ts`). Change this one constant to re-pin every agent + recall at once. */
-export const DEFAULT_COPILOT_MODEL = 'claude-opus-4';
+ *  (`eval/runner/judge.ts`). Change this one constant to re-pin every agent + recall at once.
+ *
+ *  MUST be an id the `copilot` CLI accepts: copilot validates `--model` PRE-FLIGHT and hard-rejects
+ *  unknown ids (`Model "X" … not available`), which would throw on every decider launch and kill the
+ *  whole pipeline. Verified against copilot CLI 0.0.373: `claude-opus-4.5` ✅ / `claude-sonnet-4.5` ✅;
+ *  `claude-opus-4` ❌ (the original pin — rejected). Re-verify the live CLI before changing this. */
+export const DEFAULT_COPILOT_MODEL = 'claude-opus-4.5';
 
 /**
  * Resolve the model to launch the Copilot CLI/SDK with. An explicit `KB_COPILOT_MODEL` (the eval
