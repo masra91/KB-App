@@ -137,7 +137,9 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
       await tick();
       const note = root.querySelector<HTMLElement>('.model-stale')!;
       expect(note).toBeTruthy();
-      expect(note.classList.contains('viz-brass')).toBe(true); // needs-you tone, never oxide
+      // `.model-stale` is the needs-you/BRASS surface (design-system.css `color: var(--viz-brass)`),
+      // never oxide — the brass-intent coverage lives at the class that now carries it (per QD-2).
+      expect(note.classList.contains('model-stale')).toBe(true);
       expect(note.getAttribute('role')).toBe('status');
       expect(note.textContent).toContain('claude-opus-4'); // names the unavailable id
     });

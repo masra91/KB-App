@@ -59,6 +59,23 @@
    interaction. No new styling — they alias the pseudo. (Harmless on feature surfaces; only the gallery sets them.) */
 .viz-focusable:focus-visible, .viz-focusable.is-focus { outline: 2px solid var(--viz-ember); outline-offset: 1px; } /* never the framework indigo */
 
+/* Select primitive (SPEC-0048) — a native <select> in the viz idiom for a DYNAMIC many-option list
+   (the model catalog); .viz-seg stays for small bounded enums. Flat, ruled, mono, custom caret, ember
+   focus — never the default OS chrome (the "generic AI app" tell §6 guards against). */
+.viz-select {
+  appearance: none; font: inherit; font-family: var(--viz-font-numeric);
+  background-color: var(--viz-field); color: var(--viz-ink);
+  border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0;
+  padding: 0.2rem 1.3rem 0.2rem 0.1rem; cursor: pointer;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--viz-ink-muted) 50%),
+    linear-gradient(135deg, var(--viz-ink-muted) 50%, transparent 50%);
+  background-position: right 0.5rem center, right 0.3rem center;
+  background-size: 0.32rem 0.32rem; background-repeat: no-repeat;
+}
+.viz-select:hover { border-color: var(--viz-ember); }
+.viz-select:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: 1px; }
+
 /* Badge / chip base — uppercase signage, ruled, muted; state carried by glyph + hue + fill, never color alone (§3 DESIGN-4). */
 .viz-chip { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem; border: 1px solid var(--viz-rule); padding: 0.05rem 0.4rem; color: var(--viz-ink-muted); }
 /* Button base — the only rounding allowed off-structure is a ≤4px button radius; hover/active tint with state hues, not blue. */

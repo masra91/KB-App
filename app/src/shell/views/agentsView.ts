@@ -66,8 +66,9 @@ function modelControlHtml(catalog: ModelCatalogView | null): string {
   const options = [`<option value=""${configured ? '' : ' selected'}>Auto (in-app default)</option>`]
     .concat(accepted.map((m) => `<option value="${esc(m)}"${m === configured ? ' selected' : ''}>${esc(m)}</option>`))
     .join('');
+  // .model-stale carries the brass needs-you color (design-system.css) — never oxide.
   const stale = catalog.staleConfigured
-    ? `<p class="model-stale viz-brass" role="status">${esc(configured)} isn't available on this CLI — running ${esc(resolved)}.</p>`
+    ? `<p class="model-stale" role="status">${esc(configured)} isn't available on this CLI — running ${esc(resolved)}.</p>`
     : '';
   return `<div class="model-control">
     <label class="model-label" for="model-default">Default model</label>
