@@ -12,7 +12,7 @@ import type { CopilotClientOptions, SessionConfig, SystemMessageConfig, Tool, To
 import type { RecallClient, RecallSession, RecallSessionConfig, RecallToolDef } from './recall';
 
 /** Version of the recall skill/instruction (for the audit trail; ORCH-16 / SPEC-0014 Q9). */
-export const RECALL_SKILL_VERSION = 'recall/v4-sdk';
+export const RECALL_SKILL_VERSION = 'recall/v5-sdk';
 
 /**
  * The recall SKILL (ASK-4): teaches the agent the KB's structure + how to ground/cite, so it
@@ -35,14 +35,29 @@ export const RECALL_SKILL = [
   '- [[wikilinks]] connect nodes; provenance links everything back to sources.',
   '',
   'METHOD (multi-hop, entity-centric): find the relevant entity → read its claims → follow its',
-  'links → read the underlying source text for exact quotes. Reason about relevance; do not dump.',
-  'STOP calling tools as soon as you can answer with grounded citations — do NOT exhaustively',
-  'traverse the graph (a small KB is fully coverable in a few hops; extra calls are wasted looping).',
+  'links → read the underlying source text for exact quotes. Reason about relevance; stay on-topic.',
+  'STOP once you have gathered ENOUGH to answer at the depth the question calls for (see ADAPTIVE',
+  'LENGTH & EFFORT below): a focused fact needs only a hop or two; an open-ended question warrants',
+  'broader gathering across the relevant entities/claims/sources. Don’t loop pointlessly past what',
+  'the question needs — but don’t stop short of an exploratory question’s relevant detail either.',
   'Mind the retrieval budget: a tool may tell you it is exhausted — then answer with what you have.',
   '',
   'GROUNDING (strict): cite the entity/claim/source each assertion rests on. Prefer claims and',
   'sources as evidence. If the KB does not support something, SAY SO — never present an',
   'unsupported statement as fact. Clearly distinguish KB-grounded facts from your own inference.',
+  '',
+  'ADAPTIVE LENGTH & EFFORT (ASK-18): match the answer — and how much you retrieve — to the',
+  'QUESTION’S shape, not a fixed size. Judge the question, then scale:',
+  '- A SIMPLE / FACTUAL lookup ("where did I stay in Mexico in 2025?", "what is X’s email?") gets a',
+  '  TIGHT, DIRECT answer — a sentence or two, the fact and its citation. Do NOT pad a fact into an',
+  '  essay or add unrequested background.',
+  '- An OPEN-ENDED / EXPLORATORY question ("what do we know about my time in Mexico?", "tell me',
+  '  about X", "summarise everything on Y") gets a FULLER, fleshed-out, multi-paragraph answer:',
+  '  gather more broadly first, then compose the relevant detail in organized sections (use short',
+  '  markdown headings and/or paragraphs where they help the reader). Do NOT truncate a rich,',
+  '  well-supported answer down to one line — give the Principal the depth the question invites.',
+  'Either way, ground EVERY substantive assertion with an inline [n] citation (below): a fuller',
+  'answer means MORE grounded detail, never less grounding.',
   '',
   'CITATIONS (Wikipedia-style inline numbers, ASK-13): write the markdown answer with inline',
   'NUMBERED markers — [1], [2], … — on each grounded assertion, numbered in order of first',

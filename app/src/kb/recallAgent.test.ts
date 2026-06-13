@@ -39,9 +39,14 @@ describe('recall skill (ASK-4)', () => {
     expect(RECALL_SKILL).toContain('GROUNDING');
     expect(RECALL_SKILL).toContain('submitAnswer');
     expect(RECALL_SKILL).toMatch(/tags/); // metadata-aware (SPEC-0025 META)
-    expect(RECALL_SKILL).toMatch(/STOP calling tools/); // budget stop-criterion (#113, dogfood #5)
+    expect(RECALL_SKILL).toMatch(/STOP once you have gathered ENOUGH/); // shape-aware budget stop-criterion (#113 / ASK-18)
     expect(RECALL_SKILL).toMatch(/\[1\], \[2\]/); // inline numbered citations (ASK-13)
-    expect(RECALL_SKILL_VERSION).toBe('recall/v4-sdk'); // combined #113 + ASK-13 skill
+    // ASK-18: adaptive length/effort — terse for facts, fuller for open-ended, cite regardless.
+    expect(RECALL_SKILL).toContain('ADAPTIVE LENGTH & EFFORT (ASK-18)');
+    expect(RECALL_SKILL).toMatch(/SIMPLE \/ FACTUAL[\s\S]*TIGHT, DIRECT/);
+    expect(RECALL_SKILL).toMatch(/OPEN-ENDED \/ EXPLORATORY[\s\S]*FULLER/);
+    expect(RECALL_SKILL).toMatch(/never less grounding/);
+    expect(RECALL_SKILL_VERSION).toBe('recall/v5-sdk'); // #113 + ASK-13 + ASK-18 adaptive length
   });
 });
 

@@ -507,3 +507,73 @@ describe('recall work budget (ASK-17)', () => {
     expect(res.answer).toMatch(/couldn't reach a grounded answer in time/i); // honest, retryable — not a throw
   });
 });
+
+// ASK-18 — recall length/effort ADAPTS to the question (concise for facts, fuller for open-ended;
+// always cited). The behaviour lives in the agent (LLM) shaped by the recall SKILL, so the real-path
+// regression has two halves: (1) the prompt-contract the REAL agent receives carries the adaptive
+// instruction (the lever — prompt-faithful, not a hand-injected verdict); (2) the recall pipeline
+// carries BOTH a fuller multi-section answer AND a terse one through intact + cited (never truncating
+// a rich answer, never dropping citations). No LLM runs in CI, so these pin the scaffolding that makes
+// adaptation possible — the exact thing a regression would silently break.
+describe('recall — adaptive length & effort (ASK-18)', () => {
+  let v: RecallVault | undefined;
+  afterEach(async () => {
+    if (v) await rmTempDir(v.root);
+    v = undefined;
+  });
+
+  it('the recall skill instructs the agent to scale length to the question — terse fact vs fuller open-ended, always cited', async () => {
+    v = await buildRecallVault();
+    const { client, lastConfig } = fakeClient([{ tool: 'submitAnswer', args: { answer: 'x', citations: [], grounded: false } }]);
+    await recall(v.root, 'q', { client, now: fixedNow });
+    const skill = lastConfig()?.systemMessage?.content ?? '';
+    expect(skill).toContain('ADAPTIVE LENGTH & EFFORT (ASK-18)');
+    expect(skill).toMatch(/SIMPLE \/ FACTUAL[\s\S]*TIGHT, DIRECT/); // a fact → tight, direct
+    expect(skill).toMatch(/OPEN-ENDED \/ EXPLORATORY[\s\S]*FULLER/); // open-ended → fuller, multi-paragraph
+    expect(skill).toMatch(/MORE grounded detail, never less grounding/); // cite REGARDLESS (ASK-7/13 kept)
+  });
+
+  it('carries an open-ended question’s FULLER multi-section answer through intact + grounded — never truncated', async () => {
+    v = await buildRecallVault();
+    const fuller = [
+      '## Overview',
+      'Ada Lovelace is regarded as the first computer programmer [1].',
+      '',
+      '## Her work',
+      'She wrote the first published algorithm intended for a machine [1].',
+      '',
+      '## Significance',
+      'Her notes anticipated ideas central to general-purpose computing [1].',
+    ].join('\n');
+    const { client } = fakeClient([
+      { tool: 'entityLookup', args: { query: 'Ada' } },
+      { tool: 'claimsForEntity', args: { entity: v.adaRel } },
+      { tool: 'submitAnswer', args: { answer: fuller, citations: [{ kind: 'claim', ref: v.claimRel, label: 'first programmer' }], grounded: true } },
+    ]);
+    const res = await recall(v.root, 'What do we know about Ada Lovelace and her work?', { client, now: fixedNow });
+
+    expect(res.grounded).toBe(true);
+    // The fuller answer survives end-to-end — multi-section, not collapsed to one line.
+    expect(res.answer).toContain('## Overview');
+    expect(res.answer).toContain('## Her work');
+    expect(res.answer).toContain('## Significance');
+    expect(res.answer.split('\n').filter((l) => l.startsWith('## ')).length).toBeGreaterThanOrEqual(3);
+    expect(res.citations).toHaveLength(1); // still cited — fuller means MORE grounded detail, kept
+    expect(res.answer).toContain('[1]'); // inline citation marker preserved (ASK-13)
+  });
+
+  it('keeps a simple factual question’s answer terse + cited — not padded into the open-ended shape', async () => {
+    v = await buildRecallVault();
+    const terse = 'Ada Lovelace is regarded as the first computer programmer [1].';
+    const { client } = fakeClient([
+      { tool: 'entityLookup', args: { query: 'Ada' } },
+      { tool: 'submitAnswer', args: { answer: terse, citations: [{ kind: 'claim', ref: v.claimRel, label: 'first programmer' }], grounded: true } },
+    ]);
+    const res = await recall(v.root, 'Who was Ada Lovelace?', { client, now: fixedNow });
+
+    expect(res.grounded).toBe(true);
+    expect(res.citations).toHaveLength(1); // still cited
+    expect(res.answer).not.toContain('##'); // stayed terse — no padded multi-section structure
+    expect(res.answer.length).toBeLessThan(120); // a sentence or two, not an essay
+  });
+});
