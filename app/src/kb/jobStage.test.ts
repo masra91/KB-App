@@ -26,7 +26,7 @@ function gitInstalledSync(): boolean {
 }
 const gitAvailable = gitInstalledSync();
 
-const exampleJob: JobConfig = { id: 'example', type: EXAMPLE_JOB_TYPE, schedule: 'daily', enabled: true, posture: 'guarded' };
+const exampleJob: JobConfig = { id: 'example', type: EXAMPLE_JOB_TYPE, schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' };
 
 /** Commit files onto `staging` via the staging worktree (which is checked out on `staging`). */
 async function commitOnStaging(stagingWt: string, files: Record<string, string>): Promise<void> {
@@ -126,7 +126,7 @@ describe.skipIf(!gitAvailable)('runJobOnce — bounded pass, journal, promotion 
           { summary: 'add census', kind: 'additive', confidence: 1, proposed: 'auto', writes: [{ rel: 'outputs/example/note.md', content: 'hi\n' }] },
         ],
       });
-      const job: JobConfig = { id: 'mixed', type: 'mixed', schedule: 'daily', enabled: true, posture: 'guarded' };
+      const job: JobConfig = { id: 'mixed', type: 'mixed', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' };
       const res = await runJobOnce(stagingWt, job, behavior, lock);
       expect(res.applied).toBe(1); // the additive
       expect(res.deferred).toBe(1); // the destructive → Review
@@ -152,7 +152,7 @@ describe.skipIf(!gitAvailable)('JobRunner — single-flight (JOBS-6/11)', () => 
         await gate; // hold the run open
         return { inspected: 'slow', findings: [] };
       };
-      const job: JobConfig = { id: 'slow', type: 'slow', schedule: 'daily', enabled: true, posture: 'guarded' };
+      const job: JobConfig = { id: 'slow', type: 'slow', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' };
       const runner = new JobRunner(stagingWt, job, slow, lock);
       const first = runner.runNow(); // starts, parks on the gate
       await Promise.resolve();
@@ -166,7 +166,7 @@ describe.skipIf(!gitAvailable)('JobRunner — single-flight (JOBS-6/11)', () => 
 });
 
 describe.skipIf(!gitAvailable)('runJobOnce — write-sink containment (JOBS-10 security: agent rel is injection surface)', () => {
-  const sinkJob: JobConfig = { id: 'sink', type: 'sink', schedule: 'daily', enabled: true, posture: 'guarded' };
+  const sinkJob: JobConfig = { id: 'sink', type: 'sink', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' };
   const additiveWrites = (writes: { rel: string; content: string }[]): JobBehavior => async () => ({
     inspected: 'crafted',
     findings: [{ summary: 'crafted write', kind: 'additive', confidence: 1, proposed: 'auto', writes }],
@@ -276,7 +276,7 @@ describe.skipIf(!gitAvailable)('runJobOnce — job-id sink guard (#29 / JOBS-10)
 
   it('throws on an unsafe job id and creates NO journal / worktree path for it', async () => {
     await withVault(async (root, stagingWt, lock) => {
-      const evil: JobConfig = { id: '../../../tmp/evil', type: 'reflect', schedule: 'daily', enabled: true, posture: 'guarded' };
+      const evil: JobConfig = { id: '../../../tmp/evil', type: 'reflect', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' };
       await expect(runJobOnce(stagingWt, evil, neverRuns, lock)).rejects.toThrow(/unsafe id/);
       // The traversal target outside `.kb/jobs` was never written (journalRel would have escaped there).
       expect(await pathExists(path.join(stagingWt, '..', '..', '..', 'tmp', 'evil'))).toBe(false);

@@ -22,6 +22,7 @@ const job = (over: Partial<JobConfig> = {}): JobConfig => ({
   schedule: 'daily',
   enabled: true,
   posture: 'guarded',
+  facing: 'internal',
   ...over,
 });
 
@@ -74,6 +75,46 @@ describe('jobRegistry (JOBS-1)', () => {
       await writeJobRegistry(root, [job({ enabled: true, schedule: 'daily', posture: 'guarded' })]);
       await patchJob(root, 'reflect', { enabled: false, schedule: 'off', posture: 'autonomous' });
       expect(await readJobRegistry(root)).toEqual([job({ enabled: false, schedule: 'off', posture: 'autonomous' })]);
+    });
+  });
+
+  // JOBS-16: facing round-trips; an unknown/absent facing falls back to the safe default (internal).
+  it('round-trips facing (internal|external) and defaults an unknown facing to internal (JOBS-16)', async () => {
+    await withTempRoot(async (root) => {
+      const p = jobRegistryPath(root);
+      await fs.mkdir(path.dirname(p), { recursive: true });
+      await fs.writeFile(p, JSON.stringify([
+        { id: 'reflect', type: 'reflect', schedule: 'off', enabled: false, posture: 'guarded', facing: 'external' },
+        { id: 'bad', type: 't', schedule: 'off', enabled: false, posture: 'guarded', facing: 'sideways' }, // unknown → internal
+        { id: 'absent', type: 't', schedule: 'off', enabled: false, posture: 'guarded' }, // missing → internal
+      ]), 'utf8');
+      const jobs = await readJobRegistry(root);
+      expect(jobs.map((j) => [j.id, j.facing])).toEqual([['reflect', 'external'], ['bad', 'internal'], ['absent', 'internal']]);
+    });
+  });
+
+  // JOBS-17: workDepth round-trips; junk numbers/levels are sanitized away (never persisted as effort).
+  it('round-trips a clean workDepth and drops a malformed one (JOBS-17)', async () => {
+    await withTempRoot(async (root) => {
+      const p = jobRegistryPath(root);
+      await fs.mkdir(path.dirname(p), { recursive: true });
+      await fs.writeFile(p, JSON.stringify([
+        { id: 'deep', type: 't', schedule: 'off', enabled: false, posture: 'guarded', workDepth: { level: 'deep', maxToolCalls: 20 } },
+        { id: 'junk', type: 't', schedule: 'off', enabled: false, posture: 'guarded', workDepth: { level: 'turbo', maxToolCalls: -5 } },
+      ]), 'utf8');
+      const jobs = await readJobRegistry(root);
+      expect(jobs.find((j) => j.id === 'deep')?.workDepth).toEqual({ level: 'deep', maxToolCalls: 20 });
+      expect(jobs.find((j) => j.id === 'junk')?.workDepth).toBeUndefined(); // all fields junk → dropped
+    });
+  });
+
+  it('patchJob updates facing + workDepth (JOBS-16/17 editable knobs)', async () => {
+    await withTempRoot(async (root) => {
+      await writeJobRegistry(root, [job({ id: 'r', type: 'r' })]);
+      await patchJob(root, 'r', { facing: 'external', workDepth: { level: 'deep' } });
+      const [out] = await readJobRegistry(root);
+      expect(out.facing).toBe('external');
+      expect(out.workDepth).toEqual({ level: 'deep' });
     });
   });
 });

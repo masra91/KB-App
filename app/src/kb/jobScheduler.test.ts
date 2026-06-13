@@ -36,7 +36,7 @@ async function withVault(fn: (root: string, stagingWt: string, lock: Mutex) => P
   }
 }
 
-const job = (over: Partial<JobConfig> = {}): JobConfig => ({ id: 'j', type: 'noop', schedule: 'daily', enabled: true, posture: 'guarded', ...over });
+const job = (over: Partial<JobConfig> = {}): JobConfig => ({ id: 'j', type: 'noop', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal', ...over });
 
 describe.skipIf(!gitAvailable)('isJobDue (JOBS-2)', () => {
   it('never-run enabled job is due; disabled / off are not', async () => {

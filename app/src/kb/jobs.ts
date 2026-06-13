@@ -4,6 +4,7 @@
 // KB-wide work (Reflect is the first; SPEC-0024). This module holds the contract the engine
 // (`jobRegistry` / `jobScheduler` / `jobStage`) and any job *behavior* share — it owns no I/O
 // beyond the per-job journal. Behavior of a specific job lives in its own module + spec.
+import type { WorkDepthConfig } from './workDepth';
 
 /** Named schedule presets (JOBS-2). Raw cron / event-driven are later extensions the registry
  *  must not preclude — `schedule` is an open string at the storage layer, validated to a preset. */
@@ -24,13 +25,31 @@ export const AUTONOMY_POSTURES = ['guarded', 'autonomous'] as const;
 export type AutonomyPosture = (typeof AUTONOMY_POSTURES)[number];
 export const DEFAULT_POSTURE: AutonomyPosture = 'guarded';
 
-/** One registered autonomous job (JOBS-1). `type` selects the behavior; `config` is behavior-specific. */
+/** Which way a job faces (JOBS-16) — the ONLY thing that distinguishes a researcher from a cron.
+ *  `internal` = inward (operates on the KB itself: Reflect, reconcile, maintenance) — JOBS-10's
+ *  no-external-egress holds. `external` = a researcher (SPEC-0028) reaching outside the KB under an
+ *  egress tier + scope/sensitivity gates (SPEC-0043) — JOBS-10 relaxes to read-only egress within
+ *  the granted tier (still no side-effecting writes to the world). Both facings share the SAME
+ *  registry / scheduler / single-flight / journal / autonomy / audit / config surface; `facing` is
+ *  the only difference (it gates egress). Safe default `internal` (no egress). */
+export const FACINGS = ['internal', 'external'] as const;
+export type Facing = (typeof FACINGS)[number];
+export const DEFAULT_FACING: Facing = 'internal';
+
+/** One registered job (JOBS-1/16). `type` selects the behavior; `facing` gates egress (JOBS-16);
+ *  `workDepth` is the per-item effort knob (JOBS-17, resolved via {@link WorkDepthSpec}); `config` is
+ *  behavior-specific. A researcher is just an `external` job on this same shape. */
 export interface JobConfig {
   id: string;
   type: string;
   schedule: SchedulePreset;
   enabled: boolean;
   posture: AutonomyPosture;
+  /** JOBS-16: internal (no egress) | external (researcher — egress within tier). Default internal. */
+  facing: Facing;
+  /** JOBS-17: the Principal-configurable per-item work-depth (level + optional explicit overrides).
+   *  Absent = the work-kind's safe default. Resolved against the kind's `WorkDepthSpec` at run time. */
+  workDepth?: WorkDepthConfig;
   config?: Record<string, unknown>;
 }
 

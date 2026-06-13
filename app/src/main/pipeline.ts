@@ -53,7 +53,7 @@ import { makeReflectJobBehavior, REFLECT_JOB_TYPE } from '../kb/reflectJob';
 import { makeReflectDecider } from '../kb/reflectAgent';
 import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/jobRegistry';
 import { readJournal } from '../kb/jobStage';
-import { JOB_CATALOG, catalogEntry } from '../kb/jobCatalog';
+import { JOB_CATALOG, catalogEntry, facingForType } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
 import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel } from '../kb/instanceConfig';
 import { getQuickCaptureAgent } from './quickCaptureService';
@@ -82,6 +82,7 @@ import { readSourceSensitivities, type SourceSensitivity } from '../kb/sensitivi
 import { applySensitivityOverrideToSourceMd } from '../kb/sourceDoc';
 import { buildRecallOutput } from '../kb/outputDoc';
 import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } from '../kb/jobs';
+import { asWorkDepthConfig } from '../kb/workDepth';
 import type { Review } from '../kb/reviews';
 import { reviewToSummary } from '../kb/reviewSummary';
 import type { AuditEvent } from '../kb/audit';
@@ -850,6 +851,11 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
   if (typeof patch.enabled === 'boolean') clean.enabled = patch.enabled;
   if (isSchedulePreset(patch.schedule)) clean.schedule = patch.schedule;
   if (isAutonomyPosture(patch.posture)) clean.posture = patch.posture;
+  // JOBS-17: the editable per-item work-depth (sanitized — drops junk). Absent leaves the prior/default.
+  if (patch.workDepth !== undefined) {
+    const wd = asWorkDepthConfig(patch.workDepth);
+    if (wd) clean.workDepth = wd;
+  }
 
   let prior: JobConfig | undefined;
   let applied = false;
@@ -864,10 +870,12 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
         ...(clean.enabled !== undefined ? { enabled: clean.enabled } : {}),
         ...(clean.schedule !== undefined ? { schedule: clean.schedule } : {}),
         ...(clean.posture !== undefined ? { posture: clean.posture } : {}),
+        ...(clean.workDepth !== undefined ? { workDepth: clean.workDepth } : {}),
       });
     } else {
       // New job: an explicit per-job posture wins; otherwise inherit the Instance default (AUTO-12
       // cascade — `resolveJobPosture` is the single swap point if the ruling lands differently).
+      // JOBS-16: facing comes from the catalog (the built-in's fixed facing; `internal` default).
       const instanceCfg = await readInstanceConfig(root);
       await upsertJob(root, {
         id: clean.id,
@@ -875,6 +883,8 @@ export async function setActiveJobConfig(patch: JobConfigPatch): Promise<JobView
         enabled: clean.enabled ?? false,
         schedule: clean.schedule ?? 'off',
         posture: resolveJobPosture(instanceCfg.autonomyDefault, clean.posture),
+        facing: facingForType(clean.type),
+        ...(clean.workDepth !== undefined ? { workDepth: clean.workDepth } : {}),
       });
     }
     await commitRegistryChange(root, summarizeJobChange(clean));
@@ -903,7 +913,7 @@ export async function runActiveJobNow(id: string): Promise<RunJobResult> {
     if (!entry) return { ran: false, reason: 'not-found' };
     await active.lock.run(async () => {
       const instanceCfg = await readInstanceConfig(root);
-      await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: resolveJobPosture(instanceCfg.autonomyDefault, undefined) });
+      await upsertJob(root, { id, type: entry.type, enabled: false, schedule: 'off', posture: resolveJobPosture(instanceCfg.autonomyDefault, undefined), facing: facingForType(entry.type) });
       await commitRegistryChange(root, `seed job ${id} for run-now`);
     }, 'job:seed-for-run-now');
   }

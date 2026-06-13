@@ -88,6 +88,8 @@ export function buildJobViews(
       // Effective posture: an explicit per-job posture wins; a catalog-only job inherits the
       // Instance default (display == what enabling it would run — QA #74 blocker).
       posture: cfg?.posture ?? instanceDefault,
+      facing: entry.facing, // JOBS-16: the built-in's fixed facing (catalog-declared)
+      workDepth: cfg?.workDepth ?? null, // JOBS-17: stored depth config; null = kind default
       lastRun: lastRunOf(lastEntryByJobId[id]),
     });
   }
@@ -105,6 +107,8 @@ export function buildJobViews(
       enabled: cfg.enabled,
       schedule: cfg.schedule,
       posture: cfg.posture,
+      facing: cfg.facing, // JOBS-16
+      workDepth: cfg.workDepth ?? null, // JOBS-17
       lastRun: lastRunOf(lastEntryByJobId[cfg.id]),
     });
   }

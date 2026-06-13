@@ -146,7 +146,7 @@ describe.skipIf(!gitAvailable)('Reflect job e2e through the JOBS engine (SPEC-00
           { summary: 'retire stale node', kind: 'destructive', confidence: 0.7, review: { question: 'Retire X?' } },
         ],
       });
-      const job: JobConfig = { id: 'reflect', type: REFLECT_JOB_TYPE, schedule: 'several-daily', enabled: true, posture: 'guarded' };
+      const job: JobConfig = { id: 'reflect', type: REFLECT_JOB_TYPE, schedule: 'several-daily', enabled: true, posture: 'guarded', facing: 'internal' };
       const res = await runJobOnce(stagingWt, job, makeReflectJobBehavior(decider), lock);
       expect(res.applied).toBe(1); // additive
       expect(res.deferred).toBe(1); // destructive → Review (guarded)
