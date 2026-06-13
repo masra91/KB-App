@@ -172,3 +172,20 @@ scoped eval creds only (EVAL-11).
 eval (node-vs-attribute), run via `npm run eval:enrich`. It predates the general harness and remains as
 a focused granularity check; new quality cases should be **scenarios** (`scenarios/*.yaml`) under the
 general framework above.
+
+### Dedup / node-finding precision-recall eval (EVAL-13)
+
+`dedupQuality.eval.ts` + `dedupFixtures.ts` measure **entity dedup + node-finding** quality — "does
+dedup actually work?" — over generalized, **synthetic / no-secrets** labeled fixtures. It drives the
+REAL Connect matcher (within-block: collapse duplicate candidates / fold into the right existing node)
+and the REAL Reflect consolidation (cross-block: merge name-variant nodes like *Caroline* / *Caroline
+Winters Azzone* that exact-name blocking can't), and scores each against ground truth with the pure
+metric `src/kb/dedupEval.ts` (pairwise precision/recall). HARD per fixture: **zero false merges of
+distinct entities** (the don't-false-merge guard); SOFT: median recall clears a floor. Opt-in:
+
+```sh
+KB_EVAL=1 npm run eval -- dedupQuality      # real copilot; reports precision/recall + the guard
+```
+
+The metric + the verdict→groups reducers are unit-tested deterministically (`src/kb/dedupEval.test.ts`,
+CI-green); only the live-copilot behavioural run is opt-in. Fixtures are shared with the Reflect impl.
