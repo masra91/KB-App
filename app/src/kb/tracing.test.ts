@@ -74,6 +74,26 @@ describe('tracing (SPEC-0030 OBS-12/13/16)', () => {
     expect(await readSpansFile(root)).toHaveLength(1);
   });
 
+  it('records the failure MESSAGE on an error span (robustness batch) — and ONLY on error', async () => {
+    root = await makeTempDir('kb-trace-');
+    const { now, mintId } = harness();
+    const tracer = createTracer({ dir: root, now, mintId });
+    // The bug: a failed stage was `outcome:'error'` with no *why* — invisible in the span. Now the
+    // caught message threads in, so a failed `stage.run` is diagnosable from the span alone.
+    tracer.start('stage.run', { stage: 'decompose', itemId: 'BAD' }).end('error', "ENOENT: no such file or directory, open 'raw.txt'");
+    tracer.start('stage.run', { stage: 'decompose', itemId: 'GOOD' }).end('ok');
+    tracer.start('stage.run', { stage: 'decompose', itemId: 'ASIDE' }).end('setaside', 'stray message must be dropped');
+    await tracer.flush();
+
+    const spans = await readSpansFile(root);
+    const bad = spans.find((s) => s.itemId === 'BAD')!;
+    expect(bad.outcome).toBe('error');
+    expect(bad.error).toContain('ENOENT'); // the why is on the span
+    // A non-error outcome never carries an `error` field — so the field means exactly "this is why it failed".
+    expect(spans.find((s) => s.itemId === 'GOOD')!.error).toBeUndefined();
+    expect(spans.find((s) => s.itemId === 'ASIDE')!.error).toBeUndefined();
+  });
+
   it('record() appends a fully-formed span (synthesized from an AgentTrace)', async () => {
     root = await makeTempDir('kb-trace-');
     const tracer = createTracer({ dir: root });

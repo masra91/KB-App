@@ -134,6 +134,9 @@ export interface DecomposeOneResult {
   ok: boolean;
   candidateIds: string[]; // ULIDs of the candidate files written on `staging` (STAGING-5)
   setAside: boolean;
+  /** On a failed/set-aside outcome, the failure message — threaded onto the stage's error span so a
+   *  failed source is diagnosable from the span alone (SPEC-0030 robustness batch). */
+  error?: string;
 }
 
 /**
@@ -162,11 +165,15 @@ export async function decomposeOne(
   const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
     const wtGit = simpleGit(wt); // the ephemeral per-item worktree, fresh off the checkpoint
     const sourceDirWt = path.join(wt, sourceRel);
-    const input = await readSourceInput(sourceDirWt);
-    result.sourceId = input.sourceId;
     const runId = ulid();
     const auditPath = path.join(sourceDirWt, 'audit.jsonl');
     try {
+      // DECOMP-6 / robustness: read the source INSIDE the set-aside try — a dangling/missing file-ref
+      // (`meta.raw` ENOENT) must be a per-item set-aside-after-K, NOT an escape that trips the stage's
+      // systemic circuit-breaker. `result.sourceId` defaults to the source basename, so the catch can
+      // still record a failed/setaside marker even when the read itself threw (no `input` yet).
+      const input = await readSourceInput(sourceDirWt);
+      result.sourceId = input.sourceId;
       const decision = await decider(input, { span });
       const model = decision.agent?.model ?? 'default';
 
@@ -207,17 +214,23 @@ export async function decomposeOne(
       // DECOMP-6 / ORCH-12: never lose the source. Record the failed attempt durably; set aside
       // after K so it can't head-of-line-block. No candidates are written on failure.
       const error = err instanceof Error ? err.message : String(err);
+      // `result.sourceId` (the source basename, or the parsed id once the read succeeded) — never
+      // `input.sourceId`, which is undefined when `readSourceInput` itself threw (the dangling-ref case).
+      const sourceId = result.sourceId;
       const priorFailures = (await readDecomposeState(sourceDirWt)).failures;
       const attempt = priorFailures + 1;
       const setAside = attempt >= maxAttempts;
-      let audit = auditLine({ runId, sourceId: input.sourceId, event: 'failed', attempt, error });
-      if (setAside) audit += auditLine({ runId, sourceId: input.sourceId, event: 'setaside', attempts: attempt });
+      let audit = auditLine({ runId, sourceId, event: 'failed', attempt, error });
+      if (setAside) audit += auditLine({ runId, sourceId, event: 'setaside', attempts: attempt });
+      // BUG #135 / dangling-ref: the failure may BE a missing source dir/file — ensure the audit dir
+      // exists so the durable failed/setaside marker always lands (else the count never increments).
+      await fs.mkdir(path.dirname(auditPath), { recursive: true });
       await fs.appendFile(auditPath, audit, 'utf8');
       // OBS-4: the structured audit above gets its verbose cause in the dev-log, cross-linked by runId (OBS-3).
-      log.error('decompose.failed', { runId, itemId: input.sourceId, attempt, setAside, err });
+      log.error('decompose.failed', { runId, itemId: sourceId, attempt, setAside, err });
       await wtGit.raw('add', '-A');
-      await wtGit.commit(`decompose: failed ${input.sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-      result = { sourceId: input.sourceId, ok: false, candidateIds: [], setAside };
+      await wtGit.commit(`decompose: failed ${sourceId} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
+      result = { sourceId, ok: false, candidateIds: [], setAside, error };
       return true;
     }
   };
@@ -363,36 +376,49 @@ export class DecomposeStage {
   /** Drain the queue once. Returns false if the pass errored out (e.g. a wedged canonical writer) so
    *  {@link runDrains} can back off, true on a clean pass. */
   private async drainOnce(): Promise<boolean> {
-    let queue = await readDecomposeQueue(this.root, this.maxAttempts);
-    while (queue.length > 0) {
-      // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
-      // own ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial; cross-stage cognition
-      // overlaps regardless). decomposeOne handles its own failures, so a settled batch never rejects;
-      // an unexpected throw stops this pass for a later poke/sweep to retry.
-      const batch = queue.slice(0, this.cap);
-      try {
+    // Robustness batch (SPEC-0030): sources whose processing threw UNEXPECTEDLY this pass — skip them so
+    // one poison source can't head-of-line-block the queue; a later sweep retries them (bounded).
+    const failedThisPass = new Set<string>();
+    try {
+      let queue = await readDecomposeQueue(this.root, this.maxAttempts);
+      while (true) {
+        // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
+        // own ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial; cross-stage cognition
+        // overlaps regardless). decomposeOne handles its own failures, so a settled batch never rejects.
+        const batch = queue.filter((r) => !failedThisPass.has(r)).slice(0, this.cap);
+        if (batch.length === 0) break; // queue empty, or only this-pass-failed sources remain
         // OBS-12: each item gets a `stage.run` span that wraps its decider's `copilot.invoke` child.
+        // Per-item isolation = the PER-ITEM locus (NOT the systemic #256 back-off): a single dangling/
+        // missing file-ref ENOENT sets aside only THAT source and keeps draining — it must never trip
+        // the circuit-breaker that backs off the WHOLE stage (reserved for a wedged writer, below).
         await Promise.all(
           batch.map((rel) => {
-            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: path.basename(rel) });
+            const itemId = path.basename(rel);
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId });
             return decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts, this.log, span).then(
               (r) => {
-                span.end(spanOutcome(r.ok, r.setAside));
-                return r;
+                // An internally-handled failure (set aside after K, or a not-yet-exhausted attempt)
+                // returns rather than throws — carry its message onto the error span (robustness batch).
+                span.end(spanOutcome(r.ok, r.setAside), r.error);
               },
               (err) => {
-                span.end('error');
-                throw err;
+                const message = err instanceof Error ? err.message : String(err);
+                span.end('error', message);
+                this.log.error('decompose.drain-error', { itemId, err });
+                failedThisPass.add(rel);
               },
             );
           }),
         );
-      } catch (err) {
-        this.log.error('decompose.drain-error', { err }); // unexpected (e.g. wedged writer) — surface it, back off
-        return false;
+        queue = await readDecomposeQueue(this.root, this.maxAttempts);
       }
-      queue = await readDecomposeQueue(this.root, this.maxAttempts);
+      return true;
+    } catch (err) {
+      // SYSTEMIC failure (the queue read / canonical writer is wedged — affects EVERY item, not one):
+      // surface it + return false so runDrains' #256 circuit-breaker backs the stage off (ORCH-26). A
+      // per-item ENOENT is handled above and never reaches here, so it can't trip the breaker.
+      this.log.error('decompose.drain-error', { err });
+      return false;
     }
-    return true;
   }
 }

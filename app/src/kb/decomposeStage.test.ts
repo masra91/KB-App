@@ -19,8 +19,32 @@ import {
   DEFAULT_MAX_ATTEMPTS,
 } from './decomposeStage';
 import { findEntityFiles } from './claimsStage';
+import { createVaultTracer, vaultSpansPath, type Span } from './tracing';
+import type { DevLog } from './devlog';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { DecomposeDecision } from './decompose';
+
+/** A DevLog that records every emitted entry (with bound + per-call fields), for telemetry assertions. */
+function recordingLog(): { log: DevLog; entries: Array<{ level: string; event: string; fields: Record<string, unknown> }> } {
+  const entries: Array<{ level: string; event: string; fields: Record<string, unknown> }> = [];
+  const make = (bound: Record<string, unknown>): DevLog => {
+    const at = (level: string) => (event: string, fields: Record<string, unknown> = {}) => {
+      entries.push({ level, event, fields: { ...bound, ...fields } });
+    };
+    return { debug: at('debug'), info: at('info'), warn: at('warn'), error: at('error'), child: (bind) => make({ ...bound, ...bind }), flush: () => Promise.resolve() };
+  };
+  return { log: make({}), entries };
+}
+
+/** Read the vault's spans.jsonl back as parsed spans (robustness-batch telemetry assertions). */
+async function readVaultSpans(root: string): Promise<Span[]> {
+  const raw = await fs.readFile(vaultSpansPath(root), 'utf8');
+  return raw
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Span);
+}
 
 function gitInstalledSync(): boolean {
   try {
@@ -253,6 +277,46 @@ describe.skipIf(!gitAvailable)('failure never loses the source; set aside after 
       expect(cands[0].sourceId).toBe(path.basename(good));
       // The poison source is still preserved.
       expect(await fs.readFile(path.join(root, bad, 'raw.md'), 'utf8')).toBe('poison');
+    });
+  });
+
+  // Robustness batch (SPEC-0030): a DANGLING/missing file-ref (the textbook case) must be a PER-ITEM
+  // set-aside, never a fatal drain crash and never a systemic back-off. Fails-before: `readSourceInput`
+  // ran OUTSIDE decomposeOne's set-aside try, so a `meta.raw` ENOENT escaped → tripped the #256
+  // circuit-breaker (back off the WHOLE stage) and never set the item aside → the good source behind it
+  // was head-of-line-blocked. Plus the error span carried no message. This locks both fixes.
+  it('a dangling raw-file ref (ENOENT) is set aside per-item — drain completes the rest, no systemic backoff, error span carries the message', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const good = await archiveText(root, 'fine');
+      const bad = await archiveText(root, 'dangling');
+      // Delete the bad source's raw payload so `readSourceInput` ENOENTs — the textbook dangling file-ref.
+      // Commit it so the decompose worktree (reset to the canonical checkpoint) sees the file gone.
+      await fs.rm(path.join(root, bad, 'raw.md'));
+      const git = simpleGit(root);
+      await git.add('-A');
+      await git.commit('delete bad raw payload (dangling file-ref)');
+
+      const tracer = createVaultTracer(root);
+      const { log, entries } = recordingLog();
+      const stage = new DecomposeStage(root, deciderFor(['OK']), new Mutex(), DEFAULT_MAX_ATTEMPTS, 1, log, tracer);
+      for (let n = 0; n < DEFAULT_MAX_ATTEMPTS + 1; n++) await stage.poke();
+      await tracer.flush();
+
+      // (1) NOT FATAL: the good source decomposed — never head-of-line-blocked by the dangling one.
+      const cands = await readCandidates(root);
+      expect(cands.map((c) => c.sourceId)).toContain(path.basename(good));
+      // (2) SET ASIDE (per-item locus): the dangling source is durably set aside; the queue drained.
+      expect(await readDecomposeQueue(root)).toHaveLength(0);
+      expect(await fs.readFile(path.join(root, bad, 'audit.jsonl'), 'utf8')).toContain('"event":"setaside"');
+      // (3) NOT systemic: a single bad file-ref must NOT trip the #256 writer-backoff (reserved for a wedged writer).
+      expect(entries.find((e) => e.event === 'decompose.writer-backoff')).toBeUndefined();
+      // (4) TELEMETRY (app.log): the failure carries the real ENOENT message...
+      const failed = entries.find((e) => e.event === 'decompose.failed');
+      expect(String((failed?.fields.err as Error | undefined)?.message ?? '')).toContain('ENOENT');
+      // (5) TELEMETRY (span): ...and the error span carries it too — diagnosable from the span alone.
+      const errSpan = (await readVaultSpans(root)).find((s) => s.stage === 'decompose' && s.outcome === 'error');
+      expect(errSpan?.error ?? '').toContain('ENOENT');
     });
   });
 });

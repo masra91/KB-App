@@ -519,6 +519,9 @@ export interface ConnectOneResult {
   deletedNodeRels: string[]; // loser node files deleted on merge
   setAside: boolean;
   parked?: boolean;
+  /** On a failed/set-aside outcome, the failure message — threaded onto the stage's error span so a
+   *  failed block is diagnosable from the span alone (SPEC-0030 robustness batch). */
+  error?: string;
 }
 
 /**
@@ -834,7 +837,7 @@ export async function connectOne(
     log.error('connect.failed', { runId, itemId: key, attempt, setAside, err });
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: failed ${key} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-    return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside });
+    return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside, error });
   }
 }
 
@@ -1134,6 +1137,11 @@ export class ConnectStage {
         this.pending = false;
         await this.drainOnce();
       }
+    } catch (err) {
+      // A SYSTEMIC drain failure (e.g. the queue read / canonical writer is wedged) must NOT escape as
+      // an unhandledRejection through a fire-and-forget `void poke()` (SPEC-0030 robustness). Surface it
+      // loudly; a later poke/sweep retries. Per-item failures are isolated in drainOnce and never reach here.
+      this.log.error('connect.drain-fatal', { err });
     } finally {
       this.draining = false;
       this.drainStartedAt = null;
@@ -1142,22 +1150,34 @@ export class ConnectStage {
   }
 
   private async drainOnce(): Promise<void> {
+    // Robustness batch (SPEC-0030): items whose processing threw UNEXPECTEDLY this pass — skip them so
+    // one poison block can't head-of-line-block the whole queue; a later sweep retries them (bounded).
+    const failedThisPass = new Set<string>();
     let queue = await readConnectQueue(this.root, this.maxAttempts);
     let worked = false;
-    while (queue.length > 0) {
-      const key = queue[0].blockKey;
+    while (true) {
+      const item = queue.find((q) => !failedThisPass.has(q.blockKey));
+      if (!item) break; // queue empty, or only this-pass-failed items remain (retried on a later sweep)
+      const key = item.blockKey;
       const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: key });
       try {
         // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
         // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
         // OBS-12: the `stage.run` span wraps the decider's `copilot.invoke` child (incl. collision re-runs).
         const r = await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log, span);
-        span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error');
+        // An internally-handled failure carries its message onto the error span (robustness batch).
+        span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
         worked = true;
       } catch (err) {
-        span.end('error');
+        // Per-item isolation (ENG-16 at the orchestrator): connectOne handles its OWN failures (set
+        // aside after K). Reaching here means processing threw UNEXPECTEDLY — e.g. a dangling/missing
+        // file-ref ENOENT, or the set-aside write itself failed. End the span WITH the message + log it
+        // (so a failed stage is diagnosable, not a silent "N in queue, nothing happened"), set the item
+        // aside for THIS pass, and KEEP DRAINING the rest. A single bad item must never fatal the drain.
+        const message = err instanceof Error ? err.message : String(err);
+        span.end('error', message);
         this.log.error('connect.drain-error', { itemId: key, err });
-        return; // unexpected — stop this pass; a later poke/sweep retries rather than spinning
+        failedThisPass.add(key);
       }
       queue = await readConnectQueue(this.root, this.maxAttempts);
     }
