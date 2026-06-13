@@ -5,6 +5,7 @@
 // data fields DEV-3 landed: `inFlight` #175, `conversion` #169, `STAGE_ORDER` #168) — it never
 // mutates and never imports electron/DOM.
 import { STAGE_ORDER, stageIndex } from '../../kb/pipelineStages';
+import { pendingForStage } from '../../kb/pipelineStatusView';
 import { stageDisplayName } from '../stageLabels';
 // Overall-state glyph vocabulary now lives in the neutral kb layer so the tray (main) shares one
 // source with The Line (QCAP-14); re-exported here so existing importers are unchanged.
@@ -39,6 +40,26 @@ export const STATION_STATE_CLASS: Record<StageState, string> = {
 };
 
 /** One station on the spine — its own liveness merged with its funnel gauge-rail (§2/§6). */
+/** VIZ-12 — the two pending segments as a % of the rail track height (0–100, together ≤ 100). The
+ *  ember `active` base + the still `queued` cap; the empty remainder reads as calm headroom. */
+export interface PendingBar {
+  activePct: number;
+  queuedPct: number;
+}
+
+/**
+ * VIZ-12 bar-fill geometry: the pending split scaled to the PEAK pending across all six stations
+ * (relative backlog — the fullest station reads full-height, so "where's it piling up" is a glance).
+ * `peakPending <= 0` → an empty track (calm/idle). Null-tolerant (ENG-16): a negative/NaN count
+ * floors to 0 so a malformed roster entry can never produce a NaN height that breaks the bar.
+ */
+export function pendingBarGeometry(queued: number, inProgress: number, peakPending: number): PendingBar {
+  if (!(peakPending > 0)) return { activePct: 0, queuedPct: 0 };
+  const a = Number.isFinite(inProgress) ? Math.max(0, inProgress) : 0;
+  const q = Number.isFinite(queued) ? Math.max(0, queued) : 0;
+  return { activePct: (a / peakPending) * 100, queuedPct: (q / peakPending) * 100 };
+}
+
 export interface StationModel {
   stage: StageId;
   /** Human label (display-only — `stageLabels`). */
@@ -52,6 +73,15 @@ export interface StationModel {
    *  routinely has hundreds in flight), so brass fires only when this stage is blocked/errored or the
    *  whole pipeline is stalled AND there's a backlog — never on depth alone (the cry-wolf guard). */
   queueConcerning: boolean;
+  /** VIZ-12: PENDING WORK at this station split into waiting vs actively-draining — the headline
+   *  "work in motion" picture. Derived from the in-flight roster (`pendingForStage`), the exact source
+   *  of truth; `queueDepth` above stays the cumulative funnel concern (VIZ-3, demoted to secondary). */
+  queued: number;
+  inProgress: number;
+  /** VIZ-12 bar-fill geometry (DEV-6 owns this): the two pending segments as a % of the rail track,
+   *  scaled so the station with the most pending across all six reads full (relative backlog — "where's
+   *  it piling up" at a glance). Ember (`active`) is the base, queued stacks above. Per #336 design. */
+  pendingBar: PendingBar;
   setAside: number;
   currentItem?: string;
   /** This station's gauge-rail (volume bar + directional conversion caption). */
@@ -212,11 +242,18 @@ export function buildStations(v: PipelineStatusView): StationModel[] {
   const byStage = new Map<string, StageStatus>(v.stages.map((s) => [s.stage, s]));
   const rails = buildFunnel(v.conversion);
   const slow = slowestStage(v.perf);
+  // VIZ-12: the headline pending split per station, read from the in-flight roster (exact). Null/empty
+  // tolerant (ENG-15/16) — `pendingForStage` ignores any roster entry whose stage doesn't match (or a
+  // legacy item missing `active`, which falls to `queued`), so a malformed item can't skew another
+  // station's bar. The bar height scales to the PEAK pending across all six stations (relative backlog).
+  const pending = STAGE_ORDER.map((stage) => pendingForStage(v.inFlight ?? [], stage));
+  const peakPending = pending.reduce((m, p) => Math.max(m, p.queued + p.inProgress), 0);
   return STAGE_ORDER.map((stage, i) => {
     const st = byStage.get(stage);
     const state: StageState = st?.state ?? 'idle';
     const isSlowest = slow !== null && slow.stage === stage;
     const queueDepth = st?.queueDepth ?? 0;
+    const { queued, inProgress } = pending[i];
     return {
       stage,
       name: stageDisplayName(stage),
@@ -227,6 +264,9 @@ export function buildStations(v: PipelineStatusView): StationModel[] {
       // Stuck-coupled, not depth (VIZ-10 / OBS-11): a stuck stage (blocked/error) or an overall-stalled
       // pipeline WITH a backlog is the needs-you case; a deep draining queue stays calm.
       queueConcerning: queueDepth > 0 && (state === 'blocked' || state === 'error' || v.stalled),
+      queued,
+      inProgress,
+      pendingBar: pendingBarGeometry(queued, inProgress, peakPending),
       setAside: st?.setAside ?? 0,
       ...(st?.currentItem !== undefined ? { currentItem: st.currentItem } : {}),
       rail: rails[i],
