@@ -5,7 +5,7 @@
 // when the view is detached. Degrades to a friendly message when no KB / IPC fails (PANEL-9).
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
-import type { AgentView } from '../../kb/types';
+import type { AgentView, ModelCatalogView } from '../../kb/types';
 
 export async function mountAgents(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="agent-note">Loading…</p></div>`;
@@ -32,12 +32,76 @@ async function render(container: HTMLElement): Promise<void> {
     renderLoadError(container, '<h1>🤖 Agents</h1>', () => void render(container));
     return;
   }
-  const header = `<h1>🤖 Agents</h1><p class="agent-note">The librarian agents that run your pipeline. Observe-only — configuration is coming.</p>`;
+  // SPEC-0048: the model picker's data — best-effort, isolated so a probe miss (or an older client
+  // without the IPC) never blocks the agent list; the control just omits when absent (ENG-15/16).
+  let catalog: ModelCatalogView | null = null;
+  try {
+    catalog = await withTimeout(window.kbApi.getModelCatalog());
+  } catch {
+    catalog = null;
+  }
+  const header = `<h1>🤖 Agents</h1><p class="agent-note">The librarian agents that run your pipeline.</p>`;
   if (agents.length === 0) {
     container.innerHTML = `<div class="card">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
     return;
   }
-  container.innerHTML = `<div class="card">${header}<ul class="agent-list">${agents.map(agentItem).join('')}</ul></div>`;
+  container.innerHTML = `<div class="card">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map(agentItem).join('')}</ul></div>`;
+  wireModelPicker(container);
+}
+
+/** SPEC-0048 — the global "Default model" picker (the MUST): a styled native `<select>` over the live
+ *  CLI catalog + a quiet "runs as: ‹resolved›" caption + a BRASS note when the persisted pick is stale
+ *  (no longer in the catalog). Null-tolerant (ENG-15/16): a missing/empty catalog degrades to a
+ *  resolved-only readout (no dropdown) rather than throwing. */
+function modelControlHtml(catalog: ModelCatalogView | null): string {
+  if (!catalog) return ''; // no catalog data → omit the control (the agent rows still show the model)
+  const accepted = Array.isArray(catalog.accepted) ? catalog.accepted : [];
+  const configured = catalog.configured ?? '';
+  const resolved = catalog.resolved || '—';
+  // The CLI couldn't be probed → can't offer a fresh list; show the resolved readout only.
+  if (accepted.length === 0) {
+    return `<div class="model-control"><span class="model-label">Default model</span>` +
+      `<p class="model-runs">runs as: <span class="path">${esc(resolved)}</span></p></div>`;
+  }
+  const options = [`<option value=""${configured ? '' : ' selected'}>Auto (in-app default)</option>`]
+    .concat(accepted.map((m) => `<option value="${esc(m)}"${m === configured ? ' selected' : ''}>${esc(m)}</option>`))
+    .join('');
+  // .model-stale carries the brass needs-you color (design-system.css) — never oxide.
+  const stale = catalog.staleConfigured
+    ? `<p class="model-stale" role="status">${esc(configured)} isn't available on this CLI — running ${esc(resolved)}.</p>`
+    : '';
+  return `<div class="model-control">
+    <label class="model-label" for="model-default">Default model</label>
+    <select id="model-default" class="viz-select model-select">${options}</select>
+    <p class="model-runs">runs as: <span class="path">${esc(resolved)}</span></p>
+    ${stale}
+  </div>`;
+}
+
+/** Wire the global picker: on change, persist via `setModel` (validated server-side) and update the
+ *  "runs as" caption + clear the stale note in place. Re-renders on a rejected pick (shouldn't happen —
+ *  options are catalog-valid — but keeps the view honest if the catalog shifted mid-session). */
+function wireModelPicker(container: HTMLElement): void {
+  const select = container.querySelector<HTMLSelectElement>('#model-default');
+  if (!select) return;
+  select.addEventListener('change', () => {
+    const id = select.value; // '' = clear the override (Auto)
+    select.disabled = true;
+    void window.kbApi
+      .setModel(id.length > 0 ? id : null)
+      .then((res) => {
+        const runs = container.querySelector<HTMLElement>('.model-runs .path');
+        if (runs) runs.textContent = res.resolved;
+        // A successful set clears any prior stale note (the pick is now valid + applied).
+        if (res.ok) container.querySelector('.model-stale')?.remove();
+      })
+      .catch((): void => {
+        void render(container); // IPC failure → reload to a known state
+      })
+      .finally(() => {
+        select.disabled = false;
+      });
+  });
 }
 
 function agentItem(a: AgentView): string {

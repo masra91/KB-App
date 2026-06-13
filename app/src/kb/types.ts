@@ -593,6 +593,25 @@ export interface AgentView {
   status: 'running' | 'idle'; // live: running when the pipeline is active, else idle (PANEL-9)
 }
 
+/** SPEC-0048 — the model picker's view data. `accepted` is the live CLI catalog (null = couldn't probe;
+ *  the picker then shows the resolved/configured value but can't offer a fresh list). `resolved` is what
+ *  actually launches after override/probe/floor (the ORCH-28 "runs as" value). `configured` is the
+ *  persisted global pick, if any. `staleConfigured` flags a persisted pick the live CLI no longer
+ *  accepts (a brass "isn't available — running ‹resolved›" note; never hard-breaks — resolution fell back). */
+export interface ModelCatalogView {
+  accepted: string[] | null;
+  resolved: string;
+  configured?: string;
+  staleConfigured: boolean;
+}
+
+/** SPEC-0048 — the result of persisting a model pick. */
+export interface SetModelResult {
+  ok: boolean;
+  resolved: string; // the model that now launches (the pick if accepted, else the fallback)
+  reason?: 'rejected'; // set when `id` wasn't in the live catalog (pick refused, resolution unchanged)
+}
+
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
   getState(): Promise<AppState>;
@@ -660,6 +679,13 @@ export interface KbApi {
   getInstanceSettings(): Promise<InstanceSettings>;
   setInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings>;
   listAgents(): Promise<AgentView[]>;
+  /** SPEC-0048: the model picker's data — the live CLI's accepted catalog, the currently-resolved
+   *  model (after override/probe/floor), and the persisted global pick (if any). */
+  getModelCatalog(): Promise<ModelCatalogView>;
+  /** SPEC-0048: persist the Principal's global model pick (validated against the live catalog first).
+   *  `null`/'' clears the override (→ preference-list probe drives). Returns the new resolved model +,
+   *  on a rejected id, why (the picker stays catalog-valid, so this guards a programmatic/stale call). */
+  setModel(id: string | null): Promise<SetModelResult>;
   // SPEC-0028 Researchers (Control Panel · Manage): manage the registry + on-demand run.
   listResearchers(): Promise<ResearcherView[]>;
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;

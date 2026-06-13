@@ -5,15 +5,15 @@
 // the node tier (agentCatalog.test.ts). The live-status poll is the same `listAgents` call on a timer.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountAgents } from './agentsView';
-import type { AgentView, KbApi } from '../../kb/types';
+import type { AgentView, KbApi, ModelCatalogView } from '../../kb/types';
 
 const AGENTS: AgentView[] = [
   { key: 'decompose', label: 'Decompose', role: 'Extracts candidates.', model: 'Copilot (default)', instructions: 'kb/decomposeAgent.ts', status: 'running' },
   { key: 'reflect', label: 'Reflect', role: 'Rumination.', model: 'gpt-x', instructions: 'kb/reflectAgent.ts', status: 'idle' },
 ];
 
-function setApi(listAgents: KbApi['listAgents']): void {
-  (window as unknown as { kbApi: Pick<KbApi, 'listAgents'> }).kbApi = { listAgents };
+function setApi(listAgents: KbApi['listAgents'], getModelCatalog?: KbApi['getModelCatalog'], setModel?: KbApi['setModel']): void {
+  (window as unknown as { kbApi: Partial<KbApi> }).kbApi = { listAgents, getModelCatalog, setModel };
 }
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -105,6 +105,74 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
       await mountAgents(root);
       await tick();
       expect(root.querySelector('.muted')).toBeNull();
+    });
+  });
+
+  // SPEC-0048 — the global "Default model" picker over the live CLI catalog.
+  describe('SPEC-0048 model picker', () => {
+    const CATALOG: ModelCatalogView = {
+      accepted: ['claude-opus-4.8', 'claude-sonnet-4.5', 'gpt-5.5'],
+      resolved: 'claude-opus-4.8',
+      configured: 'claude-opus-4.8',
+      staleConfigured: false,
+    };
+
+    it('renders a .viz-select picker over the catalog with the configured model selected + a "runs as" caption', async () => {
+      setApi(vi.fn(async () => AGENTS), vi.fn(async () => CATALOG), vi.fn());
+      await mountAgents(root);
+      await tick();
+      const select = root.querySelector<HTMLSelectElement>('select.viz-select#model-default')!;
+      expect(select).toBeTruthy();
+      // an "Auto" clear option + one per accepted model
+      expect(select.querySelectorAll('option')).toHaveLength(4);
+      expect(select.value).toBe('claude-opus-4.8'); // the configured pick is selected
+      expect(root.querySelector('.model-runs')?.textContent).toContain('claude-opus-4.8'); // runs-as caption
+      expect(root.querySelector('.model-stale')).toBeNull(); // not stale → no brass note
+    });
+
+    it('shows a BRASS stale note when the persisted pick is no longer in the live catalog', async () => {
+      const stale: ModelCatalogView = { accepted: ['claude-opus-4.8'], resolved: 'claude-opus-4.8', configured: 'claude-opus-4', staleConfigured: true };
+      setApi(vi.fn(async () => AGENTS), vi.fn(async () => stale), vi.fn());
+      await mountAgents(root);
+      await tick();
+      const note = root.querySelector<HTMLElement>('.model-stale')!;
+      expect(note).toBeTruthy();
+      // `.model-stale` is the needs-you/BRASS surface (design-system.css `color: var(--viz-brass)`),
+      // never oxide — the brass-intent coverage lives at the class that now carries it (per QD-2).
+      expect(note.classList.contains('model-stale')).toBe(true);
+      expect(note.getAttribute('role')).toBe('status');
+      expect(note.textContent).toContain('claude-opus-4'); // names the unavailable id
+    });
+
+    it('persists a pick via setModel on change and updates the runs-as caption in place', async () => {
+      const setModel = vi.fn(async () => ({ ok: true, resolved: 'gpt-5.5' }));
+      setApi(vi.fn(async () => AGENTS), vi.fn(async () => CATALOG), setModel);
+      await mountAgents(root);
+      await tick();
+      const select = root.querySelector<HTMLSelectElement>('#model-default')!;
+      select.value = 'gpt-5.5';
+      select.dispatchEvent(new Event('change'));
+      await tick();
+      expect(setModel).toHaveBeenCalledWith('gpt-5.5');
+      expect(root.querySelector('.model-runs .path')?.textContent).toBe('gpt-5.5'); // caption reflects the new resolved
+    });
+
+    it('degrades to the agent list with NO picker when the catalog IPC is unavailable (ENG-15/16)', async () => {
+      // getModelCatalog omitted → the call throws → catalog null → control omitted, list still renders.
+      setApi(vi.fn(async () => AGENTS));
+      await mountAgents(root);
+      await tick();
+      expect(root.querySelector('select.viz-select')).toBeNull();
+      expect(root.querySelectorAll('.agent')).toHaveLength(2); // the list never blocks on the picker
+    });
+
+    it('shows a resolved-only readout (no dropdown) when the CLI catalog could not be probed (accepted=null)', async () => {
+      const unprobed: ModelCatalogView = { accepted: null, resolved: 'claude-opus-4.8', configured: undefined, staleConfigured: false };
+      setApi(vi.fn(async () => AGENTS), vi.fn(async () => unprobed), vi.fn());
+      await mountAgents(root);
+      await tick();
+      expect(root.querySelector('select')).toBeNull(); // can't offer a list
+      expect(root.querySelector('.model-runs')?.textContent).toContain('claude-opus-4.8'); // but shows what runs
     });
   });
 

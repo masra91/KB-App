@@ -538,6 +538,12 @@ button:disabled {
 .agent-meta { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.82rem; }
 .agent-meta dt { color: var(--viz-ink-muted); }
 .agent-meta dd { margin: 0; }
+
+/* SPEC-0048 — the global "Default model" picker control (Design-Lead visual). */
+.model-control { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.3rem 0 0.9rem; }
+.model-label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
+.model-runs { font-family: var(--viz-font-numeric); font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.1rem 0 0; }
+.model-stale { font-family: var(--viz-font-body); font-size: 0.72rem; color: var(--viz-brass); margin: 0.1rem 0 0; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
 /* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
    controls are SegmentedControls now, laid out by .settings-control above.) */
