@@ -27,7 +27,7 @@ export const DEFAULT_STAGE_CAP = 1;
  *  child produces no output for this long it is killed, so a pathological worktree, lock, or
  *  prompt can never hang the pipeline or a status read indefinitely. Generous — normal ops are
  *  sub-second; this only ever fires on a genuine stall. */
-const WORKTREE_GIT_TIMEOUT_MS = 20_000;
+export const WORKTREE_GIT_TIMEOUT_MS = 20_000;
 
 /** A simple-git handle whose every command is time-bounded: simple-git kills the child if it goes
  *  `timeoutMs` with no output (a stalled fetch, a credential/editor prompt, a hung hook), so a

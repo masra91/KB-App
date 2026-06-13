@@ -315,7 +315,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // single commit run serialized under the canonical-writer lock (STAGING-3). Obsidian settles between.
   const promoter = createCoalescingPromoter({
     promote: async () => {
-      await lock.run(() => promote(vaultPath), 'coalesced:promote');
+      await lock.run(() => promote(vaultPath, undefined, undefined, log.child({ scope: 'promote' })), 'coalesced:promote'); // STAGING-12 coalesced; log surfaces ORCH-27 stale-lock heal
     },
     quiescentMs: PROMOTE_QUIESCENT_MS,
     maxWaitMs: PROMOTE_MAX_WAIT_MS,
