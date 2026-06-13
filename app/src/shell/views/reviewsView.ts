@@ -21,11 +21,23 @@ const REVIEW_POLL_MS = 5000;
 // View-local state (the shell mounts this view once; reset on each mount for test isolation).
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let renderedSig = ''; // the open-review id set currently painted — re-render only when it changes
+// REVIEW-20 (optimistic confirm/deny): an answered item leaves the queue INSTANTLY on click; the
+// verdict IPC + backend resume/merge run async (the UI never waits). `answeredIds` suppresses an
+// optimistically-removed item from the reconcile poll so it can't flicker back before the backend (and
+// the SHELL-12 projection `listReviews` reads) catch up; `failedIds` re-surfaces an item whose async
+// answer failed, carrying an honest error affordance; `lastList` is the last fetched queue so an
+// optimistic mutation can re-derive the painted set without a refetch.
+let answeredIds = new Set<string>();
+let failedIds = new Map<string, string>();
+let lastList: ReviewSummary[] = [];
 
 export async function mountReviews(container: HTMLElement): Promise<void> {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = undefined;
   renderedSig = '';
+  answeredIds = new Set();
+  failedIds = new Map();
+  lastList = [];
   container.innerHTML = `<div class="card"><h1>🔍 Reviews</h1><p class="muted">Loading…</p></div>`;
   await refresh(container);
   startPoll(container);
@@ -75,19 +87,43 @@ async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean }
     }
     return; // poll error → keep the last good list
   }
+  const list = Array.isArray(reviews) ? reviews : [];
+  lastList = list;
+  // REVIEW-20: prune the optimistic-answered set — once the backend stops returning an id, the answer
+  // landed for real; drop it so the set can't grow unbounded across a session.
+  for (const id of Array.from(answeredIds)) if (!list.some((r) => r?.id === id)) answeredIds.delete(id);
   // ENG-16: the change-signature must tolerate a malformed item too (a null/odd entry can't be
-  // allowed to throw here and abort the whole render before `paint` ever runs).
-  const sig = (Array.isArray(reviews) ? reviews : []).map((r) => r?.id ?? '∅').join(',');
+  // allowed to throw here and abort the whole render before `paint` ever runs). It reflects the
+  // VISIBLE set (REVIEW-20: minus anything optimistically answered) so a removed item stays removed.
+  const sig = sigFor(list);
   if (opts.onlyIfChanged && sig === renderedSig) return;
   renderedSig = sig;
-  paint(container, reviews);
+  paint(container, visibleOf(list));
+}
+
+/** The render-visible reviews: the fetched queue minus anything optimistically answered (REVIEW-20). */
+function visibleOf(list: ReviewSummary[]): ReviewSummary[] {
+  return (Array.isArray(list) ? list : []).filter((r) => !answeredIds.has(r?.id));
+}
+
+/** The change-signature of what would paint now (visible ids) — ENG-16 null-tolerant. */
+function sigFor(list: ReviewSummary[]): string {
+  return visibleOf(list)
+    .map((r) => r?.id ?? '∅')
+    .join(',');
+}
+
+/** The empty state — extracted so the optimistic-remove path can show it the instant the last item
+ *  is answered (REVIEW-20), without waiting on a refetch. */
+function paintEmpty(container: HTMLElement): void {
+  container.innerHTML = `<div class="card"><h1>🔍 Reviews</h1><p class="muted">Nothing needs you right now. 🎉</p></div>`;
 }
 
 /** Render the review list (or the empty state) and wire the per-item Confirm/Reject buttons. */
 function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
   const header = `<h1>🔍 Reviews</h1>`;
   if (reviews.length === 0) {
-    container.innerHTML = `<div class="card">${header}<p class="muted">Nothing needs you right now. 🎉</p></div>`;
+    paintEmpty(container);
     return;
   }
 
@@ -135,8 +171,14 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
  *  failure (ENG-16) — a throw here drops to `reviewItemFallback`, never the whole list. */
 function reviewItemHtml(r: ReviewSummary): string {
   const refs = Array.isArray(r.refs) ? r.refs : []; // legacy/malformed: refs may be absent/non-array
+  // REVIEW-20: a re-surfaced item whose async answer failed carries an honest, retryable error banner.
+  // Oxide colours only the glyph (off small text, design-system §3); the message stays readable ink.
+  const err = failedIds.has(r.id)
+    ? `<p class="review-error viz-body" role="alert"><span class="review-error-glyph viz-state-error" aria-hidden="true">✕</span> ${esc(failedIds.get(r.id))}</p>`
+    : '';
   return `
       <li class="review" data-id="${esc(r.id)}">
+        ${err}
         <div class="review-q">${esc(r.question)}</div>
         ${candidatesBlock(r)}
         <details class="review-detail">
@@ -230,23 +272,44 @@ function firstNonEmpty(...vals: Array<string | null | undefined>): string | unde
   return undefined;
 }
 
+/**
+ * REVIEW-20 — answering is OPTIMISTIC. The item leaves the queue the INSTANT the Principal clicks
+ * (no backend wait — the #322 P1 was "confirm/deny takes forever to disappear, waiting on the
+ * backend"); the verdict IPC and the heavy resume/merge run async. Removing the row also makes a
+ * double-submit impossible (the buttons are gone), so no in-flight disabling is needed. On async
+ * failure we reconcile honestly: un-suppress the id and re-surface the item with a retryable error.
+ */
 async function answer(container: HTMLElement, id: string, verdict: 'confirm' | 'reject'): Promise<void> {
   const li = container.querySelector<HTMLElement>(`.review[data-id="${cssEscape(id)}"]`);
   const note = li?.querySelector<HTMLTextAreaElement>('.review-note')?.value ?? '';
-  // Disable the item's buttons while the answer is in flight (avoid a double-submit).
-  for (const b of Array.from(li?.querySelectorAll('button') ?? [])) (b as HTMLButtonElement).disabled = true;
+  // A fresh click on this item is a new attempt — clear any prior failure affordance.
+  failedIds.delete(id);
+  // Optimistic: suppress it from the reconcile poll, then drop the row immediately.
+  answeredIds.add(id);
+  optimisticallyRemove(container, id);
+  // Fire the verdict in the background. The UI has already moved on.
+  let ok = false;
   try {
     const res = await window.kbApi.answerReview({ id, verdict, note: note.trim() || undefined });
-    if (!res.ok) {
-      for (const b of Array.from(li?.querySelectorAll('button') ?? [])) (b as HTMLButtonElement).disabled = false;
-      return;
-    }
+    ok = !!res?.ok;
   } catch {
-    for (const b of Array.from(li?.querySelectorAll('button') ?? [])) (b as HTMLButtonElement).disabled = false;
-    return;
+    ok = false;
   }
-  // Answered → the item leaves the queue; force a re-render (its id drops from the set).
-  await refresh(container);
+  if (ok) return; // answered for real — the poll/projection keeps it gone; `answeredIds` is pruned then
+  // FAILED → honest reconcile: un-suppress + re-surface the item carrying a retryable error affordance.
+  answeredIds.delete(id);
+  failedIds.set(id, 'Couldn’t submit your answer — please try again.');
+  await refresh(container); // forced repaint → the still-open item returns with its error banner
+}
+
+/** REVIEW-20: remove one answered row from the DOM IMMEDIATELY (before the verdict IPC resolves), so
+ *  the queue reflects the click with zero backend wait. Shows the empty state if it was the last item,
+ *  and keeps `renderedSig` consistent with what a refresh would compute now (so the next unchanged poll
+ *  stays a no-op rather than repainting the item back). */
+function optimisticallyRemove(container: HTMLElement, id: string): void {
+  container.querySelector(`.review[data-id="${cssEscape(id)}"]`)?.remove();
+  if (!container.querySelector('.review')) paintEmpty(container);
+  renderedSig = sigFor(lastList);
 }
 
 /** Minimal CSS.escape fallback (review ids are ULIDs, so this is belt-and-suspenders). */
