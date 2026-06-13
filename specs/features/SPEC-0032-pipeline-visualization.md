@@ -75,12 +75,12 @@ drifts into the default AI look); this spec sets the intent and the surface.
 
 | ID    | Priority | Statement (short)                                                                    | Verify   | Traces |
 | ----- | -------- | ------------------------------------------------------------------------------------ | -------- | ------ |
-| VIZ-1 | should   | The status surface is **real-time + event-driven** — stage transitions **push** to the UI and counts **animate/interpolate** rather than jumping (fixes the "0 → sudden numbers" jank) | none-yet | OBS-8 |
+| VIZ-1 | should   | The status surface is **real-time + event-driven** — stage transitions **push** to the UI and counts **animate/interpolate** rather than jumping (fixes the "0 → sudden numbers" jank) | test:app/src/shell/views/lineMotion.test.ts (counts animate/interpolate — odometer roll); **event-driven push deferred** (still the SHELL-12 poll) | OBS-8 |
 | VIZ-2 | should   | A **per-item tracker** ("pizza tracker") shows each in-flight source as a **stepper** across stages, current step lit + animated, completed filled, errors/set-aside flagged | none-yet | OBS-5; ORCH-12 |
 | VIZ-3 | should   | A **funnel/aggregate** view shows counts + **conversion** per stage (captured → candidates → deduped entities → claims → promoted) — throughput + dedup visible | none-yet | OBS-14; CONNECT-3 |
 | VIZ-4 | should   | **Per-stage bars** show queue/active/throughput **segmented by source**, surfacing slow stages' **Copilot latency** | none-yet | OBS-5,14 |
 | VIZ-5 | should   | The view **pivots** between **per-item** and **per-stage** lenses on the same data | none-yet | OBS-5 |
-| VIZ-6 | should   | **Light, purposeful animation** signals work (active pulse, items flowing); **idle is calm** | none-yet | VISION-13 |
+| VIZ-6 | should   | **Light, purposeful animation** signals work (active pulse, items flowing); **idle is calm** | test:app/src/shell/views/lineMotion.test.ts (signature index + reduced-motion parity); ember-breathe + idle-cool = CSS (Design-Lead visual gate) | VISION-13 |
 | VIZ-7 | should   | Set-aside/errored items are **visually prominent** and carry the **Retry/Dismiss** actions (OBS-17) | none-yet | OBS-17 |
 | VIZ-8 | should   | The visualization establishes a **distinct visual identity** (motion/color/layout language) so the app is recognizably itself — **not the generic AI-app look**; authored + gated per the design process (SPEC-0033) | none-yet | VISION-13; DESIGN-3 |
 | VIZ-9 | should   | The live view is **smooth/performant** (coalesced/debounced updates, no reflow storms) even with many in-flight items | none-yet | PRIN-5 |
@@ -116,6 +116,20 @@ drifts into the default AI look); this spec sets the intent and the surface.
 
 ## 10. Changelog
 
+- 2026-06-13 — **The Line motion — slice 1 (KB-Developer-4 → PR #TBD, visual gate KB-Design-Lead, code
+  gate-2 KB-QD-2).** The §5 motion layer the spec called for but was never built. `lineMotion.ts` applies
+  two JS-driven motions after each (change-guarded, full-innerHTML) repaint, carrying the prior value in
+  a keyed store so a roll/index survives the node-destroying repaint: **odometer** (VIZ-1) — the funnel
+  volume counts + in-flight total roll from their last value to the new one (400ms ease-out, the
+  `--viz-dur-odometer` window), fixing the Principal's "0 → sudden numbers" jank; **signature index**
+  (§5) — a carriage whose stepper advanced a station since the last render gets the 220ms translateX
+  settle (`--viz-dur-index`/`--viz-ease-index`). Pure + injected (clock/rAF/reduced-motion) → unit-tested
+  with a synchronous fake rAF; reduced-motion snaps (full parity — state also reads via fill+hue; ENG-15/16:
+  malformed/keyless elements skipped, never throw, one bad never aborts the rest). transform/opacity only
+  (VIZ-9). **Honest scope:** this is the *animate-not-jump* half of VIZ-1 — the **event-driven push**
+  channel (§10) is still the SHELL-12 poll, deferred to a later slice; the **conversion-caption delta
+  roll** + **VIZ-2 click-to-expand per-hop trace** are fast-follows. Coordinated file-split with
+  KB-Developer-6 (DEV-6 = VIZ-12 pending bars; me = carriages/funnel/pivot/motion).
 - 2026-06-13 — **VIZ-12 data implemented** (KB-Developer-2). The pending-work derivation that re-orients
   the Status bars from cumulative totals to **work-in-motion**: `pendingForStage(inFlight, stage)` (pure,
   `pipelineStatusView.ts`) splits a stage into `inProgress` (the active draining batch) vs `queued`
