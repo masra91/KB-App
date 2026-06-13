@@ -109,7 +109,16 @@ function isNonEmptyString(v: unknown): v is string {
 export function parseReflectResult(stdout: string): ReflectResult {
   const match = stdout.match(/\{[\s\S]*\}/);
   if (!match) throw new Error('reflect: no JSON object in output');
-  const obj = JSON.parse(match[0]) as Record<string, unknown>;
+  // REFLECT-18: the brace-greedy regex can grab non-JSON (prose with braces, a truncated object), so the
+  // raw `JSON.parse` SyntaxError crashed the pass (the live `job.failed JSON.parse SyntaxError`). Wrap it
+  // into a clear, controlled reflect error — the job runner catches it and sets the slice aside instead of
+  // failing the whole run. Still never fabricates a finding (bad output → no findings, surfaced as error).
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(match[0]) as Record<string, unknown>;
+  } catch (err) {
+    throw new Error(`reflect: agent output was not valid JSON (${err instanceof Error ? err.message : String(err)})`);
+  }
   if (!isNonEmptyString(obj.inspected)) throw new Error('reflect: missing inspected');
   if (!Array.isArray(obj.findings)) throw new Error('reflect: findings must be an array');
   const findings = obj.findings.map((f, i): ReflectFinding => {
