@@ -11,7 +11,7 @@ import {
   activeStagingRoot,
   pipelineStatusForActive,
   pipelineControlForActive,
-  listActiveReviews,
+  reviewProjectionForActive,
   answerActiveReview,
   saveRecallOutput,
   fullReplay,
@@ -69,6 +69,7 @@ import type {
   PipelineStatusView,
   RendererErrorReport,
   ReviewSummary,
+  Projection,
   AnswerReviewRequest,
   AnswerReviewResult,
   PipelineControlRequest,
@@ -348,24 +349,19 @@ export function registerIpc(): void {
     noteRendererError(report);
   });
 
-  // SPEC-0018 REVIEW-10/11: the "needs you" queue + answering, over the typed contract.
+  // SPEC-0018 REVIEW-10/11 + SHELL-12: the "needs you" queue, served from the maintained projection —
+  // INSTANT, never blocks on the backend (zero git/fs on the render path; a busy stage / held lock
+  // can't stall the Reviews surface or the rail badge). The compute + summary mapping live in the
+  // pipeline's `reviewStore` (background cadence); here we just hand back the last-known-good.
   ipcMain.handle('kb:listReviews', async (): Promise<ReviewSummary[]> => {
-    const reviews = await listActiveReviews();
-    // `subject` is optional-shaped per review type — a CONNECT-15 link review has an EMPTY subject
-    // (#110: no entity subject, just a node↔target link). Optional-chain it so an empty/missing
-    // subject can't throw here and blank the whole list + the rail badge (both read this handler).
-    return reviews.map((r) => ({
-      id: r.id,
-      question: r.question,
-      detail: r.detail,
-      stage: r.raisedBy.stage,
-      refs: r.subject?.refs ?? [],
-      // REVIEW-16: pass the per-candidate disambiguation context through to the view (rows + links +
-      // each candidate's resolved source title, persisted at raise — PRIN-24). Optional-chained for
-      // the same empty-subject reasons as `refs`. Omitted when there are none.
-      ...(r.subject?.candidates?.length ? { candidates: r.subject.candidates } : {}),
-      createdAt: r.createdAt,
-    }));
+    return reviewProjectionForActive()?.data ?? [];
+  });
+
+  // SHELL-12: the review queue WITH its freshness envelope (`builtAt`/`stale`) for the "as of /
+  // updating…" affordance — so a surface honors staleness visibly, never renders stale-as-live. The
+  // plain `kb:listReviews` above stays the instant queue read; this is additive (also instant).
+  ipcMain.handle('kb:reviewProjection', async (): Promise<Projection<ReviewSummary[]> | null> => {
+    return reviewProjectionForActive();
   });
 
   ipcMain.handle('kb:answerReview', async (_e, req: AnswerReviewRequest): Promise<AnswerReviewResult> => {

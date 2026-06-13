@@ -20,6 +20,7 @@ const kbApi: KbApi = {
   pipelineStatusView: () => ipcRenderer.invoke('kb:pipelineStatusView'),
   reportRendererError: (report) => ipcRenderer.invoke('kb:reportRendererError', report), // OBS-18 (renderer)
   listReviews: () => ipcRenderer.invoke('kb:listReviews'),
+  reviewProjection: () => ipcRenderer.invoke('kb:reviewProjection'), // SHELL-12: queue + freshness envelope
   answerReview: (req) => ipcRenderer.invoke('kb:answerReview', req),
   pipelineControl: (req) => ipcRenderer.invoke('kb:pipelineControl', req),
   fullReplay: () => ipcRenderer.invoke('kb:fullReplay'),

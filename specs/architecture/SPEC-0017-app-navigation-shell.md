@@ -6,7 +6,7 @@ type: architecture
 status: draft
 owners: [KB-Architect, Principal]
 created: 2026-05-30
-updated: 2026-05-30
+updated: 2026-06-13
 related: [SPEC-0002, SPEC-0009, SPEC-0010, SPEC-0012, SPEC-0013]
 supersedes: null
 ---
@@ -99,7 +99,7 @@ The "user" is the Principal, in the main window.
 | SHELL-9  | should   | Setup remains a pre-shell gate; the shell appears only once a KB is active         | none-yet | SETUP-1; SETUP-6 |
 | SHELL-10 | should   | Settings (later) lets the Principal switch the active KB folder, reusing Setup's pick/inspect/open and re-persisting the active vault | none-yet | SETUP-2; SETUP-8 |
 | SHELL-11 | may      | Views are switchable via keyboard                                                 | none-yet | PRIN-17 |
-| SHELL-12 | must     | **The renderer NEVER blocks on a backend op — every surface renders instantly from maintained state, mutates optimistically, and updates by push.** Today views take **hard synchronous IPC dependencies on live backend work** (git reads, the canonical-writer lock, recompute), so when the orchestrator is busy or the lock is held, **Settings / Status / Reviews all stall, spin, or time out** (Principal: *"settings, status, etc — all still super slow to load; the UI needs to not be waiting on these ops"*). OBS-24 fixed this for Status alone; **SHELL-12 makes it the universal rule for every surface:** **(a) READ** — the render path does **zero git/fs/lock/recompute**; each view reads a **maintained in-memory/cached projection** (settings · review queue · status · activity) and shows **last-known-good instantly** (stale-but-fast ≫ correct-but-frozen), with an "as of"/updating affordance. **(b) MUTATE optimistically** — a user action (confirm/deny a review, change a setting) updates the UI **immediately**; the backend effect (resume/merge/promote/persist) runs **async** and the UI reconciles on settle (incl. rollback on failure) but **never blocks on it** (fixes the review confirm/deny lag — the item disappears at once). **(c) UPDATE by push** — main→renderer events (or a cheap cached-projection poll), never a live recompute the user waits on. A slow/hung backend op **degrades to staleness, never a frozen UI** — the surface stays interactive, decoupled from orchestrator/lock health. This is the **UI half** of the orchestrator-hang problem (the backend half is the lock/concurrency rethink). Instances: Status (OBS-24/25), Reviews (REVIEW-20 optimistic), Settings, Activity, Explore. | none-yet | PRIN-5,17; OBS-24; STACK-2; REVIEW-20 |
+| SHELL-12 | must     | **The renderer NEVER blocks on a backend op — every surface renders instantly from maintained state, mutates optimistically, and updates by push.** Today views take **hard synchronous IPC dependencies on live backend work** (git reads, the canonical-writer lock, recompute), so when the orchestrator is busy or the lock is held, **Settings / Status / Reviews all stall, spin, or time out** (Principal: *"settings, status, etc — all still super slow to load; the UI needs to not be waiting on these ops"*). OBS-24 fixed this for Status alone; **SHELL-12 makes it the universal rule for every surface:** **(a) READ** — the render path does **zero git/fs/lock/recompute**; each view reads a **maintained in-memory/cached projection** (settings · review queue · status · activity) and shows **last-known-good instantly** (stale-but-fast ≫ correct-but-frozen), with an "as of"/updating affordance. **(b) MUTATE optimistically** — a user action (confirm/deny a review, change a setting) updates the UI **immediately**; the backend effect (resume/merge/promote/persist) runs **async** and the UI reconciles on settle (incl. rollback on failure) but **never blocks on it** (fixes the review confirm/deny lag — the item disappears at once). **(c) UPDATE by push** — main→renderer events (or a cheap cached-projection poll), never a live recompute the user waits on. A slow/hung backend op **degrades to staleness, never a frozen UI** — the surface stays interactive, decoupled from orchestrator/lock health. This is the **UI half** of the orchestrator-hang problem (the backend half is the lock/concurrency rethink). Instances: Status (OBS-24/25), Reviews (REVIEW-20 optimistic), Settings, Activity, Explore. | test: **backbone** — `app/src/main/projectionStore.test.ts` (the shared `ProjectionStore<T>` spine: read never computes · failure retains last-known-good marked stale · persisted-seed-then-live · coalesced) + `app/src/main/statusSnapshot.test.ts` (Status on the spine); **Reviews-read instance** — `app/src/kb/reviewSummary.test.ts` (ENG-16 fold) + the `reviewStore` projection (`kb:listReviews` served instant). Mutate-optimistic = REVIEW-20; Settings/Activity/Explore reads + push = follow-on instances | PRIN-5,17; OBS-24; STACK-2; REVIEW-20 |
 
 ### SHELL-1 — The shell exists when a KB is active
 - **Status:** draft · **Priority:** must
@@ -232,6 +232,20 @@ The "user" is the Principal, in the main window.
 
 ## 6. Changelog
 
+- 2026-06-13 — **SHELL-12 backbone + Reviews-read instance implemented** (KB-Developer-2). Generalized
+  OBS-24's status snapshot into a shared `ProjectionStore<T>` spine (`projectionStore.ts`) — the cached-
+  projection backbone every surface reads: `current()` returns a `Projection<T>` (`data` + `builtAt`
+  "as of" + `stale`) INSTANTLY (zero git/fs/lock/recompute on the render path), a background cadence
+  maintains it off-path, a compute failure retains the last-known-good marked `stale` (honest staleness,
+  never a frozen UI or a render-path timeout). OBS-24's status store is now a thin adapter over it (no
+  parallel impl). First new instance: the **Reviews-read** projection — `reviewStore` maintains the
+  open "needs you" queue; `kb:listReviews` is served from it instantly (a busy stage / held lock can
+  never stall the Reviews surface or rail badge), with `refreshReviewProjection()` the post-answer seam
+  REVIEW-20 calls. SHELL-12 (c) "update by push" is satisfied for now by the existing cheap poll reading
+  the instant projection (no live recompute the user waits on); a real main→renderer push is a ready
+  follow-on via the spine's `onUpdate` hook. Read-interface posted on `control` for DEV-6 (REVIEW-20
+  write-path) to wire to. `Verify` graduated for the backbone + Reviews-read; Settings/Activity/Explore
+  reads + the optimistic-mutate (REVIEW-20) + VIZ-12 pending-work data are companion instances.
 - 2026-06-09 — **SHELL-12: the renderer NEVER blocks on a backend op (Principal — "big rethink, the UI needs to not be waiting on these ops").** Generalizes OBS-24 (status-only) into the universal rule for *every* surface: read a maintained cached projection (instant, stale-ok), mutate optimistically (the action reflects in the UI immediately; backend effect runs async — fixes the review confirm/deny lag), update by push; a slow/hung backend degrades to staleness, never a frozen UI. This is the UI half of the orchestrator-hang problem (the backend half = the lock/concurrency rethink). Companion instances added same day: REVIEW-20 (optimistic answer) + VIZ-12 (pending-work status, not cumulative totals).
 - 2026-05-30 — created (draft). Defines the navigation shell: left rail + content
   region, a shell-agnostic view registry/selection model (node-tested per TEST-5),
