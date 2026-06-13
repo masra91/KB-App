@@ -55,7 +55,8 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry, facingForType } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type InstanceConfig } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, resolveStageCaps, clampCopilotCeiling, clampStageCap, SCALE_STAGES, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type ScaleStage, type InstanceConfig } from '../kb/instanceConfig';
+import { applyCopilotCeiling } from '../kb/copilotConcurrency';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
 import { resolveCopilotModel } from '../kb/copilotModel';
@@ -91,10 +92,6 @@ import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
 import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus, ReviewSummary } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
-
-/** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
- *  Module-scoped so the Status roster (SPEC-0032 VIZ-2) can mark the active draining batch. */
-const STAGE_CAP = 3;
 
 /** Factory to create a job behavior resolver with scoped vaultPath (SPEC-0023, Copilot context scope).
  *  v1 ships the deterministic example job and **Reflect** (SPEC-0024, the first real job);
@@ -298,6 +295,12 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   await initLaunchModel({ preferences: stagingInstance.modelPreferences, override: stagingInstance.model, log: log.child({ scope: 'model' }) }).catch((err) =>
     log.child({ scope: 'model' }).warn('model.probe-failed', { itemId: vaultPath, err }),
   );
+  // SPEC-0048 SCALE-1/2: apply the configured global ceiling (env > Settings > cores-derived) to the
+  // shared semaphore, and resolve the per-stage caps (today's defaults overlaid with any overrides;
+  // Connect pinned to 1, SCALE-5) — each stage is sized below, live-adjustable via setActiveInstanceSettings.
+  const effectiveCeiling = applyCopilotCeiling(stagingInstance.copilotCeiling);
+  const stageCaps = resolveStageCaps(stagingInstance);
+  log.info('scale.applied', { ceiling: effectiveCeiling, caps: stageCaps });
   const startedAt = Date.now();
   let stagingWt: string;
   try {
@@ -339,7 +342,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const promoteEvergreen = async (): Promise<void> => {
     promoter.request();
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, undefined, log, tracer);
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, stageCaps.archive, log, tracer);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen
@@ -347,18 +350,18 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // resolved graph. They drain independently; the lock keeps their staging ff-advances from
   // racing. Connect + Claims each carry the promotion gate as their afterDrain so resolved
   // entities and their claims become visible on `main` (the archivist already promotes sources/).
-  // Per-stage concurrency cap (ORCH-20 / dogfood #4): >1 lets a stage run that many items' cognition
-  // concurrently, cutting wall-time on a backlog (claims/decompose dominate it). The process-wide
-  // `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across all stages
-  // + jobs + researchers, so a higher cap can never fan out past the global ceiling. Hardcoded for
-  // now; a per-Instance setting is the tracked fast-follow (Control Panel / instance.json). Connect
-  // stays cap=1 until its ephemeral-worktree migration (Phase 2). (STAGE_CAP is module-scoped.)
-  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider({ vaultPath: stagingWt }), lock, undefined, STAGE_CAP, log, tracer);
+  // Per-stage concurrency cap (ORCH-20 / SPEC-0048 SCALE-2): >1 lets a stage run that many items'
+  // cognition concurrently, cutting wall-time on a backlog (claims/decompose dominate it). The
+  // process-wide `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across
+  // all stages + jobs + researchers, so a higher cap can never fan out past the global ceiling. Each
+  // stage is sized from `stageCaps` (instance.json overrides over today's defaults) and live-adjustable
+  // via setActiveInstanceSettings. Connect stays cap=1 until its ephemeral-worktree migration (SCALE-5).
+  const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider({ vaultPath: stagingWt }), lock, undefined, stageCaps.decompose, log, tracer);
   // SPEC-0046 COMPOSE: the FINAL Enrich stage (after Claims). It (re)writes each entity node's
   // encyclopedic prose body from that entity's cited claims — idempotent on the claims signature,
   // with a deterministic blocks-only fallback. Declared first so Claims/Connect can poke it when
   // the claims/links they own change. Its afterDrain promotes the (re)composed entity nodes to main.
-  const compose = new ComposeStage(stagingWt, makeComposeDecider({ vaultPath: stagingWt }), lock, undefined, promoteEvergreen, STAGE_CAP, log, tracer);
+  const compose = new ComposeStage(stagingWt, makeComposeDecider({ vaultPath: stagingWt }), lock, undefined, promoteEvergreen, stageCaps.compose, log, tracer);
   // Connect's afterDrain promotes the resolved/linked nodes, then pokes Compose: a links change
   // means the prose's woven cross-links (COMPOSE-4) should be regenerated.
   const connect = new ConnectStage(
@@ -387,7 +390,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
       void connect.poke();
       void compose.poke();
     },
-    STAGE_CAP,
+    stageCaps.claims,
     log,
     tracer,
   );
@@ -578,16 +581,17 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
   // SPEC-0032 VIZ-2: in-flight carriages — each stage's queue items, `active` = the draining batch
   // (`busy && index < cap`; the drain processes `queue[0..cap)`). Archive's active item is its
   // `processing` (prepended; cap=1, only when a live worker backs it — OBS-26); connect drains 1 block
-  // at a time (cap=1); decompose/claims = STAGE_CAP. Source-keyed items carry the resolved title (PRIN-24).
+  // at a time (cap=1); decompose/claims/archive carry their LIVE per-stage cap (SCALE-2, `stage.getCap()`).
+  // Source-keyed items carry the resolved title (PRIN-24).
   const inFlight = buildInFlightRoster([
     {
       stage: 'archive',
       items: [...(archiveProcessing ? [{ id: archiveProcessing, name: sourceTitles.get(archiveProcessing) }] : []), ...archiveQ.map((id) => ({ id, name: sourceTitles.get(id) }))],
-      busy: orchBusy, cap: 1, since: archiveStatus.updatedAt ?? null,
+      busy: orchBusy, cap: orch.getCap(), since: archiveStatus.updatedAt ?? null,
     },
-    { stage: 'decompose', items: decompQ.map((id) => ({ id, name: sourceTitles.get(id) })), busy: decompose.busy(), cap: STAGE_CAP, since: decompose.currentSince() },
+    { stage: 'decompose', items: decompQ.map((id) => ({ id, name: sourceTitles.get(id) })), busy: decompose.busy(), cap: decompose.getCap(), since: decompose.currentSince() },
     { stage: 'connect', items: connectQ.map((cs) => ({ id: cs.blockKey })), busy: connect.busy(), cap: 1, since: connect.currentSince() },
-    { stage: 'claims', items: claimsQ.map((rel) => ({ id: path.basename(rel, '.md') })), busy: claims.busy(), cap: STAGE_CAP, since: claims.currentSince() },
+    { stage: 'claims', items: claimsQ.map((rel) => ({ id: path.basename(rel, '.md') })), busy: claims.busy(), cap: claims.getCap(), since: claims.currentSince() },
   ]);
 
   // Last activity: the newest of the archivist status, the spans-file mtime (any stage's last span),
@@ -1005,8 +1009,12 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
   let quickCaptureAccelerator: string = DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   let recallBudgetMs: number = DEFAULT_RECALL_BUDGET_MS;
+  let stageCaps: Partial<Record<ScaleStage, number>> | undefined;
+  let copilotCeiling: number | undefined;
+  let priorCfg = defaultInstanceConfig();
   await active.lock.run(async () => {
     prior = await readInstanceConfig(root);
+    priorCfg = prior as typeof priorCfg;
     // OBS-10: keep a valid level. Server-side merge (QA-2 hardening / the #102 lesson): an
     // omitted/invalid level PRESERVES the prior — no caller can clobber a field by omission.
     devLogLevel = (DEV_LOG_LEVELS as readonly string[]).includes(settings.devLogLevel) ? settings.devLogLevel : prior.devLogLevel;
@@ -1018,18 +1026,31 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
     // ASK-17: preserve-on-omission — an omitted recall budget keeps prior; a provided one is clamped to
     // the sane bounds. (prior.recallBudgetMs is always set: readInstanceConfig fills it.)
     recallBudgetMs = settings.recallBudgetMs === undefined ? (prior.recallBudgetMs ?? DEFAULT_RECALL_BUDGET_MS) : clampRecallBudgetMs(settings.recallBudgetMs);
-    // SPEC-0048: preserve the model override + preference list on a settings save (preserve-on-omission,
-    // #102) — InstanceSettings (the Settings surface) doesn't carry them, so an omitted value must keep
-    // prior, never wipe the Principal's model pick.
+    // SCALE-1/2 preserve-on-omission (#102): a wholly-omitted `stageCaps`/`copilotCeiling` keeps prior;
+    // a provided one is merged key-by-key + clamped (Connect pinned to 1, SCALE-5). The model override
+    // + preference list (#345) are likewise preserved on the write below — InstanceSettings carries
+    // them but an omitted value must keep prior, never wipe the Principal's pick.
+    if (settings.stageCaps === undefined) {
+      stageCaps = priorCfg.stageCaps;
+    } else {
+      const merged: Partial<Record<ScaleStage, number>> = { ...(priorCfg.stageCaps ?? {}) };
+      for (const stage of SCALE_STAGES) {
+        if (settings.stageCaps[stage] !== undefined) merged[stage] = clampStageCap(stage, settings.stageCaps[stage]);
+      }
+      stageCaps = Object.keys(merged).length > 0 ? merged : undefined;
+    }
+    copilotCeiling = settings.copilotCeiling === undefined ? priorCfg.copilotCeiling : clampCopilotCeiling(settings.copilotCeiling);
     await writeInstanceConfig(root, {
       autonomyDefault: settings.autonomyDefault,
       devLogLevel,
       quickCaptureAccelerator,
       recallBudgetMs,
-      ...(prior.modelPreferences ? { modelPreferences: prior.modelPreferences } : {}),
-      ...(prior.model ? { model: prior.model } : {}),
+      ...(priorCfg.modelPreferences ? { modelPreferences: priorCfg.modelPreferences } : {}), // preserve MODEL (#345)
+      ...(priorCfg.model ? { model: priorCfg.model } : {}),
+      ...(stageCaps ? { stageCaps } : {}),
+      ...(copilotCeiling !== undefined ? { copilotCeiling } : {}),
     });
-    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs}`);
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs} ceiling=${copilotCeiling ?? 'default'} caps=${JSON.stringify(stageCaps ?? {})}`);
   }, 'instance-settings:write');
   // QCAP-6: apply a changed hotkey live (no restart) — conflict-aware via the agent; degrades to the
   // menubar if the new accelerator clashes (QCAP-9). No-op when running headless without an agent.
@@ -1058,6 +1079,27 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       eventType: 'instance-config-change',
       subjects: {},
       payload: { field: 'devLogLevel', from: prior.devLogLevel, to: devLogLevel, why: 'Principal change via Control Panel' },
+    });
+  }
+  // SPEC-0048 SCALE-4: apply scale changes LIVE (no restart). Resize the global ceiling (env still
+  // wins) and live-set each stage's cap — the new cap is read on the stage's NEXT batch (`setCap`),
+  // so a "run harder/softer" change takes effect within a sweep without rebuilding the pipeline.
+  const effectiveCeiling = applyCopilotCeiling(copilotCeiling);
+  const liveCaps = resolveStageCaps({ stageCaps });
+  active.orch.setCap(liveCaps.archive);
+  active.decompose.setCap(liveCaps.decompose);
+  active.claims.setCap(liveCaps.claims);
+  active.compose.setCap(liveCaps.compose);
+  // Connect is pinned to 1 (SCALE-5) — no setCap.
+  const priorCeiling = priorCfg.copilotCeiling;
+  const priorCaps = JSON.stringify(priorCfg.stageCaps ?? {});
+  if (priorCeiling !== copilotCeiling || priorCaps !== JSON.stringify(stageCaps ?? {})) {
+    active.log.info('scale.applied', { ceiling: effectiveCeiling, caps: liveCaps });
+    await appendAuditEvent(root, {
+      actor: 'panel',
+      eventType: 'instance-config-change',
+      subjects: {},
+      payload: { field: 'scale', ceiling: copilotCeiling ?? 'default', caps: stageCaps ?? {}, why: 'Principal change via Control Panel' },
     });
   }
   return readInstanceConfig(root);

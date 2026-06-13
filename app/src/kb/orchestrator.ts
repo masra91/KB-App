@@ -147,7 +147,7 @@ export class Orchestrator {
   private readonly decider: ArchivistDecider;
   private readonly lock: Mutex;
   private readonly afterDrain?: () => Promise<void>;
-  private readonly cap: number;
+  private cap: number; // mutable for SPEC-0048 SCALE-4 live-apply (see setCap)
   private readonly log: DevLog;
   private readonly tracer: Tracer;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -176,9 +176,20 @@ export class Orchestrator {
     this.decider = decider;
     this.lock = lock;
     this.afterDrain = afterDrain;
-    this.cap = cap;
+    this.cap = Math.max(1, Math.floor(cap));
     this.log = log.child({ scope: 'archive' });
     this.tracer = tracer;
+  }
+
+  /** Live-set the per-stage concurrency cap (SPEC-0048 SCALE-4): the new value is read on the NEXT
+   *  batch (`drainOnce` slices `this.cap` per pass), so a Settings change applies without a restart. */
+  setCap(cap: number): void {
+    this.cap = Math.max(1, Math.floor(cap));
+  }
+
+  /** The current per-stage concurrency cap (for Status display / SPEC-0048 Settings). */
+  getCap(): number {
+    return this.cap;
   }
 
   /** Initial drain + a periodic safety-net sweep (ORCH-15: poke + sweep). */
