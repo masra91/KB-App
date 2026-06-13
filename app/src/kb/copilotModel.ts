@@ -28,9 +28,23 @@ export const DEFAULT_COPILOT_MODEL = 'claude-opus-4.5';
  *
  * `env` is injectable so this stays a pure, unit-testable function (no hidden global read in tests).
  */
+// ORCH-28 model-resilience: the model PROBED + selected from the preference list against the live
+// CLI's accepted catalog at startup (copilotModelProbe.initLaunchModel sets this). It sits between the
+// eval env-override and the hardcoded floor: an explicit `KB_COPILOT_MODEL` still wins (eval), then the
+// probed-resolved model (the real prod path), then `DEFAULT_COPILOT_MODEL` (floor — used before the
+// probe runs / if it was inconclusive). Module-level so the 6 deciders' existing sync
+// `resolveCopilotModel()` calls pick it up with no per-decider change.
+let resolvedLaunchModel: string | null = null;
+
+/** Record the model the startup probe resolved (ORCH-28). Pass null to clear (tests). */
+export function setResolvedLaunchModel(model: string | null): void {
+  resolvedLaunchModel = model && model.trim().length > 0 ? model : null;
+}
+
 export function resolveCopilotModel(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.KB_COPILOT_MODEL;
-  return override && override.trim().length > 0 ? override : DEFAULT_COPILOT_MODEL;
+  if (override && override.trim().length > 0) return override; // eval harness override wins
+  return resolvedLaunchModel ?? DEFAULT_COPILOT_MODEL; // probed model, else the interim floor
 }
 
 /** The resilience fallback model. `copilot --model auto` lets Copilot pick from its own catalog;
