@@ -35,6 +35,26 @@ describe('buildComposePrompt (COMPOSE-3/4 prompt contract)', () => {
   });
 });
 
+describe('buildComposePrompt — depth proportional to evidence (COMPOSE-10)', () => {
+  it('instructs depth that scales with the evidence: fuller when rich, short when sparse, never padded', () => {
+    const p = buildComposePrompt(input).toLowerCase();
+    expect(p).toMatch(/scale the depth to the evidence/);
+    expect(p).toMatch(/fuller,?\s+multi-section/); // many claims → a fuller, multi-section article
+    expect(p).toMatch(/short but clean/); // few claims → short but clean
+    expect(p).toMatch(/never pad|never.*speculate|not.*speculate/); // grounded, never padding (COMPOSE-2)
+    expect(p).toMatch(/stays brief/); // a thin entity stays brief
+  });
+
+  it('presents EVERY claim, so a claim-rich entity has the material for a fuller article', () => {
+    const rich: ComposeInput = {
+      ...input,
+      claims: Array.from({ length: 6 }, (_, i) => ({ statement: `Fact ${i + 1}.`, title: 'Src' })),
+    };
+    const p = buildComposePrompt(rich);
+    for (let i = 1; i <= 6; i++) expect(p).toContain(`[${i}] Fact ${i}.`);
+  });
+});
+
 describe('makeComposeDecider (ORCH-21 seam)', () => {
   // Prompt-faithful fake: reads how many claims the PROMPT actually lists, then returns a grounded
   // decision citing the first — so the test hinges on the prompt presenting numbered claims.

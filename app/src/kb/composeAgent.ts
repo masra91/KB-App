@@ -80,9 +80,16 @@ export function buildComposePrompt(input: ComposeInput): string {
           .join(', ')}.`
       : 'There are no related entities to link.';
   return [
-    'You are the KB-App Compose editor. Write a short ENCYCLOPEDIC page about ONE entity —',
-    'like a Wikipedia article: a brief lede that says what/who it is, then a few sections that',
-    'group related facts into flowing prose. NOT a bullet list, NOT a metadata dump.',
+    'You are the KB-App Compose editor. Write an ENCYCLOPEDIC page about ONE entity — like a',
+    'Wikipedia article: a lede that says what/who it is, then sections that group related facts',
+    'into flowing prose. NOT a bullet list, NOT a metadata dump.',
+    '',
+    'SCALE THE DEPTH TO THE EVIDENCE (COMPOSE-10). When there are MANY claims, write a fuller,',
+    'multi-section article — a lede plus several thematic `##` sections that develop the entity in',
+    'depth. When there are FEW claims, write a short but clean page — a tight lede, perhaps one',
+    'section. The length must match how much grounded material exists: a richly-documented entity',
+    'reads like a real encyclopedia entry, a thin one stays brief. NEVER pad, repeat, or speculate to',
+    'fill space — more depth means MORE of the grounded claims woven in, never invented detail.',
     '',
     'GROUNDING IS ABSOLUTE. You may use ONLY the numbered claims below. You may NOT introduce a',
     'fact that is not in a claim, and you may NOT use outside knowledge. EVERY sentence you write',
@@ -100,7 +107,8 @@ export function buildComposePrompt(input: ComposeInput): string {
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
     '{"sections":[{"heading":"<omit on the first/lede section>","sentences":[{"text":"<one prose sentence, may contain [[Entity]] links, NO citation markers>","claims":[1,2]}]}]}',
-    'The first section is the lede and should omit "heading". Keep it tight and readable.',
+    'The first section is the lede and should omit "heading". Add further `##` sections only as the',
+    'claims warrant — match the article length to the grounded material (COMPOSE-10).',
   ]
     .filter((l) => l !== '')
     .join('\n');

@@ -74,6 +74,8 @@ vi.mock('./pipeline', () => ({
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
+  composeBacklog: async () => ({ ok: false, message: 'no active kb' }),
+  composeBacklogStatus: async () => ({ ok: false, message: 'no active kb' }),
   listResearchersForActive: mocks.listResearchers,
   setActiveResearcherConfig: mocks.setResearcherConfig,
   runActiveResearcherNow: mocks.runResearcherNow,
@@ -449,6 +451,13 @@ describe('SPEC-0030 OBS-17 — kb:pipelineControl delegates set-aside recovery',
     const res = await invoke<{ ok: boolean; message?: string }>('kb:pipelineControl', { action: 'retry', stage: 'claims', itemId: '01ADAID' });
     expect(mocks.pipelineControl).toHaveBeenCalledWith({ action: 'retry', stage: 'claims', itemId: '01ADAID' });
     expect(res).toEqual({ ok: true, message: 'Retrying Ada Lovelace.' });
+  });
+});
+
+describe('SPEC-0046 COMPOSE-9 — kb:composeBacklog / kb:composeBacklogStatus are wired', () => {
+  it('registers the backfill trigger + read-only status handlers and returns the pipeline result', async () => {
+    expect(await invoke<{ ok: boolean; message: string }>('kb:composeBacklog')).toEqual({ ok: false, message: 'no active kb' });
+    expect(await invoke<{ ok: boolean; message: string }>('kb:composeBacklogStatus')).toEqual({ ok: false, message: 'no active kb' });
   });
 });
 

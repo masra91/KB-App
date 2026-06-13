@@ -24,7 +24,7 @@ import { CLAIMS_BLOCK_START, CLAIMS_BLOCK_END, oneLine } from './claimDoc';
 import { LINKS_BLOCK_START, LINKS_BLOCK_END } from './connectDoc';
 import { deriveSourceTitle } from './sourceDoc';
 import { parseEntityNode, parseClaimBacklink, findEntityFiles } from './claimsStage';
-import { applyProse, renderProse } from './composeDoc';
+import { applyProse, renderProse, hasProse } from './composeDoc';
 import type { CitedClaim } from './compose';
 import { makeComposeDecider, type ComposeDecider, type ComposeInput } from './composeAgent';
 import { Mutex } from './stageLock';
@@ -36,6 +36,9 @@ import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan 
 const STAGE = 'compose';
 /** Default attempts (per claims-signature) before an un-composable entity is set aside (ORCH-12). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
+/** Max entities composed in ONE drain pass before yielding + re-poking (COMPOSE-9 bounded-per-pass):
+ *  a large backfill drains across several bounded passes, never one giant uninterruptible sweep. */
+export const BACKFILL_SWEEP_CAP = 50;
 
 /** One parsed compose audit line we care about (keyed by entityId, scoped to a claims signature). */
 interface ComposeAuditLine {
@@ -131,7 +134,14 @@ export async function readComposeState(sourceDir: string, entityId: string, sig:
       continue;
     }
     if (obj.stage !== STAGE || obj.entityId !== entityId || obj.sig !== sig) continue;
-    if (obj.event === 'composed') composed = true;
+    if (obj.event === 'reopened') {
+      // A user-triggered backfill re-attempt (COMPOSE-9 one-shot trigger): supersede prior
+      // failed/setaside for THIS signature so a transiently-failed entity re-enters the queue. Does
+      // NOT clear `composed` — an already-composed entity stays composed (reopen only un-sticks the
+      // uncomposed backlog).
+      failures = 0;
+      setAside = false;
+    } else if (obj.event === 'composed') composed = true;
     else if (obj.event === 'failed') failures += 1;
     else if (obj.event === 'setaside') setAside = true;
   }
@@ -422,11 +432,20 @@ export class ComposeStage {
 
   private async drainOnce(): Promise<void> {
     let queue = await readComposeQueue(this.root, this.maxAttempts);
-    let worked = false;
-    while (queue.length > 0) {
+    // A backlog sweep (COMPOSE-9) vs a live poke: more than one batch's worth pending ⇒ we're
+    // backfilling the existing corpus, so emit progress.
+    const backfill = queue.length > this.cap;
+    let composedTotal = 0;
+    let processed = 0;
+    // COMPOSE-9 bounded-per-pass: compose at most BACKFILL_SWEEP_CAP entities in one drain, then yield
+    // and re-poke to continue — a large backlog drains across several bounded passes rather than one
+    // giant uninterruptible sweep (each pass still publishes incrementally via the coalesced promote).
+    while (queue.length > 0 && processed < BACKFILL_SWEEP_CAP) {
       const batch = queue.slice(0, this.cap);
+      processed += batch.length;
+      let batchComposed = 0;
       try {
-        await Promise.all(
+        const results = await Promise.all(
           batch.map((entityRel) => {
             const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: path.basename(entityRel, '.md') });
             return composeOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, this.log, span).then(
@@ -441,13 +460,100 @@ export class ComposeStage {
             );
           }),
         );
-        worked = true;
+        batchComposed = results.filter((r) => r.composed).length;
+        composedTotal += batchComposed;
       } catch (err) {
         this.log.error('compose.drain-error', { err });
         return;
       }
+      // STAGING-12 / COMPOSE-9: request a COALESCED promotion after EACH batch (not once at the very
+      // end), so a large backfill publishes to `main` INCREMENTALLY — the Principal sees articles
+      // appear progressively rather than nothing until all ~700 entities finish. The coalescingPromoter
+      // debounces these requests into infrequent bursts (afterDrain = `promoter.request()`), so this is
+      // never a per-entity promotion storm against the live Obsidian vault (the #319 P1).
+      if (batchComposed > 0 && this.afterDrain) await this.lock.run(() => this.afterDrain!(), 'compose:afterDrain');
       queue = await readComposeQueue(this.root, this.maxAttempts);
+      if (backfill) this.log.info('compose.backfill-progress', { composed: composedTotal, remaining: queue.length });
     }
-    if (worked && this.afterDrain) await this.lock.run(() => this.afterDrain!(), 'compose:afterDrain');
+    // Bounded-per-pass: a backlog remains (we hit the sweep cap) → continue on the next drain pass
+    // (runDrains loops while `pending`), so the corpus finishes to completion across passes (COMPOSE-9).
+    if (queue.length > 0) this.pending = true;
   }
+}
+
+/** A claim-bearing entity's compose status for the backfill (COMPOSE-9 "ship the whole vault"
+ *  observability): how many entities WITH cited claims have a composed article vs still need one. An
+ *  entity with no claims isn't counted (nothing to compose). `composed` is measured by the presence of
+ *  a prose body (not just a marker), so it reflects what a human opening the vault actually sees. */
+export interface ComposeBacklogStats {
+  total: number; // entities with cited claims (the universe Compose should cover)
+  composed: number; // of those, how many already read as an article (have a prose body)
+  remaining: number; // total - composed (claim-bearing entities still block-only)
+}
+
+export async function composeBacklogStats(root: string): Promise<ComposeBacklogStats> {
+  root = path.resolve(root);
+  let total = 0;
+  let composed = 0;
+  for (const rel of await findEntityFiles(root)) {
+    let md: string;
+    try {
+      md = await fs.readFile(path.join(root, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!hasClaims(md)) continue;
+    total += 1;
+    if (hasProse(md)) composed += 1;
+  }
+  return { total, composed, remaining: total - composed };
+}
+
+/**
+ * COMPOSE-9 one-shot backfill re-attempt: append a per-entity `reopened` marker (for the current
+ * claims signature) to every entity whose compose is currently SET ASIDE — so a transiently-failed
+ * entity (e.g. Compose was unavailable during the autonomous sweep) re-enters the queue and composes
+ * on the next drain. This is what makes the "backfill the vault" trigger GUARANTEE completion rather
+ * than leaving a stuck remnant. Idempotent: an entity that isn't set aside is untouched; if none are
+ * set aside it's a no-op. One commit, advanced under the canonical-writer lock. Returns the count.
+ */
+export async function reopenComposeSetAside(root: string, lock: Mutex = new Mutex()): Promise<number> {
+  root = path.resolve(root);
+  let reopened = 0;
+  const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
+    reopened = 0;
+    for (const rel of await findEntityFiles(wt)) {
+      let md: string;
+      try {
+        md = await fs.readFile(path.join(wt, rel), 'utf8');
+      } catch {
+        continue;
+      }
+      if (!hasClaims(md)) continue;
+      let sources: string[];
+      try {
+        sources = parseEntityNode(md).sources;
+      } catch {
+        continue;
+      }
+      const sig = claimsBlockSig(md);
+      const entityId = path.basename(rel, '.md');
+      const state = await readComposeState(path.join(wt, sources[0]), entityId, sig);
+      if (!state.setAside) continue;
+      const auditPath = path.join(wt, sources[0], 'audit.jsonl');
+      await fs.mkdir(path.dirname(auditPath), { recursive: true });
+      await fs.appendFile(auditPath, auditLine({ runId: ulid(), entityId, sig, event: 'reopened' }), 'utf8');
+      reopened += 1;
+    }
+    if (reopened === 0) return false; // nothing set aside → nothing to recover (noop)
+    const wtGit = simpleGit(wt);
+    await wtGit.raw('add', '-A');
+    await wtGit.commit(`compose: reopened ${reopened} set-aside entit${reopened === 1 ? 'y' : 'ies'} for backfill`);
+    return true;
+  };
+  const onExhausted = async (): Promise<void> => {
+    throw new Error('compose: could not advance reopen-backfill — canonical too contended');
+  };
+  await withConcurrentAdvance({ root, lock, stage: STAGE }, prepare, onExhausted);
+  return reopened;
 }

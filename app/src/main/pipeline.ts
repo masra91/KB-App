@@ -20,7 +20,7 @@ import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
 import { makeClaimsDecider } from '../kb/claimsAgent';
-import { ComposeStage, readComposeQueue } from '../kb/composeStage';
+import { ComposeStage, readComposeQueue, reopenComposeSetAside, composeBacklogStats } from '../kb/composeStage';
 import { makeComposeDecider } from '../kb/composeAgent';
 import { ConnectStage, readConnectQueue, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from '../kb/connectStage';
 import { makeConnectDecider } from '../kb/connectAgent';
@@ -84,7 +84,7 @@ import { DEFAULT_POSTURE, type JobBehavior, type JobConfig, type JournalEntry } 
 import type { Review } from '../kb/reviews';
 import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
-import type { FullReplayResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus } from '../kb/types';
+import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
@@ -1503,5 +1503,51 @@ export async function fullReplay(): Promise<FullReplayResult> {
     // post-replay stage set always mirrors normal startup (no dormant-stage divergence).
     if (active) startActiveStages(active);
     replaying = false;
+  }
+}
+
+function composeCoverageMessage(stats: { total: number; composed: number; remaining: number }): string {
+  if (stats.total === 0) return 'No entities with claims to compose yet.';
+  return stats.remaining === 0
+    ? `All ${stats.total} entities with claims read as articles.`
+    : `${stats.composed} of ${stats.total} entities composed, ${stats.remaining} to go.`;
+}
+
+/**
+ * SPEC-0046 COMPOSE-9 — read-only "is the whole vault composed yet?" coverage (no side effects). Reads
+ * the staging worktree (the compose source of truth) so it reflects work composed but not yet promoted.
+ */
+export async function composeBacklogStatus(): Promise<ComposeBacklogResult> {
+  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  try {
+    const stats = await composeBacklogStats(active.stagingWt);
+    return { ok: true, ...stats, message: composeCoverageMessage(stats) };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * SPEC-0046 COMPOSE-9 — the one-shot "backfill the vault" trigger: re-attempt any set-aside entities
+ * (so a transient Compose outage doesn't leave a stuck remnant), then kick the Compose stage to drain
+ * the uncomposed backlog (bounded per pass, coalesced promotion — never a per-entity storm). Returns
+ * the CURRENT coverage immediately; the backfill then runs in the background.
+ */
+export async function composeBacklog(): Promise<ComposeBacklogResult> {
+  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  const { stagingWt, lock, compose } = active;
+  try {
+    const reopened = await reopenComposeSetAside(stagingWt, lock);
+    void compose.poke(); // drain the backlog (bounded, coalesced); runs in the background
+    const stats = await composeBacklogStats(stagingWt);
+    const tail = reopened > 0 ? ` (re-queued ${reopened} that had stalled)` : '';
+    return {
+      ok: true,
+      ...stats,
+      reopened,
+      message: stats.remaining > 0 ? `${composeCoverageMessage(stats)} Composing…${tail}` : composeCoverageMessage(stats),
+    };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : String(err) };
   }
 }
