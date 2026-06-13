@@ -65,7 +65,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
       if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
       throw err;
     }
-  });
+  }, { stage: 'decompose' }); // SCALE-3: tag the stage so the ceiling reserves it a slot
 
 /**
  * The versioned per-stage instruction template (SPEC-0014 Q9 / SPEC-0015 §3.1), composed

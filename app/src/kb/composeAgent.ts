@@ -71,7 +71,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
       if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
       throw err;
     }
-  });
+  }, { stage: 'compose' }); // SCALE-3: tag the stage so the ceiling reserves it a slot
 
 /** The versioned per-stage instruction template (SPEC-0046 §3/§4), composed per entity. */
 export const COMPOSE_PROMPT_VERSION = 'compose/v1';

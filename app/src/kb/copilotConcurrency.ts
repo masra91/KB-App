@@ -45,6 +45,21 @@ export interface AcquireOptions {
    * instead of hanging. Omitted = wait indefinitely (background pipeline acquisitions are patient).
    */
   timeoutMs?: number;
+  /**
+   * SPEC-0048 SCALE-3 no-starvation: the pipeline STAGE this background acquisition is for
+   * (`decompose`/`connect`/`claims`/`compose`/`archive`). The semaphore guarantees that any stage with
+   * work keeps ≥1 RESERVED slot — a busy upstream stage (e.g. Decompose at cap 3) can't consume the
+   * whole ceiling and starve a downstream stage (Claims/Compose) to zero (the live BLOCKED pathology).
+   * Untagged background acquisitions (jobs/researchers) share the remaining pool; priority (interactive)
+   * acquisitions are unaffected (they preempt, ASK-16).
+   */
+  stage?: string;
+}
+
+/** A queued acquisition awaiting a slot — carries its lane + the stage it reserves for (SCALE-3). */
+interface Waiter {
+  grant: () => void;
+  stage?: string;
 }
 
 /** Thrown by a bounded {@link Semaphore.acquire} when no slot frees within `timeoutMs` (ASK-16). */
@@ -64,8 +79,11 @@ export class CopilotCapacityTimeoutError extends Error {
  */
 export class Semaphore {
   private inFlight = 0;
-  private readonly waiters: Array<() => void> = []; // background, FIFO
-  private readonly priorityWaiters: Array<() => void> = []; // interactive/foreground, served before background
+  private readonly waiters: Waiter[] = []; // background, FIFO (scanned for the reservation rule)
+  private readonly priorityWaiters: Waiter[] = []; // interactive/foreground, served before background
+  /** In-flight count per stage tag (SCALE-3) — drives the per-stage reservation. Untagged in-flight
+   *  acquisitions don't count toward any stage's reservation (they share the leftover pool). */
+  private readonly inFlightByStage = new Map<string, number>();
   /** The live concurrency ceiling. Mutable for SPEC-0048 SCALE-1 (Settings-driven ceiling, live-applied
    *  without a restart). `acquire` reads it dynamically, so a resize takes effect on the next acquire. */
   public ceiling: number;
@@ -73,55 +91,98 @@ export class Semaphore {
     this.ceiling = ceiling;
   }
 
+  /** How many distinct OTHER stages (≠ `exclude`) currently have a queued waiter AND zero in-flight —
+   *  i.e. stages still owed their RESERVED first slot. A stage taking a 2nd+ slot must leave this many
+   *  free so none of them starves (SCALE-3). */
+  private stagesNeedingReservation(exclude: string | undefined): number {
+    const set = new Set<string>();
+    for (const w of this.waiters) {
+      if (w.stage !== undefined && w.stage !== exclude && (this.inFlightByStage.get(w.stage) ?? 0) === 0) set.add(w.stage);
+    }
+    return set.size;
+  }
+
+  /** Whether a BACKGROUND acquisition for `stage` may be granted right now under the reservation rule
+   *  (SCALE-3). A stage's FIRST slot (its reservation) is always grantable while any slot is free; a
+   *  2nd+ slot (or an untagged acquisition) is granted only if it leaves ≥1 free per other stage still
+   *  owed its reserved slot. */
+  private canGrantBackground(stage: string | undefined): boolean {
+    if (this.inFlight >= this.ceiling) return false;
+    const free = this.ceiling - this.inFlight;
+    if (stage !== undefined && (this.inFlightByStage.get(stage) ?? 0) === 0) return true; // reserved first slot
+    return free > this.stagesNeedingReservation(stage);
+  }
+
+  /** Re-evaluate the queues after a release/resize: priority waiters first (ASK-16, always grantable
+   *  while a slot is free), then background waiters that satisfy the reservation rule (SCALE-3). */
+  private pump(): void {
+    while (this.inFlight < this.ceiling && this.priorityWaiters.length > 0) {
+      this.priorityWaiters.shift()!.grant();
+    }
+    let progressed = true;
+    while (progressed && this.inFlight < this.ceiling) {
+      progressed = false;
+      for (let i = 0; i < this.waiters.length; i++) {
+        if (this.canGrantBackground(this.waiters[i].stage)) {
+          this.waiters.splice(i, 1)[0].grant();
+          progressed = true; // state changed — re-scan from the top
+          break;
+        }
+      }
+    }
+  }
+
   /**
-   * Resize the ceiling live (SCALE-1/4). Raising it immediately grants the freed capacity to queued
-   * waiters (priority first), so a "run harder" change takes effect at once. Lowering it never
-   * force-releases an in-flight slot — `inFlight` simply drains below the new ceiling as holders
-   * finish, and no new slot is granted until there's room. A no-op when unchanged.
+   * Resize the ceiling live (SCALE-1/4). Raising it immediately re-pumps so the freed capacity goes to
+   * queued waiters (priority first, then the reservation rule). Lowering it never force-releases an
+   * in-flight slot — `inFlight` simply drains below the new ceiling as holders finish. A no-op when unchanged.
    */
   resize(ceiling: number): void {
     const next = Math.max(1, Math.floor(ceiling));
     if (next === this.ceiling) return;
     this.ceiling = next;
-    while (this.inFlight < this.ceiling) {
-      const grantNext = this.priorityWaiters.shift() ?? this.waiters.shift();
-      if (!grantNext) break;
-      grantNext(); // grants + increments inFlight (still ≤ the new ceiling)
-    }
+    this.pump();
   }
 
   acquire(opts: AcquireOptions = {}): Promise<() => void> {
     return new Promise<() => void>((resolve, reject) => {
       let settled = false; // guards grant-vs-timeout: whichever fires first wins, the other no-ops
       let timer: ReturnType<typeof setTimeout> | undefined;
+      const stage = opts.stage;
       const grant = (): void => {
         if (settled) return; // already timed out / settled
         settled = true;
         if (timer) clearTimeout(timer);
         this.inFlight++;
+        if (stage !== undefined) this.inFlightByStage.set(stage, (this.inFlightByStage.get(stage) ?? 0) + 1);
         let released = false;
         resolve(() => {
           if (released) return; // idempotent release
           released = true;
           this.inFlight--;
-          // Hand the freed slot to a PRIORITY (foreground) waiter first, then background (ASK-16).
-          const next = this.priorityWaiters.shift() ?? this.waiters.shift();
-          if (next) next(); // still ≤ ceiling (one out, one in)
+          if (stage !== undefined) {
+            const n = (this.inFlightByStage.get(stage) ?? 1) - 1;
+            if (n <= 0) this.inFlightByStage.delete(stage);
+            else this.inFlightByStage.set(stage, n);
+          }
+          this.pump();
         });
       };
-      // A free slot is granted immediately. (Waiters only accumulate while full, and release re-grants
-      // synchronously, so a free slot never coexists with a pending waiter — no queue-jump race here.)
-      if (this.inFlight < this.ceiling) {
+      // Grant immediately when allowed: priority preempts on any free slot (ASK-16); background respects
+      // the per-stage reservation (SCALE-3). Otherwise queue and let `pump` grant it later.
+      const grantableNow = opts.priority ? this.inFlight < this.ceiling : this.canGrantBackground(stage);
+      if (grantableNow) {
         grant();
         return;
       }
       const queue = opts.priority ? this.priorityWaiters : this.waiters;
-      queue.push(grant);
+      const waiter: Waiter = { grant, stage };
+      queue.push(waiter);
       if (opts.timeoutMs !== undefined) {
         timer = setTimeout(() => {
           if (settled) return;
           settled = true;
-          const idx = queue.indexOf(grant);
+          const idx = queue.indexOf(waiter);
           if (idx >= 0) queue.splice(idx, 1); // give up our place in line
           reject(new CopilotCapacityTimeoutError(opts.timeoutMs as number));
         }, opts.timeoutMs);
@@ -141,6 +202,10 @@ export class Semaphore {
   /** Test/diagnostic: how many PRIORITY (foreground) acquisitions are queued. */
   get priorityWaiting(): number {
     return this.priorityWaiters.length;
+  }
+  /** Test/diagnostic: in-flight count for a given stage tag (SCALE-3 reservation). */
+  activeForStage(stage: string): number {
+    return this.inFlightByStage.get(stage) ?? 0;
   }
 }
 
@@ -169,8 +234,8 @@ export function currentCopilotCeiling(): number {
  * spawn. Acquires before, releases after (even on throw). For a long-lived SDK session that holds a
  * copilot process for its lifetime, use {@link acquireCopilotSlot} and release on disconnect.
  */
-export async function withCopilotSlot<T>(fn: () => Promise<T>): Promise<T> {
-  const release = await copilotSemaphore.acquire();
+export async function withCopilotSlot<T>(fn: () => Promise<T>, opts: AcquireOptions = {}): Promise<T> {
+  const release = await copilotSemaphore.acquire(opts);
   try {
     return await fn();
   } finally {

@@ -57,7 +57,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
       if (err instanceof Error && stderr) err.message += `\n[copilot stderr] ${String(stderr).slice(0, 2000)}`;
       throw err;
     }
-  });
+  }, { stage: 'archive' }); // SCALE-3: tag the stage so the ceiling reserves it a slot
 
 /** The versioned per-stage instruction template (SPEC-0014 Q9), composed per item. */
 export function buildPrompt(meta: CapturedMeta): string {

@@ -143,6 +143,83 @@ describe('withCopilotSlot / acquireCopilotSlot (the shared global slot)', () => 
   });
 });
 
+describe('Semaphore — SPEC-0048 SCALE-3 per-stage no-starvation reservation', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('a stage ALONE still fans out to the full ceiling (the reservation only bites under contention)', async () => {
+    const sem = new Semaphore(3);
+    let inFlight = 0;
+    let peak = 0;
+    await Promise.all(
+      Array.from({ length: 10 }, () =>
+        (async () => {
+          const rel = await sem.acquire({ stage: 'decompose' });
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await tick();
+          inFlight--;
+          rel();
+        })(),
+      ),
+    );
+    expect(peak).toBe(3); // no false starvation when no other stage is contending
+  });
+
+  it('a busy upstream stage cannot starve a downstream stage to zero (the live BLOCKED-Claims bug)', async () => {
+    const sem = new Semaphore(4); // the dogfood ceiling
+    // Decompose grabs 3 + Connect 1 = the whole ceiling (the exact starvation config).
+    const d = [
+      await sem.acquire({ stage: 'decompose' }),
+      await sem.acquire({ stage: 'decompose' }),
+      await sem.acquire({ stage: 'decompose' }),
+    ];
+    const c = await sem.acquire({ stage: 'connect' });
+    expect(sem.active).toBe(4);
+    expect(sem.activeForStage('decompose')).toBe(3);
+
+    // Claims + Compose each have work; a HUNGRY Decompose also wants a 4th slot.
+    let claims = false;
+    let compose = false;
+    const claimsP = sem.acquire({ stage: 'claims' }).then((r) => ((claims = true), r));
+    const composeP = sem.acquire({ stage: 'compose' }).then((r) => ((compose = true), r));
+    void sem.acquire({ stage: 'decompose' }); // hungry 4th — must NOT win the freed slots over a starved stage
+    await tick();
+    expect(claims).toBe(false); // still full
+    expect(compose).toBe(false);
+
+    // Decompose finishes one → the freed slot goes to a STARVED stage (its reserved slot), not back to decompose.
+    d[0]();
+    await tick();
+    expect(claims || compose).toBe(true);
+    // Decompose finishes another → the OTHER starved stage gets ITS reserved slot.
+    d[1]();
+    await tick();
+    expect(claims && compose).toBe(true); // BOTH downstream stages ran — no starvation
+    expect(sem.activeForStage('decompose')).toBeLessThanOrEqual(2); // the hungry 4th stayed held back
+
+    c();
+    d[2]();
+    (await claimsP)();
+    (await composeP)();
+  });
+
+  it('priority (interactive) acquisitions still preempt — the reservation never blocks the human (ASK-16)', async () => {
+    const sem = new Semaphore(2);
+    const d = [await sem.acquire({ stage: 'decompose' }), await sem.acquire({ stage: 'decompose' })]; // full
+    let interactive = false;
+    const pP = sem.acquire({ priority: true }).then((r) => ((interactive = true), r));
+    const bgP = sem.acquire({ stage: 'claims' }); // a background stage also waiting
+    await tick();
+    expect(interactive).toBe(false); // full
+    d[0]();
+    await tick();
+    expect(interactive).toBe(true); // the freed slot went to the human FIRST (ASK-16), not the stage
+    d[1]();
+    (await pP)();
+    (await bgP)();
+  });
+});
+
 /** Local helper: run `fn` holding one slot of `sem` (mirrors withCopilotSlot but on an explicit instance). */
 async function withSem<T>(sem: Semaphore, fn: () => Promise<T>): Promise<T> {
   const release = await sem.acquire();
