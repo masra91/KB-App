@@ -23,6 +23,8 @@ import {
   getActiveInstanceSettings,
   setActiveInstanceSettings,
   listAgentsForActive,
+  getModelCatalogForActive,
+  setActiveModel,
   listResearchersForActive,
   setActiveResearcherConfig,
   runActiveResearcherNow,
@@ -92,6 +94,8 @@ import type {
   Lineage,
   InstanceSettings,
   AgentView,
+  ModelCatalogView,
+  SetModelResult,
   ResearcherView,
   ResearcherConfigPatch,
   ResearcherLastRun,
@@ -550,6 +554,10 @@ export function registerIpc(): void {
   ipcMain.handle('kb:setInstanceSettings', async (_e, s: InstanceSettings): Promise<InstanceSettings> => setActiveInstanceSettings(s));
 
   ipcMain.handle('kb:listAgents', async (): Promise<AgentView[]> => listAgentsForActive());
+
+  // SPEC-0048: the model picker — the live accepted catalog + resolved model, and a validated set.
+  ipcMain.handle('kb:getModelCatalog', async (): Promise<ModelCatalogView> => getModelCatalogForActive());
+  ipcMain.handle('kb:setModel', async (_e, id: string | null): Promise<SetModelResult> => setActiveModel(id));
 
   // SPEC-0028 RESEARCH-15: the Control Panel's Researchers view — list/configure researchers,
   // on-demand "Run now" (test pass), and recent-run history. The renderer gates risky changes

@@ -58,8 +58,8 @@ import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvent
 import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type InstanceConfig } from '../kb/instanceConfig';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
-import { resolveCopilotModel } from '../kb/copilotModel';
-import { initLaunchModel } from '../kb/copilotModelProbe';
+import { resolveCopilotModel, setResolvedLaunchModel } from '../kb/copilotModel';
+import { initLaunchModel, probeAcceptedModels, validateModel } from '../kb/copilotModelProbe';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
@@ -89,7 +89,7 @@ import type { Review } from '../kb/reviews';
 import { reviewToSummary } from '../kb/reviewSummary';
 import type { AuditEvent } from '../kb/audit';
 import type { AskResult } from '../kb/recall';
-import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus, ReviewSummary } from '../kb/types';
+import type { FullReplayResult, ComposeBacklogResult, JobView, JobConfigPatch, RunJobResult, InstanceSettings, AgentView, ModelCatalogView, SetModelResult, ResearcherView, ResearcherConfigPatch, ResearcherLastRun, RunResearcherResult, SaveRecallOutputResult, PipelineControlRequest, PipelineControlResult, QuiesceStatus, ReviewSummary } from '../kb/types';
 import { lastRunFromEvent } from '../kb/researchersPanel';
 
 /** Per-drain concurrency cap for decompose + claims (ORCH-17/18). Connect + archive stay cap=1.
@@ -1072,6 +1072,56 @@ export async function listAgentsForActive(): Promise<AgentView[]> {
     requestedModel: resolveCopilotModel(),
     pipelineActive: active !== null,
   });
+}
+
+/** SPEC-0048 — the model picker's data: the live CLI accepted catalog (probed), the currently-resolved
+ *  launch model, the persisted global pick (if any), and whether that pick is stale (no longer accepted
+ *  by this CLI version → the brass note). Best-effort: a probe miss leaves `accepted` null (the picker
+ *  shows the resolved/configured value but can't offer a fresh list). */
+export async function getModelCatalogForActive(): Promise<ModelCatalogView> {
+  const accepted = await probeAcceptedModels();
+  const resolved = resolveCopilotModel();
+  const configured = active ? (await readInstanceConfig(active.stagingWt)).model : undefined;
+  const staleConfigured = !!configured && accepted !== null && !accepted.includes(configured);
+  return { accepted, resolved, configured, staleConfigured };
+}
+
+/** SPEC-0048 — persist the Principal's global model pick (Agents-view picker), validated against the
+ *  live CLI catalog first so a stale/rejected id is REFUSED (never persisted into a hard-break). An
+ *  empty/null id clears the override (→ the preference-list probe re-resolves). Applies live via
+ *  `setResolvedLaunchModel` so new launches use it without a restart. */
+export async function setActiveModel(id: string | null): Promise<SetModelResult> {
+  if (!active) return { ok: false, resolved: resolveCopilotModel() };
+  const root = active.stagingWt;
+  const trimmed = (id ?? '').trim();
+
+  if (trimmed.length === 0) {
+    // Clear the override → re-resolve from the preference list against the live catalog.
+    let prefs: string[] | undefined;
+    await active.lock.run(async () => {
+      const prior = await readInstanceConfig(root);
+      prefs = prior.modelPreferences;
+      const { model: _drop, ...rest } = prior;
+      void _drop;
+      await writeInstanceConfig(root, rest);
+      await commitControlFile(root, instanceConfigPath(root), 'instance model=cleared');
+    }, 'instance-model:write');
+    await initLaunchModel({ preferences: prefs, log: active.log.child({ scope: 'model' }) }).catch(() => {});
+    return { ok: true, resolved: resolveCopilotModel() };
+  }
+
+  // Validate the pick against the live catalog: a rejected id is refused (resolution unchanged). An
+  // `unknown` (un-probable CLI) is allowed — the per-call `auto` net still guards a real launch reject.
+  const { result } = await validateModel(trimmed);
+  if (result === 'rejected') return { ok: false, resolved: resolveCopilotModel(), reason: 'rejected' };
+
+  await active.lock.run(async () => {
+    const prior = await readInstanceConfig(root);
+    await writeInstanceConfig(root, { ...prior, model: trimmed });
+    await commitControlFile(root, instanceConfigPath(root), `instance model=${trimmed}`);
+  }, 'instance-model:write');
+  setResolvedLaunchModel(trimmed); // apply live — new launches use it immediately
+  return { ok: true, resolved: resolveCopilotModel() };
 }
 
 // --- Control Panel · Watched folders (SPEC-0037 WATCH-9; over the watch registry) ---
