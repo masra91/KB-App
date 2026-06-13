@@ -2,6 +2,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { buildManifest } from './manifest';
 import { DEFAULT_JUDGE_MODEL } from './judge';
+import { DEFAULT_COPILOT_MODEL } from '../../src/kb/copilotModel';
 
 afterEach(() => {
   delete process.env.KB_COPILOT_MODEL;
@@ -16,8 +17,8 @@ describe('buildManifest (EVAL-9)', () => {
     expect(m.promptVersions.decompose).toMatch(/decompose\//);
     expect(m.node).toBe(process.version);
   });
-  it('falls back to the SDK default SUT model when the env is unset', () => {
+  it('records the in-app pinned SUT model when the env is unset (ORCH-16 — no unrecorded SDK default)', () => {
     delete process.env.KB_COPILOT_MODEL;
-    expect(buildManifest('s', 'default', 'T').sutModel).toBe('copilot-default');
+    expect(buildManifest('s', 'default', 'T').sutModel).toBe(DEFAULT_COPILOT_MODEL);
   });
 });

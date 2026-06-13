@@ -58,6 +58,7 @@ import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvent
 import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel } from '../kb/instanceConfig';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
+import { resolveCopilotModel } from '../kb/copilotModel';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
@@ -1046,7 +1047,9 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
  *  the resolved model (env-requested or Copilot default) + live running/idle status (PANEL-9). */
 export async function listAgentsForActive(): Promise<AgentView[]> {
   return buildAgentViews(AGENT_CATALOG, {
-    requestedModel: process.env.KB_COPILOT_MODEL || undefined,
+    // ORCH-16: show the pinned model the agents actually launch with (resolveCopilotModel),
+    // not the bare env — prod pins in-app, so the Agents view reflects what really runs.
+    requestedModel: resolveCopilotModel(),
     pipelineActive: active !== null,
   });
 }

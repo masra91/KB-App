@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
+import { resolveCopilotModel } from './copilotModel';
 import { parseDecomposeDecision, type DecomposeDecision } from './decompose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -35,14 +36,10 @@ export type DecomposeDecider = (input: SourceInput, ctx?: SpanCtx) => Promise<De
  *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
 export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
-function requestedModel(): string | undefined {
-  return process.env.KB_COPILOT_MODEL || undefined;
-}
-
-/** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace (ORCH-16). */
+/** Launch flags (excludes `-p <prompt>`); recorded verbatim in the AgentTrace (ORCH-16). The
+ *  model is pinned in-app so prod never silently inherits `~/.copilot/settings.json`. */
 function launchFlags(): string[] {
-  const model = requestedModel();
-  return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
+  return ['--no-ask-user', '--model', resolveCopilotModel()];
 }
 
 const defaultRunner: CopilotRunner = async (prompt, cwd) =>
@@ -171,7 +168,7 @@ export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): Decomp
     }
     if (!available) throw new Error('decompose: copilot unavailable');
 
-    const model = requestedModel() ?? 'default';
+    const model = resolveCopilotModel();
     const params = launchFlags();
     const at = new Date().toISOString();
     const t0 = Date.now();
