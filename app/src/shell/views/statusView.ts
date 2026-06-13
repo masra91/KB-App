@@ -293,6 +293,23 @@ function legendHtml(): string {
   </details>`;
 }
 
+/**
+ * VIZ-12 — the rail's primary fill is the two-segment PENDING bar (DEV-6's bar-fill geometry, #336):
+ * the **in-progress** segment is the warm EMBER base anchored at the spine (breathing — the
+ * Principal's "fade"), the **queued** segment a still SLATE cap stacked above (brass only when the
+ * backlog is actually STUCK). Heights are a % of the rail track, scaled to the peak pending across
+ * stations (`st.pendingBar`). `0` pending → an empty track (calm/idle). Reads live off `view.inFlight`
+ * so it's never the stale cumulative end-state; the ember segment is present *iff* something is
+ * genuinely `active` (no frozen breathing bar). The bar is decorative — the ink counts + the `title`
+ * carry the accessible reading. ENG-16: a NaN/negative geometry floored to 0 in the model.
+ */
+function railFillHtml(st: StationModel): string {
+  const { activePct, queuedPct } = st.pendingBar;
+  const active = activePct > 0 ? `<span class="line-pending-active" style="height:${activePct}%"></span>` : '';
+  const queued = queuedPct > 0 ? `<span class="line-pending-queued${st.queueConcerning ? ' line-queue-concern' : ''}" style="height:${queuedPct}%"></span>` : '';
+  return `<span class="line-rail-fill">${active}${queued}</span>`;
+}
+
 function stationHtml(st: StationModel): string {
   // Small text (the state word, counts, captions, queue, set-aside badge) stays ink/ink-muted; the
   // state hue rides the glyph + the gauge-rail bar (large/graphic) only (§3 contrast rule). VIZ-10
@@ -306,21 +323,27 @@ function stationHtml(st: StationModel): string {
   const caption = r.caption
     ? `<span class="line-rail-caption line-cap-${r.captionKind} viz-numeric"${r.captionTitle ? ` title="${esc(r.captionTitle)}"` : ''}>${esc(r.caption)}</span>`
     : '';
-  // Lane 2 — LIVE-STATE cluster: the real backlog (role 3, brass when concerning), current item, and
-  // the set-aside badge — the numbers that are actually *here*, not flowing through.
-  const queue =
-    st.queueDepth > 0
-      ? `<span class="line-station-queue viz-body${st.queueConcerning ? ' line-queue-concern' : ''}" title="${st.queueDepth} waiting to be processed at ${esc(st.name)}">queue <span class="viz-numeric">${st.queueDepth}</span></span>`
-      : '';
+  // Lane 2 — LIVE-STATE cluster (VIZ-12): the two pending NUMBERS (ink, §3) sitting here — `▣ N active`
+  // (the ember glyph carries the heat; the count is ink-numeric) + `queue N` (waiting, brass when the
+  // backlog is actually stuck) — then the current item + the set-aside badge. These are the actionable
+  // sitting-here numbers, apart from the rail's cumulative volume/projection (a projection, never live).
+  const active = st.inProgress > 0
+    ? `<span class="line-station-active viz-body" title="${st.inProgress} actively being worked at ${esc(st.name)}"><span class="line-active-glyph" aria-hidden="true">▣</span> <span class="viz-numeric">${st.inProgress}</span> <span class="viz-signage">active</span></span>`
+    : '';
+  // `queue N` is the existing live-state chip (queueDepth, VIZ-10's backlog number) — unchanged; VIZ-12
+  // only ADDS the `▣ active` sibling above. The bar's queued *segment* uses the roster split separately.
+  const queue = st.queueDepth > 0
+    ? `<span class="line-station-queue viz-body${st.queueConcerning ? ' line-queue-concern' : ''}" title="${st.queueDepth} waiting to be processed at ${esc(st.name)}">queue <span class="viz-numeric">${st.queueDepth}</span></span>`
+    : '';
   const current = st.currentItem ? `<span class="line-station-current viz-body">▶ ${esc(st.currentItem)}</span>` : '';
   const setAside = st.setAside > 0 ? `<span class="line-station-setaside line-badge-error"><span class="viz-numeric">${st.setAside}</span> set aside</span>` : '';
-  const live = queue || current || setAside ? `<span class="line-station-live">${queue}${current}${setAside}</span>` : '';
+  const live = active || queue || current || setAside ? `<span class="line-station-live">${active}${queue}${current}${setAside}</span>` : '';
   const latency = st.slowest && st.latency ? `<span class="line-station-latency viz-numeric" title="Slowest station">slowest · ${esc(st.latency)}</span>` : '';
   return `<li class="line-station line-station-${esc(st.state)}${st.slowest ? ' line-station-slow' : ''}" data-stage="${esc(st.stage)}">
     <span class="line-station-glyph ${st.stateClass}" aria-hidden="true">${esc(st.glyph)}</span>
     <span class="line-station-name viz-signage">${esc(st.name)}</span>
     <span class="line-station-state viz-chip" title="${esc(st.state)}">${esc(st.state)}</span>
-    <span class="line-rail" aria-hidden="true"><span class="line-rail-bar ${st.stateClass}${st.slowest ? ' line-rail-bar-slow' : ''}" style="height:${st.rail.barPct}%"></span></span>
+    <span class="line-rail" aria-hidden="true">${railFillHtml(st)}</span>
     <span class="line-station-rail-lane">
       ${count}
       ${caption}

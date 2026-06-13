@@ -8,6 +8,7 @@ import {
   completionRatio,
   buildFunnel,
   buildStations,
+  pendingBarGeometry,
   slowestStage,
   stepperCells,
   dwellLabel,
@@ -171,6 +172,50 @@ describe('theLineModel — stations (§6, state never colour alone)', () => {
   it('slowestStage returns null when no stage has timing yet (cold start)', () => {
     expect(slowestStage({ ...PERF, stages: [] })).toBeNull();
     expect(slowestStage({ ...PERF, stages: [{ stage: 'archive', runs: 0, avgMs: 0, throughputPerMin: 0 }] })).toBeNull();
+  });
+});
+
+// VIZ-12 (SPEC-0032, #336 design) — the rail's primary fill is the two-segment PENDING bar: per
+// station, queued (waiting) vs in-progress (active), the bar height scaled to the peak pending across
+// all six stations (relative backlog). DEV-6 owns the bar fill GEOMETRY (these tests) + the `▣ active`
+// count; the data derivation (`pendingForStage`) is pinned in pipelineStatusView.test.ts.
+describe('theLineModel — VIZ-12 pending-work bar geometry', () => {
+  it('pendingBarGeometry scales the ember (active) base + queued cap to the peak pending across stations', () => {
+    expect(pendingBarGeometry(0, 0, 0)).toEqual({ activePct: 0, queuedPct: 0 }); // nothing pending → empty track
+    expect(pendingBarGeometry(3, 1, 4)).toEqual({ activePct: 25, queuedPct: 75 }); // 1 active + 3 queued, this IS the peak (4) → fills track
+    expect(pendingBarGeometry(2, 2, 8)).toEqual({ activePct: 25, queuedPct: 25 }); // 4 of peak 8 → only half the track (relative backlog)
+  });
+
+  it('pendingBarGeometry floors negative/NaN counts to 0 — a malformed roster entry never makes a NaN height (ENG-16)', () => {
+    expect(pendingBarGeometry(-5, Number.NaN, 4)).toEqual({ activePct: 0, queuedPct: 0 });
+    expect(pendingBarGeometry(2, Number.NaN, 4)).toEqual({ activePct: 0, queuedPct: 50 }); // bad active → 0, queued still scales
+  });
+
+  it('buildStations splits the in-flight roster into queued vs in-progress per station + scales the bar to peak pending', () => {
+    const inFlight: InFlightItem[] = [
+      { itemId: 'd1', name: 'A', stage: 'decompose', active: true, sinceTs: 'T' }, // decompose: 1 active …
+      { itemId: 'd2', name: 'B', stage: 'decompose' }, // … + 2 queued = 3 pending (the peak)
+      { itemId: 'd3', name: 'C', stage: 'decompose' },
+      { itemId: 'c1', name: 'D', stage: 'claims' }, // claims: 1 queued
+    ];
+    const st = buildStations(viewWith({ inFlight }));
+    const decompose = st.find((s) => s.stage === 'decompose')!;
+    const claims = st.find((s) => s.stage === 'claims')!;
+    expect(decompose).toMatchObject({ queued: 2, inProgress: 1 });
+    expect(decompose.pendingBar).toEqual({ activePct: (1 / 3) * 100, queuedPct: (2 / 3) * 100 }); // peak station fills the track
+    expect(claims).toMatchObject({ queued: 1, inProgress: 0 });
+    expect(claims.pendingBar).toEqual({ activePct: 0, queuedPct: (1 / 3) * 100 }); // 1 of peak 3 → a third-height cool cap, no ember
+  });
+
+  it('ENG-15/16: an empty/absent roster yields empty bars (no false ember); a legacy item missing `active` falls to queued', () => {
+    const empty = buildStations(viewWith({ inFlight: [] }));
+    expect(empty.every((s) => s.queued === 0 && s.inProgress === 0)).toBe(true);
+    expect(empty.every((s) => s.pendingBar.activePct === 0 && s.pendingBar.queuedPct === 0)).toBe(true);
+    // a legacy roster item with no `active` flag counts as queued, never as a (breathing) in-progress → no false ember
+    const legacy = buildStations(viewWith({ inFlight: [{ itemId: 'x', name: 'L', stage: 'connect' } as InFlightItem] }));
+    const connect = legacy.find((s) => s.stage === 'connect')!;
+    expect(connect).toMatchObject({ queued: 1, inProgress: 0 });
+    expect(connect.pendingBar.activePct).toBe(0);
   });
 });
 

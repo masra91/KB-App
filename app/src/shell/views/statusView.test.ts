@@ -160,6 +160,82 @@ describe('The Line — station spine + gauge-rails (§2/§6, VIZ-3/4)', () => {
   });
 });
 
+// VIZ-12 (SPEC-0032, #336 design) — the rail's primary fill is the two-segment PENDING bar: an ember
+// in-progress BASE (breathing — the Principal's "fade") + a still slate queued CAP (brass only when
+// stuck), heights scaled to the peak pending across stations; plus a `▣ N active` count beside `queue N`
+// in the ink live-state lane. Live off `view.inFlight` (never the stale cumulative end-state).
+describe('The Line — VIZ-12 pending-work bar (queued vs in-progress)', () => {
+  // decompose: 1 active + 2 queued = 3 pending (the peak); connect (blocked): 1 queued → brass cap.
+  const PENDING_VIEW: PipelineStatusView = {
+    ...STALLED,
+    overall: 'running',
+    stalled: false,
+    lock: { held: false, waiters: 0 },
+    stages: [
+      { stage: 'decompose', state: 'running', queueDepth: 2, setAside: 0 },
+      { stage: 'connect', state: 'blocked', queueDepth: 1, setAside: 0 },
+      { stage: 'claims', state: 'idle', queueDepth: 0, setAside: 0 },
+    ],
+    inFlight: [
+      { itemId: 'a', name: 'A', stage: 'decompose', active: true, sinceTs: 'T' },
+      { itemId: 'b', name: 'B', stage: 'decompose' },
+      { itemId: 'c', name: 'C', stage: 'decompose' },
+      { itemId: 'd', name: 'D', stage: 'connect' },
+    ],
+  };
+  const spine = (): string => spineHtml(buildStations(PENDING_VIEW));
+
+  it('the rail fill is a two-segment pending bar — ember in-progress base + slate queued cap, scaled to peak pending', () => {
+    const h = spine();
+    expect(h).toContain('line-rail-fill');
+    // decompose is the peak (3 pending) → its bar fills the track: ember base 1/3, queued cap 2/3
+    expect(h).toContain('line-pending-active" style="height:33.3'); // 1 active of peak 3
+    expect(h).toContain('line-pending-queued" style="height:66.6'); // 2 queued of peak 3 (calm — running)
+    // the cumulative end-state volume bar is no longer the rail's primary fill (demoted to funnel, #336)
+    expect(h).not.toContain('line-rail-bar');
+  });
+
+  it('the in-progress count joins the queue in the ink live-state lane: `▣ N active` (ember glyph) + the existing `queue N`', () => {
+    const h = spine();
+    expect(h).toContain('line-station-active'); // the new active readout
+    expect(h).toContain('line-active-glyph'); // the ▣ glyph carries ember (a glyph — hue allowed)
+    expect(h).toContain('▣');
+    expect(h).toContain('title="1 actively being worked at Decompose"');
+    expect(h).toContain('line-station-queue'); // `queue N` (queueDepth) unchanged — VIZ-12 only ADDS active
+  });
+
+  it('the queued cap tints brass only when the backlog is actually STUCK (queueConcerning)', () => {
+    // connect is blocked WITH a queued item → its queued segment takes needs-you brass.
+    expect(spine()).toContain('line-pending-queued line-queue-concern');
+  });
+
+  it('a deep but DRAINING queue stays calm slate (no brass) — the cry-wolf guard', () => {
+    const draining: PipelineStatusView = {
+      ...PENDING_VIEW,
+      stages: [{ stage: 'decompose', state: 'running', queueDepth: 250, setAside: 0 }],
+      inFlight: [
+        { itemId: 'a', name: 'A', stage: 'decompose', active: true, sinceTs: 'T' },
+        ...Array.from({ length: 9 }, (_, i) => ({ itemId: `q${i}`, name: `q${i}`, stage: 'decompose' as const })),
+      ],
+    };
+    const h = spineHtml(buildStations(draining));
+    expect(h).toContain('line-pending-queued'); // a queued segment exists
+    expect(h).not.toContain('line-pending-queued line-queue-concern'); // but stays slate — healthy draining
+  });
+
+  it('idle/empty stations show no pending fill (calm track) — a frozen pending bar would be the bug, not the feature', () => {
+    const idle: PipelineStatusView = {
+      ...PENDING_VIEW,
+      stages: [{ stage: 'claims', state: 'idle', queueDepth: 0, setAside: 0 }],
+      inFlight: [],
+    };
+    const h = spineHtml(buildStations(idle));
+    expect(h).toContain('line-rail-fill'); // the rail track still renders…
+    expect(h).not.toContain('line-pending-active'); // …but no ember (nothing genuinely active)
+    expect(h).not.toContain('line-pending-queued'); // …and no slate (nothing queued)
+  });
+});
+
 describe('The Line — funnel-caption legibility, each number declares its role (VIZ-10, Principal-reported)', () => {
   const spine = (): string => spineHtml(buildStations(STALLED));
 
