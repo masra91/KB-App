@@ -4,6 +4,7 @@ import {
   selectPreferredModel,
   probeAcceptedModels,
   initLaunchModel,
+  validateModel,
   DEFAULT_MODEL_PREFERENCES,
   LAST_RESORT_MODEL,
 } from './copilotModelProbe';
@@ -126,5 +127,36 @@ describe('initLaunchModel (startup resolution + visible degradation — ORCH-28)
 
   it('the interim floor is unchanged for code that reads it directly', () => {
     expect(DEFAULT_COPILOT_MODEL).toBe('claude-opus-4.5');
+  });
+});
+
+describe('SPEC-0048 — validated config model override (Agents-view picker)', () => {
+  it('a user override the CLI ACCEPTS wins over the preference list', async () => {
+    const log = { info: vi.fn(), warn: vi.fn() };
+    const sel = await initLaunchModel({ override: 'gpt-5.5', run: async () => HELP_CONFIG, log });
+    expect(sel.model).toBe('gpt-5.5'); // honored (it's in the catalog), not the opus-4.8 top preference
+    expect(resolveCopilotModel({})).toBe('gpt-5.5');
+    expect(log.info).toHaveBeenCalledWith('model.resolved', expect.objectContaining({ model: 'gpt-5.5', source: 'config-override' }));
+  });
+
+  it('a user override the CLI REJECTS is refused (WARN) and falls back to the preference list — never hard-breaks', async () => {
+    const log = { info: vi.fn(), warn: vi.fn() };
+    // claude-opus-4.6 is NOT in HELP_CONFIG → rejected → fall to the preference-list top (opus-4.8).
+    const sel = await initLaunchModel({ override: 'claude-opus-4.6', run: async () => HELP_CONFIG, log });
+    expect(sel.model).toBe('claude-opus-4.8');
+    expect(resolveCopilotModel({})).toBe('claude-opus-4.8');
+    expect(log.warn).toHaveBeenCalledWith('model.override-rejected', expect.objectContaining({ wanted: 'claude-opus-4.6' }));
+  });
+
+  it("an override is honored when the probe is INCONCLUSIVE (can't prove it invalid; per-call auto net still guards)", async () => {
+    const sel = await initLaunchModel({ override: 'some-future-model', run: async () => { throw new Error('CLI gone'); } });
+    expect(sel.model).toBe('some-future-model');
+    expect(resolveCopilotModel({})).toBe('some-future-model');
+  });
+
+  it('validateModel classifies a pick against the live catalog (accepted / rejected / unknown)', async () => {
+    expect((await validateModel('claude-opus-4.8', async () => HELP_CONFIG)).result).toBe('accepted');
+    expect((await validateModel('claude-opus-4.6', async () => HELP_CONFIG)).result).toBe('rejected'); // not in the catalog
+    expect((await validateModel('anything', async () => { throw new Error('no CLI'); })).result).toBe('unknown');
   });
 });

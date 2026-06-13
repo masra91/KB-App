@@ -133,11 +133,29 @@ export function selectPreferredModel(
  */
 export async function initLaunchModel(opts: {
   preferences?: readonly string[];
+  /** SPEC-0048: a user-configured global model override (Agents-view picker → instance.json). When set
+   *  AND accepted by the live CLI it wins over the preference list; an UNACCEPTED override is rejected
+   *  (WARN) and we fall back to the preference-list resolution — never hard-break on a stale config. */
+  override?: string;
   run?: (args: string[]) => Promise<string>;
   log?: ModelProbeLog;
 } = {}): Promise<ModelSelection> {
   const preferences = opts.preferences && opts.preferences.length > 0 ? opts.preferences : DEFAULT_MODEL_PREFERENCES;
   const accepted = await probeAcceptedModels(opts.run ?? defaultHelpConfigRunner);
+
+  // SPEC-0048 — honor a validated user override first. Validate against the live catalog so a stale
+  // picked id (a model retired by a CLI upgrade — the #340 class) can't silently break the pipeline:
+  // accepted (or unprovable when the probe is inconclusive) → use it; rejected → WARN + fall through.
+  const override = opts.override && opts.override.trim().length > 0 ? opts.override.trim() : undefined;
+  if (override) {
+    if (accepted === null || accepted.includes(override)) {
+      setResolvedLaunchModel(override);
+      opts.log?.info?.('model.resolved', { model: override, source: 'config-override', probed: accepted !== null });
+      return { model: override, degraded: false, reason: 'preferred' };
+    }
+    opts.log?.warn?.('model.override-rejected', { wanted: override, reason: 'not-in-catalog', acceptedCount: accepted.length });
+  }
+
   const selection = selectPreferredModel(preferences, accepted);
   setResolvedLaunchModel(selection.model);
   // ORCH-28 item 3 — visible degradation, never silent. A clean top-preference pick is info; running
@@ -154,4 +172,22 @@ export async function initLaunchModel(opts: {
     });
   }
   return selection;
+}
+
+/** SPEC-0048 — the model-validation result the Agents-view picker needs before accepting a choice. */
+export type ModelValidation = 'accepted' | 'rejected' | 'unknown';
+
+/**
+ * Validate a user-picked model id against the live CLI's accepted catalog (SPEC-0048). `accepted` = the
+ * CLI lists it; `rejected` = the CLI lists models but NOT this one (would hard-reject pre-flight — the
+ * #340 class, so the picker must refuse it); `unknown` = the catalog couldn't be probed (CLI absent /
+ * format shift) → the caller decides (we allow-with-caveat, since the per-call `auto` net still guards).
+ */
+export async function validateModel(
+  id: string,
+  run: (args: string[]) => Promise<string> = defaultHelpConfigRunner,
+): Promise<{ result: ModelValidation; accepted: string[] | null }> {
+  const accepted = await probeAcceptedModels(run);
+  if (accepted === null) return { result: 'unknown', accepted: null };
+  return { result: accepted.includes(id.trim()) ? 'accepted' : 'rejected', accepted };
 }

@@ -63,6 +63,22 @@ describe('instance config store (PANEL-5)', () => {
     expect((await readInstanceConfig(root)).quickCaptureAccelerator).toBe('Alt+Space');
   });
 
+  it('SPEC-0048: the model override + preferences round-trip; empty/garbage/legacy → omitted (no override)', async () => {
+    // A configured global model + preference list persist.
+    await writeInstanceConfig(root, { ...DEF, model: 'claude-opus-4.8', modelPreferences: ['claude-opus-4.8', 'claude-sonnet-4.5'] });
+    const got = await readInstanceConfig(root);
+    expect(got.model).toBe('claude-opus-4.8');
+    expect(got.modelPreferences).toEqual(['claude-opus-4.8', 'claude-sonnet-4.5']);
+    // A legacy file (no model field) → undefined (no override; the preference-list probe drives).
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF }), 'utf8');
+    expect((await readInstanceConfig(root)).model).toBeUndefined();
+    // Empty/non-string model or an all-junk preference array → omitted, not a broken value.
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, model: '  ', modelPreferences: [42, ''] }), 'utf8');
+    const cleaned = await readInstanceConfig(root);
+    expect(cleaned.model).toBeUndefined();
+    expect(cleaned.modelPreferences).toBeUndefined();
+  });
+
   it('ASK-17: recallBudgetMs round-trips, clamps out-of-range, and a legacy file (no field) → default', async () => {
     await writeInstanceConfig(root, { ...DEF, recallBudgetMs: 300_000 });
     expect((await readInstanceConfig(root)).recallBudgetMs).toBe(300_000); // an in-range value round-trips
