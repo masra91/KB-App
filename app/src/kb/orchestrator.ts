@@ -247,40 +247,40 @@ export class Orchestrator {
   private async drainOnce(): Promise<void> {
     // ORCH-14: adopt any foreign drops into canonical units before draining.
     await this.lock.run(() => normalizeInbox(this.root), 'normalize');
-    // Robustness batch (SPEC-0030): drops whose archive threw UNEXPECTEDLY this pass — skip them so one
-    // bad drop can't head-of-line-block the inbox; they stay in the inbox (ORCH-12) for a later sweep.
-    const failedThisPass = new Set<string>();
     let queue = await readQueue(this.root);
     await this.updateStatus(queue.length, null);
-    while (true) {
+    while (queue.length > 0) {
       // ORCH-17/18/20: archive up to `cap` items concurrently — each prepares OFF the lock in its own
-      // ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial).
-      const batch = queue.filter((id) => !failedThisPass.has(id)).slice(0, this.cap);
-      if (batch.length === 0) break; // queue empty, or only this-pass-failed drops remain
+      // ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial). A failing item throws and
+      // stays in the inbox (ORCH-12); the batch's other items still land, and a later sweep retries.
+      const batch = queue.slice(0, this.cap);
       await this.updateStatus(queue.length, batch[0]);
-      // OBS-12: each item gets a `stage.run` span (wraps the archivist's copilot child once Phase B
-      // lands; v1's deterministic decider emits no child, so this just times the archive op).
-      // Per-item isolation (ENG-16 at the orchestrator): a failing drop (e.g. a dangling/missing
-      // file-ref ENOENT) sets aside only THAT item + surfaces the message; the batch's other items
-      // still land. The bad drop stays in the inbox for a later sweep (ORCH-12) — never fatal the drain.
-      await Promise.all(
-        batch.map((id) => {
-          const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
-          return archiveOne(this.root, id, this.decider, this.lock, span).then(
-            () => {
-              span.end('ok');
-              this.lastArchived = id;
-            },
-            (err) => {
-              // OBS-4: surface the cause so this is never a silent "N in queue, nothing happened" stall.
-              const message = err instanceof Error ? err.message : String(err);
-              span.end('error', message);
-              this.log.error('archive.drain-error', { itemId: id, err });
-              failedThisPass.add(id);
-            },
-          );
-        }),
-      );
+      try {
+        // OBS-12: each item gets a `stage.run` span (wraps the archivist's copilot child once Phase B
+        // lands; v1's deterministic decider emits no child, so this just times the archive op).
+        await Promise.all(
+          batch.map((id) => {
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
+            return archiveOne(this.root, id, this.decider, this.lock, span).then(
+              () => {
+                span.end('ok');
+                this.lastArchived = id;
+              },
+              (err) => {
+                // Surface the cause on the span (robustness batch), then propagate to stop this pass.
+                span.end('error', err instanceof Error ? err.message : String(err));
+                throw err;
+              },
+            );
+          }),
+        );
+      } catch (err) {
+        // OBS-4: archive failed — the item stays in the inbox (ORCH-12). Surface the cause so this is
+        // never a silent "N in queue, nothing happened" stall (the bug that motivated SPEC-0030).
+        this.log.error('archive.drain-error', { itemId: batch[0], err });
+        await this.updateStatus(queue.length, null);
+        return;
+      }
       queue = await readQueue(this.root);
     }
     await this.updateStatus(0, null);

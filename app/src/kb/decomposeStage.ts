@@ -376,36 +376,33 @@ export class DecomposeStage {
   /** Drain the queue once. Returns false if the pass errored out (e.g. a wedged canonical writer) so
    *  {@link runDrains} can back off, true on a clean pass. */
   private async drainOnce(): Promise<boolean> {
-    // Robustness batch (SPEC-0030): sources whose processing threw UNEXPECTEDLY this pass — skip them so
-    // one poison source can't head-of-line-block the queue; a later sweep retries them (bounded).
-    const failedThisPass = new Set<string>();
     try {
       let queue = await readDecomposeQueue(this.root, this.maxAttempts);
-      while (true) {
+      while (queue.length > 0) {
         // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
         // own ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial; cross-stage cognition
         // overlaps regardless). decomposeOne handles its own failures, so a settled batch never rejects.
-        const batch = queue.filter((r) => !failedThisPass.has(r)).slice(0, this.cap);
-        if (batch.length === 0) break; // queue empty, or only this-pass-failed sources remain
+        const batch = queue.slice(0, this.cap);
         // OBS-12: each item gets a `stage.run` span that wraps its decider's `copilot.invoke` child.
-        // Per-item isolation = the PER-ITEM locus (NOT the systemic #256 back-off): a single dangling/
-        // missing file-ref ENOENT sets aside only THAT source and keeps draining — it must never trip
-        // the circuit-breaker that backs off the WHOLE stage (reserved for a wedged writer, below).
+        // LOCUS DISTINCTION (the per-item ≠ systemic rule, #263/#282): decomposeOne RETURNS for a
+        // per-item failure it could RECORD (e.g. a dangling/missing file-ref ENOENT → set aside after K,
+        // the writer is fine) — that drains on, never trips the breaker. decomposeOne THROWS only when
+        // it could NOT record (the canonical writer/advance is wedged — a SYSTEMIC failure affecting
+        // every item) — that propagates to the catch → #256 back-off (don't retry-forever-spin).
         await Promise.all(
           batch.map((rel) => {
             const itemId = path.basename(rel);
             const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId });
             return decomposeOne(this.root, rel, this.decider, this.lock, this.maxAttempts, this.log, span).then(
               (r) => {
-                // An internally-handled failure (set aside after K, or a not-yet-exhausted attempt)
-                // returns rather than throws — carry its message onto the error span (robustness batch).
+                // Per-item: an internally-handled failure (set aside / not-yet-exhausted) carries its
+                // message onto the error span (robustness batch — a failed source is diagnosable).
                 span.end(spanOutcome(r.ok, r.setAside), r.error);
               },
               (err) => {
-                const message = err instanceof Error ? err.message : String(err);
-                span.end('error', message);
-                this.log.error('decompose.drain-error', { itemId, err });
-                failedThisPass.add(rel);
+                // Systemic (wedged writer): end the span WITH the message, then propagate to back off.
+                span.end('error', err instanceof Error ? err.message : String(err));
+                throw err;
               },
             );
           }),
@@ -414,9 +411,9 @@ export class DecomposeStage {
       }
       return true;
     } catch (err) {
-      // SYSTEMIC failure (the queue read / canonical writer is wedged — affects EVERY item, not one):
+      // SYSTEMIC failure (the queue read, or a wedged canonical writer — affects EVERY item, not one):
       // surface it + return false so runDrains' #256 circuit-breaker backs the stage off (ORCH-26). A
-      // per-item ENOENT is handled above and never reaches here, so it can't trip the breaker.
+      // per-item ENOENT is handled by decomposeOne (it RETURNS), so it never reaches here / trips the breaker.
       this.log.error('decompose.drain-error', { err });
       return false;
     }

@@ -751,42 +751,40 @@ export class ClaimsStage {
   }
 
   private async drainOnce(): Promise<void> {
-    // Robustness batch (SPEC-0030): entities whose processing threw UNEXPECTEDLY this pass — skip them
-    // so one poison entity can't head-of-line-block the queue; a later sweep retries them (bounded).
-    const failedThisPass = new Set<string>();
     let queue = await readClaimsQueue(this.root, this.maxAttempts);
     let worked = false;
-    while (true) {
+    while (queue.length > 0) {
       // ORCH-17/18/20: process up to `cap` entities concurrently (each in its own ephemeral worktree;
       // cap=1 ⇒ serial). claimsOne handles its own failures + same-source-audit collisions (re-sync +
       // retry), so a settled batch never rejects.
-      const batch = queue.filter((r) => !failedThisPass.has(r)).slice(0, this.cap);
-      if (batch.length === 0) break; // queue empty, or only this-pass-failed entities remain
-      // OBS-12: each entity gets a `stage.run` span wrapping its decider's `copilot.invoke` child.
-      // Per-item isolation (ENG-16 at the orchestrator): each entity SETTLES independently — an
-      // unexpected throw (e.g. a dangling/missing file-ref ENOENT, or a failed set-aside write) ends
-      // that entity's span WITH the message, logs it, and sets the entity aside for the pass; it never
-      // rejects the whole batch or fatals the drain. The rest keep draining.
-      await Promise.all(
-        batch.map((entityRel) => {
-          const itemId = path.basename(entityRel, '.md');
-          const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId });
-          return claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log, span).then(
-            (r) => {
-              // A park (review raised) is a successful outcome, not an error. An internally-handled
-              // failure carries its message onto the error span (robustness batch).
-              span.end(r.ok || r.parked ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
-              worked = true;
-            },
-            (err) => {
-              const message = err instanceof Error ? err.message : String(err);
-              span.end('error', message);
-              this.log.error('claims.drain-error', { itemId, err });
-              failedThisPass.add(entityRel);
-            },
-          );
-        }),
-      );
+      const batch = queue.slice(0, this.cap);
+      try {
+        // OBS-12: each entity gets a `stage.run` span wrapping its decider's `copilot.invoke` child.
+        // LOCUS DISTINCTION: claimsOne RETURNS for a per-item failure it could record (set aside after
+        // K) — its message rides onto the error span (robustness batch). It THROWS only when it could
+        // NOT record (a wedged writer — systemic), handled by the catch.
+        await Promise.all(
+          batch.map((entityRel) => {
+            const itemId = path.basename(entityRel, '.md');
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId });
+            return claimsOne(this.root, entityRel, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, this.log, span).then(
+              (r) => {
+                // A park (review raised) is a successful outcome, not an error.
+                span.end(r.ok || r.parked ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
+                worked = true;
+              },
+              (err) => {
+                // Systemic (wedged writer): end the span WITH the message, then propagate to the catch.
+                span.end('error', err instanceof Error ? err.message : String(err));
+                throw err;
+              },
+            );
+          }),
+        );
+      } catch (err) {
+        this.log.error('claims.drain-error', { err }); // systemic — stop this pass; a later poke/sweep retries
+        return;
+      }
       queue = await readClaimsQueue(this.root, this.maxAttempts);
     }
     // Publish entity nodes' newly-attached claims staging→main (STAGING-3/11), serialized under

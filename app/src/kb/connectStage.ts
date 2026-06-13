@@ -1150,34 +1150,28 @@ export class ConnectStage {
   }
 
   private async drainOnce(): Promise<void> {
-    // Robustness batch (SPEC-0030): items whose processing threw UNEXPECTEDLY this pass — skip them so
-    // one poison block can't head-of-line-block the whole queue; a later sweep retries them (bounded).
-    const failedThisPass = new Set<string>();
     let queue = await readConnectQueue(this.root, this.maxAttempts);
     let worked = false;
-    while (true) {
-      const item = queue.find((q) => !failedThisPass.has(q.blockKey));
-      if (!item) break; // queue empty, or only this-pass-failed items remain (retried on a later sweep)
-      const key = item.blockKey;
+    while (queue.length > 0) {
+      const key = queue[0].blockKey;
       const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: key });
       try {
         // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
         // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
         // OBS-12: the `stage.run` span wraps the decider's `copilot.invoke` child (incl. collision re-runs).
         const r = await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log, span);
-        // An internally-handled failure carries its message onto the error span (robustness batch).
+        // LOCUS DISTINCTION: connectOne RETURNS for a per-item failure it could record (set aside after
+        // K) — carry its message onto the error span (robustness batch). It THROWS only when it could
+        // NOT record (a wedged writer — systemic), handled below.
         span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
         worked = true;
       } catch (err) {
-        // Per-item isolation (ENG-16 at the orchestrator): connectOne handles its OWN failures (set
-        // aside after K). Reaching here means processing threw UNEXPECTEDLY — e.g. a dangling/missing
-        // file-ref ENOENT, or the set-aside write itself failed. End the span WITH the message + log it
-        // (so a failed stage is diagnosable, not a silent "N in queue, nothing happened"), set the item
-        // aside for THIS pass, and KEEP DRAINING the rest. A single bad item must never fatal the drain.
-        const message = err instanceof Error ? err.message : String(err);
-        span.end('error', message);
+        // Systemic/unexpected (the write/advance was wedged — connectOne handles per-item failures by
+        // returning). End the span WITH the message + log it (a failed stage must be diagnosable, never a
+        // silent "N in queue, nothing happened"), then stop this pass; a later poke/sweep retries.
+        span.end('error', err instanceof Error ? err.message : String(err));
         this.log.error('connect.drain-error', { itemId: key, err });
-        failedThisPass.add(key);
+        return;
       }
       queue = await readConnectQueue(this.root, this.maxAttempts);
     }
