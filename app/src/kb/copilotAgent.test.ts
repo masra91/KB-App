@@ -8,6 +8,14 @@ vi.mock('./copilot', () => ({
   detectCopilot: vi.fn(async () => ({ available: true, detail: 'stubbed' })),
 }));
 
+// COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process to drive the REAL defaultRunner and
+// assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site).
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  return { ...actual, execFile: vi.fn() };
+});
+
+import { execFile } from 'node:child_process';
 import { buildPrompt, parseDecision, makeCopilotDecider } from './copilotAgent';
 import type { CapturedMeta } from './ingest';
 
@@ -110,5 +118,28 @@ describe('makeCopilotDecider (ORCH-5/8)', () => {
     const decide = makeCopilotDecider({ run }); // no `available` → uses stubbed detectCopilot
     await decide(textMeta);
     expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  // COPILOT-CONTEXT-SCOPE-BUG regression (fail-before/pass-after): the real defaultRunner must pass
+  // the threaded vaultPath to execFile as `cwd` so Copilot scans the staging worktree, not `/`.
+  // (The archivist falls back on a bad parse rather than throwing — execFile is still called first.)
+  it('runs the real Copilot subprocess in the threaded vaultPath (execFile cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: VALID, stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeCopilotDecider({ available: true, vaultPath: '/vault/.kb/cache/worktrees/staging' })(textMeta);
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBe('/vault/.kb/cache/worktrees/staging');
+  });
+
+  it('leaves execFile cwd undefined when no vaultPath is set (unscoped)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: VALID, stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeCopilotDecider({ available: true })(textMeta);
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBeUndefined();
   });
 });

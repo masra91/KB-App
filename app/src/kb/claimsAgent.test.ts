@@ -1,6 +1,14 @@
 // Claims agent: prompt composition + the disposable decider (SPEC-0016 CLAIMS-3/4/5/12).
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import { buildClaimsPrompt, makeClaimsDecider, type EntityInput } from './claimsAgent';
+
+// COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process to drive the REAL defaultRunner and
+// assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site).
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  return { ...actual, execFile: vi.fn() };
+});
 
 const input = (over: Partial<EntityInput> = {}): EntityInput => ({
   entityId: '01JENT',
@@ -47,6 +55,28 @@ describe('makeClaimsDecider (CLAIMS-3/4/12)', () => {
 
   it('THROWS when copilot is unavailable — never fabricates claims (CLAIMS-12)', async () => {
     await expect(makeClaimsDecider({ available: false })(input())).rejects.toThrow(/unavailable/);
+  });
+
+  // COPILOT-CONTEXT-SCOPE-BUG regression (fail-before/pass-after): the real defaultRunner must pass
+  // the threaded vaultPath to execFile as `cwd` so Copilot scans the staging worktree, not `/`.
+  it('runs the real Copilot subprocess in the threaded vaultPath (execFile cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeClaimsDecider({ available: true, vaultPath: '/vault/.kb/cache/worktrees/staging' })(input()).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBe('/vault/.kb/cache/worktrees/staging');
+  });
+
+  it('leaves execFile cwd undefined when no vaultPath is set (unscoped)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeClaimsDecider({ available: true })(input()).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBeUndefined();
   });
 
   it('THROWS on bad output rather than inventing a decision (CLAIMS-12)', async () => {

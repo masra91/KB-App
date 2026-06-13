@@ -39,8 +39,9 @@ export interface ComposeInput {
 /** A decider maps a ComposeInput to a validated, grounded ComposeDecision. May throw (COMPOSE-7). */
 export type ComposeDecider = (input: ComposeInput, ctx?: SpanCtx) => Promise<ComposeDecision>;
 
-/** Injectable runner: given the composed prompt, return the session's stdout. */
-export type CopilotRunner = (prompt: string) => Promise<string>;
+/** Injectable runner: given the composed prompt (+ optional working directory), return the
+ *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
+export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
 function requestedModel(): string | undefined {
   return process.env.KB_COPILOT_MODEL || undefined;
@@ -52,13 +53,18 @@ function launchFlags(): string[] {
   return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
 }
 
-const defaultRunner: CopilotRunner = async (prompt) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd) =>
   // One global copilot slot so concurrent stage drains can't fan out past the process-wide ceiling.
   withCopilotSlot(async () => {
     try {
+      // COPILOT-CONTEXT-SCOPE-BUG: run in the staging worktree (`cwd`) so Copilot's workspace
+      // scan (`tgrep count-files`) is rooted here, NOT the filesystem root. With no cwd the
+      // subprocess inherits Electron's cwd (`/` in a packaged app) → a runaway root scan.
+      // `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
       const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
         timeout: COPILOT_TIMEOUT_MS,
         maxBuffer: 8 * 1024 * 1024,
+        cwd,
       });
       return stdout;
     } catch (err) {
@@ -119,7 +125,9 @@ export interface ComposeDeciderOptions {
   available?: boolean;
   /** Injected runner (tests). Defaults to shelling out to `copilot -p`. */
   run?: CopilotRunner;
-  /** Directory context for Copilot (scopes --add-dir to avoid filesystem-wide scan). */
+  /** Working directory for the Copilot subprocess (the staging worktree, threaded from the
+   *  pipeline). Set as the execFile `cwd` so Copilot's workspace scan stays scoped here, not the
+   *  filesystem root — `--add-dir` only widens permissions, it does NOT move the cwd. */
   vaultPath?: string;
 }
 
@@ -131,6 +139,7 @@ export interface ComposeDeciderOptions {
  */
 export function makeComposeDecider(opts: ComposeDeciderOptions = {}): ComposeDecider {
   const run = opts.run ?? defaultRunner;
+  const cwd = opts.vaultPath; // staging worktree → Copilot subprocess cwd (COPILOT-CONTEXT-SCOPE-BUG)
   let available: boolean | null = opts.available ?? null;
   return async (input, ctx) => {
     if (available === null) {
@@ -148,7 +157,7 @@ export function makeComposeDecider(opts: ComposeDeciderOptions = {}): ComposeDec
     const t0 = Date.now();
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
-      const decision = parseComposeDecision(await run(buildComposePrompt(input)), input.entityId, input.claims.length);
+      const decision = parseComposeDecision(await run(buildComposePrompt(input), cwd), input.entityId, input.claims.length);
       cs?.end('ok');
       const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
       return { ...decision, agent };

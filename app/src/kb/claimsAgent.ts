@@ -40,8 +40,9 @@ export interface EntityInput {
 /** A decider maps an entity (+ its source) to a validated claims decision. May throw (CLAIMS-12). */
 export type ClaimsDecider = (input: EntityInput, ctx?: SpanCtx) => Promise<ClaimsDecision>;
 
-/** Injectable runner: given the composed prompt, return the session's stdout. */
-export type CopilotRunner = (prompt: string) => Promise<string>;
+/** Injectable runner: given the composed prompt (+ optional working directory), return the
+ *  session's stdout. `cwd` scopes the Copilot subprocess to the staging worktree. */
+export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
 function requestedModel(): string | undefined {
   return process.env.KB_COPILOT_MODEL || undefined;
@@ -53,14 +54,19 @@ function launchFlags(): string[] {
   return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
 }
 
-const defaultRunner: CopilotRunner = async (prompt) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd) =>
   // Acquire one global copilot slot so concurrent (cap>1) stage drains can't fan out past the
   // process-wide ceiling (dogfood #4 / copilotConcurrency).
   withCopilotSlot(async () => {
     try {
+      // COPILOT-CONTEXT-SCOPE-BUG: run in the staging worktree (`cwd`) so Copilot's workspace
+      // scan (`tgrep count-files`) is rooted here, NOT the filesystem root. With no cwd the
+      // subprocess inherits Electron's cwd (`/` in a packaged app) → a runaway root scan.
+      // `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
       const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], {
         timeout: COPILOT_TIMEOUT_MS,
         maxBuffer: 8 * 1024 * 1024,
+        cwd,
       });
       return stdout;
     } catch (err) {
@@ -142,7 +148,9 @@ export interface ClaimsDeciderOptions {
   available?: boolean;
   /** Injected runner (tests). Defaults to shelling out to `copilot -p`. */
   run?: CopilotRunner;
-  /** Directory context for Copilot (scopes --add-dir to avoid filesystem-wide scan). */
+  /** Working directory for the Copilot subprocess (the staging worktree, threaded from the
+   *  pipeline). Set as the execFile `cwd` so Copilot's workspace scan stays scoped here, not the
+   *  filesystem root — `--add-dir` only widens permissions, it does NOT move the cwd. */
   vaultPath?: string;
 }
 
@@ -153,6 +161,7 @@ export interface ClaimsDeciderOptions {
  */
 export function makeClaimsDecider(opts: ClaimsDeciderOptions = {}): ClaimsDecider {
   const run = opts.run ?? defaultRunner;
+  const cwd = opts.vaultPath; // staging worktree → Copilot subprocess cwd (COPILOT-CONTEXT-SCOPE-BUG)
   let available: boolean | null = opts.available ?? null;
   return async (input, ctx) => {
     if (available === null) {
@@ -171,7 +180,7 @@ export function makeClaimsDecider(opts: ClaimsDeciderOptions = {}): ClaimsDecide
     // OBS-13: time the Copilot call as a child of the stage's run span (failures included).
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
-      const decision = parseClaimsDecision(await run(buildClaimsPrompt(input)), input.entityId);
+      const decision = parseClaimsDecision(await run(buildClaimsPrompt(input), cwd), input.entityId);
       cs?.end('ok');
       const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model, params, ok: true, ms: Date.now() - t0, at };
       return { ...decision, agent };

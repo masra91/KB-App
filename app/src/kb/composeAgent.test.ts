@@ -1,5 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { execFile } from 'node:child_process';
 import { buildComposePrompt, makeComposeDecider, type ComposeInput } from './composeAgent';
+
+// COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process to drive the REAL defaultRunner and
+// assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site).
+vi.mock('node:child_process', async (importActual) => {
+  const actual = await importActual<typeof import('node:child_process')>();
+  return { ...actual, execFile: vi.fn() };
+});
 
 const input: ComposeInput = {
   entityId: '01JENT',
@@ -90,5 +98,27 @@ describe('makeComposeDecider (ORCH-21 seam)', () => {
   it('THROWS when copilot is unavailable (no deterministic fabrication — the stage falls back)', async () => {
     const decide = makeComposeDecider({ available: false, run: async () => '{}' });
     await expect(decide(input)).rejects.toThrow(/unavailable/i);
+  });
+
+  // COPILOT-CONTEXT-SCOPE-BUG regression (fail-before/pass-after): the real defaultRunner must pass
+  // the threaded vaultPath to execFile as `cwd` so Copilot scans the staging worktree, not `/`.
+  it('runs the real Copilot subprocess in the threaded vaultPath (execFile cwd)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeComposeDecider({ available: true, vaultPath: '/vault/.kb/cache/worktrees/staging' })(input).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBe('/vault/.kb/cache/worktrees/staging');
+  });
+
+  it('leaves execFile cwd undefined when no vaultPath is set (unscoped)', async () => {
+    vi.mocked(execFile).mockImplementation(((_f: unknown, _a: unknown, _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: '{}', stderr: '' });
+      return {} as never;
+    }) as never);
+    await makeComposeDecider({ available: true })(input).catch(() => {});
+    const opts = vi.mocked(execFile).mock.calls.at(-1)?.[2] as { cwd?: string } | undefined;
+    expect(opts?.cwd).toBeUndefined();
   });
 });

@@ -49,8 +49,9 @@ export interface ReflectResult {
 /** A reflect decider maps a working set to findings. May throw (no fabrication). Injectable for tests. */
 export type ReflectDecider = (ctx: ReflectContext) => Promise<ReflectResult>;
 
-/** Injected runner: given the composed prompt, return the session's stdout (tests stub this). */
-export type CopilotRunner = (prompt: string) => Promise<string>;
+/** Injected runner: given the composed prompt (+ optional working directory), return the session's
+ *  stdout (tests stub this). `cwd` scopes the Copilot subprocess to the staging worktree. */
+export type CopilotRunner = (prompt: string, cwd?: string) => Promise<string>;
 
 function requestedModel(): string | undefined {
   return process.env.KB_COPILOT_MODEL || undefined;
@@ -59,11 +60,14 @@ function launchFlags(): string[] {
   const model = requestedModel();
   return model ? ['--no-ask-user', '--model', model] : ['--no-ask-user'];
 }
-const defaultRunner: CopilotRunner = async (prompt) =>
+const defaultRunner: CopilotRunner = async (prompt, cwd) =>
   // Acquire one global copilot slot so concurrent (cap>1) job/stage drains can't fan out past the
   // process-wide ceiling (dogfood #4 / copilotConcurrency).
   withCopilotSlot(async () => {
-    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
+    // COPILOT-CONTEXT-SCOPE-BUG: run in the staging worktree (`cwd`) so Copilot's workspace scan
+    // (`tgrep count-files`) is rooted here, not the filesystem root (inherited `/` in a packaged
+    // app). `cwd: undefined` (tests / unscoped) behaves exactly as before (inherits parent cwd).
+    const { stdout } = await exec('copilot', ['-p', prompt, ...launchFlags()], { timeout: COPILOT_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, cwd });
     return stdout;
   });
 
@@ -160,7 +164,9 @@ export function parseReflectResult(stdout: string): ReflectResult {
 export interface ReflectDeciderOptions {
   available?: boolean;
   run?: CopilotRunner;
-  /** Directory context for Copilot (scopes --add-dir to avoid filesystem-wide scan). */
+  /** Working directory for the Copilot subprocess (the staging worktree, threaded from the
+   *  pipeline). Set as the execFile `cwd` so Copilot's workspace scan stays scoped here, not the
+   *  filesystem root — `--add-dir` only widens permissions, it does NOT move the cwd. */
   vaultPath?: string;
 }
 
@@ -168,6 +174,7 @@ export interface ReflectDeciderOptions {
  *  unavailable or the output is bad (the run is a failed pass; no fabrication). */
 export function makeReflectDecider(opts: ReflectDeciderOptions = {}): ReflectDecider {
   const run = opts.run ?? defaultRunner;
+  const cwd = opts.vaultPath; // staging worktree → Copilot subprocess cwd (COPILOT-CONTEXT-SCOPE-BUG)
   let available: boolean | null = opts.available ?? null;
   return async (ctx) => {
     if (available === null) {
@@ -178,6 +185,6 @@ export function makeReflectDecider(opts: ReflectDeciderOptions = {}): ReflectDec
       }
     }
     if (!available) throw new Error('reflect: copilot unavailable');
-    return parseReflectResult(await run(buildReflectPrompt(ctx)));
+    return parseReflectResult(await run(buildReflectPrompt(ctx), cwd));
   };
 }
