@@ -174,6 +174,36 @@ export interface RunBulkRetryOptions {
  *  terminal set-aside without an unbounded loop (matches the scenario driver). */
 const DEFAULT_DECOMPOSE_PASSES = 5;
 
+/** Subpaths (relative to the vault root) that must NOT be carried into a non-destructive copy. A vault
+ *  that has ever run the pipeline (i.e. EVERY real vault, incl. the 203 dogfood vault) holds live git
+ *  worktrees under `.kb/cache/worktrees/*` whose `.git` files store ABSOLUTE `gitdir:` pointers back to
+ *  the SOURCE vault, plus `.git/worktrees/*` admin entries that also encode absolute source paths.
+ *  `fs.cp` copies both verbatim, so the "copy" stays wired to the original: `ensureStagingWorktree`
+ *  sees the copied `staging` dir pass `--is-inside-work-tree` (its `.git` resolves to the real vault),
+ *  deems it healthy, reuses it — and every git op (the replay-reset commit, each stage's ephemeral
+ *  worktree) silently mutates the REAL vault, defeating the non-destructive guarantee AND crashing the
+ *  drain with a doubled, nonexistent path (`…/staging/.kb/cache/worktrees/claims-<id>` ENOENT).
+ *  Excluding them makes the copy self-contained — `ensureStagingWorktree` builds a FRESH staging
+ *  worktree inside the copy's OWN git. */
+const COPY_EXCLUDE_RELS = [path.join('.kb', 'cache', 'worktrees'), path.join('.git', 'worktrees')];
+
+/**
+ * Copy a vault to `dest` for a non-destructive bulk-retry, SEVERING the source's live git worktrees so
+ * the copy is genuinely isolated (see COPY_EXCLUDE_RELS — without this, a real vault leaks its retry
+ * back into the original). Exported so the isolation is unit-tested directly, since the live drain that
+ * would otherwise exercise it can't run in CI.
+ */
+export async function copyVaultIsolated(srcVault: string, dest: string): Promise<void> {
+  const src = path.resolve(srcVault);
+  const excluded = COPY_EXCLUDE_RELS.map((rel) => path.join(src, rel));
+  await fs.cp(src, dest, {
+    recursive: true,
+    // false skips the path AND (via the startsWith test) everything under it, regardless of whether
+    // node descends into a filtered directory — robust across Node fs.cp filter-recursion behavior.
+    filter: (from) => !excluded.some((ex) => from === ex || from.startsWith(ex + path.sep)),
+  });
+}
+
 /**
  * Run the full HEAL-7 bulk-retry against a vault: find set-aside sources → partial-replay re-enqueue →
  * drive the REAL decompose→connect→claims drain on the resolved model + self-repair → measure residual.
@@ -187,7 +217,7 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
   if (!opts.inPlace) {
     tempRoot = await makeTempDir('kb-bulk-retry-');
     root = path.join(tempRoot, 'vault');
-    await fs.cp(src, root, { recursive: true });
+    await copyVaultIsolated(src, root);
   }
   try {
     // 1) BEFORE — the toss population (read from the canonical vault before staging).
