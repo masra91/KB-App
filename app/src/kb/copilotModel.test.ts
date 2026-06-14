@@ -1,7 +1,7 @@
 // ORCH-16 / model-pin gap: resolveCopilotModel must ALWAYS yield a concrete model so prod never
 // runs unpinned (silently inheriting ~/.copilot/settings.json) and traces never record `default`.
-import { describe, it, expect } from 'vitest';
-import { resolveCopilotModel, DEFAULT_COPILOT_MODEL, isModelUnavailableError, COPILOT_MODEL_AUTO } from './copilotModel';
+import { describe, it, expect, afterEach } from 'vitest';
+import { resolveCopilotModel, DEFAULT_COPILOT_MODEL, isModelUnavailableError, COPILOT_MODEL_AUTO, setAgentModelOverrides } from './copilotModel';
 
 describe('resolveCopilotModel (ORCH-16 model pin)', () => {
   it('pins the in-app default when KB_COPILOT_MODEL is unset (the prod path that was broken)', () => {
@@ -25,6 +25,28 @@ describe('resolveCopilotModel (ORCH-16 model pin)', () => {
 
   it('the pinned default is a copilot-CLI-valid model id (claude-opus-4 was rejected pre-flight)', () => {
     expect(DEFAULT_COPILOT_MODEL).toBe('claude-opus-4.5');
+  });
+});
+
+describe('SPEC-0048 per-agent model override (resolveCopilotModel agentKey)', () => {
+  afterEach(() => setAgentModelOverrides({})); // clear the module-level per-agent cache between tests
+
+  it("uses an agent's per-agent pin for that agentKey, falling through to the global for others", () => {
+    setAgentModelOverrides({ connect: 'claude-sonnet-4.5' });
+    expect(resolveCopilotModel({}, 'connect')).toBe('claude-sonnet-4.5'); // its own pin
+    expect(resolveCopilotModel({}, 'decompose')).toBe(DEFAULT_COPILOT_MODEL); // unset agent → global
+    expect(resolveCopilotModel({})).toBe(DEFAULT_COPILOT_MODEL); // no agentKey → global
+  });
+
+  it('the eval KB_COPILOT_MODEL override still wins over a per-agent pin', () => {
+    setAgentModelOverrides({ connect: 'claude-sonnet-4.5' });
+    expect(resolveCopilotModel({ KB_COPILOT_MODEL: 'gpt-5.5' }, 'connect')).toBe('gpt-5.5');
+  });
+
+  it('clearing the overrides reverts every agent to the global', () => {
+    setAgentModelOverrides({ connect: 'claude-sonnet-4.5' });
+    setAgentModelOverrides({});
+    expect(resolveCopilotModel({}, 'connect')).toBe(DEFAULT_COPILOT_MODEL);
   });
 });
 

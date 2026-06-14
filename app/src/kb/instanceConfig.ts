@@ -118,6 +118,10 @@ export interface InstanceConfig {
    *  and the preference-list resolution is used instead — a stale pick can never hard-break the pipeline.
    *  Omitted ⇒ no override (the preference-list probe drives). */
   model?: string;
+  /** SPEC-0048: per-agent model picks (AGENT_CATALOG key → model id) — an agent's pin wins over `model`
+   *  for that agent only. Validated against the live catalog at set-time; an agent with no entry uses
+   *  the global default. Omitted/empty ⇒ all agents use the global. */
+  agentModels?: Record<string, string>;
 }
 
 /** Absolute path to a vault's instance-config file. */
@@ -193,6 +197,17 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
     if (Object.keys(cleaned).length > 0) stageCaps = cleaned;
   }
   const copilotCeiling = clampCopilotCeiling(o.copilotCeiling);
+  // SPEC-0048: per-agent model picks — keep only string-keyed non-empty-string values (drop junk);
+  // validation against the live catalog is at set-time (the picker IPC) / startup, not here.
+  let agentModels: Record<string, string> | undefined;
+  if (typeof o.agentModels === 'object' && o.agentModels !== null && !Array.isArray(o.agentModels)) {
+    const raw = o.agentModels as Record<string, unknown>;
+    const cleaned: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      if (typeof v === 'string' && v.trim().length > 0) cleaned[k] = v.trim();
+    }
+    if (Object.keys(cleaned).length > 0) agentModels = cleaned;
+  }
   return {
     autonomyDefault,
     devLogLevel,
@@ -200,6 +215,7 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
     recallBudgetMs,
     ...(modelPreferences ? { modelPreferences } : {}),
     ...(model ? { model } : {}),
+    ...(agentModels ? { agentModels } : {}),
     ...(stageCaps ? { stageCaps } : {}),
     ...(copilotCeiling !== undefined ? { copilotCeiling } : {}),
   };

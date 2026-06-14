@@ -25,6 +25,7 @@ import {
   listAgentsForActive,
   getModelCatalogForActive,
   setActiveModel,
+  setActiveAgentModel,
   listResearchersForActive,
   setActiveResearcherConfig,
   runActiveResearcherNow,
@@ -426,7 +427,7 @@ export function registerIpc(): void {
     const { recallBudgetMs } = await getActiveInstanceSettings();
     // ORCH-16: pin the model recall's SDK session runs on, same as the enrich deciders — prod
     // otherwise passed no model and the SDK inherited `~/.copilot/settings.json` (model-pin gap).
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, model: resolveCopilotModel() });
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, model: resolveCopilotModel(undefined, 'recall') });
   });
 
   // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,
@@ -558,6 +559,7 @@ export function registerIpc(): void {
   // SPEC-0048: the model picker — the live accepted catalog + resolved model, and a validated set.
   ipcMain.handle('kb:getModelCatalog', async (): Promise<ModelCatalogView> => getModelCatalogForActive());
   ipcMain.handle('kb:setModel', async (_e, id: string | null): Promise<SetModelResult> => setActiveModel(id));
+  ipcMain.handle('kb:setAgentModel', async (_e, agentKey: string, id: string | null): Promise<SetModelResult> => setActiveAgentModel(agentKey, id));
 
   // SPEC-0028 RESEARCH-15: the Control Panel's Researchers view — list/configure researchers,
   // on-demand "Run now" (test pass), and recent-run history. The renderer gates risky changes

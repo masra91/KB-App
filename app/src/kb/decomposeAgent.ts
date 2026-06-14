@@ -172,7 +172,7 @@ export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): Decomp
 
     // ORCH-16: `modelUsed` starts at the pin and is rewritten to `auto` if the pinned id is rejected
     // and we fall back — so the trace records the model that ACTUALLY ran (a silent pin-drift is visible).
-    let modelUsed = resolveCopilotModel();
+    let modelUsed = resolveCopilotModel(undefined, 'decompose'); // SPEC-0048: per-agent pin, else global
     const at = new Date().toISOString();
     const t0 = Date.now();
     // OBS-13: time this Copilot invocation as a child of the stage's run span (OBS-12 nesting),
@@ -180,7 +180,7 @@ export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): Decomp
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
       const decision = parseDecomposeDecision(
-        await runWithModelFallback((m) => run(buildDecomposePrompt(input), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
+        await runWithModelFallback((m) => run(buildDecomposePrompt(input), cwd, m), { agentKey: 'decompose', onFallback: (_from, to) => { modelUsed = to; } }),
         input.sourceId,
       );
       cs?.end('ok');

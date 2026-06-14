@@ -41,10 +41,29 @@ export function setResolvedLaunchModel(model: string | null): void {
   resolvedLaunchModel = model && model.trim().length > 0 ? model : null;
 }
 
-export function resolveCopilotModel(env: NodeJS.ProcessEnv = process.env): string {
+// SPEC-0048 per-agent override: the Principal's explicit per-agent model picks (Agents-view per-agent
+// picker → instance.json `agentModels`), keyed by AGENT_CATALOG key. Validated at set-time/startup, so
+// only catalog-accepted ids reach here. Wins over the GLOBAL resolved model for that agent only; an
+// agent with no entry falls through to the global resolution. Module-level so a decider that passes its
+// `agentKey` to `resolveCopilotModel` picks up its own pin.
+let agentModelOverrides: Record<string, string> = {};
+
+/** Record the validated per-agent model overrides (SPEC-0048). Replaces the whole map; empty clears. */
+export function setAgentModelOverrides(map: Record<string, string>): void {
+  agentModelOverrides = { ...map };
+}
+
+/**
+ * Resolve the model to launch with. Order: eval `KB_COPILOT_MODEL` override (wins always) → the
+ * per-AGENT pick for `agentKey` (SPEC-0048) → the GLOBAL probed/configured model (ORCH-28) →
+ * `DEFAULT_COPILOT_MODEL` floor. `agentKey` (a decider's AGENT_CATALOG key) selects that agent's pin;
+ * omit it for the global default.
+ */
+export function resolveCopilotModel(env: NodeJS.ProcessEnv = process.env, agentKey?: string): string {
   const override = env.KB_COPILOT_MODEL;
   if (override && override.trim().length > 0) return override; // eval harness override wins
-  return resolvedLaunchModel ?? DEFAULT_COPILOT_MODEL; // probed model, else the interim floor
+  if (agentKey && agentModelOverrides[agentKey]) return agentModelOverrides[agentKey]; // per-agent pick
+  return resolvedLaunchModel ?? DEFAULT_COPILOT_MODEL; // global probed model, else the interim floor
 }
 
 /** The resilience fallback model. `copilot --model auto` lets Copilot pick from its own catalog;

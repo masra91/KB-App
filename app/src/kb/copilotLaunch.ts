@@ -22,9 +22,10 @@ import { resolveCopilotModel, isModelUnavailableError, COPILOT_MODEL_AUTO } from
  */
 export async function runWithModelFallback<T>(
   attempt: (model: string) => Promise<T>,
-  opts: { env?: NodeJS.ProcessEnv; onFallback?: (from: string, to: string) => void } = {},
+  opts: { env?: NodeJS.ProcessEnv; agentKey?: string; onFallback?: (from: string, to: string) => void } = {},
 ): Promise<T> {
-  const pinned = resolveCopilotModel(opts.env);
+  // SPEC-0048: `agentKey` selects that agent's per-agent model pin (falls through to the global pin).
+  const pinned = resolveCopilotModel(opts.env, opts.agentKey);
   try {
     return await attempt(pinned);
   } catch (err) {

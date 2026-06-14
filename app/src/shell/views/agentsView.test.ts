@@ -12,8 +12,13 @@ const AGENTS: AgentView[] = [
   { key: 'reflect', label: 'Reflect', role: 'Rumination.', model: 'gpt-x', instructions: 'kb/reflectAgent.ts', status: 'idle' },
 ];
 
-function setApi(listAgents: KbApi['listAgents'], getModelCatalog?: KbApi['getModelCatalog'], setModel?: KbApi['setModel']): void {
-  (window as unknown as { kbApi: Partial<KbApi> }).kbApi = { listAgents, getModelCatalog, setModel };
+function setApi(
+  listAgents: KbApi['listAgents'],
+  getModelCatalog?: KbApi['getModelCatalog'],
+  setModel?: KbApi['setModel'],
+  setAgentModel?: KbApi['setAgentModel'],
+): void {
+  (window as unknown as { kbApi: Partial<KbApi> }).kbApi = { listAgents, getModelCatalog, setModel, setAgentModel };
 }
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -173,6 +178,40 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
       await tick();
       expect(root.querySelector('select')).toBeNull(); // can't offer a list
       expect(root.querySelector('.model-runs')?.textContent).toContain('claude-opus-4.8'); // but shows what runs
+    });
+
+    // SPEC-0048 per-agent override (the SHOULD): each agent-backed row gets its own picker.
+    it('renders a per-agent picker per agent-backed row with "Use default" + the configured pick selected', async () => {
+      const agents: AgentView[] = [
+        { key: 'connect', label: 'Connect', role: 'r', model: 'claude-sonnet-4.5', configuredModel: 'claude-sonnet-4.5', instructions: 'kb/connectAgent.ts', status: 'idle' },
+        { key: 'decompose', label: 'Decompose', role: 'r', model: 'claude-opus-4.8', instructions: 'kb/decomposeAgent.ts', status: 'idle' },
+      ];
+      setApi(vi.fn(async () => agents), vi.fn(async () => CATALOG), vi.fn(), vi.fn());
+      await mountAgents(root);
+      await tick();
+      const connectSel = root.querySelector<HTMLSelectElement>('.agent[data-key="connect"] .agent-model-select')!;
+      expect(connectSel).toBeTruthy();
+      expect(connectSel.querySelector('option')?.textContent).toContain('Use default'); // clear-override option, names the global
+      // its configured pick is the selected option (assert the render's `selected` directly — robust to happy-dom's value quirk)
+      expect(connectSel.querySelector('option[value="claude-sonnet-4.5"]')?.hasAttribute('selected')).toBe(true);
+      // decompose has no per-agent pick → "Use default" (value '') is the selected option
+      const decSel = root.querySelector<HTMLSelectElement>('.agent[data-key="decompose"] .agent-model-select')!;
+      expect(decSel.querySelector('option[value=""]')?.hasAttribute('selected')).toBe(true);
+      expect(root.querySelector('.agent[data-key="connect"] .agent-model-runs')?.textContent).toContain('claude-sonnet-4.5');
+    });
+
+    it('persists a per-agent pick via setAgentModel(key,id) on change and updates that row in place', async () => {
+      const agents: AgentView[] = [{ key: 'connect', label: 'Connect', role: 'r', model: 'claude-opus-4.8', instructions: 'kb/connectAgent.ts', status: 'idle' }];
+      const setAgentModel = vi.fn(async () => ({ ok: true, resolved: 'claude-sonnet-4.5' }));
+      setApi(vi.fn(async () => agents), vi.fn(async () => CATALOG), vi.fn(), setAgentModel);
+      await mountAgents(root);
+      await tick();
+      const sel = root.querySelector<HTMLSelectElement>('.agent[data-key="connect"] .agent-model-select')!;
+      sel.value = 'claude-sonnet-4.5';
+      sel.dispatchEvent(new Event('change'));
+      await tick();
+      expect(setAgentModel).toHaveBeenCalledWith('connect', 'claude-sonnet-4.5');
+      expect(root.querySelector('.agent[data-key="connect"] .agent-model-runs .path')?.textContent).toBe('claude-sonnet-4.5');
     });
   });
 

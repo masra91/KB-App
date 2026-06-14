@@ -184,7 +184,7 @@ export function makeConnectDecider(opts: ConnectDeciderOptions = {}): ConnectDec
 
     // ORCH-16: `modelUsed` starts at the pin and is rewritten to `auto` if the pinned id is rejected
     // and we fall back — so the trace records the model that ACTUALLY ran (a silent pin-drift is visible).
-    let modelUsed = resolveCopilotModel();
+    let modelUsed = resolveCopilotModel(undefined, 'connect'); // SPEC-0048: per-agent pin, else global
     const at = new Date().toISOString();
     const t0 = Date.now();
     const ids = set.candidates.map((c) => c.id);
@@ -192,7 +192,7 @@ export function makeConnectDecider(opts: ConnectDeciderOptions = {}): ConnectDec
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
       const decision = parseConnectDecision(
-        await runWithModelFallback((m) => run(buildConnectPrompt(set), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
+        await runWithModelFallback((m) => run(buildConnectPrompt(set), cwd, m), { agentKey: 'connect', onFallback: (_from, to) => { modelUsed = to; } }),
         set.blockKey,
         ids,
       );

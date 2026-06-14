@@ -45,8 +45,9 @@ async function render(container: HTMLElement): Promise<void> {
     container.innerHTML = `<div class="card">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
     return;
   }
-  container.innerHTML = `<div class="card">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map(agentItem).join('')}</ul></div>`;
+  container.innerHTML = `<div class="card">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map((a) => agentItem(a, catalog)).join('')}</ul></div>`;
   wireModelPicker(container);
+  wireAgentPickers(container);
 }
 
 /** SPEC-0048 — the global "Default model" picker (the MUST): a styled native `<select>` over the live
@@ -90,7 +91,7 @@ function wireModelPicker(container: HTMLElement): void {
     void window.kbApi
       .setModel(id.length > 0 ? id : null)
       .then((res) => {
-        const runs = container.querySelector<HTMLElement>('.model-runs .path');
+        const runs = container.querySelector<HTMLElement>('.model-control .model-runs .path');
         if (runs) runs.textContent = res.resolved;
         // A successful set clears any prior stale note (the pick is now valid + applied).
         if (res.ok) container.querySelector('.model-stale')?.remove();
@@ -104,7 +105,33 @@ function wireModelPicker(container: HTMLElement): void {
   });
 }
 
-function agentItem(a: AgentView): string {
+/** SPEC-0048 — wire the per-agent pickers: on change, persist via `setAgentModel(key, id)` (validated
+ *  server-side) and update THAT agent's "runs as" caption in place. A delegated listener so it survives
+ *  the row set; `''` clears the agent's override (→ global default). */
+function wireAgentPickers(container: HTMLElement): void {
+  for (const select of Array.from(container.querySelectorAll<HTMLSelectElement>('.agent-model-select'))) {
+    select.addEventListener('change', () => {
+      const key = select.dataset.agent ?? '';
+      const id = select.value; // '' = clear → use the global default
+      if (!key) return;
+      select.disabled = true;
+      void window.kbApi
+        .setAgentModel(key, id.length > 0 ? id : null)
+        .then((res) => {
+          const runs = container.querySelector<HTMLElement>(`.agent[data-key="${key}"] .agent-model-runs .path`);
+          if (runs) runs.textContent = res.resolved;
+        })
+        .catch((): void => {
+          void render(container);
+        })
+        .finally(() => {
+          select.disabled = false;
+        });
+    });
+  }
+}
+
+function agentItem(a: AgentView, catalog: ModelCatalogView | null): string {
   return `
     <li class="agent" data-key="${esc(a.key)}">
       <div class="agent-head">
@@ -113,10 +140,25 @@ function agentItem(a: AgentView): string {
       </div>
       <p class="agent-role">${esc(a.role)}</p>
       <dl class="agent-meta">
-        <dt>Model</dt><dd>${esc(a.model)}</dd>
+        <dt>Model</dt><dd>${agentModelCell(a, catalog)}</dd>
         <dt>Instructions</dt><dd><span class="path">${esc(a.instructions)}</span></dd>
       </dl>
     </li>`;
+}
+
+/** SPEC-0048 — the per-agent Model cell: a `.viz-select` over the live catalog (first option "Use
+ *  default (‹global›)" so clearing an override is obvious; the agent's configured pick selected) + a
+ *  "runs as: ‹resolved›" caption. ENG-15/16 degradation: a deterministic agent, or a missing/empty
+ *  catalog, falls back to the plain resolved-model text — never a broken control. */
+function agentModelCell(a: AgentView, catalog: ModelCatalogView | null): string {
+  const accepted = catalog && Array.isArray(catalog.accepted) ? catalog.accepted : [];
+  if (a.model === 'deterministic' || accepted.length === 0) return `<span class="agent-model-text">${esc(a.model)}</span>`;
+  const configured = a.configuredModel ?? '';
+  const options = [`<option value=""${configured ? '' : ' selected'}>Use default (${esc(catalog?.resolved ?? '—')})</option>`]
+    .concat(accepted.map((m) => `<option value="${esc(m)}"${m === configured ? ' selected' : ''}>${esc(m)}</option>`))
+    .join('');
+  return `<select class="viz-select agent-model-select" data-agent="${esc(a.key)}" aria-label="Model for ${esc(a.label)}">${options}</select>` +
+    `<span class="model-runs agent-model-runs">runs as: <span class="path">${esc(a.model)}</span></span>`;
 }
 
 /** PANEL-9: refresh only the status badges in place (no full re-render → no flicker). */

@@ -59,7 +59,7 @@ import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJob
 import { applyCopilotCeiling } from '../kb/copilotConcurrency';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
-import { resolveCopilotModel, setResolvedLaunchModel } from '../kb/copilotModel';
+import { resolveCopilotModel, setResolvedLaunchModel, setAgentModelOverrides } from '../kb/copilotModel';
 import { initLaunchModel, probeAcceptedModels, validateModel } from '../kb/copilotModelProbe';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
@@ -295,6 +295,10 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   await initLaunchModel({ preferences: stagingInstance.modelPreferences, override: stagingInstance.model, log: log.child({ scope: 'model' }) }).catch((err) =>
     log.child({ scope: 'model' }).warn('model.probe-failed', { itemId: vaultPath, err }),
   );
+  // SPEC-0048 per-agent overrides: apply the persisted picks (validated at set-time via the picker IPC).
+  // A stale per-agent id is caught at launch by the per-call `auto` fallback — narrower blast radius than
+  // the global, so we trust the stored value here rather than re-probe.
+  setAgentModelOverrides(stagingInstance.agentModels ?? {});
   // SPEC-0048 SCALE-1/2: apply the configured global ceiling (env > Settings > cores-derived) to the
   // shared semaphore, and resolve the per-stage caps (today's defaults overlaid with any overrides;
   // Connect pinned to 1, SCALE-5) — each stage is sized below, live-adjustable via setActiveInstanceSettings.
@@ -1047,6 +1051,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       recallBudgetMs,
       ...(priorCfg.modelPreferences ? { modelPreferences: priorCfg.modelPreferences } : {}), // preserve MODEL (#345)
       ...(priorCfg.model ? { model: priorCfg.model } : {}),
+      ...(priorCfg.agentModels ? { agentModels: priorCfg.agentModels } : {}), // preserve per-agent picks (SPEC-0048)
       ...(stageCaps ? { stageCaps } : {}),
       ...(copilotCeiling !== undefined ? { copilotCeiling } : {}),
     });
@@ -1108,10 +1113,13 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
 /** The librarian/stage agents for observe-only display (PANEL-3): the static catalog overlaid with
  *  the resolved model (env-requested or Copilot default) + live running/idle status (PANEL-9). */
 export async function listAgentsForActive(): Promise<AgentView[]> {
+  // SPEC-0048: per-agent resolution — each row shows the model THAT agent launches with (its own pin
+  // → global → floor) + its configured pick (for the picker). `agentModels` read from the persisted
+  // config so the view reflects the saved picks even before a restart re-applies the override cache.
+  const configuredModels = active ? (await readInstanceConfig(active.stagingWt)).agentModels : undefined;
   return buildAgentViews(AGENT_CATALOG, {
-    // ORCH-16: show the pinned model the agents actually launch with (resolveCopilotModel),
-    // not the bare env — prod pins in-app, so the Agents view reflects what really runs.
-    requestedModel: resolveCopilotModel(),
+    resolveModel: (agentKey) => resolveCopilotModel(undefined, agentKey),
+    configuredModels,
     pipelineActive: active !== null,
   });
 }
@@ -1164,6 +1172,39 @@ export async function setActiveModel(id: string | null): Promise<SetModelResult>
   }, 'instance-model:write');
   setResolvedLaunchModel(trimmed); // apply live — new launches use it immediately
   return { ok: true, resolved: resolveCopilotModel() };
+}
+
+/** SPEC-0048 — set/clear ONE agent's per-agent model pick (Agents-view per-agent picker). Validated
+ *  against the live catalog (rejected → refused). Empty/null clears that agent's pick (→ global default).
+ *  Persists `instance.agentModels` under the lock + applies live via `setAgentModelOverrides`. Returns
+ *  that agent's now-resolved model. */
+export async function setActiveAgentModel(agentKey: string, id: string | null): Promise<SetModelResult> {
+  if (!active) return { ok: false, resolved: resolveCopilotModel(undefined, agentKey) };
+  const root = active.stagingWt;
+  const key = agentKey.trim();
+  const trimmed = (id ?? '').trim();
+  if (key.length === 0) return { ok: false, resolved: resolveCopilotModel() };
+
+  // A non-empty pick must be catalog-accepted (rejected → refuse, leave the agent on its current model).
+  if (trimmed.length > 0) {
+    const { result } = await validateModel(trimmed);
+    if (result === 'rejected') return { ok: false, resolved: resolveCopilotModel(undefined, agentKey), reason: 'rejected' };
+  }
+
+  let next: Record<string, string> = {};
+  await active.lock.run(async () => {
+    const prior = await readInstanceConfig(root);
+    const map = { ...(prior.agentModels ?? {}) };
+    if (trimmed.length > 0) map[key] = trimmed;
+    else delete map[key]; // clear → fall back to the global default
+    next = map;
+    const { agentModels: _drop, ...rest } = prior;
+    void _drop;
+    await writeInstanceConfig(root, { ...rest, ...(Object.keys(map).length > 0 ? { agentModels: map } : {}) });
+    await commitControlFile(root, instanceConfigPath(root), `instance agentModels.${key}=${trimmed || 'cleared'}`);
+  }, 'instance-agent-model:write');
+  setAgentModelOverrides(next); // apply live
+  return { ok: true, resolved: resolveCopilotModel(undefined, agentKey) };
 }
 
 // --- Control Panel · Watched folders (SPEC-0037 WATCH-9; over the watch registry) ---
