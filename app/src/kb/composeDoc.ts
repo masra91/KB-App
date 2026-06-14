@@ -130,3 +130,34 @@ export function hasProse(entityMd: string): boolean {
   if (blockAt < start) return false;
   return entityMd.slice(start, blockAt).trim().length > 0;
 }
+
+/**
+ * SPEC-0051 COHERE-1 — resolve BARE woven `[[Name]]` links in the entity's PROSE region to path form
+ * `[[entities/kind/Name.md|Name]]` via the caller's `resolve(name) → rel | null`. Compose weaves links
+ * as bare display names (composeAgent), which Obsidian can't resolve to the kind-subdir entity path, so
+ * they render dead (`[[Harrie]]`). Only the prose region is touched — the frontmatter/H1 above and the
+ * kb:links / kb:claims blocks below are left verbatim (COMPOSE-5). A link is rewritten ONLY when it is
+ * bare (no `|`, no `/`) AND `resolve` returns exactly one entity rel; unknown/ambiguous targets are
+ * left bare (CONNECT-13 — never a dangling guess). Idempotent: a rewritten `[[rel|Name]]` carries a `|`
+ * so a later pass skips it. ENG-16: a malformed `[[...]]` or a throwing resolver leaves the link as-is,
+ * never corrupts the doc.
+ */
+export function resolveProseWikilinks(entityMd: string, resolve: (name: string) => string | null): string {
+  const start = proseStart(entityMd);
+  const end = firstBlockIndex(entityMd);
+  if (end <= start) return entityMd; // no prose region to touch
+  const prose = entityMd.slice(start, end);
+  const rewritten = prose.replace(/\[\[([^\]]+)\]\]/g, (whole: string, inner: string) => {
+    if (inner.includes('|') || inner.includes('/')) return whole; // already piped or path form — leave
+    const name = inner.trim();
+    if (!name) return whole;
+    let rel: string | null = null;
+    try {
+      rel = resolve(name);
+    } catch {
+      return whole; // ENG-16: a resolver throw never corrupts the doc
+    }
+    return rel ? `[[${rel}|${name}]]` : whole; // unknown/ambiguous → leave bare (CONNECT-13)
+  });
+  return entityMd.slice(0, start) + rewritten + entityMd.slice(end);
+}

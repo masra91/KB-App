@@ -9,6 +9,7 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, entityFileRel, LINKS_BLOCK_START } from './connectDoc';
+import { applyProse } from './composeDoc';
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
@@ -60,8 +61,9 @@ async function seedCandidate(root: string, kind: string, name: string, sourceId:
   return id;
 }
 
-/** Seed an existing canonical entity node; returns { id, rel }. */
-async function seedNode(root: string, kind: string, name: string, derivedFrom: string[]): Promise<{ id: string; rel: string }> {
+/** Seed an existing canonical entity node; returns { id, rel }. `aliases` are added alongside the
+ *  self-id alias (real nodes carry both) — used to test alias-based link resolution (COHERE-1). */
+async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = []): Promise<{ id: string; rel: string }> {
   const id = ulid();
   const rel = entityFileRel(kind, name, id); // COMPOSE-6: human leaf (real case + spaces), kind dir lowercase
   const dest = path.join(root, rel);
@@ -73,7 +75,7 @@ async function seedNode(root: string, kind: string, name: string, derivedFrom: s
       kind,
       name,
       confidence: 0.9,
-      aliases: [id],
+      aliases: [id, ...aliases],
       derivedFrom,
       resolvedFrom: [],
       tags: [],
@@ -513,6 +515,41 @@ describe.skipIf(!gitAvailable)('linkOne — promote relatesTo hints into [[wikil
       expect(md).toContain(`[[${apple.rel}|`); // VAULT-12: alias form `[[path|Name]]` to the canonical node
       expect(md).toContain(`[[${apple.rel}|Apple]]`); // shows the entity name, not the raw path
       expect((await simpleGit(root).status()).isClean()).toBe(true); // ORCH-3
+    });
+  });
+
+  it('COHERE-1 coverage: a relatesTo hint matching an entity ALIAS resolves to that node', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const apple = await seedNode(root, 'organization', 'Apple', ['sources/b/01SB'], ['Apple Inc']); // alias
+      await seedClaimRelatesTo(root, steve.rel, 'Worked at Apple Inc.', ['Apple Inc']); // hint = the alias
+      await commitAll(root, 'seed node + alias-hint claim');
+
+      const res = await linkOne(root, steve.rel);
+      expect(res.links).toBe(1); // resolved via the alias, not the canonical name
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(`[[${apple.rel}|Apple]]`); // links to Apple, displayed by its canonical name
+    });
+  });
+
+  it('COHERE-1 bare-[[Name]]: resolves a bare woven prose link to the entity path; leaves an unknown one bare', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const steve = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const harrie = await seedNode(root, 'person', 'Harrie', ['sources/b/01SB']);
+      // Compose-style woven prose: a bare known link + a bare unknown link.
+      const withProse = applyProse(await fs.readFile(path.join(root, steve.rel), 'utf8'), 'Jobs worked with [[Harrie]] and [[Ghost Person]].');
+      await fs.writeFile(path.join(root, steve.rel), withProse, 'utf8');
+      await commitAll(root, 'seed node with bare woven prose links');
+
+      const res = await linkOne(root, steve.rel);
+      expect(res.changed).toBe(true);
+      const md = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(md).toContain(`[[${harrie.rel}|Harrie]]`); // bare [[Harrie]] → entity path (navigable)
+      expect(md).toContain('[[Ghost Person]]'); // unknown stays bare (CONNECT-13 — no dangling guess)
+      expect(md).not.toContain('Ghost Person.md');
+      expect((await simpleGit(root).status()).isClean()).toBe(true); // ORCH-3: advance is clean
     });
   });
 
