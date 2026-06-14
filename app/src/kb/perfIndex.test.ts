@@ -64,6 +64,19 @@ describe('perf index (SPEC-0030 OBS-14/16)', () => {
     expect(idx.copilot.p95Ms).toBe(400);
   });
 
+  // OBS-12/13 path regression: the tracer writes spans to the VAULT ROOT (`createVaultTracer(vaultPath)`),
+  // so the perf index must be read from that SAME root. The Latency & Throughput panel showed "No Copilot
+  // calls recorded yet" because the status path read `loadPerfIndex(stagingWt)` — a DIFFERENT (empty) root.
+  it('reads spans from the tracer’s vault root, NOT the staging subpath (the "No calls recorded" bug)', async () => {
+    root = await makeTempDir('kb-perf-');
+    await writeSpans(root, FIXTURE); // the tracer appends here: <vaultRoot>/.kb/cache/spans.jsonl
+    // Reading the vault root (the fix) sees the calls...
+    expect((await loadPerfIndex(root, { now: () => 'V' })).copilot.count).toBe(4);
+    // ...but reading the staging worktree subpath (the bug) finds an empty/absent index → 0 calls.
+    const stagingWt = path.join(root, '.kb', 'cache', 'worktrees', 'staging');
+    expect((await loadPerfIndex(stagingWt, { now: () => 'S' })).copilot.count).toBe(0);
+  });
+
   it('computes per-stage throughput from stage.run spans (OBS-14)', async () => {
     root = await makeTempDir('kb-perf-');
     await writeSpans(root, FIXTURE);
