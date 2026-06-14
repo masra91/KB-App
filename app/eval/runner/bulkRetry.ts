@@ -166,6 +166,12 @@ export interface RunBulkRetryOptions {
   inPlace?: boolean;
   /** Max decompose sweep passes before giving up on a never-terminating item (mirrors the stage sweep). */
   maxDecomposePasses?: number;
+  /** Bound the retry to the first N set-aside sources (deterministic order). A real-copilot drain runs
+   *  ~tens-of-seconds-to-minutes PER source, so the full population (≈203) is many hours — too long for a
+   *  single test window. `limit` takes a quick representative SAMPLE (a real residual number in minutes)
+   *  and lets the full population be worked in CHUNKS across runs. Omit/0 = the whole population. The
+   *  report's denominator is exactly the targeted subset. */
+  limit?: number;
   /** Inspect the post-drain snapshot (human-eyeball dogfood logging), as the scenario runner does. */
   onSnapshot?: (snap: VaultSnapshot) => void;
 }
@@ -220,14 +226,18 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
     await copyVaultIsolated(src, root);
   }
   try {
-    // 1) BEFORE — the toss population (read from the canonical vault before staging).
-    const before = await findSetAsideSources(root);
+    // 1) BEFORE — the toss population (read from the canonical vault before staging). `limit` bounds it
+    //    to the first N (deterministic order) so a slow real-copilot drain can be sampled / chunked; the
+    //    targeted subset (by vault-relative path) is what we re-enqueue, drain, and measure.
+    const allBefore = await findSetAsideSources(root);
+    const before = opts.limit && opts.limit > 0 ? allBefore.slice(0, opts.limit) : allBefore;
+    const targetRel = new Set(before.map((s) => path.relative(root, s.dir)));
 
-    // 2) Re-enqueue via partial replay on the staging worktree, then commit so the markers survive the
-    //    drain's git advances.
+    // 2) Re-enqueue via partial replay on the staging worktree (only the targeted subset), then commit
+    //    so the markers survive the drain's git advances.
     const stagingWt = await ensureStagingWorktree(root);
     const replayId = newReplayId();
-    const stagedSetAside = await findSetAsideSources(stagingWt);
+    const stagedSetAside = (await findSetAsideSources(stagingWt)).filter((s) => targetRel.has(path.relative(stagingWt, s.dir)));
     await reEnqueueSetAside(
       stagingWt,
       stagedSetAside.map((s) => s.dir),
@@ -265,8 +275,8 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
     await tracer.flush();
     await log.flush();
 
-    // 4) AFTER — residual set-aside + the snapshot (for the span cross-check + dogfood logging).
-    const after = await findSetAsideSources(root);
+    // 4) AFTER — residual set-aside WITHIN the targeted subset + the snapshot (span cross-check + log).
+    const after = (await findSetAsideSources(root)).filter((s) => targetRel.has(path.relative(root, s.dir)));
     const snap = await captureSnapshot(root);
     opts.onSnapshot?.(snap);
     return computeBulkRetryReport({ before, after, snap, replayId, model: process.env.KB_COPILOT_MODEL ?? 'default' });
