@@ -7,6 +7,7 @@
 // Layering (STACK-6): `resolveExecutable` is main-tier (it shells out to the login shell); the kb-tier
 // research adapter takes the resolved `cliPath` as data. This module is the only bridge.
 import { resolveExecutable } from './resolvePath';
+import { resolveCopilotModel } from '../kb/copilotModel';
 import type { WebResearchOptions } from '../kb/researchWebAgent';
 import type { CodeResearchOptions } from '../kb/researchCodeAgent';
 import type { ResearchDepsOptions } from '../kb/researchInline';
@@ -21,16 +22,20 @@ export function resolveCopilotCliPath(env: NodeJS.ProcessEnv = process.env, plat
   return resolveExecutable('copilot', env, platform) ?? undefined;
 }
 
-/** Web-researcher SDK options with the resolved cliPath + the research dev-log (#160: failed ≠ empty). */
+/** Web-researcher SDK options with the resolved cliPath + the research dev-log (#160: failed ≠ empty).
+ *  SPEC-0048 WS-D(c): pin the model the SDK session runs on (researchers otherwise passed no model →
+ *  the SDK inherited `~/.copilot/settings.json`, the same model-pin gap #340 closed for the deciders).
+ *  `resolveCopilotModel(undefined, 'researcher-web')` = the per-researcher pin if set, else the global. */
 export function webResearchOptions(log: DevLog): WebResearchOptions {
-  return { cliPath: resolveCopilotCliPath(), log };
+  return { cliPath: resolveCopilotCliPath(), log, model: resolveCopilotModel(undefined, 'researcher-web') };
 }
 
 /** Code-researcher SDK options (RESEARCH-20): the resolved cliPath enables the live agentic local-repo
  *  session; absent → the deterministic grep fallback (RESEARCH-14). The dev-log surfaces a session
- *  failure before it degrades to grep (#160: never silent). */
+ *  failure before it degrades to grep (#160: never silent). SPEC-0048 WS-D(c): pin the model (per-agent
+ *  'researcher-code' → global), so the agentic pass runs the chosen model, not settings.json's. */
 export function codeResearchOptions(log: DevLog): CodeResearchOptions {
-  return { cliPath: resolveCopilotCliPath(), log };
+  return { cliPath: resolveCopilotCliPath(), log, model: resolveCopilotModel(undefined, 'researcher-code') };
 }
 
 /**
