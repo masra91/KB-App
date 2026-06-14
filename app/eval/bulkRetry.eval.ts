@@ -17,11 +17,16 @@
 // The deterministic CI guard for this harness's logic (scanner / re-enqueue / report math) is
 // runner/bulkRetry.test.ts; this file is the live instrument that produces the residual number.
 import { describe, it, expect } from 'vitest';
+import { appendFileSync } from 'node:fs';
 import { runBulkRetry, formatBulkRetryReport } from './runner/bulkRetry';
 
 const ENABLED = process.env.KB_EVAL === '1';
 const VAULT = process.env.KB_EVAL_RETRY_VAULT;
 const IN_PLACE = process.env.KB_EVAL_RETRY_INPLACE === '1';
+// Live, unbuffered progress file (vitest buffers console + discards it on timeout). Tail it to watch a
+// long run; the decompose-stage residual is written here before the slow downstream drain, so the
+// SPEC-0049 toss-rate is captured even if the outer window times out.
+const PROGRESS = process.env.KB_EVAL_RETRY_PROGRESS;
 // A real-copilot drain runs ~tens-of-seconds-to-minutes PER source, so the full ≈203 population is many
 // HOURS — far past one test window. Sample/chunk with KB_EVAL_RETRY_LIMIT (first N set-aside sources)
 // and size the window with KB_EVAL_RETRY_TIMEOUT_MIN (default 60). The full 203 run uses a high limit +
@@ -37,6 +42,15 @@ describe.skipIf(!ENABLED || !VAULT)('SPEC-0049 HEAL-7 — bulk-retry the set-asi
         vaultPath: VAULT as string,
         inPlace: IN_PLACE,
         limit: LIMIT,
+        onProgress: PROGRESS
+          ? (m) => {
+              try {
+                appendFileSync(PROGRESS, `[${new Date().toISOString()}] ${m}\n`);
+              } catch {
+                /* best-effort live log */
+              }
+            }
+          : undefined,
         onSnapshot: (snap) =>
           console.log(`\n[bulk-retry] post-drain vault: entities=${snap.entities.length} claims=${snap.claims.length} sources=${snap.sources.length}`),
       });

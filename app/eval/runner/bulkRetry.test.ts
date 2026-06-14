@@ -171,6 +171,13 @@ describe('computeBulkRetryReport (the residual math)', () => {
     expect(formatBulkRetryReport(r)).toContain('toss-rate → 0');
   });
 
+  it('formats a vacuous run (no residual set-aside sources) without a misleading "converged" verdict', () => {
+    const r = computeBulkRetryReport({ before: [], after: [], snap: snap({ spans: [] }), replayId: 'e1', model: 'm' });
+    expect(r.beforeSetAside).toBe(0);
+    expect(r.tossRateAfter).toBe(0);
+    expect(formatBulkRetryReport(r)).toContain('no residual set-aside sources to retry');
+  });
+
   it('null span cross-check when no decompose stage-run spans were recorded', () => {
     const r = computeBulkRetryReport({ before: [sa('a')], after: [sa('a')], snap: snap({ spans: [] }), replayId: 'e1', model: 'm' });
     expect(r.spanSetAsideRate).toBeNull();
