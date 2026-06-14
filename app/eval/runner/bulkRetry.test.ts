@@ -8,7 +8,7 @@ import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { readDecomposeQueue } from '../../src/kb/decomposeStage';
 import { replayResetLine } from '../../src/kb/replayEpoch';
-import { findSetAsideSources, reEnqueueSetAside, computeBulkRetryReport, formatBulkRetryReport } from './bulkRetry';
+import { findSetAsideSources, reEnqueueSetAside, computeBulkRetryReport, formatBulkRetryReport, copyVaultIsolated } from './bulkRetry';
 import type { VaultSnapshot } from './snapshot';
 
 const tmpDirs: string[] = [];
@@ -26,6 +26,15 @@ async function writeSource(root: string, id: string, auditLines: string[]): Prom
 }
 
 const line = (event: string, stage = 'decompose') => JSON.stringify({ ts: '2026-01-01T00:00:00.000Z', stage, event });
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function vaultWith(sources: Record<string, string[]>): Promise<string> {
   const root = await makeTempDir('kb-bulkretry-test-');
@@ -64,6 +73,47 @@ describe('findSetAsideSources (the toss population)', () => {
   it('does not count a source that was set aside then succeeded in the same epoch', async () => {
     const root = await vaultWith({ 'aside-then-ok': [line('setaside'), line('decomposed')] });
     expect(await findSetAsideSources(root)).toEqual([]);
+  });
+});
+
+describe('copyVaultIsolated (non-destructive copy severs the source\'s live git worktrees)', () => {
+  // Reproduces the real-vault leak: fs.cp of a vault that contains a live `staging` worktree (whose
+  // `.git` holds an ABSOLUTE gitdir back to the source) wires the "copy" to the original, so the retry
+  // mutates the real vault. The fix excludes the worktree checkouts + the `.git/worktrees` admin.
+  async function vaultWithLiveWorktree(): Promise<string> {
+    const root = await makeTempDir('kb-isolate-src-');
+    tmpDirs.push(root);
+    await writeSource(root, 'aside-1', [line('setaside')]); // canonical content that MUST be copied
+    // a live staging worktree whose .git points BACK at the source vault (the leak vector)
+    const stagingWt = path.join(root, '.kb', 'cache', 'worktrees', 'staging');
+    await fs.mkdir(stagingWt, { recursive: true });
+    await fs.writeFile(path.join(stagingWt, '.git'), `gitdir: ${path.join(root, '.git', 'worktrees', 'staging')}\n`, 'utf8');
+    // the matching worktree admin registration (also absolute-pathed)
+    const admin = path.join(root, '.git', 'worktrees', 'staging');
+    await fs.mkdir(admin, { recursive: true });
+    await fs.writeFile(path.join(admin, 'gitdir'), `${path.join(stagingWt, '.git')}\n`, 'utf8');
+    await fs.writeFile(path.join(root, '.git', 'HEAD'), 'ref: refs/heads/main\n', 'utf8');
+    return root;
+  }
+
+  it('copies canonical content but DROPS .kb/cache/worktrees and .git/worktrees, leaving the source untouched', async () => {
+    const src = await vaultWithLiveWorktree();
+    const destParent = await makeTempDir('kb-isolate-dest-');
+    tmpDirs.push(destParent);
+    const dest = path.join(destParent, 'vault');
+
+    await copyVaultIsolated(src, dest);
+
+    // canonical sources came across …
+    expect(await exists(path.join(dest, 'sources', 'aside-1', 'audit.jsonl'))).toBe(true);
+    // … but both leak vectors are severed in the copy
+    expect(await exists(path.join(dest, '.kb', 'cache', 'worktrees'))).toBe(false);
+    expect(await exists(path.join(dest, '.git', 'worktrees'))).toBe(false);
+    // parent dirs we still want are preserved (only the `worktrees` subtree is excluded)
+    expect(await exists(path.join(dest, '.kb', 'cache'))).toBe(true);
+    // and the SOURCE vault keeps its live worktree (the copy never touched the original)
+    expect(await exists(path.join(src, '.kb', 'cache', 'worktrees', 'staging', '.git'))).toBe(true);
+    expect(await exists(path.join(src, '.git', 'worktrees', 'staging', 'gitdir'))).toBe(true);
   });
 });
 
@@ -119,6 +169,13 @@ describe('computeBulkRetryReport (the residual math)', () => {
     expect(r.tossRateAfter).toBe(0);
     expect(r.spanSetAsideRate).toBe(0);
     expect(formatBulkRetryReport(r)).toContain('toss-rate → 0');
+  });
+
+  it('formats a vacuous run (no residual set-aside sources) without a misleading "converged" verdict', () => {
+    const r = computeBulkRetryReport({ before: [], after: [], snap: snap({ spans: [] }), replayId: 'e1', model: 'm' });
+    expect(r.beforeSetAside).toBe(0);
+    expect(r.tossRateAfter).toBe(0);
+    expect(formatBulkRetryReport(r)).toContain('no residual set-aside sources to retry');
   });
 
   it('null span cross-check when no decompose stage-run spans were recorded', () => {

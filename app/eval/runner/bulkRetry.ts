@@ -146,7 +146,12 @@ export function computeBulkRetryReport(args: {
 /** A human-readable HEAL-7 report (for the #control post + the opt-in eval log). */
 export function formatBulkRetryReport(r: BulkRetryReport): string {
   const pct = (x: number | null) => (x === null ? 'n/a' : `${(x * 100).toFixed(1)}%`);
-  const verdict = r.residualSetAside === 0 ? '✓ toss-rate → 0 (every set-aside source converged)' : `${r.residualSetAside} residual toss(es) remain`;
+  const verdict =
+    r.beforeSetAside === 0
+      ? '— no residual set-aside sources to retry (vacuous)'
+      : r.residualSetAside === 0
+        ? '✓ toss-rate → 0 (every set-aside source converged)'
+        : `${r.residualSetAside} residual toss(es) remain`;
   return [
     `HEAL-7 bulk-retry — model=${r.model} epoch=${r.replayId}`,
     `  set-aside before:   ${r.beforeSetAside}`,
@@ -166,13 +171,54 @@ export interface RunBulkRetryOptions {
   inPlace?: boolean;
   /** Max decompose sweep passes before giving up on a never-terminating item (mirrors the stage sweep). */
   maxDecomposePasses?: number;
+  /** Bound the retry to the first N set-aside sources (deterministic order). A real-copilot drain runs
+   *  ~tens-of-seconds-to-minutes PER source, so the full population (≈203) is many hours — too long for a
+   *  single test window. `limit` takes a quick representative SAMPLE (a real residual number in minutes)
+   *  and lets the full population be worked in CHUNKS across runs. Omit/0 = the whole population. The
+   *  report's denominator is exactly the targeted subset. */
+  limit?: number;
   /** Inspect the post-drain snapshot (human-eyeball dogfood logging), as the scenario runner does. */
   onSnapshot?: (snap: VaultSnapshot) => void;
+  /** Live, UNBUFFERED progress sink (per-item + stage milestones). A real-copilot drain runs for hours
+   *  and the vitest entry buffers console output then discards it on timeout, so without this a long run
+   *  yields no data at all. Wire it to an append-to-file and the residual is captured incrementally —
+   *  the decompose-stage toss-rate (the SPEC-0049 measure) survives even a downstream-drain timeout. */
+  onProgress?: (msg: string) => void;
 }
 
 /** Default decompose sweep passes — K=3 set-aside attempts + buffer, so a poison item reaches its
  *  terminal set-aside without an unbounded loop (matches the scenario driver). */
 const DEFAULT_DECOMPOSE_PASSES = 5;
+
+/** Subpaths (relative to the vault root) that must NOT be carried into a non-destructive copy. A vault
+ *  that has ever run the pipeline (i.e. EVERY real vault, incl. the 203 dogfood vault) holds live git
+ *  worktrees under `.kb/cache/worktrees/*` whose `.git` files store ABSOLUTE `gitdir:` pointers back to
+ *  the SOURCE vault, plus `.git/worktrees/*` admin entries that also encode absolute source paths.
+ *  `fs.cp` copies both verbatim, so the "copy" stays wired to the original: `ensureStagingWorktree`
+ *  sees the copied `staging` dir pass `--is-inside-work-tree` (its `.git` resolves to the real vault),
+ *  deems it healthy, reuses it — and every git op (the replay-reset commit, each stage's ephemeral
+ *  worktree) silently mutates the REAL vault, defeating the non-destructive guarantee AND crashing the
+ *  drain with a doubled, nonexistent path (`…/staging/.kb/cache/worktrees/claims-<id>` ENOENT).
+ *  Excluding them makes the copy self-contained — `ensureStagingWorktree` builds a FRESH staging
+ *  worktree inside the copy's OWN git. */
+const COPY_EXCLUDE_RELS = [path.join('.kb', 'cache', 'worktrees'), path.join('.git', 'worktrees')];
+
+/**
+ * Copy a vault to `dest` for a non-destructive bulk-retry, SEVERING the source's live git worktrees so
+ * the copy is genuinely isolated (see COPY_EXCLUDE_RELS — without this, a real vault leaks its retry
+ * back into the original). Exported so the isolation is unit-tested directly, since the live drain that
+ * would otherwise exercise it can't run in CI.
+ */
+export async function copyVaultIsolated(srcVault: string, dest: string): Promise<void> {
+  const src = path.resolve(srcVault);
+  const excluded = COPY_EXCLUDE_RELS.map((rel) => path.join(src, rel));
+  await fs.cp(src, dest, {
+    recursive: true,
+    // false skips the path AND (via the startsWith test) everything under it, regardless of whether
+    // node descends into a filtered directory — robust across Node fs.cp filter-recursion behavior.
+    filter: (from) => !excluded.some((ex) => from === ex || from.startsWith(ex + path.sep)),
+  });
+}
 
 /**
  * Run the full HEAL-7 bulk-retry against a vault: find set-aside sources → partial-replay re-enqueue →
@@ -187,17 +233,33 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
   if (!opts.inPlace) {
     tempRoot = await makeTempDir('kb-bulk-retry-');
     root = path.join(tempRoot, 'vault');
-    await fs.cp(src, root, { recursive: true });
+    await copyVaultIsolated(src, root);
   }
+  const note = (m: string): void => opts.onProgress?.(m);
   try {
-    // 1) BEFORE — the toss population (read from the canonical vault before staging).
-    const before = await findSetAsideSources(root);
+    // 1) BEFORE — the toss population (read from the canonical vault before staging). `limit` bounds it
+    //    to the first N (deterministic order) so a slow real-copilot drain can be sampled / chunked; the
+    //    targeted subset (by vault-relative path) is what we re-enqueue, drain, and measure.
+    const allBefore = await findSetAsideSources(root);
+    const before = opts.limit && opts.limit > 0 ? allBefore.slice(0, opts.limit) : allBefore;
+    const targetRel = new Set(before.map((s) => path.relative(root, s.dir)));
+    note(`set-aside found: ${allBefore.length}; targeting ${before.length}${opts.limit ? ` (limit ${opts.limit})` : ''}`);
+    // Nothing genuinely stuck in the current epoch → no drain at all. Guards against a pointless
+    // whole-vault connect/claims churn (the stage pokes aren't source-scoped) when there's nothing to
+    // retry — e.g. a vault whose past set-asides all later recovered (a `setaside` event followed by a
+    // success terminal is NOT a residual toss; findSetAsideSources already excludes those).
+    if (before.length === 0) {
+      note('nothing to retry — no residual set-aside sources in the current epoch.');
+      const snap = await captureSnapshot(root);
+      opts.onSnapshot?.(snap);
+      return computeBulkRetryReport({ before, after: [], snap, replayId: newReplayId(), model: process.env.KB_COPILOT_MODEL ?? 'default' });
+    }
 
-    // 2) Re-enqueue via partial replay on the staging worktree, then commit so the markers survive the
-    //    drain's git advances.
+    // 2) Re-enqueue via partial replay on the staging worktree (only the targeted subset), then commit
+    //    so the markers survive the drain's git advances.
     const stagingWt = await ensureStagingWorktree(root);
     const replayId = newReplayId();
-    const stagedSetAside = await findSetAsideSources(stagingWt);
+    const stagedSetAside = (await findSetAsideSources(stagingWt)).filter((s) => targetRel.has(path.relative(stagingWt, s.dir)));
     await reEnqueueSetAside(
       stagingWt,
       stagedSetAside.map((s) => s.dir),
@@ -206,6 +268,7 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
     const git = simpleGit(stagingWt);
     await git.add('-A');
     await git.commit(`bulk-retry: partial replay-reset ${stagedSetAside.length} set-aside source(s) (HEAL-7, epoch ${replayId})`);
+    note(`re-enqueued ${stagedSetAside.length} (epoch ${replayId}); draining decompose…`);
 
     // 3) Drive the REAL drain with telemetry sinks pointed at the vault root (where the snapshot reads).
     const lock = new Mutex();
@@ -220,23 +283,38 @@ export async function runBulkRetry(opts: RunBulkRetryOptions): Promise<BulkRetry
     const decideOpts = { vaultPath: stagingWt };
     const connectPoke = (): Promise<void> => new ConnectStage(stagingWt, makeConnectDecider(decideOpts), lock, undefined, promoteEvergreen, log, tracer).poke();
 
-    let q = await readDecomposeQueue(stagingWt);
+    // Drain ONLY the re-enqueued set-aside sources, not the whole decompose queue: we're retrying the
+    // toss population, not re-draining unrelated pending work (and on a real vault the full queue can be
+    // huge — that's what blew the sample window). targetRel holds the sources we re-enqueued; an empty
+    // set would mean nothing to retry. The set-aside residual is fully determined by decompose (that's
+    // where the 203 were tossed), so downstream connect/claims add no toss-rate signal — they run below
+    // only to leave the retried sources fully processed.
+    const inScope = (rel: string): boolean => targetRel.has(rel);
+    let q = (await readDecomposeQueue(stagingWt)).filter(inScope);
     for (let pass = 0; q.length > 0 && pass < maxPasses; pass++) {
       for (const srcRel of q) {
         const span = tracer.start(STAGE_RUN_OP, { stage: 'decompose', itemId: path.basename(srcRel) });
         const r = await decomposeOne(stagingWt, srcRel, makeDecomposeDecider(decideOpts), lock, undefined, log, span);
         span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
+        note(`  decompose ${path.basename(srcRel)}: ${r.ok ? 'ok' : r.setAside ? 'SET ASIDE' : 'error'}${r.error ? ` — ${r.error}` : ''}`);
       }
-      q = await readDecomposeQueue(stagingWt);
+      q = (await readDecomposeQueue(stagingWt)).filter(inScope);
     }
+    // The toss-rate is determined at DECOMPOSE (where the 203 were tossed) — capture the residual on the
+    // staging branch NOW, before the slow downstream drain, so the SPEC-0049 number survives even if
+    // connect/claims (which add no toss-rate signal) run long and the outer test window times out.
+    const decResidual = (await findSetAsideSources(stagingWt)).filter((s) => targetRel.has(path.relative(stagingWt, s.dir)));
+    note(`DECOMPOSE residual: ${decResidual.length}/${before.length} still set aside → toss-rate ${((before.length ? decResidual.length / before.length : 0) * 100).toFixed(1)}%`);
+    note('draining connect/claims (no toss-rate signal; for full processing)…');
     await connectPoke();
     await new ClaimsStage(stagingWt, makeClaimsDecider(decideOpts), lock, undefined, promoteEvergreen, DEFAULT_STAGE_CAP, log, tracer).poke();
     await connectPoke(); // settle link-promotion lock-free after claims (mirrors the scenario driver)
     await tracer.flush();
     await log.flush();
 
-    // 4) AFTER — residual set-aside + the snapshot (for the span cross-check + dogfood logging).
-    const after = await findSetAsideSources(root);
+    // 4) AFTER — residual set-aside WITHIN the targeted subset + the snapshot (span cross-check + log).
+    const after = (await findSetAsideSources(root)).filter((s) => targetRel.has(path.relative(root, s.dir)));
+    note(`final residual (post-promote): ${after.length}/${before.length}`);
     const snap = await captureSnapshot(root);
     opts.onSnapshot?.(snap);
     return computeBulkRetryReport({ before, after, snap, replayId, model: process.env.KB_COPILOT_MODEL ?? 'default' });
