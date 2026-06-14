@@ -15,6 +15,7 @@
 import { LINKS_BLOCK_START } from './connectDoc';
 import { CLAIMS_BLOCK_START } from './claimDoc';
 import type { ComposeDecision, CitedClaim } from './compose';
+import { stripLeadingHashes } from './compose';
 
 /**
  * Render a grounded decision + its cited claims into the prose body (lede + sections + References).
@@ -48,10 +49,14 @@ export function renderProse(decision: ComposeDecision, claims: readonly CitedCla
 
   const blocks: string[] = [];
   for (const section of decision.sections) {
+    // Defensively strip any leading `#`s the model left on the heading (compose prepends its own `## `,
+    // so an un-stripped value renders `## ## Family`). Also lets a hashed "## References" be recognized
+    // + dropped below. parseComposeDecision already strips at the seam; this guards hand-built callers.
+    const heading = section.heading ? stripLeadingHashes(section.heading) : undefined;
     // Drop a spurious agent-authored "References" section — Compose owns References (built below).
-    if (section.heading && /^references$/i.test(section.heading)) continue;
+    if (heading && /^references$/i.test(heading)) continue;
     const lines: string[] = [];
-    if (section.heading) lines.push(`## ${section.heading}`);
+    if (heading) lines.push(`## ${heading}`);
     const sentences = section.sentences
       .map((s) => {
         const marks = footnotesFor(s.claims)

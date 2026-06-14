@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateGrounding, parseComposeDecision, firstJsonObject, type ComposeDecision } from './compose';
+import { validateGrounding, parseComposeDecision, firstJsonObject, stripLeadingHashes, type ComposeDecision } from './compose';
 
 const grounded: ComposeDecision = {
   entityId: '01JENT',
@@ -94,5 +94,28 @@ describe('parseComposeDecision (ORCH-21 parse seam — grounding enforced at par
     const json = JSON.stringify({ sections: [{ sentences: [{ text: 'A.', claims: ['1'] }] }] });
     const d = parseComposeDecision(json, 'e', 1);
     expect(d.sections[0].sentences[0].claims).toEqual([1]);
+  });
+
+  it('strips leading `#`s the model leaves on a heading (compose prepends its own `## `) — KB-Lead `## ##` bug', () => {
+    const json = JSON.stringify({
+      sections: [
+        { sentences: [{ text: 'Lede.', claims: [1] }] },
+        { heading: '## Family', sentences: [{ text: 'Detail.', claims: [1] }] },
+        { heading: '## ## Career', sentences: [{ text: 'More.', claims: [1] }] },
+      ],
+    });
+    const d = parseComposeDecision(json, 'e', 1);
+    expect(d.sections[1].heading).toBe('Family');
+    expect(d.sections[2].heading).toBe('Career');
+  });
+});
+
+describe('stripLeadingHashes (defensive heading normalization)', () => {
+  it('removes a single, doubled, or absent `#` prefix and trims', () => {
+    expect(stripLeadingHashes('## Family')).toBe('Family');
+    expect(stripLeadingHashes('## ## Career')).toBe('Career');
+    expect(stripLeadingHashes('#Family')).toBe('Family');
+    expect(stripLeadingHashes('Family')).toBe('Family');
+    expect(stripLeadingHashes('  ##  Spaced  ')).toBe('Spaced');
   });
 });

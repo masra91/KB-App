@@ -115,6 +115,7 @@ export function buildComposePrompt(input: ComposeInput): string {
     '{"sections":[{"heading":"<omit on the first/lede section>","sentences":[{"text":"<one prose sentence, may contain [[Entity]] links, NO citation markers>","claims":[1,2]}]}]}',
     'The first section is the lede and should omit "heading". Add further `##` sections only as the',
     'claims warrant — match the article length to the grounded material (COMPOSE-10).',
+    '"heading" is BARE text only (e.g. "Family") — do NOT include leading `#`/`##` marks; we add them.',
   ]
     .filter((l) => l !== '')
     .join('\n');

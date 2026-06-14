@@ -62,6 +62,35 @@ describe('renderProse (COMPOSE-1/2/4/8)', () => {
     expect(prose).toContain('Both.[^1][^2]');
   });
 
+  it('renders a heading once even when the model leaves leading `#`s on it (no `## ## Family` — KB-Lead bug)', () => {
+    const d: ComposeDecision = {
+      entityId: 'e',
+      sections: [
+        { sentences: [{ text: 'Lede.', claims: [1] }] },
+        { heading: '## Family', sentences: [{ text: 'He served as CEO.', claims: [2] }] }, // model already prepended ##
+        { heading: '## ## Career', sentences: [{ text: 'Championed it.', claims: [3] }] }, // doubled prefix
+      ],
+    };
+    const prose = renderProse(d, CLAIMS);
+    expect(prose).toContain('## Family');
+    expect(prose).not.toContain('## ## Family');
+    expect(prose).toContain('## Career');
+    expect(prose).not.toContain('## ## Career');
+  });
+
+  it('recognizes + drops a hashed "## References" section (the strip lets the dedup check match)', () => {
+    const d: ComposeDecision = {
+      entityId: 'e',
+      sections: [
+        { sentences: [{ text: 'Real.', claims: [1] }] },
+        { heading: '## References', sentences: [{ text: 'junk', claims: [1] }] },
+      ],
+    };
+    const prose = renderProse(d, CLAIMS);
+    expect(prose).not.toContain('junk');
+    expect(prose.match(/## References/g)).toHaveLength(1);
+  });
+
   it('drops a spurious agent-authored "References" section (Compose owns References)', () => {
     const d: ComposeDecision = {
       entityId: 'e',
