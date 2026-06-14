@@ -30,3 +30,9 @@ expect:
     # "errors logged nowhere" gap). Reads dev-log `error` entries (DEV-5: app.log + Span.error carry it).
     - check: telemetryError
       args: { contains: enoent, min: 1 }
+    # SPEC-0049 toss-rate, BOUNDED: ONLY the genuinely-unrecoverable item (missing raw.md) is tossed — the
+    # good source still converged, so decompose toss-rate stays ≤50% (it'd be 100% if the good one tossed
+    # too / head-of-line-blocked). Self-repair can't (and shouldn't) rescue a missing file; this is the
+    # complement to the good-vault `setAsideRate {max:0}` scenarios — converge-when-recoverable, toss-when-not.
+    - check: setAsideRate
+      args: { stage: decompose, max: 0.5 }

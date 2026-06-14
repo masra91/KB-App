@@ -2,6 +2,7 @@
 // that assert EXACTLY over a VaultSnapshot (entities/claims/sources/recall/audit). This is the DURABLE
 // HOME (KB-Lead affirmation) for the quality asserts enrichE2eDogfood hand-wired — consolidated here so
 // scenarios reference them by name (EVAL-1/12) and the runner scores pass/fail. Pure + fork-independent.
+import { STAGE_RUN_OP } from '../../src/kb/tracing';
 import type { VaultSnapshot, VaultFile } from './snapshot';
 import type { DeterministicCheck } from './scenario';
 
@@ -160,6 +161,36 @@ export const VALIDATORS: Record<string, Validator> = {
     return matched.length >= min
       ? pass('telemetryError', `${matched.length} dev-log error(s)${tail} (≥${min}) — failure surfaced with a message`)
       : fail('telemetryError', `${matched.length} dev-log error(s)${tail} (<${min}) — failure not surfaced in telemetry`);
+  },
+  // SPEC-0049 (self-healing deciders) — the TOSS-RATE metric (SPEC-0047). The fraction of items that
+  // reached a terminal decider outcome which were SET ASIDE ("tossed") instead of converged. Success =
+  // → ~0: with the self-repair round (HEAL-1/2/3) a brittle decider should re-prompt to a committed
+  // decision, never silently toss. Counts per-item stage-run spans (`op === 'stage.run'`) so the nested
+  // copilot.invoke spans aren't double-counted. Denominator = terminal items (`ok` + `setaside`, plus
+  // `error` when `includeError:true`); numerator = `setaside`. `max` (default 0) is the rate ceiling
+  // as a fraction (e.g. 0.01 = 1%). An empty denominator FAILS by default (a run that processed nothing
+  // can't prove toss→0) — pass `allowEmpty:true` for the no-op case. `stage` scopes to one stage.
+  setAsideRate(snap, args) {
+    const a = (args ?? {}) as { stage?: unknown; max?: unknown; includeError?: unknown; allowEmpty?: unknown };
+    const stage = a.stage === undefined ? undefined : String(a.stage);
+    const max = typeof a.max === 'number' ? a.max : 0;
+    const includeError = a.includeError === true;
+    const allowEmpty = a.allowEmpty === true;
+    const where = stage ? ` (stage '${stage}')` : '';
+    const runs = snap.spans.filter((s) => s.op === STAGE_RUN_OP && (stage === undefined || s.stage === stage));
+    const terminal = runs.filter((s) => s.outcome === 'ok' || s.outcome === 'setaside' || (includeError && s.outcome === 'error'));
+    const setAside = runs.filter((s) => s.outcome === 'setaside').length;
+    if (terminal.length === 0) {
+      return allowEmpty
+        ? pass('setAsideRate', `no items processed${where} — vacuous (allowEmpty)`)
+        : fail('setAsideRate', `no terminal stage-run spans${where} — nothing processed, can't prove toss→0`);
+    }
+    const rate = setAside / terminal.length;
+    const pct = (rate * 100).toFixed(1);
+    const cap = (max * 100).toFixed(1);
+    return rate <= max
+      ? pass('setAsideRate', `${setAside}/${terminal.length} set aside${where} = ${pct}% ≤ ${cap}%`)
+      : fail('setAsideRate', `${setAside}/${terminal.length} set aside${where} = ${pct}% > ${cap}% — items tossed, not converged`);
   },
 };
 
