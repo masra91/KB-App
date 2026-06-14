@@ -64,6 +64,7 @@ import { initLaunchModel, probeAcceptedModels, validateModel } from '../kb/copil
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
 import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
+import { seedDefaultResearcherIfAbsent } from '../kb/researcherSeed';
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
 import { ResearcherScheduler } from '../kb/researcherScheduler';
@@ -326,6 +327,23 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // (scope `lock`) + flips the OBS-7 `stuck` flag if any section is held past the threshold — so a
   // deadlocked/hung critical section surfaces (named by its label) instead of silently wedging (#163).
   const lock = new Mutex({ log: log.child({ scope: 'lock' }) });
+  // SPEC-0028 RESEARCH-1 / WS-B: seed a default Web researcher on a virgin (or pre-feature) vault so
+  // the research pipeline isn't INERT — an empty registry means nothing dispatches even once a
+  // `research-request` is emitted. Keyed on the registry FILE's absence (not emptiness), so a
+  // Principal who deliberately cleared all researchers is never re-seeded. Write + commit run under
+  // the canonical-writer lock (durability — the `.kb/researchers/` registry is tracked on `staging`
+  // and would otherwise be wiped by a staging reset; mirrors the jobs registry). Best-effort: a seed
+  // failure must never block startup.
+  try {
+    await lock.run(async () => {
+      if (await seedDefaultResearcherIfAbsent(stagingWt)) {
+        await commitControlFile(stagingWt, researcherRegistryPath(stagingWt), 'seed default web researcher (SPEC-0028)');
+        log.child({ scope: 'pipeline' }).info('startup.researcher-seeded', { templates: ['web'] });
+      }
+    }, 'seed:default-researcher');
+  } catch (err) {
+    log.child({ scope: 'pipeline' }).warn('startup.researcher-seed-failed', { itemId: vaultPath, err });
+  }
   // STAGING-12: `main` IS the live Obsidian vault folder. Promoting on EVERY drain (~14–46s) made
   // Obsidian's watcher re-index endlessly → nav/files/indexing HANG. So a stage's afterDrain no longer
   // promotes directly — it REQUESTS a promotion, and the coalescer publishes in infrequent batched

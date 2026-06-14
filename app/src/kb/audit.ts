@@ -36,6 +36,7 @@ export const AUDIT_ACTORS = [
   'watch',
   'output',
   'maintenance',
+  'enrich',
 ] as const;
 export type AuditActor = (typeof AUDIT_ACTORS)[number];
 
@@ -417,6 +418,15 @@ export const AUDIT_COVERAGE: readonly AuditCoverageEntry[] = [
     mutating: true, // removes a stale .git/index.lock — a repository-state repair
     carriesWhy: true, // payload records why-stale (the gate that fired) + the lock path + pid/op/age
     traces: ['AUDIT-1', 'AUDIT-2', 'AUDIT-11', 'ORCH-27'],
+  },
+  {
+    actor: 'enrich',
+    what: 'SPEC-0028 enrichment trigger (WS-B): records each `research-request` auto-emitted for a SPARSE ("little reference") entity — the entity (subject id), the term researched (what), and the why (corroborated by only N source(s)). The producer that makes the research pipeline non-inert; the dispatcher reads these back via collectResearchRequests. Non-mutating (emits a request signal, writes no KB content) — emitted via appendAuditEvent into the cross-cutting control log so an auto-request surfaces in Activity.',
+    emitters: ['enrichTrigger'],
+    auditPath: CONTROL_AUDIT_REL,
+    mutating: false, // emits a research-request signal only; produces no KB content of its own
+    carriesWhy: true, // payload records why the entity is sparse (the source count) behind each request
+    traces: ['AUDIT-1', 'AUDIT-2', 'RESEARCH-3'],
   },
 ] as const;
 
