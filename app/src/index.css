@@ -310,6 +310,20 @@ dl.settings dd {
    (design-system.css) — no new tokens/components (DESIGN-7). */
 .settings-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
 .settings-control { display: flex; align-items: center; gap: 0.6rem; margin: 0.6rem 0; flex-wrap: wrap; }
+/* A control toggled via the `hidden` attribute must hide — the display:flex above wins over the UA
+   [hidden] rule (the ConfirmInline lesson), so restore display:none when hidden. */
+.settings-control[hidden] { display: none; }
+
+/* Scale card (SPEC-0048 SCALE). The per-stage rows put the stage label and its stepper on one line;
+   the pin note explains Connect's fixed 1; the hint is a brass-ruled heads-up (caution, not error). */
+.scale-stages-heading { margin: 0.8rem 0 0.2rem; font-weight: 600; color: var(--viz-ink); }
+.scale-stage-row { margin: 0.35rem 0; }
+.scale-pin-note { margin: 0; }
+/* The hint REASSURES ("none starves") → calm/informational, NOT caution. Brass = needs-you/caution
+   in our language; using it here cries wolf (the VIZ-10 principle, KB-Design-Lead's call). Neutral
+   structural rule; text stays ink-muted via .settings-note. A real low-ceiling contention warning,
+   if one ever lands, is what gets brass. */
+.scale-hint { border-left: 2px solid var(--viz-rule); padding-left: 0.6rem; }
 
 /* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
 ul.review-list {

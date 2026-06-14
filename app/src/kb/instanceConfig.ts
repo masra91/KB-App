@@ -29,65 +29,25 @@ export const DEFAULT_RECALL_BUDGET_MS = 240_000;
 export const RECALL_BUDGET_MS_MIN = 60_000; // never below the old hard 60s
 export const RECALL_BUDGET_MS_MAX = 600_000; // 10min ceiling — an interactive op must stay bounded
 
-// ── SPEC-0048 SCALE: user-configurable stage parallelism (per-stage caps + global ceiling) ──────────
-//
-// The engine already HAS these knobs (per-stage cap ORCH-20, global copilot ceiling ORCH-23) — they
-// were hardcoded/auto-derived. SCALE-1/2 persist them here so the Principal can tune throughput. The
-// stored values are OPTIONAL overrides: omitted ⇒ today's behaviour (the cores-derived ceiling + the
-// per-stage cap defaults below), so an absent/old `instance.json` is byte-for-byte today's pipeline.
-
-/** The copilot-using pipeline stages whose concurrency cap is configurable (SCALE-2). */
-export const SCALE_STAGES = ['archive', 'decompose', 'connect', 'claims', 'compose'] as const;
-export type ScaleStage = (typeof SCALE_STAGES)[number];
-
-/** Today's per-stage caps (SCALE-2 default = current behaviour). Decompose/Claims/Compose ran the
- *  hardcoded `STAGE_CAP=3`; Connect & Archive ran serial (1). */
-export const DEFAULT_STAGE_CAPS: Record<ScaleStage, number> = {
-  archive: 1,
-  decompose: 3,
-  connect: 1,
-  claims: 3,
-  compose: 3,
-};
-
-/** Sane per-stage cap bound — a stage running more than this many cognitions at once thrashes more
- *  than it helps, and the global ceiling bounds the real total anyway. */
-export const STAGE_CAP_MAX = 8;
-/** Sane global-ceiling bounds (SCALE-1) — even a huge box shouldn't fan out unbounded copilot procs. */
-export const COPILOT_CEILING_MIN = 1;
-export const COPILOT_CEILING_MAX = 32;
-
-/** SCALE-5: Connect's resolver races on shared `entities/` until its ephemeral-worktree migration
- *  (Phase 2). Until then its cap is PINNED to 1 — enforced here (defense-in-depth) so a hand-edited
- *  `instance.json` can't set Connect>1 and corrupt dedup; the UI also pins it with a note. */
-export const CONNECT_CAP_PINNED = 1;
-
-/** Clamp one stage's configured cap into [1, {@link STAGE_CAP_MAX}]; Connect is pinned to 1 (SCALE-5).
- *  A non-finite value falls back to that stage's default (today's behaviour). */
-export function clampStageCap(stage: ScaleStage, v: unknown): number {
-  if (stage === 'connect') return CONNECT_CAP_PINNED;
-  const n = typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : DEFAULT_STAGE_CAPS[stage];
-  return Math.max(1, Math.min(STAGE_CAP_MAX, n));
-}
-
-/** Clamp a configured global ceiling into [{@link COPILOT_CEILING_MIN}, {@link COPILOT_CEILING_MAX}],
- *  or `undefined` (⇒ the engine's cores-derived default) when absent/non-finite. */
-export function clampCopilotCeiling(v: unknown): number | undefined {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return undefined;
-  return Math.max(COPILOT_CEILING_MIN, Math.min(COPILOT_CEILING_MAX, Math.floor(v)));
-}
-
-/** The effective per-stage caps: today's defaults overlaid with any configured overrides (Connect
- *  pinned). The pipeline reads THIS to size each stage; the Settings UI renders it. */
-export function resolveStageCaps(cfg: Pick<InstanceConfig, 'stageCaps'>): Record<ScaleStage, number> {
-  const out = { ...DEFAULT_STAGE_CAPS };
-  for (const stage of SCALE_STAGES) {
-    const configured = cfg.stageCaps?.[stage];
-    out[stage] = configured === undefined ? DEFAULT_STAGE_CAPS[stage] : clampStageCap(stage, configured);
-  }
-  out.connect = CONNECT_CAP_PINNED; // SCALE-5 always
-  return out;
-}
+// SPEC-0048 SCALE — the stage-parallelism constants/clamps live in the PURE `scaleConstants` module
+// (no node import) so the renderer's Settings UI can consume them without pulling this node-only file
+// into the Vite bundle. Imported for local use + re-exported so existing main-process import sites
+// (pipeline.ts) keep importing them from here unchanged.
+import {
+  SCALE_STAGES,
+  DEFAULT_STAGE_CAPS,
+  STAGE_CAP_MAX,
+  COPILOT_CEILING_MIN,
+  COPILOT_CEILING_MAX,
+  CONNECT_CAP_PINNED,
+  clampStageCap,
+  clampCopilotCeiling,
+  resolveStageCaps,
+  resolveCeilingWrite,
+  type ScaleStage,
+} from './scaleConstants';
+export { SCALE_STAGES, DEFAULT_STAGE_CAPS, STAGE_CAP_MAX, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX, CONNECT_CAP_PINNED, clampStageCap, clampCopilotCeiling, resolveStageCaps, resolveCeilingWrite };
+export type { ScaleStage };
 
 /** Instance-wide settings (PANEL-5). v1 holds the autonomy default; grows as Settings does. */
 export interface InstanceConfig {
