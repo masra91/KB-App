@@ -520,7 +520,10 @@ async function computePipelineStatus(): Promise<PipelineStatusView | null> {
     readClaimsQueue(stagingWt),
     orch.status(),
     readRecentDevLogEntries(vaultPath, { limit: 25 }),
-    loadPerfIndex(stagingWt),
+    // OBS-12/13 path fix: the tracer WRITES spans to `vaultPath` (createVaultTracer(vaultPath), ~L288),
+    // so the perf index must READ from the SAME root — reading `stagingWt` found an empty/absent index
+    // and the Latency & Throughput panel showed "No Copilot calls recorded yet" while calls flowed.
+    loadPerfIndex(vaultPath),
     listWorktrees(vaultPath),
     listSetAsideItems(stagingWt), // OBS-17: claims poison items (canonical claims-path reader, CLAIMS-20)
     listConnectSetAsideItems(stagingWt), // OBS-17: connect poison blocks (CLAIMS-20 connect twin, #157)
