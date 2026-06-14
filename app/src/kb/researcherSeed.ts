@@ -16,13 +16,14 @@ import { writeResearcherRegistry, researcherRegistryPath } from './researcherReg
 export const DEFAULT_WEB_RESEARCHER_ID = 'web';
 
 /**
- * The default Web researcher seeded on a virgin vault (WS-B). **Enabled** so the pipeline is
- * genuinely live — a disabled seed would leave it inert, the very bug this fixes; **guarded** posture
- * so findings route to Review, never auto-applied; `topics: []` so it is eligible for every request
- * (no topic pre-filter); `schedule: 'off'` (inline/on-demand only — driven by the research-request
- * sweep, not a standing cron). Budgets are the shared defaults, user-editable in the Researchers view.
- * NB: the enabled-by-default posture is the one egress-policy choice the SPEC-0028 amendment may flip
- * to opt-in; the rest of the machinery is unaffected by that toggle.
+ * The default Web researcher seeded on a virgin vault (WS-B). **Disabled by default** — the
+ * conservative, reversible OPT-IN egress posture ratified for SPEC-0028 (PM decision 2026-06-14): the
+ * seed installs the researcher and the enrichment trigger still emits research-requests for sparse
+ * entities, but NO public-web egress happens until the user enables it in the Control Panel (one
+ * toggle — at which point the accumulated requests dispatch, bounded by the per-instance ceiling).
+ * **Guarded** posture so even then findings route to Review, never auto-applied; `topics: []` so it
+ * is eligible for every request (no pre-filter); `schedule: 'off'` (inline/on-demand only — driven by
+ * the research-request sweep, not a standing cron). Budgets are the shared defaults, user-editable.
  */
 export function makeDefaultWebResearcher(): ResearcherConfig {
   return {
@@ -36,8 +37,8 @@ export function makeDefaultWebResearcher(): ResearcherConfig {
     budget: { ...DEFAULT_RESEARCHER_BUDGET },
     schedule: 'off',
     posture: DEFAULT_POSTURE, // guarded — findings route to Review
-    enabled: true,
-    topics: [], // no pre-filter: eligible for every research-request
+    enabled: false, // opt-in egress: no public-web traffic until the user enables it (SPEC-0028 ratified)
+    topics: [], // no pre-filter: eligible for every research-request once enabled
   };
 }
 

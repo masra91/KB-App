@@ -19,15 +19,15 @@ async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
 }
 
 describe('makeDefaultWebResearcher (WS-B)', () => {
-  it('is a valid, enabled, guarded public-web researcher with a safe id', () => {
+  it('is a valid, disabled-by-default (opt-in egress), guarded public-web researcher with a safe id', () => {
     const r = makeDefaultWebResearcher();
     expect(isSafeResearcherId(r.id)).toBe(true);
     expect(r.id).toBe(DEFAULT_WEB_RESEARCHER_ID);
     expect(r.template).toBe('web');
     expect(r.egressTier).toBe('public-web');
-    expect(r.enabled).toBe(true); // a disabled seed would leave the pipeline inert — the bug WS-B fixes
+    expect(r.enabled).toBe(false); // opt-in egress (SPEC-0028 ratified): no web traffic until the user enables it
     expect(r.posture).toBe('guarded'); // findings route to Review, never auto-applied
-    expect(r.topics).toEqual([]); // no pre-filter → eligible for every research-request
+    expect(r.topics).toEqual([]); // no pre-filter → eligible for every research-request once enabled
   });
 });
 
@@ -38,7 +38,7 @@ describe('seedDefaultResearcherIfAbsent (WS-B)', () => {
       expect(seeded).toBe(true);
       const reg = await readResearcherRegistry(root);
       expect(reg).toHaveLength(1);
-      expect(reg[0]).toMatchObject({ id: DEFAULT_WEB_RESEARCHER_ID, template: 'web', enabled: true });
+      expect(reg[0]).toMatchObject({ id: DEFAULT_WEB_RESEARCHER_ID, template: 'web', enabled: false });
     });
   });
 
