@@ -121,6 +121,14 @@ export function firstJsonObject(stdout: string): string | null {
   return null;
 }
 
+/** Strip leading markdown heading hashes from a model-provided heading STRING. The agent is asked to
+ *  return BARE heading text, but intermittently returns e.g. `"## Family"`; composeDoc prepends its own
+ *  `## `, so an un-stripped value renders as `## ## Family`. Repeats the prefix so a doubled `"## ## X"`
+ *  collapses to `"X"` too. Returns trimmed bare text. */
+export function stripLeadingHashes(s: string): string {
+  return s.trim().replace(/^(?:#+\s*)+/, '').trim();
+}
+
 /**
  * Parse + validate the Compose agent's raw output into a grounded ComposeDecision (the ORCH-21
  * parse seam). Throws on malformed JSON, a shape mismatch, OR a grounding defect — so the stage
@@ -143,7 +151,7 @@ export function parseComposeDecision(stdout: string, entityId: string, claimCoun
   const sections: ComposeSection[] = rawSections.map((sec, si) => {
     if (typeof sec !== 'object' || sec === null) throw new Error(`compose: section ${si} is not an object`);
     const s = sec as Record<string, unknown>;
-    const heading = s.heading === undefined || s.heading === null ? undefined : String(s.heading).trim() || undefined;
+    const heading = s.heading === undefined || s.heading === null ? undefined : stripLeadingHashes(String(s.heading)) || undefined;
     const rawSentences = s.sentences;
     if (!Array.isArray(rawSentences)) throw new Error(`compose: section ${si} `+'`sentences` must be an array');
     const sentences: ComposeSentence[] = rawSentences.map((sn, ni) => {
