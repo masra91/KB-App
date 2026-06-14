@@ -200,6 +200,150 @@ describe('Settings · WS3 design-system migration (DESIGN-LEGACY-VIEWS §3 — o
   });
 });
 
+// SPEC-0048 SCALE — the Scale card exposes the engine's stage-parallelism knobs (ORCH-20 caps +
+// ORCH-23 ceiling) as live Settings. IPC mocked (echo); we assert the render reflects the resolved
+// caps + ceiling mode, that the Auto/Manual toggle clears (null) vs sets the ceiling, that a stepper
+// persists the FULL settings (preserve-on-omission), Connect is pinned/disabled (SCALE-5), and the
+// bound-affordance + malformed-data tolerance (ENG-15/16) hold. (The clamp/merge is node-tested in
+// instanceConfig + pipeline; here we cover the view + wiring contract.)
+describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function setScaleApi(instance: Partial<InstanceSettings> = {}): { set: ReturnType<typeof vi.fn> } {
+    const base: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' };
+    const set = vi.fn(async (s: InstanceSettings) => s); // echo; the real backend merge is node-tested
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
+      inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
+      getInstanceSettings: vi.fn(async () => ({ ...base, ...instance })),
+      setInstanceSettings: set as KbApi['setInstanceSettings'],
+    };
+    return { set };
+  }
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+  const stepper = (id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-stepper="${id}"]`)!;
+  const stepperValue = (id: string): string => stepper(id).querySelector<HTMLElement>('.viz-stepper__value')!.textContent ?? '';
+  const bump = (id: string, dir: 1 | -1): void => stepper(id).querySelector<HTMLButtonElement>(`[data-step="${dir}"]`)!.click();
+  const btn = (id: string, dir: 1 | -1): HTMLButtonElement => stepper(id).querySelector<HTMLButtonElement>(`[data-step="${dir}"]`)!;
+
+  it('renders Auto by default (no ceiling override): manual row + hint hidden, caps at defaults', async () => {
+    setScaleApi(); // no copilotCeiling, no stageCaps
+    await mountSettings(root);
+    await tick();
+    expect(checked(root, 'ceiling-mode')).toBe('auto');
+    expect((root.querySelector('#ceiling-manual-row') as HTMLElement).hidden).toBe(true);
+    expect((root.querySelector('#scale-hint') as HTMLElement).hidden).toBe(true);
+    // Effective per-stage caps (resolveStageCaps): today's defaults.
+    expect(stepperValue('cap-decompose')).toBe('3');
+    expect(stepperValue('cap-claims')).toBe('3');
+    expect(stepperValue('cap-compose')).toBe('3');
+    expect(stepperValue('cap-archive')).toBe('1');
+  });
+
+  it('Connect is pinned at 1 with both buttons disabled + a note (SCALE-5)', async () => {
+    setScaleApi();
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('cap-connect')).toBe('1');
+    expect(btn('cap-connect', 1).disabled).toBe(true);
+    expect(btn('cap-connect', -1).disabled).toBe(true);
+    expect(root.querySelector('.scale-pin-note')?.textContent).toMatch(/pinned/i);
+  });
+
+  it('renders Manual when a ceiling override is set: row + hint visible, stepper at the value', async () => {
+    setScaleApi({ copilotCeiling: 6 });
+    await mountSettings(root);
+    await tick();
+    expect(checked(root, 'ceiling-mode')).toBe('manual');
+    expect((root.querySelector('#ceiling-manual-row') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#scale-hint') as HTMLElement).hidden).toBe(false);
+    expect(stepperValue('ceiling')).toBe('6');
+  });
+
+  it('Auto → Manual sets the ceiling to the stepper value + reveals the row (SCALE-1)', async () => {
+    const { set } = setScaleApi(); // auto, ceiling stepper seeds at 4
+    await mountSettings(root);
+    await tick();
+    pick(root, 'ceiling-mode', 'manual');
+    await tick();
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ copilotCeiling: 4, autonomyDefault: 'guarded', devLogLevel: 'info' }));
+    expect(checked(root, 'ceiling-mode')).toBe('manual');
+    expect((root.querySelector('#ceiling-manual-row') as HTMLElement).hidden).toBe(false);
+  });
+
+  it('Manual → Auto CLEARS the ceiling (copilotCeiling: null) + hides the row', async () => {
+    const { set } = setScaleApi({ copilotCeiling: 8 });
+    await mountSettings(root);
+    await tick();
+    pick(root, 'ceiling-mode', 'auto');
+    await tick();
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ copilotCeiling: null }));
+    expect(checked(root, 'ceiling-mode')).toBe('auto');
+    expect((root.querySelector('#ceiling-manual-row') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('bumping a stage cap persists the FULL settings with the merged stageCaps (preserve-on-omission)', async () => {
+    const { set } = setScaleApi({ stageCaps: { claims: 2 } });
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('cap-decompose')).toBe('3');
+    bump('cap-decompose', 1); // 3 → 4
+    await tick();
+    expect(stepperValue('cap-decompose')).toBe('4');
+    // Full settings sent; the prior claims override is merged, not clobbered; autonomy preserved.
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({ stageCaps: { claims: 2, decompose: 4 }, autonomyDefault: 'guarded', devLogLevel: 'info' }),
+    );
+  });
+
+  it('the manual-ceiling stepper persists copilotCeiling on change', async () => {
+    const { set } = setScaleApi({ copilotCeiling: 5 });
+    await mountSettings(root);
+    await tick();
+    bump('ceiling', 1); // 5 → 6
+    await tick();
+    expect(stepperValue('ceiling')).toBe('6');
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ copilotCeiling: 6 }));
+  });
+
+  it('bound-affordance: a stepper at its minimum disables decrement; at its max disables increment', async () => {
+    setScaleApi({ stageCaps: { decompose: 1 } }); // at the floor
+    await mountSettings(root);
+    await tick();
+    expect(btn('cap-decompose', -1).disabled).toBe(true); // can't go below 1
+    expect(btn('cap-decompose', 1).disabled).toBe(false);
+    bump('cap-decompose', 1); // 1 → 2
+    await tick();
+    expect(btn('cap-decompose', -1).disabled).toBe(false); // affordance re-enables off the bound
+  });
+
+  it('tolerates malformed legacy stageCaps without crashing the card (ENG-15)', async () => {
+    // A hand-edited/old instance.json with a garbled cap — resolveStageCaps clamps to a safe default.
+    setScaleApi({ stageCaps: { decompose: 'nope' as unknown as number, compose: 999 } });
+    await mountSettings(root);
+    await tick();
+    expect(root.querySelector('#scale-status')).toBeTruthy(); // card rendered, not a blank/crash
+    expect(stepperValue('cap-decompose')).toBe('3'); // garbled → default
+    expect(stepperValue('cap-compose')).toBe('8'); // out-of-range → clamped to STAGE_CAP_MAX
+  });
+
+  it('renders the steppers as labelled groups (a11y): role=group + aria-labelledby + a live value', async () => {
+    setScaleApi();
+    await mountSettings(root);
+    await tick();
+    const el = stepper('cap-decompose');
+    expect(el.getAttribute('role')).toBe('group');
+    expect(el.getAttribute('aria-labelledby')).toBe('cap-decompose-label');
+    expect(root.querySelector('#cap-decompose-label')?.textContent).toBe('Decompose');
+    expect(el.querySelector('.viz-stepper__value')?.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
 describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)', () => {
   let root: HTMLElement;
   beforeEach(() => {

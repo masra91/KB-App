@@ -127,6 +127,19 @@
 /* disabled — the group dims to 0.5 (§4). Disable each segment (`<button disabled>`); mirrors .viz-btn:disabled. */
 .viz-seg-opt:disabled { opacity: 0.5; cursor: default; }
 
+/* --- Stepper (SPEC-0048 SCALE) — a −/value/+ integer control for a bounded numeric setting (the
+   per-stage concurrency caps + the manual ceiling). Signage-aligned with .viz-seg: ruled square
+   buttons, ink-on-rule, no border-radius; the value reads in the signage face. A bound button
+   disables (dims) at the min/max so the limit reads without a tooltip. PROPOSED anatomy/skin
+   (KB-Developer-5) — pending KB-Design-Lead's design-system gate; he owns the final visual. */
+.viz-stepper { display: inline-flex; align-items: stretch; gap: 2px; }
+.viz-stepper__btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; color: var(--viz-ink); width: 1.5rem; line-height: 1.2; padding: 0.05rem 0; cursor: pointer; text-align: center; }
+/* hover tints EMBER (§6, matches .viz-btn) — no grey fill (KB-Design-Lead visual gate). */
+.viz-stepper__btn:hover:not(:disabled) { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-stepper__btn:disabled { opacity: 0.4; cursor: default; }
+/* the value is a NUMBER → mono numeric face (§4: all counts → IBM Plex Mono), not signage. */
+.viz-stepper__value { font-family: var(--viz-font-numeric); font-size: 0.78rem; color: var(--viz-ink); min-width: 1.6rem; text-align: center; align-self: center; font-variant-numeric: tabular-nums; }
+
 /* --- ConfirmInline (§5) — the consequence-gate; expands in place under the trigger, framed by a left
    hue rule (caution=brass default, danger=oxide). Message names what will happen; always dismissable
    (#215). The confirm action is a danger/clearance Button, the dismiss a ghost Button. */

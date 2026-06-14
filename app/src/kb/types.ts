@@ -578,9 +578,11 @@ export interface InstanceSettings {
   /** SPEC-0048 SCALE-2: per-stage concurrency cap overrides. Absent keys ⇒ today's default; Connect
    *  is pinned to 1 (SCALE-5). Optional in the edit contract (preserve-on-omission). */
   stageCaps?: Partial<Record<ScaleStage, number>>;
-  /** SPEC-0048 SCALE-1: the global Copilot concurrency ceiling override. Omitted ⇒ cores-derived
-   *  default; env still wins. Optional in the edit contract (preserve-on-omission). */
-  copilotCeiling?: number;
+  /** SPEC-0048 SCALE-1: the global Copilot concurrency ceiling override. A number sets the manual
+   *  override (clamped); `null` explicitly CLEARS it back to the cores-derived default ("let the app
+   *  decide"); omitted (`undefined`) preserves the prior value (the #102 preserve-on-omission rule).
+   *  Env `KB_COPILOT_MAX_CONCURRENCY` still wins over any of these. */
+  copilotCeiling?: number | null;
 }
 
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */

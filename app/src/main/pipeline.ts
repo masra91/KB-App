@@ -55,7 +55,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry, facingForType } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, resolveStageCaps, clampCopilotCeiling, clampStageCap, SCALE_STAGES, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type ScaleStage, type InstanceConfig } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, resolveStageCaps, clampStageCap, resolveCeilingWrite, SCALE_STAGES, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type ScaleStage, type InstanceConfig } from '../kb/instanceConfig';
 import { applyCopilotCeiling } from '../kb/copilotConcurrency';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
@@ -1051,7 +1051,9 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       }
       stageCaps = Object.keys(merged).length > 0 ? merged : undefined;
     }
-    copilotCeiling = settings.copilotCeiling === undefined ? priorCfg.copilotCeiling : clampCopilotCeiling(settings.copilotCeiling);
+    // `undefined` preserves prior (#102); `null` is the Auto toggle's explicit CLEAR (→ cores-derived);
+    // a number is clamped (see resolveCeilingWrite — pure + unit-tested in scaleConstants).
+    copilotCeiling = resolveCeilingWrite(priorCfg.copilotCeiling, settings.copilotCeiling);
     await writeInstanceConfig(root, {
       autonomyDefault: settings.autonomyDefault,
       devLogLevel,

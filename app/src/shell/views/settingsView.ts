@@ -11,6 +11,9 @@
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
+// SPEC-0048 SCALE Settings (Scale card). Imported from the PURE `scaleConstants` (no node import) so
+// the renderer bundle never pulls the node-only `instanceConfig` (the renderer→node-builtin boundary).
+import { SCALE_STAGES, STAGE_CAP_MAX, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX, resolveStageCaps, type ScaleStage } from '../../kb/scaleConstants';
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
 const REPLAY_CONFIRM =
@@ -24,6 +27,29 @@ function segOpt(value: string, label: string, current: string): string {
   const on = value === current;
   return `<button type="button" role="radio" class="viz-seg-opt viz-signage viz-focusable" data-value="${esc(value)}" aria-checked="${on ? 'true' : 'false'}" tabindex="${on ? '0' : '-1'}">${esc(label)}</button>`;
 }
+
+/** SPEC-0048 SCALE: a −/value/+ STEPPER for an integer setting (per-stage caps + the manual ceiling).
+ *  `id` keys the control + binds the value to its label (`<id>-label`). `disabled` pins it (Connect,
+ *  SCALE-5). The `.viz-stepper` visual primitive is Design-Lead's design-system lane — authored CSS. */
+function stepper(id: string, value: number, min: number, max: number, disabled = false): string {
+  const dis = disabled ? ' disabled' : '';
+  const btn = (step: number, label: string, glyph: string): string =>
+    `<button type="button" class="viz-stepper__btn viz-focusable" data-step="${step}" aria-label="${esc(label)}"${dis}>${glyph}</button>`;
+  return `<span class="viz-stepper" data-stepper="${esc(id)}" data-min="${min}" data-max="${max}" role="group" aria-labelledby="${esc(id)}-label">
+        ${btn(-1, 'Decrease', '−')}
+        <span class="viz-stepper__value" data-value="${value}" aria-live="polite">${value}</span>
+        ${btn(1, 'Increase', '+')}
+      </span>`;
+}
+
+/** Human label for a stage (the Scale card rows). */
+const STAGE_LABELS: Record<ScaleStage, string> = {
+  decompose: 'Decompose',
+  claims: 'Claims',
+  compose: 'Compose',
+  archive: 'Archive',
+  connect: 'Connect',
+};
 
 export async function mountSettings(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="card"><h1>⚙️ Settings</h1><p class="settings-note">Loading…</p></div>`;
@@ -58,6 +84,24 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     } catch {
       // Leave the safe defaults.
     }
+
+    // SPEC-0048 SCALE view-model: effective per-stage caps, and the ceiling mode (Auto = let the app
+    // decide / cores-derived; Manual = the Principal's value). The manual stepper seeds at the saved
+    // value, else 4 (a sensible starting point on the cores-derived default).
+    const caps = resolveStageCaps({ stageCaps: settings.stageCaps });
+    const ceilingMode = settings.copilotCeiling === undefined ? 'auto' : 'manual';
+    const ceilingValue = settings.copilotCeiling ?? 4;
+    const scaleRowOrder: ScaleStage[] = ['decompose', 'connect', 'claims', 'compose', 'archive'];
+    const stageRow = (stage: ScaleStage): string => {
+      const pinned = stage === 'connect';
+      const ctrl = pinned
+        ? `${stepper(`cap-${stage}`, 1, 1, 1, true)}<span class="settings-note scale-pin-note">Pinned at 1 until its safe-parallel migration.</span>`
+        : stepper(`cap-${stage}`, caps[stage], 1, STAGE_CAP_MAX);
+      return `<div class="settings-control scale-stage-row">
+          <span class="viz-field__label" id="cap-${stage}-label">${STAGE_LABELS[stage]}</span>
+          ${ctrl}
+        </div>`;
+    };
 
     container.innerHTML = `
       <div class="card">
@@ -96,6 +140,22 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="verbosity-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>
       <div class="card">
+        <h2>Scale</h2>
+        <p class="settings-note">How hard this Knowledge Base runs. <strong>Total at once</strong> caps how many AI sessions run concurrently across all stages; <strong>per-stage</strong> limits tune which stages get the slots. Higher is faster on a big backlog but loads your machine and the model more. Each stage always keeps at least one slot, so raising one never starves another. Applies live, on the next sweep.</p>
+        <div class="settings-control">
+          <span class="viz-field__label" id="ceiling-mode-label">Total at once</span>
+          <span class="viz-seg" role="radiogroup" aria-labelledby="ceiling-mode-label" id="ceiling-mode">${segOpt('auto', 'Let the app decide', ceilingMode)}${segOpt('manual', 'Manual', ceilingMode)}</span>
+        </div>
+        <div class="settings-control" id="ceiling-manual-row"${ceilingMode === 'manual' ? '' : ' hidden'}>
+          <span class="viz-field__label" id="ceiling-label">Max AI sessions at once</span>
+          ${stepper('ceiling', ceilingValue, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX)}
+        </div>
+        <p class="settings-note scale-stages-heading">Per-stage limits</p>
+        ${scaleRowOrder.map(stageRow).join('\n        ')}
+        <p id="scale-hint" class="settings-note scale-hint" role="note"${ceilingMode === 'manual' ? '' : ' hidden'}>Per-stage limits can total more than the cap — that's fine. Stages share the available slots fairly; none starves.</p>
+        <p id="scale-status" class="settings-note" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="settings-note">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
         <button id="replay-btn" type="button" class="viz-btn viz-btn--danger viz-focusable"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild KB…</button>
@@ -116,6 +176,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
 
     wireAutonomy(container, settings);
     wireVerbosity(container, settings);
+    wireScale(container, settings);
     wireReplay(container);
     void wireQuiesce(container);
   } catch {
@@ -249,6 +310,140 @@ function wireVerbosity(container: HTMLElement, settings: InstanceSettings): void
     if (v === settings.devLogLevel) return; // no-op when unchanged
     void apply(v);
   });
+}
+
+/** Read a stepper's current integer value (`null` if absent/garbled — ENG-15 tolerant). */
+function readStepperValue(el: HTMLElement | null): number | null {
+  const raw = el?.querySelector<HTMLElement>('.viz-stepper__value')?.dataset.value;
+  const n = raw === undefined ? Number.NaN : Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Reflect a stepper's value + bound-affordance (disable −/+ at min/max). Pinned steppers stay
+ *  disabled either way. The value node is `aria-live=polite`, so a screen reader announces it. */
+function setStepperValue(el: HTMLElement, v: number): void {
+  const valEl = el.querySelector<HTMLElement>('.viz-stepper__value');
+  if (valEl) {
+    valEl.dataset.value = String(v);
+    valEl.textContent = String(v);
+  }
+  const min = Number(el.dataset.min);
+  const max = Number(el.dataset.max);
+  const dec = el.querySelector<HTMLButtonElement>('[data-step="-1"]');
+  const inc = el.querySelector<HTMLButtonElement>('[data-step="1"]');
+  // A pinned stepper (Connect, min===max) keeps both disabled; otherwise disable only at the bound.
+  if (dec) dec.disabled = Number.isFinite(min) && v <= min;
+  if (inc) inc.disabled = Number.isFinite(max) && v >= max;
+}
+
+/** Wire a −/value/+ stepper (SPEC-0048). Native `<button>`s carry the click + keyboard (Enter/Space)
+ *  for free. The display updates optimistically, then `onChange(next, prev)` persists — the caller
+ *  reverts via {@link setStepperValue} on failure. Disabled (pinned) buttons no-op. */
+function wireStepper(el: HTMLElement, onChange: (next: number, prev: number) => void): void {
+  const min = Number(el.dataset.min);
+  const max = Number(el.dataset.max);
+  setStepperValue(el, readStepperValue(el) ?? min); // initialize the bound-affordance
+  el.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.viz-stepper__btn');
+    if (!btn || btn.disabled) return;
+    const cur = readStepperValue(el) ?? min;
+    const next = Math.max(min, Math.min(max, cur + Number(btn.dataset.step)));
+    if (next === cur) return;
+    setStepperValue(el, next);
+    onChange(next, cur);
+  });
+}
+
+/** Wire the Scale card (SPEC-0048 SCALE): the Auto/Manual total-concurrency toggle, the manual-ceiling
+ *  stepper, and the per-stage cap steppers. Every change sends the FULL settings (preserve-on-omission,
+ *  #102) and applies live (next sweep). Auto sends `copilotCeiling: null` to CLEAR the override back to
+ *  the cores-derived default. Connect's stepper is pinned/disabled (SCALE-5). ENG-16: a missing control
+ *  degrades the card, never throws. */
+function wireScale(container: HTMLElement, settings: InstanceSettings): void {
+  const modeGroup = container.querySelector<HTMLElement>('#ceiling-mode');
+  const manualRow = container.querySelector<HTMLElement>('#ceiling-manual-row');
+  const ceilingStepper = container.querySelector<HTMLElement>('[data-stepper="ceiling"]');
+  const hint = container.querySelector<HTMLElement>('#scale-hint');
+  const status = container.querySelector<HTMLElement>('#scale-status');
+  if (!modeGroup || !status) return;
+
+  // Persist a partial change over the full settings; re-sync the scale fields from the saved config
+  // (Object.assign can't delete a now-omitted key — a cleared ceiling must reflect as undefined).
+  const save = async (patch: Partial<InstanceSettings>, onOk: () => void, onErr: () => void): Promise<void> => {
+    status.textContent = 'Saving…';
+    try {
+      const saved = await window.kbApi.setInstanceSettings({ ...settings, ...patch });
+      Object.assign(settings, saved);
+      settings.copilotCeiling = saved.copilotCeiling; // may be undefined ⇒ cleared (Auto)
+      settings.stageCaps = saved.stageCaps; // may be undefined ⇒ all defaults
+      onOk();
+    } catch {
+      onErr();
+      status.textContent = 'Could not save the change.';
+    }
+  };
+
+  // The Auto/Manual toggle: Manual pins the ceiling to the stepper's value; Auto clears it (→ the app
+  // decides). Selection doesn't follow focus (wireSegmentedRadio) — only an actual pick commits.
+  wireSegmentedRadio(modeGroup, (value) => {
+    const wantManual = value === 'manual';
+    const isManual = settings.copilotCeiling !== undefined && settings.copilotCeiling !== null;
+    if (wantManual === isManual) return; // no-op when unchanged
+    if (wantManual) {
+      const val = readStepperValue(ceilingStepper) ?? 4;
+      void save(
+        { copilotCeiling: val },
+        () => {
+          setSegChecked(modeGroup, 'manual');
+          manualRow?.removeAttribute('hidden');
+          hint?.removeAttribute('hidden');
+          status.textContent = `Total at once: manual — ${val} session${val === 1 ? '' : 's'} (applies on the next sweep).`;
+        },
+        () => setSegChecked(modeGroup, isManual ? 'manual' : 'auto'),
+      );
+    } else {
+      void save(
+        { copilotCeiling: null },
+        () => {
+          setSegChecked(modeGroup, 'auto');
+          manualRow?.setAttribute('hidden', '');
+          hint?.setAttribute('hidden', '');
+          status.textContent = 'Total at once: the app decides, based on your machine (applies on the next sweep).';
+        },
+        () => setSegChecked(modeGroup, isManual ? 'manual' : 'auto'),
+      );
+    }
+  });
+
+  // The manual-ceiling stepper.
+  if (ceilingStepper) {
+    wireStepper(ceilingStepper, (next, prev) => {
+      void save(
+        { copilotCeiling: next },
+        () => {
+          status.textContent = `Total at once: ${next} session${next === 1 ? '' : 's'} (applies on the next sweep).`;
+        },
+        () => setStepperValue(ceilingStepper, prev),
+      );
+    });
+  }
+
+  // The per-stage cap steppers (Connect is pinned/disabled — SCALE-5 — so its buttons never fire).
+  for (const stage of SCALE_STAGES) {
+    if (stage === 'connect') continue;
+    const el = container.querySelector<HTMLElement>(`[data-stepper="cap-${stage}"]`);
+    if (!el) continue;
+    wireStepper(el, (next, prev) => {
+      const stageCaps = { ...(settings.stageCaps ?? {}), [stage]: next };
+      void save(
+        { stageCaps },
+        () => {
+          status.textContent = `${STAGE_LABELS[stage]} limit: ${next} (applies on the next sweep).`;
+        },
+        () => setStepperValue(el, prev),
+      );
+    });
+  }
 }
 
 /** Wire the Clean & Rebuild flow: reveal a confirm panel (REPLAY-2), then run the replay and
