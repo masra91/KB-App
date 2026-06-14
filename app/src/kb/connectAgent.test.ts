@@ -73,6 +73,17 @@ describe('buildConnectPrompt (CONNECT-5)', () => {
   it('instructs the agent to reference sources by title and never a raw id', () => {
     expect(buildConnectPrompt(set())).toMatch(/NEVER a raw id/i);
   });
+
+  // WS-C (SPEC-0025 META-2): the prompt must instruct the agent to coin emergent topic/ tags + show
+  // `tags` in the JSON schema — the dead-rail fix (Connect renders tags but never asked for them).
+  it('instructs emergent topic/ tags as broad community labels + offers tags[] in the schema (WS-C)', () => {
+    const p = buildConnectPrompt(set());
+    expect(p).toMatch(/TOPIC TAGS/);
+    expect(p).toMatch(/topic\//); // the namespace format
+    expect(p).toMatch(/community labels/i); // broad + reusable, not entity-specific
+    expect(p).toMatch(/NEVER restate this entity.s own name or kind/i); // no topic/<name>, no topic/person
+    expect(p).toContain('"tags":["topic/'); // the cluster object in the schema offers tags
+  });
 });
 
 describe('makeConnectDecider (CONNECT-5/14)', () => {
@@ -239,5 +250,31 @@ describe('makeConnectDecider (CONNECT-5/14)', () => {
     const decide = makeConnectDecider({ available: true, run: async () => { calls += 1; return 'not json'; } });
     await expect(decide(set())).rejects.toThrow();
     expect(calls).toBe(2); // first attempt + one bounded repair round, then give up (the stage sets aside)
+  });
+
+  // WS-C topic-tag emission through the REAL decider path (feedback-test-real-agent-path): a prompt-faithful
+  // model coins emergent topic/ tags ONLY because the prompt now asks for them (the dead-rail fix). Strip
+  // the instruction and it emits none — so the test hinges on the PROMPT. Fails-before/passes-after.
+  it('coins emergent topic/ tags on the node when the prompt instructs it (WS-C, real decider path)', async () => {
+    const decide = makeConnectDecider({
+      available: true,
+      run: async (prompt) => {
+        // A model coins topics only because the prompt's TOPIC TAGS instruction (with the topic/ format) is present.
+        const coinsTopics = /topic tags/i.test(prompt) && /topic\//.test(prompt);
+        return JSON.stringify({
+          blockKey: 'person|steve jobs',
+          clusters: [
+            {
+              canonicalName: 'Steve Jobs',
+              memberCandidateIds: ['01A', '01B'],
+              confidence: 0.95,
+              ...(coinsTopics ? { tags: ['topic/technology', 'topic/startups'] } : {}),
+            },
+          ],
+        });
+      },
+    });
+    const d = await decide(set());
+    expect(d.clusters[0].tags).toEqual(['topic/technology', 'topic/startups']);
   });
 });

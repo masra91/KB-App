@@ -126,6 +126,15 @@ export function buildConnectPrompt(set: CandidateSet): string {
     'thing as one of the existing nodes below — that node\'s existingNodeId (to fold into it).',
     'EVERY candidate id below MUST appear in exactly one cluster.',
     '',
+    'TOPIC TAGS (SPEC-0025 META-2): for each cluster ALSO coin tags[] — 1–4 emergent "topic/" tags for',
+    'the recurring THEMES / domains this entity belongs to, drawn from its mentions + source context',
+    '(e.g. "topic/machine-learning", "topic/travel", "topic/finance"). Topic tags are the COMMUNITY LABELS',
+    'that knit the knowledge graph together — a topic is a theme MANY entities can share. So:',
+    '  - make them broad + REUSABLE (prefer a few general topics over many hyper-specific ones);',
+    '  - format each as lowercase "topic/<short-kebab-theme>";',
+    '  - NEVER restate this entity\'s own name or kind as a topic (no "topic/<the name>", no "topic/person");',
+    '  - if the entity has no clear thematic domain, omit tags[] — do not force one.',
+    '',
     'Do NOT merge things that are merely similar — when two mentions are genuinely ambiguous',
     '(e.g. "S. Jobs" could be a different person), keep them in SEPARATE clusters and raise a',
     'review instead of guessing. A wrong merge conflates two real things.',
@@ -162,7 +171,7 @@ export function buildConnectPrompt(set: CandidateSet): string {
     'Do NOT create typed links or resolve relationships — only entity resolution here.',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"pair":["<existingNodeIdA>","<existingNodeIdB>"],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
+    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0,"tags":["topic/..."]}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"pair":["<existingNodeIdA>","<existingNodeIdB>"],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
   ]
     .filter((l) => l !== '')
     .join('\n');
