@@ -265,17 +265,25 @@ describe.skipIf(!gitAvailable)('cross-stage optimistic concurrency (SPEC-0014 OR
 
       // Connect drain at cap=2: both blocks prepare concurrently (each in its own ephemeral worktree),
       // advances serialized by the shared lock — disjoint entity paths replay cleanly (ORCH-3).
-      const connectByName: ConnectDecider = async (set) => ({
-        blockKey: set.blockKey,
-        clusters: [{ canonicalName: set.candidates[0].name, memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
-        agent: { via: 'copilot', model: 'test' },
-      });
+      let deciderCalls = 0;
+      const connectByName: ConnectDecider = async (set) => {
+        deciderCalls++;
+        return {
+          blockKey: set.blockKey,
+          clusters: [{ canonicalName: set.candidates[0].name, memberCandidateIds: set.candidates.map((c) => c.id), confidence: 0.95 }],
+          agent: { via: 'copilot', model: 'test' },
+        };
+      };
       const stage = new ConnectStage(stagingWt, connectByName, lock, undefined, undefined, undefined, undefined, 2);
       await stage.poke();
       stage.stop();
 
       expect((await readConnectQueue(stagingWt)).length).toBe(0); // both resolved
       expect((await findEntityFiles(stagingWt)).length).toBe(2); // Steve + Dave, no dup
+      // SCALE-5 / QD-2: EXACTLY one decide per block — disjoint blocks replay cleanly on the per-block
+      // audit, so cap>1 actually parallelizes. A shared-audit collision would re-run prepare (re-invoke
+      // the LLM decider) → deciderCalls > 2. This guards the throughput/$ regression, not just convergence.
+      expect(deciderCalls).toBe(2);
       expect(await mergeCommitCount(stagingWt)).toBe(mergesBefore); // linear, no merge bubble
       expect(await isClean(stagingWt)).toBe(true);
     } finally {

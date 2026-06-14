@@ -23,6 +23,7 @@
 // ConnectStage on the staging worktree.
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import simpleGit from 'simple-git';
 import { ulid, dateShard, isUlid } from './ulid';
 import { ensureGitIdentity } from './vault';
@@ -49,7 +50,7 @@ import { deriveSourceTitle } from './sourceDoc';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_STAGE_CAP, withConcurrentAdvance, withEphemeralWorktree, type PrepareContext } from './canonicalAdvance';
+import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, DEFAULT_STAGE_CAP, withConcurrentAdvance, withEphemeralWorktree, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -79,8 +80,22 @@ async function resolveBaseBranch(git: ReturnType<typeof simpleGit>): Promise<str
 const WORKTREE_REL = path.join('.kb', 'cache', 'worktrees', 'connect');
 const WORK_BRANCH = 'kb/connect-work';
 const STAGE = 'connect';
-/** Append-only stage audit (working zone; keyed by blockKey). The review resume path points here. */
+/** Append-only stage audit (working zone; keyed by blockKey). The LINK/dedup sweeps (serial under the
+ *  lock) still write here. The RESOLVE path writes PER-BLOCK (see {@link blockAuditRel}). */
 const AUDIT_REL = path.join('connect', 'audit.jsonl');
+/** SPEC-0048 SCALE-5: per-block resolve audit dir. With Connect running cap>1, two DISJOINT blocks'
+ *  resolve commits must touch DISJOINT paths — else they'd same-path-collide on a shared `audit.jsonl`
+ *  (concurrent EOF appends → cherry-pick conflict) → `withConcurrentAdvance` would re-run the whole
+ *  prepare incl. the LLM decider on each collision (cost). So each block gets its own audit file (the
+ *  decompose-per-source pattern that makes its single unchecked advance safe). */
+const AUDIT_DIR_REL = path.join('connect', 'blocks');
+/** The per-block resolve-audit file for a block key — a deterministic, filesystem-safe name (slug for
+ *  readability + a short hash for collision-freedom, since a block name can be any string). */
+function blockAuditRel(key: string): string {
+  const slug = key.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'block';
+  const hash = createHash('sha1').update(key).digest('hex').slice(0, 8);
+  return path.join(AUDIT_DIR_REL, `${slug}-${hash}.jsonl`);
+}
 /** Default attempts before a poison block is set aside (CONNECT-14). */
 export const DEFAULT_MAX_ATTEMPTS = 3;
 /** Default review rounds (parks) on one block before it is set aside (REVIEW-8 cascade cap). */
@@ -227,12 +242,17 @@ export interface ConnectState {
 }
 
 async function readConnectState(root: string, key: string): Promise<ConnectState> {
-  let raw: string;
-  try {
-    raw = await fs.readFile(path.join(root, AUDIT_REL), 'utf8');
-  } catch {
-    return { terminal: false, failures: 0, parked: false, rounds: 0 };
-  }
+  // SCALE-5: the block's events now live in its PER-BLOCK file; the legacy stage-wide file is also read
+  // (back-compat for pre-migration vaults). Each file is epoch-scoped independently (replay writes the
+  // reset to both), processed legacy-then-per-block so chronology holds (new resolve events go per-block).
+  const readOr = async (rel: string): Promise<string> => {
+    try {
+      return await fs.readFile(path.join(root, rel), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const lines = [...epochScopedLines(await readOr(AUDIT_REL)), ...epochScopedLines(await readOr(blockAuditRel(key)))];
   let terminal = false;
   let terminalReason: ConnectTerminalReason | undefined;
   let failures = 0;
@@ -241,7 +261,7 @@ async function readConnectState(root: string, key: string): Promise<ConnectState
   let answered = new Set<string>();
   // Scope to the current replay epoch (REPLAY-6): a replayed block's prior terminal/park markers
   // are ignored so the (re-emitted) candidates re-resolve through the unmodified pipeline (REPLAY-14).
-  for (const line of epochScopedLines(raw)) {
+  for (const line of lines) {
     if (line.trim().length === 0) continue;
     let o: AuditLine;
     try {
@@ -368,7 +388,7 @@ async function appendConnectAudit(
 ): Promise<void> {
   root = path.resolve(root);
   const prepare = async ({ wt }: PrepareContext): Promise<boolean> => {
-    const auditPath = path.join(wt, AUDIT_REL);
+    const auditPath = path.join(wt, blockAuditRel(key)); // SCALE-5: per-block (keeps reopened/dismissed in chronological order with the resolve events)
     await fs.mkdir(path.dirname(auditPath), { recursive: true });
     await fs.appendFile(auditPath, auditLine({ runId: ulid(), blockKey: key, ...fields }), 'utf8');
     const wtGit = simpleGit(wt);
@@ -438,6 +458,26 @@ async function appendAudit(wt: string, text: string): Promise<void> {
   const file = path.join(wt, AUDIT_REL);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.appendFile(file, text, 'utf8');
+}
+
+/** SCALE-5: append a RESOLVE-path audit event to the block's PER-BLOCK file (disjoint path → two
+ *  concurrent disjoint blocks never collide on a shared audit, so their advances replay cleanly). */
+async function appendBlockAudit(wt: string, key: string, text: string): Promise<void> {
+  const file = path.join(wt, blockAuditRel(key));
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, text, 'utf8');
+}
+
+/** Test/diagnostic: the concatenated content of ALL per-block resolve audits (SCALE-5) — the resolve
+ *  events that used to live in the single `connect/audit.jsonl` now span `connect/blocks/*.jsonl`. */
+export async function readResolveAudit(root: string): Promise<string> {
+  const dir = path.join(path.resolve(root), AUDIT_DIR_REL);
+  try {
+    const files = (await fs.readdir(dir)).filter((f) => f.endsWith('.jsonl')).sort();
+    return (await Promise.all(files.map((f) => fs.readFile(path.join(dir, f), 'utf8')))).join('');
+  } catch {
+    return '';
+  }
 }
 
 // ── Claim repoint (CONNECT-11): point a loser node's claims at the canonical node ──────────
@@ -674,7 +714,7 @@ export async function connectOne(
       let audit = auditLine({ runId, blockKey: key, model, event: 'start' });
       if (prior.rounds >= maxReviewRounds) {
         audit += auditLine({ runId, blockKey: key, event: 'setaside', reason: 'review-cascade-cap', rounds: prior.rounds });
-        await appendAudit(wt, audit);
+        await appendBlockAudit(wt, key, audit);
         await wtGit.raw('add', '-A');
         await wtGit.commit(`connect: set aside ${key} (review cascade cap)`);
         log.warn('connect.setaside', { runId, itemId: key, reason: 'review-cascade-cap', rounds: prior.rounds });
@@ -714,7 +754,8 @@ export async function connectOne(
             stage: STAGE,
             runId,
             item: { kind: 'block', ref: key },
-            auditRel: AUDIT_REL,
+            auditRel: blockAuditRel(key), // SCALE-5: the answer path appends `review-answered` to the per-block file
+
             // REVIEW-18: a disambiguation review carries the decided entity-PAIR on its markerKey so the
             // answer path records a durable per-pair decision (`confirm`→same, `reject`→distinct) keyed by it.
             markerKey: { blockKey: key, ...(req.pair ? { pairA: req.pair[0], pairB: req.pair[1] } : {}) },
@@ -730,7 +771,7 @@ export async function connectOne(
         audit += auditLine({ runId, blockKey: key, model, event: 'review-raised', reviewId: id, question: req.question });
       }
       audit += auditLine({ runId, blockKey: key, event: 'awaiting-review', reviewIds, round: prior.rounds + 1 });
-      await appendAudit(wt, audit);
+      await appendBlockAudit(wt, key, audit);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`connect: parked ${key} for review (${reviewIds.length})`);
       result = { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false, parked: true };
@@ -843,7 +884,7 @@ export async function connectOne(
       audit += auditLine({ runId, blockKey: key, model, event: 'signal', type: sig.type, note: sig.note, refs: sig.refs });
     }
     audit += auditLine({ runId, blockKey: key, model, event: 'connected', clusters: decision.clusters.length });
-    await appendAudit(wt, audit);
+    await appendBlockAudit(wt, key, audit);
 
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: ${key} → ${nodeRels.length} node(s)${deletedNodeRels.length ? `, merged ${deletedNodeRels.length}` : ''}`);
@@ -863,7 +904,7 @@ export async function connectOne(
     const setAside = attempt >= maxAttempts;
     let audit = auditLine({ runId, blockKey: key, event: 'failed', attempt, error });
     if (setAside) audit += auditLine({ runId, blockKey: key, event: 'setaside', attempts: attempt });
-    await appendAudit(wt, audit);
+    await appendBlockAudit(wt, key, audit);
     // OBS-4: verbose cause for the structured failed/setaside audit, cross-linked by runId (OBS-3).
     log.error('connect.failed', { runId, itemId: key, attempt, setAside, err });
     await wtGit.raw('add', '-A');
@@ -873,20 +914,30 @@ export async function connectOne(
   }
   };
 
-  // ORCH-19 collision exhaustion: the block lost the same-path race past K retries. Persist a disjoint
-  // set-aside audit (converges) in a fresh ephemeral wt, advance it, and surface the set-aside so the
-  // poison block can't head-of-line-block. (Model: decomposeStage onExhausted.)
+  // ORCH-19 collision exhaustion: the block lost the same-path race past K retries. Persist a set-aside
+  // marker (a disjoint PER-BLOCK audit append → converges) and advance it, so the poison block can't
+  // head-of-line-block. CHECK the advance outcome + retry against a fresh checkpoint; NEVER report
+  // setAside without the marker landing (QA #45 / the "never silently swallowed" gate condition) — if it
+  // truly can't persist, THROW so the systemic failure surfaces instead of a poison block silently
+  // re-queuing on inaccurate `setAside:true` telemetry.
   const onExhausted = async (): Promise<void> => {
-    const base = await canonicalHead(root);
-    await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
-      const wtGit = simpleGit(wt);
-      await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
-      await wtGit.raw('add', '-A');
-      await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
-      await lock.run(() => advanceOrCollide(root, workBranch, base), 'connect:setaside-advance');
-    });
-    log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
-    result = { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+    for (let i = 0; i <= DEFAULT_MAX_COLLISION_RETRIES; i++) {
+      const base = await canonicalHead(root);
+      const outcome = await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
+        const wtGit = simpleGit(wt);
+        await appendBlockAudit(wt, key, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
+        await wtGit.raw('add', '-A');
+        await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
+        return lock.run(() => advanceOrCollide(root, workBranch, base), 'connect:setaside-advance');
+      });
+      if (outcome === 'advanced') {
+        log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
+        result = { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+        return;
+      }
+      // 'collision' → the per-block marker raced the canonical moving; re-sync + retry.
+    }
+    throw new Error(`connect: could not persist collision-exhausted set-aside for ${key}`);
   };
 
   // cap>1 safe: each attempt prepares in its own ephemeral worktree; the advance serializes under `lock`.

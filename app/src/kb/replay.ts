@@ -144,10 +144,22 @@ async function purgeResetPromote(vaultRoot: string, stagingWt: string, opts: Rep
   for (const dir of sourceDirs) {
     await fs.appendFile(path.join(dir, 'audit.jsonl'), replayResetLine(replayId, ts));
   }
-  // 1b) …and to the stage-wide Connect audit if it exists, so resolved blocks re-derive (REPLAY-6).
+  // 1b) …and to the stage-wide Connect audit if it exists (legacy/back-compat + the serial link/dedup
+  //     sweeps), so resolved blocks re-derive (REPLAY-6).
   const connectAudit = path.join(stagingWt, CONNECT_AUDIT_REL);
   if (await pathExists(connectAudit)) {
     await fs.appendFile(connectAudit, replayResetLine(replayId, ts));
+  }
+  // 1c) SPEC-0048 SCALE-5: …and to EACH per-block resolve audit (`connect/blocks/<key>.jsonl`). Connect's
+  //     resolve events now live per-block (disjoint paths for cap>1), and `epochScopedLines` is per-file,
+  //     so the reset must reach every block's file for a replayed block to look unprocessed again.
+  const connectBlocksDir = path.join(stagingWt, 'connect', 'blocks');
+  try {
+    for (const f of await fs.readdir(connectBlocksDir)) {
+      if (f.endsWith('.jsonl')) await fs.appendFile(path.join(connectBlocksDir, f), replayResetLine(replayId, ts));
+    }
+  } catch {
+    /* no per-block audits yet (fresh or pre-migration vault) — nothing to reset */
   }
 
   // 2) Purge the derived trees (REPLAY-4). Absent trees are skipped; scaffolded trees keep a
