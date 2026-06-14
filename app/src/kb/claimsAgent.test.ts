@@ -51,6 +51,9 @@ describe('buildClaimsPrompt (CLAIMS-3/5/8/10)', () => {
     expect(p).toMatch(/first-person/i); // first-person = the narrator, not a co-mention
     expect(p).toMatch(/EMPTY claims/i); // co-mentioned-only → empty
     expect(p).toMatch(/silently corrupts their page/i); // why it matters — bias toward omit-when-unsure
+    // rule 4 (omit-when-unsure) — asserted distinctly so the instruction can't silently vanish (QD-2 bar):
+    expect(p).toMatch(/cannot tell/i);
+    expect(p).toMatch(/omit it/i);
   });
 });
 
@@ -134,6 +137,34 @@ describe('makeClaimsDecider (CLAIMS-3/4/12)', () => {
     const dMason = await makeClaimsDecider({ available: true, run: subjectAttributionRunner })(odspInput(MASON_ENTITY));
     expect(dMason.claims.length).toBeGreaterThan(0);
     expect(dMason.claims.some((c) => /Senior PM/.test(c.statement))).toBe(true);
+  });
+
+  // SUBJECT-ATTRIBUTION rule 4 (omit-when-unsure), a DISTINCT real-decider case gated on the omit/unsure
+  // instruction SPECIFICALLY (`cannot tell` + `omit it`) — independent of the co-mention/first-person
+  // rule above. A statement genuinely ambiguous about WHICH co-founder it's about: a guessing model
+  // attaches it to THIS entity; a model told to omit-when-unsure leaves it out. Fails-before/passes-after.
+  it('OMITS an ambiguously-attributed claim instead of guessing which subject it belongs to (SUBJECT-ATTRIBUTION rule 4)', async () => {
+    const AMBIG_SOURCE = [
+      'Founding Notes',
+      '',
+      'Jordan and Alex co-founded Helix in 2018 and ran it together out of a garage.',
+      'That year one of them was promoted to CTO — the notes do not say which.',
+    ].join('\n');
+    const JORDAN = { entityId: '01JJORDAN0000000000000000', kind: 'person', name: 'Jordan' };
+    const ambiguousRunner = async (prompt: string): Promise<string> => {
+      const forbidsGuessing = /cannot tell/i.test(prompt) && /omit it/i.test(prompt);
+      const cofound = { statement: 'Co-founded Helix in 2018', status: 'fact', confidence: 0.9, mentions: ['Jordan and Alex co-founded Helix in 2018'] };
+      // The CTO promotion is ambiguous between the two co-founders — a guessing model pins it on Jordan.
+      const ambiguousCto = { statement: 'Promoted to CTO in 2018', status: 'fact', confidence: 0.5, mentions: ['one of them was promoted to CTO'] };
+      return JSON.stringify({ entityId: JORDAN.entityId, claims: forbidsGuessing ? [cofound] : [cofound, ambiguousCto] });
+    };
+    const d = await makeClaimsDecider({ available: true, run: ambiguousRunner })({
+      ...JORDAN,
+      source: { sourceId: '01JAMBIGSRC0000000000000', kind: 'text', text: AMBIG_SOURCE },
+    });
+    // The ambiguous "promoted to CTO" is omitted (not guessed onto Jordan); the unambiguous co-founding stays.
+    expect(d.claims.some((c) => /CTO/.test(c.statement))).toBe(false);
+    expect(d.claims.some((c) => /Co-founded/.test(c.statement))).toBe(true);
   });
 });
 
