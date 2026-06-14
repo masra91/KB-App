@@ -74,6 +74,26 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     expect(root.textContent).toContain('About: Ada');
   });
 
+  it('PRIN-24 backstop: scrubs a raw source ULID parroted into the question / detail / gloss', async () => {
+    const ULID = '01KTJHC7MYV1MZ8XEBA4AAJH3M';
+    const leaky: ReviewSummary = {
+      id: 'U1',
+      question: `Is Ciaran (sole mention, from source ${ULID}) the same person?`,
+      detail: `Both candidates trace to ${ULID}.`,
+      stage: 'connect',
+      refs: [],
+      candidates: [{ name: 'Ciaran', gloss: `sole mention, from source ${ULID}`, title: 'A note' }],
+      createdAt: '2026-06-02T12:00:00.000Z',
+    };
+    setApi(vi.fn(async () => [leaky]));
+    await mountReviews(root);
+    // The raw id must NEVER reach the Principal — anywhere in the rendered surface.
+    expect(root.textContent).not.toContain(ULID);
+    // …replaced with a neutral word (not deleted), so the sentence still reads.
+    expect(root.querySelector('.review-q')?.textContent).toContain('a source');
+    expect(root.querySelector('.review-candidate-gloss')?.textContent).toContain('a source');
+  });
+
   it('WS2 PR3: composes the shared Button + EditableField primitives (DESIGN-SYS §8/§9)', async () => {
     setApi(vi.fn(async () => [CLAIM_REVIEW]));
     await mountReviews(root);

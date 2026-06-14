@@ -623,11 +623,21 @@ export async function connectOne(
         if (verdict) priorDecisions.push({ a, b, verdict });
       }
     }
+    // PRIN-24 / "never surface ULIDs": resolve each candidate's source ULID → human title so the
+    // Connect prompt references sources by TITLE, not the raw id. connectAgent fed `source: <ULID>`,
+    // which the model parroted into the disambiguation gloss ("Ciaran — sole mention, from source
+    // 01KTJH…"). resolveCandidateTitle never returns a ULID (falls back to the candidate name). Dedupe
+    // the read per source so a many-candidate block reads each source.md at most once.
+    const sourceTitles: Record<string, string> = {};
+    for (const c of setCandidates) {
+      if (!(c.sourceId in sourceTitles)) sourceTitles[c.sourceId] = await resolveCandidateTitle(wt, c);
+    }
     const set: CandidateSet = {
       blockKey: key,
       kind,
       candidates: setCandidates,
       existingNodes: sameKeyNodes.map((n): ExistingNodeRef => ({ id: n.id, name: n.name })),
+      sourceTitles,
       ...(priorDecisions.length > 0 ? { priorDecisions } : {}),
     };
     const decision = await decider(set, { span });
