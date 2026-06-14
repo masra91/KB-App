@@ -247,17 +247,21 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     expect(stepperValue('cap-archive')).toBe('1');
   });
 
-  it('Connect is pinned at 1 with both buttons disabled + a note (SCALE-5)', async () => {
-    setScaleApi();
+  it('Connect is an editable cap now — not pinned/disabled, and a bump persists it (SCALE-5 unpin)', async () => {
+    const { set } = setScaleApi();
     await mountSettings(root);
     await tick();
-    expect(stepperValue('cap-connect')).toBe('1');
-    expect(btn('cap-connect', 1).disabled).toBe(true);
-    expect(btn('cap-connect', -1).disabled).toBe(true);
-    expect(root.querySelector('.scale-pin-note')?.textContent).toMatch(/pinned/i);
+    expect(stepperValue('cap-connect')).toBe('1'); // today's default (serial) — but editable now
+    expect(btn('cap-connect', 1).disabled).toBe(false); // increment enabled (was disabled when pinned)
+    expect(btn('cap-connect', -1).disabled).toBe(true); // at the floor (1) → decrement disabled (bound affordance)
+    expect(root.querySelector('.scale-pin-note')).toBeNull(); // the "pinned" note is gone
+    bump('cap-connect', 1); // 1 → 2
+    await tick();
+    expect(stepperValue('cap-connect')).toBe('2');
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ stageCaps: expect.objectContaining({ connect: 2 }) }));
   });
 
-  it('cap rows align via a 2-col grid; Connect\'s note is a SIBLING below the row, not inside it (alignment)', async () => {
+  it('cap rows align via a 2-col grid (label | stepper); 5 rows, no pinned-note row (SCALE-5)', async () => {
     setScaleApi();
     await mountSettings(root);
     await tick();
@@ -265,14 +269,10 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     const rows = root.querySelectorAll('.scale-stage-row');
     expect(rows.length).toBe(5); // decompose / connect / claims / compose / archive
     for (const row of Array.from(rows)) {
-      // exactly label + stepper in the row → clean `1fr auto` alignment (no extra child shifting the stepper).
       expect(row.querySelector('.viz-field__label')).toBeTruthy();
       expect(row.querySelector('.viz-stepper')).toBeTruthy();
-      expect(row.querySelector('.scale-pin-note')).toBeNull(); // the note is NOT inside any row
     }
-    // Connect's pin note exists as a sibling <p> directly after its row (so the stepper stays aligned above).
-    const connectRow = root.querySelector('[data-stepper="cap-connect"]')!.closest('.scale-stage-row')!;
-    expect(connectRow.nextElementSibling?.classList.contains('scale-pin-note')).toBe(true);
+    expect(root.querySelector('.scale-pin-note')).toBeNull(); // Connect's pin note is gone (unpinned)
   });
 
   it('renders Manual when a ceiling override is set: row + hint visible, stepper at the value', async () => {

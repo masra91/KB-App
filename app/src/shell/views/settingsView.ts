@@ -93,16 +93,13 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     const ceilingValue = settings.copilotCeiling ?? 4;
     const scaleRowOrder: ScaleStage[] = ['decompose', 'connect', 'claims', 'compose', 'archive'];
     // Each cap row is a 2-column grid (label | stepper) so every stepper right-aligns into one column
-    // regardless of label width (Design-Lead's alignment ruling). Connect's pinned note moves OUT of the
-    // grid row to a sibling line below, so its stepper still lines up in the same column — just dimmed.
+    // regardless of label width (Design-Lead's alignment ruling). (SCALE-5: Connect is no longer
+    // pinned/disabled — its ephemeral-worktree migration landed, so it's an editable cap like the rest.)
     const stageRow = (stage: ScaleStage): string => {
-      const pinned = stage === 'connect';
-      const ctrl = pinned ? stepper(`cap-${stage}`, 1, 1, 1, true) : stepper(`cap-${stage}`, caps[stage], 1, STAGE_CAP_MAX);
-      const note = pinned ? `\n        <p class="settings-note scale-pin-note">Pinned at 1 until its safe-parallel migration.</p>` : '';
       return `<div class="settings-control scale-stage-row">
           <span class="viz-field__label" id="cap-${stage}-label">${STAGE_LABELS[stage]}</span>
-          ${ctrl}
-        </div>${note}`;
+          ${stepper(`cap-${stage}`, caps[stage], 1, STAGE_CAP_MAX)}
+        </div>`;
     };
 
     container.innerHTML = `
@@ -432,9 +429,8 @@ function wireScale(container: HTMLElement, settings: InstanceSettings): void {
     });
   }
 
-  // The per-stage cap steppers (Connect is pinned/disabled — SCALE-5 — so its buttons never fire).
+  // The per-stage cap steppers (SCALE-5: Connect is now editable like the rest — its pin lifted).
   for (const stage of SCALE_STAGES) {
-    if (stage === 'connect') continue;
     const el = container.querySelector<HTMLElement>(`[data-stepper="cap-${stage}"]`);
     if (!el) continue;
     wireStepper(el, (next, prev) => {

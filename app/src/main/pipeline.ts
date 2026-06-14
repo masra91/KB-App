@@ -377,7 +377,8 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // process-wide `copilotConcurrency` semaphore bounds the TOTAL in-flight copilot subprocesses across
   // all stages + jobs + researchers, so a higher cap can never fan out past the global ceiling. Each
   // stage is sized from `stageCaps` (instance.json overrides over today's defaults) and live-adjustable
-  // via setActiveInstanceSettings. Connect stays cap=1 until its ephemeral-worktree migration (SCALE-5).
+  // via setActiveInstanceSettings. Connect now runs cap>1 too (SCALE-5 ephemeral-worktree migration);
+  // its resolve drain is per-item-ephemeral, while its link/dedup sweeps stay serial under the lock.
   const decompose = new DecomposeStage(stagingWt, makeDecomposeDecider({ vaultPath: stagingWt }), lock, undefined, stageCaps.decompose, log, tracer);
   // SPEC-0046 COMPOSE: the FINAL Enrich stage (after Claims). It (re)writes each entity node's
   // encyclopedic prose body from that entity's cited claims — idempotent on the claims signature,
@@ -397,6 +398,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
     },
     log,
     tracer,
+    stageCaps.connect, // SCALE-5: resolve-stage concurrency (no longer pinned to 1)
   );
   // Claims' afterDrain promotes the new claims, then pokes Connect: now that the entity's claims
   // carry `relatesTo` hints, Connect's link-promotion pass turns them into `[[wikilinks]]`
@@ -1123,7 +1125,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   active.decompose.setCap(liveCaps.decompose);
   active.claims.setCap(liveCaps.claims);
   active.compose.setCap(liveCaps.compose);
-  // Connect is pinned to 1 (SCALE-5) — no setCap.
+  active.connect.setCap(liveCaps.connect); // SCALE-5: Connect's resolve drain is now live-tunable too
   const priorCeiling = priorCfg.copilotCeiling;
   const priorCaps = JSON.stringify(priorCfg.stageCaps ?? {});
   if (priorCeiling !== copilotCeiling || priorCaps !== JSON.stringify(stageCaps ?? {})) {

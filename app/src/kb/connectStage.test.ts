@@ -10,7 +10,7 @@ import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, entityFileRel, LINKS_BLOCK_START } from './connectDoc';
 import { applyProse } from './composeDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem, readResolveAudit } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
 import { readDisambiguationDirectives, directiveForIdentity } from './directives';
@@ -421,7 +421,7 @@ describe.skipIf(!gitAvailable)('connectOne — failure never loses candidates; s
       expect(await readConnectQueue(root)).toHaveLength(0); // set aside → out of active queue
       expect(await listEntityFiles(root)).toHaveLength(0); // no node fabricated
       // candidate file still present (never lost)
-      const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
+      const audit = await readResolveAudit(root);
       expect(audit).toContain('"event":"setaside"');
     });
   });
@@ -483,7 +483,7 @@ describe.skipIf(!gitAvailable)('connectOne — signals route to the audit log on
       });
       await connectOne(root, 'person|steve jobs', withSignal);
 
-      const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
+      const audit = await readResolveAudit(root);
       const sig = audit
         .split('\n')
         .filter(Boolean)
@@ -768,7 +768,7 @@ describe.skipIf(!gitAvailable)('connectOne — metadata: type Property + tags on
       expect(md).toContain('"topic/machine-learning"'); // agent tag, normalized (META-3)
       expect(md).toContain('"startups"');
       // provenance (META-10): the resolve audit records the tags it set
-      const audit = await fs.readFile(path.join(root, 'connect', 'audit.jsonl'), 'utf8');
+      const audit = await readResolveAudit(root);
       const resolved = audit
         .split('\n')
         .filter(Boolean)
