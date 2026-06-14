@@ -296,6 +296,9 @@ function liveCodeSdkSession(opts: CodeResearchOptions): CodeSdkSession {
         defineTool('read_file', {
           description: 'Read the text of a repo-relative file path (read-only; truncated if very large).',
           parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
+          // `read_file` is a Copilot CLI built-in (per the SDK override example) → our repo-scoped,
+          // budget-counted reader must override it or the session is rejected like recall's `grep` was. [[builtinTools]]
+          overridesBuiltInTool: true,
           handler: async (args: unknown) => countedRead(async () => read.readFile(String((args as { path?: unknown }).path ?? ''))),
         }),
         defineTool('git_log', {

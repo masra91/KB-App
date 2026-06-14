@@ -99,6 +99,9 @@ export function makeSdkRecallClient(opts: SdkRecallClientOptions = {}): RecallCl
         defineTool(d.name, {
           description: d.description,
           parameters: d.parameters,
+          // Opt into replacing a same-named CLI built-in (e.g. `grep`, CLI 1.0.62) — without this the
+          // CLI rejects the session ("conflicts with a built-in tool of the same name"). [[builtinTools]]
+          ...(d.overridesBuiltInTool ? { overridesBuiltInTool: true } : {}),
           handler: d.handler as ToolHandler,
         }),
       );
