@@ -48,6 +48,7 @@ import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
 import { resolveCopilotModel } from '../kb/copilotModel';
+import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
 import { resolveContainedRel } from '../kb/pathContainment';
@@ -94,6 +95,7 @@ import type {
   AuditEvent,
   Lineage,
   InstanceSettings,
+  ScaleRuntime,
   AgentView,
   ModelCatalogView,
   SetModelResult,
@@ -551,6 +553,8 @@ export function registerIpc(): void {
   // (observe-only). The renderer gates a → Autonomous default behind a confirm; the main process
   // owns the per-vault `.kb/instance.json` + emits the conforming audit.
   ipcMain.handle('kb:getInstanceSettings', async (): Promise<InstanceSettings> => getActiveInstanceSettings());
+  // SCALE-7/8: live scale runtime for the Scale card's throttled indicator (effective vs reference ceiling).
+  ipcMain.handle('kb:getScaleRuntime', async (): Promise<ScaleRuntime> => copilotScaleRuntime());
 
   ipcMain.handle('kb:setInstanceSettings', async (_e, s: InstanceSettings): Promise<InstanceSettings> => setActiveInstanceSettings(s));
 

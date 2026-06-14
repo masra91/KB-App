@@ -154,4 +154,32 @@ describe('AdaptiveCeilingController (SCALE-7 — AIMD)', () => {
     expect(c.isThrottled(1099)).toBe(true);
     expect(c.isThrottled(1100)).toBe(false);
   });
+
+  // SCALE-7/8 UI: the reference high-water drives the "effective N of M" indicator (effective < reference).
+  it('reference high-water: starts at the seed; a rate-limit leaves reference at the pre-backoff level', () => {
+    const c = new AdaptiveCeilingController(cfg({ start: 8, min: 1, increaseAfter: 1 }));
+    expect(c.referenceCeiling).toBe(8);
+    expect(c.isBackedOff).toBe(false); // healthy at the high-water
+    c.onOutcome('rate-limit', 0); // 8 → 4
+    expect(c.ceiling).toBe(4);
+    expect(c.referenceCeiling).toBe(8); // reference stays at the level we climb back toward → "4 of 8"
+    expect(c.isBackedOff).toBe(true);
+  });
+
+  it('clears the backed-off state once it re-probes back up to the reference', () => {
+    const c = new AdaptiveCeilingController(cfg({ start: 8, min: 1, increaseAfter: 1, cooldownMs: 0 }));
+    c.onOutcome('rate-limit', 0); // 8 → 4, reference 8
+    expect(c.isBackedOff).toBe(true);
+    for (let t = 1; c.ceiling < 8; t++) c.onOutcome('ok', t); // climb 4→5→6→7→8
+    expect(c.ceiling).toBe(8);
+    expect(c.isBackedOff).toBe(false); // recovered to reference → indicator clears
+  });
+
+  it('reference follows the high-water when it re-probes ABOVE the prior reference', () => {
+    const c = new AdaptiveCeilingController(cfg({ start: 4, max: 8, min: 1, increaseAfter: 1, cooldownMs: 0 }));
+    expect(c.referenceCeiling).toBe(4);
+    c.onOutcome('ok', 1); // 4 → 5 (new high)
+    expect(c.referenceCeiling).toBe(5);
+    expect(c.isBackedOff).toBe(false);
+  });
 });

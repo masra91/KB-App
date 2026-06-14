@@ -152,6 +152,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
           <span class="viz-field__label" id="ceiling-label">Max AI sessions at once</span>
           ${stepper('ceiling', ceilingValue, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX)}
         </div>
+        <p id="scale-throttle" class="settings-note scale-throttle" role="status" aria-live="polite" hidden></p>
         <p class="settings-note scale-stages-heading">Per-stage limits</p>
         ${scaleRowOrder.map(stageRow).join('\n        ')}
         <p id="scale-hint" class="settings-note scale-hint" role="note"${ceilingMode === 'manual' ? '' : ' hidden'}>Per-stage limits can total more than the cap — that's fine. Stages share the available slots fairly; none starves.</p>
@@ -179,6 +180,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     wireAutonomy(container, settings);
     wireVerbosity(container, settings);
     wireScale(container, settings);
+    void renderScaleRuntime(container);
     wireReplay(container);
     void wireQuiesce(container);
   } catch {
@@ -446,6 +448,30 @@ function wireScale(container: HTMLElement, settings: InstanceSettings): void {
       );
     });
   }
+}
+
+/** SPEC-0048 SCALE-7/8: the AIMD "throttled" indicator. Fetch the live scale runtime and, ONLY when the
+ *  adaptive controller is backed off below its healthy reference (a recent rate-limit reduced the live
+ *  ceiling), show an ink-muted "effective N of M — easing off rate limits" caption (NOT brass — it's
+ *  transient self-healing the user can't act on, so informational, per the VIZ-10 cry-wolf rule), with
+ *  an ember-breathe dot while actively in the cooldown. Absent otherwise (never announces "not
+ *  throttled"). A snapshot at mount (like the model picker's "runs as:"); ENG-16: any failure is silent. */
+async function renderScaleRuntime(container: HTMLElement): Promise<void> {
+  const el = container.querySelector<HTMLElement>('#scale-throttle');
+  if (!el) return;
+  let rt;
+  try {
+    rt = await withTimeout(window.kbApi.getScaleRuntime());
+  } catch {
+    return; // leave it hidden — the indicator is non-essential
+  }
+  if (!rt || !rt.adaptive || !rt.backedOff || rt.effective >= rt.reference) {
+    el.setAttribute('hidden', '');
+    return;
+  }
+  const dot = rt.throttled ? '<span class="scale-throttle__dot" aria-hidden="true"></span>' : '';
+  el.innerHTML = `${dot}effective ${esc(String(rt.effective))} of ${esc(String(rt.reference))} — easing off rate limits`;
+  el.removeAttribute('hidden');
 }
 
 /** Wire the Clean & Rebuild flow: reveal a confirm panel (REPLAY-2), then run the replay and

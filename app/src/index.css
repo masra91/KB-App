@@ -326,6 +326,13 @@ dl.settings dd {
    structural rule; text stays ink-muted via .settings-note. A real low-ceiling contention warning,
    if one ever lands, is what gets brass. */
 .scale-hint { border-left: 2px solid var(--viz-rule); padding-left: 0.6rem; }
+/* SCALE-7/8 throttled indicator — ink-muted "effective N of M" caption (NOT brass: transient
+   self-healing, informational, VIZ-10 cry-wolf rule). The ember-breathe dot marks active backing-off;
+   the global reduced-motion reset (design-system.css) makes it static. display:flex overrides the UA
+   [hidden], so restore display:none when hidden. */
+.scale-throttle { display: flex; align-items: center; gap: 0.4rem; color: var(--viz-ink-muted); }
+.scale-throttle[hidden] { display: none; }
+.scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-ember); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
 
 /* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
 ul.review-list {
