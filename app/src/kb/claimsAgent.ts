@@ -13,6 +13,7 @@ import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
+import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
 import { parseClaimsDecision, type ClaimsDecision, CLAIM_STATUSES } from './claims';
 import type { SourceInput } from './decomposeAgent';
 import type { AgentTrace } from './archivist';
@@ -179,13 +180,25 @@ export function makeClaimsDecider(opts: ClaimsDeciderOptions = {}): ClaimsDecide
     const t0 = Date.now();
     // OBS-13: time the Copilot call as a child of the stage's run span (failures included).
     const cs = ctx?.span?.child(COPILOT_OP);
+    // HEAL-1: self-repair wraps the launch — on a parse/validation failure, re-prompt with the error
+    // fed back (bounded). A launch/timeout/systemic error from `run` is NOT a parse error and
+    // propagates so the stage's set-aside + #256 breaker still see it (HEAL-6 boundary).
+    const basePrompt = buildClaimsPrompt(input);
+    let repairs = 0;
     try {
-      const decision = parseClaimsDecision(
-        await runWithModelFallback((m) => run(buildClaimsPrompt(input), cwd, m), { agentKey: 'claims', onFallback: (_from, to) => { modelUsed = to; } }),
-        input.entityId,
+      const { value: decision } = await runWithSelfRepair(
+        (repair) =>
+          runWithModelFallback((m) => run(repair ? appendRepairInstruction(basePrompt, repair) : basePrompt, cwd, m), {
+            agentKey: 'claims',
+            onFallback: (_from, to) => {
+              modelUsed = to;
+            },
+          }),
+        (stdout) => parseClaimsDecision(stdout, input.entityId),
+        { onRepair: () => { repairs += 1; } },
       );
       cs?.end('ok');
-      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at };
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at, ...(repairs > 0 ? { repairs } : {}) };
       return { ...decision, agent };
     } catch (e) {
       cs?.end('error');

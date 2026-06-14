@@ -206,4 +206,38 @@ describe('makeConnectDecider (CONNECT-5/14)', () => {
   it('THROWS on unparseable output', async () => {
     await expect(makeConnectDecider({ available: true, run: async () => 'sorry' })(set())).rejects.toThrow();
   });
+
+  // SPEC-0049 HEAL-1: self-repair through the REAL parse path — a first verdict that fails validation is
+  // re-prompted with the EXACT validator error fed back, and the corrected second verdict converges.
+  it('self-repairs a failed verdict: re-prompts with the error, converges, records repairs (HEAL-1)', async () => {
+    const prompts: string[] = [];
+    const decide = makeConnectDecider({
+      available: true,
+      run: async (prompt) => {
+        prompts.push(prompt);
+        // round 1: drops candidate 01B → parseConnectDecision throws "covers 1 of 2 candidates"
+        if (prompts.length === 1) {
+          return '{"blockKey":"person|steve jobs","clusters":[{"canonicalName":"Steve Jobs","memberCandidateIds":["01A"],"confidence":0.9}]}';
+        }
+        // round 2 (the repair round): the full, valid partition
+        return '{"blockKey":"person|steve jobs","clusters":[{"canonicalName":"Steve Jobs","memberCandidateIds":["01A","01B"],"confidence":0.95}]}';
+      },
+    });
+    const d = await decide(set());
+    expect(d.clusters[0].memberCandidateIds).toEqual(['01A', '01B']); // the corrected verdict won
+    expect(d.agent?.ok).toBe(true);
+    expect(d.agent?.repairs).toBe(1); // visible in the trace — self-healing isn't silent
+    expect(prompts).toHaveLength(2);
+    // the repair prompt fed the exact validator error + the prior raw back to the model
+    expect(prompts[1]).toContain('covers 1 of 2');
+    expect(prompts[1]).toContain('memberCandidateIds'); // the prior raw output echoed back
+    expect(prompts[1]).toMatch(/corrected JSON/i);
+  });
+
+  it('gives up after the bounded repair budget when the output never parses (still THROWS, never loops)', async () => {
+    let calls = 0;
+    const decide = makeConnectDecider({ available: true, run: async () => { calls += 1; return 'not json'; } });
+    await expect(decide(set())).rejects.toThrow();
+    expect(calls).toBe(2); // first attempt + one bounded repair round, then give up (the stage sets aside)
+  });
 });

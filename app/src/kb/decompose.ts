@@ -5,6 +5,7 @@
 // signal `type` are validated ONLY as non-empty strings — never against an allow-list. The
 // base sets are PROSE guidance in the prompt template (buildDecomposePrompt), never gated
 // in code, so the taxonomy can grow from the material itself.
+import { extractBalancedJson } from './jsonExtract';
 import type { AgentTrace } from './archivist';
 
 /** One entity node the source mentions. `kind` is an open string (DECOMP-7). */
@@ -119,9 +120,9 @@ export function validSignal(v: unknown, i: number): SignalDecision {
  *   stale/confused session decomposing the wrong item).
  */
 export function parseDecomposeDecision(stdout: string, expectedSourceId?: string): DecomposeDecision {
-  const match = stdout.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('decompose: no JSON object in output');
-  const obj = JSON.parse(match[0]) as Record<string, unknown>;
+  const json = extractBalancedJson(stdout); // HEAL-2: tolerate fences/leading/trailing prose
+  if (json === null) throw new Error('decompose: no JSON object in output');
+  const obj = JSON.parse(json) as Record<string, unknown>;
 
   if (!isNonEmptyString(obj.sourceId)) throw new Error('decompose: missing sourceId');
   if (expectedSourceId && obj.sourceId !== expectedSourceId) {

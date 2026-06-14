@@ -13,6 +13,7 @@ import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
+import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
 import { parseDecomposeDecision, type DecomposeDecision } from './decompose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -178,13 +179,25 @@ export function makeDecomposeDecider(opts: DecomposeDeciderOptions = {}): Decomp
     // OBS-13: time this Copilot invocation as a child of the stage's run span (OBS-12 nesting),
     // capturing failures too — a thrown parse/call ends the span `error` before re-throwing.
     const cs = ctx?.span?.child(COPILOT_OP);
+    // HEAL-1: self-repair wraps the launch — on a parse/validation failure, re-prompt with the error
+    // fed back (bounded). A launch/timeout/systemic error from `run` is NOT a parse error and
+    // propagates so the stage's set-aside + #256 breaker still see it (HEAL-6 boundary).
+    const basePrompt = buildDecomposePrompt(input);
+    let repairs = 0;
     try {
-      const decision = parseDecomposeDecision(
-        await runWithModelFallback((m) => run(buildDecomposePrompt(input), cwd, m), { agentKey: 'decompose', onFallback: (_from, to) => { modelUsed = to; } }),
-        input.sourceId,
+      const { value: decision } = await runWithSelfRepair(
+        (repair) =>
+          runWithModelFallback((m) => run(repair ? appendRepairInstruction(basePrompt, repair) : basePrompt, cwd, m), {
+            agentKey: 'decompose',
+            onFallback: (_from, to) => {
+              modelUsed = to;
+            },
+          }),
+        (stdout) => parseDecomposeDecision(stdout, input.sourceId),
+        { onRepair: () => { repairs += 1; } },
       );
       cs?.end('ok');
-      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at };
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at, ...(repairs > 0 ? { repairs } : {}) };
       return { ...decision, agent };
     } catch (e) {
       cs?.end('error');

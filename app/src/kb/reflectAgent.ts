@@ -4,11 +4,13 @@
 // returns a JSON verdict of findings and the orchestrator (JobStage) does every effect. There is
 // NO fabricating fallback — a bad/absent session throws and the job run is treated as a failed pass.
 import { execFile } from 'node:child_process';
+import { extractBalancedJson } from './jsonExtract';
 import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
+import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000;
@@ -112,15 +114,15 @@ function isNonEmptyString(v: unknown): v is string {
  * NEVER fabricates a finding (a wrong destructive proposal or bogus write is worse than no-op).
  */
 export function parseReflectResult(stdout: string): ReflectResult {
-  const match = stdout.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('reflect: no JSON object in output');
-  // REFLECT-18: the brace-greedy regex can grab non-JSON (prose with braces, a truncated object), so the
-  // raw `JSON.parse` SyntaxError crashed the pass (the live `job.failed JSON.parse SyntaxError`). Wrap it
-  // into a clear, controlled reflect error — the job runner catches it and sets the slice aside instead of
-  // failing the whole run. Still never fabricates a finding (bad output → no findings, surfaced as error).
+  const json = extractBalancedJson(stdout); // HEAL-2: tolerate fences/leading/trailing prose
+  if (json === null) throw new Error('reflect: no JSON object in output');
+  // REFLECT-18 + HEAL-2: lenient extraction (extractBalancedJson) finds the brace-balanced object even
+  // amid prose/fences; a still-malformed object surfaces as a clear, controlled reflect error — the job
+  // runner catches it (sets the slice aside, never fabricates a finding) and HEAL-1 self-repair feeds the
+  // error back to the model for a corrected round.
   let obj: Record<string, unknown>;
   try {
-    obj = JSON.parse(match[0]) as Record<string, unknown>;
+    obj = JSON.parse(json) as Record<string, unknown>;
   } catch (err) {
     throw new Error(`reflect: agent output was not valid JSON (${err instanceof Error ? err.message : String(err)})`);
   }
@@ -188,6 +190,13 @@ export function makeReflectDecider(opts: ReflectDeciderOptions = {}): ReflectDec
     if (!available) throw new Error('reflect: copilot unavailable');
     // Model-pin resilience: retry once with `--model auto` if the pinned id is rejected pre-flight
     // (a job pass should not hard-fail just because a pinned model drifted out of the catalog).
-    return parseReflectResult(await runWithModelFallback((m) => run(buildReflectPrompt(ctx), cwd, m), { agentKey: 'reflect' }));
+    // HEAL-1: and self-repair once on a parse/validation failure (re-prompt with the error fed back)
+    // before the job runner sets the slice aside — this was the live `job.failed JSON.parse` (REFLECT-18).
+    const basePrompt = buildReflectPrompt(ctx);
+    const { value } = await runWithSelfRepair(
+      (repair) => runWithModelFallback((m) => run(repair ? appendRepairInstruction(basePrompt, repair) : basePrompt, cwd, m), { agentKey: 'reflect' }),
+      parseReflectResult,
+    );
+    return value;
   };
 }

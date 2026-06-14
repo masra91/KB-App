@@ -8,6 +8,7 @@
 // Claims' `relatesTo` hints, which require a Connect re-pass AFTER Claims (the reorder puts
 // Connect before Claims, so hints don't exist on the first pass). The agent's `links[]` field
 // (SPEC-0020 §3.3) is therefore NOT parsed here yet — it lands with that slice.
+import { extractBalancedJson } from './jsonExtract';
 import type { AgentTrace } from './archivist';
 import { type SignalDecision, validSignal } from './decompose';
 import { type ReviewRequest, validReviewRequests } from './reviews';
@@ -180,9 +181,9 @@ export function parseConnectDecision(
   expectedBlockKey?: string,
   allowedCandidateIds?: readonly string[],
 ): ConnectDecision {
-  const match = stdout.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('connect: no JSON object in output');
-  const obj = JSON.parse(match[0]) as Record<string, unknown>;
+  const json = extractBalancedJson(stdout); // HEAL-2: tolerate fences/leading/trailing prose
+  if (json === null) throw new Error('connect: no JSON object in output');
+  const obj = JSON.parse(json) as Record<string, unknown>;
 
   if (!isNonEmptyString(obj.blockKey)) throw new Error('connect: missing blockKey');
   if (expectedBlockKey && obj.blockKey !== expectedBlockKey) {
