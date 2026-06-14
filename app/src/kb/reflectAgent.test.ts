@@ -23,6 +23,13 @@ describe('buildReflectPrompt', () => {
     expect(p).toContain('NOT the whole KB');
     expect(p).toContain('"inspected"'); // the required JSON shape
   });
+
+  // WS-C (SPEC-0025 META-2): Reflect should also coin/refresh emergent topic/ tags for nodes missing
+  // their thematic labels — the same dead-rail fix as Connect, on the rumination side.
+  it('nudges coining/refreshing emergent topic/ tags as an additive repair (WS-C)', () => {
+    const p = buildReflectPrompt(ctx);
+    expect(p).toMatch(/coin or refresh an emergent "topic\/" tag/i);
+  });
 });
 
 describe('parseReflectResult', () => {
