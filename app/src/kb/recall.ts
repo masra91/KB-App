@@ -130,6 +130,13 @@ export interface RecallToolDef {
   name: string;
   description: string;
   parameters?: Record<string, unknown>; // raw JSON schema (avoids a direct zod dep)
+  /**
+   * Set when this custom tool's name collides with a Copilot CLI built-in (e.g. `grep`, added in CLI
+   * 1.0.62): the SDK/CLI rejects the session otherwise ("conflicts with a built-in tool of the same
+   * name"). Signals "our KB-scoped tool IS the agent's <name>" — mirrors the web researcher's `fetch`.
+   * See [[builtinTools]] for the version-coupled built-in registry + the build-time guard.
+   */
+  overridesBuiltInTool?: boolean;
   handler: (args: unknown, invocation?: unknown) => Promise<unknown> | unknown;
 }
 
@@ -375,10 +382,16 @@ export function buildRecallToolDefs(
   budget: { used: number; truncated: boolean },
   maxToolCalls: number,
 ): RecallToolDef[] {
-  const retrieval = (name: ToolName, description: string, parameters: Record<string, unknown>): RecallToolDef => ({
+  const retrieval = (
+    name: ToolName,
+    description: string,
+    parameters: Record<string, unknown>,
+    opts: { overridesBuiltInTool?: boolean } = {},
+  ): RecallToolDef => ({
     name,
     description,
     parameters,
+    ...(opts.overridesBuiltInTool ? { overridesBuiltInTool: true } : {}),
     handler: async (rawArgs) => {
       if (budget.used >= maxToolCalls) {
         budget.truncated = true;
@@ -418,11 +431,18 @@ export function buildRecallToolDefs(
       properties: { dir: { type: 'string' } },
       required: ['dir'],
     }),
-    retrieval('grep', 'Case-insensitive line search across sources/entities/claims.', {
-      type: 'object',
-      properties: { pattern: { type: 'string' }, limit: { type: 'number' } },
-      required: ['pattern'],
-    }),
+    // `grep` collides with the CLI built-in (added in CLI 1.0.62) → must override or the session is
+    // rejected and Ask/Recall goes down. Our grep IS the agent's grep (KB-scoped retrieval). [[builtinTools]]
+    retrieval(
+      'grep',
+      'Case-insensitive line search across sources/entities/claims.',
+      {
+        type: 'object',
+        properties: { pattern: { type: 'string' }, limit: { type: 'number' } },
+        required: ['pattern'],
+      },
+      { overridesBuiltInTool: true },
+    ),
     {
       name: SUBMIT_ANSWER_TOOL,
       description: 'Finish: submit the grounded markdown answer and the evidence it cites.',
