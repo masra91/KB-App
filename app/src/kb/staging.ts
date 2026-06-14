@@ -23,7 +23,11 @@ export const STAGING_BRANCH = 'staging';
  * with producers). Working paths (`inbox/`, `candidates/`, `queue/`, `reviews/`, `.kb/…` incl. the
  * per-job `.kb/jobs/` journals) are never listed, so `main` can never hold them (STAGING-6).
  */
-export const EVERGREEN_PATHS = ['sources', 'entities', 'claims', 'outputs'] as const;
+// `directives/` is durable human INTERPRETATION (SPEC-0050) — a settled disambiguation verdict keyed
+// on STABLE block identity. It is evergreen so it is promoted to `main` AND survives reset/replay (it
+// is deliberately NOT in replay's PURGE_DIRS), so an answered "Disney is one org" never re-asks across
+// a new same-name source or a Full Replay (DIR-4).
+export const EVERGREEN_PATHS = ['sources', 'entities', 'claims', 'outputs', 'directives'] as const;
 
 /** Ensure a long-lived `staging` branch exists, created off the vault's current branch (HEAD)
  *  if absent (STAGING-1). Created off HEAD — never a hardcoded `main`, so vaults whose default

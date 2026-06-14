@@ -43,6 +43,7 @@ import { typeTag, normalizeTag } from './metaVocab';
 import { makeConnectDecider, type ConnectDecider, type CandidateSet, type ExistingNodeRef, type PriorDisambiguation } from './connectAgent';
 import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
+import { readDisambiguationDirectives, directiveForIdentity } from './directives';
 import { deriveSourceTitle } from './sourceDoc';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
@@ -597,11 +598,29 @@ export async function connectOne(
     // matcher resolves new mentions against known verdicts instead of re-opening) and the post-decision
     // suppression below. Surface the ones among THIS block's same-key existing nodes as decided pairs.
     const decisions = await readDisambiguationDecisions(wt);
+    // SPEC-0050 DIR-3: also load the durable DIRECTIVES — disambiguation verdicts keyed on the STABLE
+    // block identity (this block's `key`, e.g. `organization|disney`). Unlike the pair-keyed decisions
+    // above (whose entity ULIDs go stale on a re-derive/replay), a directive matches by block identity,
+    // so a settled "Disney is one org" still applies to the freshly-minted nodes after a Full Replay.
+    //
+    // Slice 1 acts on the MERGE directive only (`same`): it means "this identity is ONE entity", a
+    // per-block fact that survives rebirth — so it auto-resolves every same-key pair and suppresses the
+    // re-ask (the felt Disney/Microsoft bug). A `distinct` verdict is inherently PER-PAIR ("these two
+    // are different"), so it must NOT blanket-suppress the block — a genuinely new, never-decided pair
+    // still raises (REVIEW-18 per-pair memory). Distinct's durable cross-rebirth treatment rides the
+    // SPEC-0047 confidence line in a later slice; here it stays on the exact pair-keyed store.
+    const directives = await readDisambiguationDirectives(wt);
+    const directive = directiveForIdentity(directives, key);
+    const mergeDirective = directive?.verdict === 'same' ? directive : undefined;
     const priorDecisions: PriorDisambiguation[] = [];
     for (let i = 0; i < sameKeyNodes.length; i++) {
       for (let j = i + 1; j < sameKeyNodes.length; j++) {
-        const d = decisionForPair(decisions, sameKeyNodes[i].id, sameKeyNodes[j].id);
-        if (d) priorDecisions.push({ a: sameKeyNodes[i].id, b: sameKeyNodes[j].id, verdict: d.verdict });
+        const a = sameKeyNodes[i].id;
+        const b = sameKeyNodes[j].id;
+        // The exact pair-keyed decision wins when present (it may carry a later, revised per-pair
+        // verdict); otherwise a `same` directive on the block identity resolves the pair as merged.
+        const verdict = decisionForPair(decisions, a, b)?.verdict ?? (mergeDirective ? 'same' : undefined);
+        if (verdict) priorDecisions.push({ a, b, verdict });
       }
     }
     const set: CandidateSet = {
@@ -634,6 +653,24 @@ export async function connectOne(
             reviewId: decided.reviewId,
           });
           return false; // decided pair → don't re-ask (CONNECT-21)
+        }
+        // SPEC-0050 DIR-3/4/8: no exact pair-keyed decision, but a MERGE DIRECTIVE on this block
+        // identity settles the question durably (it survives the re-derive/replay that reissued the
+        // entity ULIDs the pair-keyed decision was lost to): the identity is one entity, so any "are
+        // these two the same?" re-ask is auto-resolved via the priorDecision fed to the decider above —
+        // don't re-raise. (Only `same`; a `distinct` verdict is per-pair and never blanket-suppresses,
+        // so a genuinely new pair still raises. Confidence-nudge framing per SPEC-0047: new conflicting
+        // evidence would drop confidence below the line and re-surface a review — a later slice.)
+        if (mergeDirective) {
+          log.info('connect.directive-suppressed', {
+            runId,
+            itemId: key,
+            identityKey: key,
+            pair: req.pair.join(' · '),
+            verdict: mergeDirective.verdict,
+            reviewId: mergeDirective.reviewId,
+          });
+          return false; // settled by merge directive → don't re-ask (SPEC-0050 DIR-4)
         }
       }
       return true;

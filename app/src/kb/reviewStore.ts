@@ -14,6 +14,7 @@ import { ensureGitIdentity } from './vault';
 import { captureToInbox } from './ingest';
 import { validReviewAnswerInput, type Review } from './reviews';
 import { recordDisambiguationDecision, verdictToDisambiguation } from './disambiguationDecisions';
+import { recordDisambiguationDirective } from './directives';
 import type { Mutex } from './stageLock';
 
 /** Repo-relative directory for a review id. */
@@ -135,7 +136,7 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
     // matcher (CONNECT-21) never re-asks a decided pair. Recorded here, independent of whether a
     // same-verdict merge write has landed yet (ORCH-26 pending-merge is still "decided"); lands in the
     // same commit as the answer. Provenance = this reviewId (PRIN-5/6); a later opposite verdict revises.
-    const { pairA, pairB } = review.raisedBy.markerKey;
+    const { blockKey, pairA, pairB } = review.raisedBy.markerKey;
     if (pairA && pairB) {
       await recordDisambiguationDecision(root, {
         a: pairA,
@@ -144,6 +145,20 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
         reviewId: id,
         decidedAt: answeredAt,
       });
+      // SPEC-0050 DIR-2/3/4: ALSO graduate the answer to a durable DIRECTIVE keyed on the STABLE
+      // block identity (`blockKey`, e.g. `organization|disney`), not the entity ULIDs. The pair-keyed
+      // decision above is reborn-stale on a re-derive/replay (entity ULIDs change); the block identity
+      // is content-derived and stable, so the directive — stored evergreen under `directives/` and
+      // promoted to `main` — keeps the question settled across a new same-name source AND a Full Replay.
+      if (blockKey) {
+        await recordDisambiguationDirective(root, {
+          identityKey: blockKey,
+          verdict: verdictToDisambiguation(verdict),
+          reviewId: id,
+          decidedAt: answeredAt,
+          entities: [pairA, pairB],
+        });
+      }
     }
 
     // 4. Commit on the canonical tree (serialized by the lock, so no race with stage ff-advances).

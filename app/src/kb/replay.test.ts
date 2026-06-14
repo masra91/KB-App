@@ -17,6 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -306,6 +307,41 @@ describe.skipIf(!gitAvailable)('Full Replay — HEAL-9 reset hygiene (SPEC-0049)
       expect(await pathExists(path.join(cache, 'spans.jsonl'))).toBe(false);
       expect(await pathExists(path.join(cache, 'spans.jsonl.1'))).toBe(false); // rotations too
       expect(await pathExists(path.join(cache, 'logs'))).toBe(false); // dev-log error trail gone
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
+
+describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive reset/replay (DIR-4)', () => {
+  it('keeps a disambiguation directive on staging AND republished on main across a Full Replay', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // A settled directive (as the review-answer path would record it), committed on `staging`.
+      await recordDisambiguationDirective(stagingWt, {
+        identityKey: 'organization|disney',
+        verdict: 'same',
+        reviewId: 'rev-disney',
+        decidedAt: '2026-06-14T00:00:00Z',
+        entities: ['01OLD_A', '01OLD_B'],
+      });
+      const sg = simpleGit(stagingWt);
+      await sg.raw('add', '-A');
+      await sg.commit('seed: durable disambiguation directive');
+
+      // Full Replay purges derived knowledge — directives/ is NOT in PURGE_DIRS, so it must survive…
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // …on staging (the durable memory the rebuild consults)…
+      const onStaging = await readDisambiguationDirectives(stagingWt);
+      expect(directiveForIdentity(onStaging, 'organization|disney')?.verdict).toBe('same');
+      // …and republished to `main` (directives/ is evergreen → promoted), so it is the published truth.
+      const onMain = await readDisambiguationDirectives(root);
+      expect(directiveForIdentity(onMain, 'organization|disney')?.verdict).toBe('same');
     } finally {
       await rmTempDir(dir);
     }
