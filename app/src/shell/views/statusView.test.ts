@@ -363,6 +363,20 @@ describe('The Line — set-aside siding (VIZ-7 / OBS-17, contract unchanged)', (
     expect(h).not.toContain('<b>x</b>');
     expect(h).toContain('&lt;img');
   });
+
+  it('ENG-15: a malformed set-aside item (null name, missing reason) renders without crashing — name falls back to itemId', () => {
+    // The live siding can carry a partial item (a poison entry whose name never resolved); a data-render
+    // surface must degrade the item, never crash the whole siding (REVIEW-19 / ENG-15/16 hard bar).
+    const malformed = [{ stage: 'claims', itemId: '01MALFORMED', name: null }] as unknown as Parameters<typeof sidingHtml>[0];
+    const h = sidingHtml(malformed);
+    expect(h).toContain('Claim extraction · 01MALFORMED'); // null name → itemId fallback, no throw
+    expect(h).not.toContain('undefined'); // never esc(undefined) → the "title:null" crash class
+    expect(h).toContain('line-siding-retry'); // still actionable
+    // bonus — the same malformed item carrying a re-surfaced failure still renders safely
+    const withErr = sidingHtml(malformed, { failures: new Map([['claims:01MALFORMED', 'please try again']]) });
+    expect(withErr).toContain('line-siding-error');
+    expect(withErr).toContain('Claim extraction · 01MALFORMED');
+  });
 });
 
 describe('The Line — pivot toggle (VIZ-5) + secondary readout (OBS-6/7/15)', () => {
