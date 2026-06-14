@@ -31,7 +31,7 @@ export function approxCount(n: number): number {
 
 /** Build the read-only tray status readout lines from the OBS view-model (QCAP-14). Each string
  *  becomes one disabled menu item. State-gated (progressive disclosure, Design-Lead):
- *  - running with a backlog → two lines: `◐ Running — ~N waiting` + `Decompose 12 · Linking 340 · …`
+ *  - running with a backlog → two lines: `◐ Running — ~N waiting` + `Decompose 12 · Connect 340 · …`
  *  - running with nothing queued → one line: `◐ Running` (active, nothing waiting)
  *  - idle → one line: `○ Idle — all caught up`
  *  - stalled → one line: `✕ Stalled — needs you` (never hide a failure behind a friendly word)

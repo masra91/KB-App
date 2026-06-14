@@ -89,12 +89,12 @@ describe('theLineModel — funnel unit logic (§2 / VIZ-3)', () => {
   it('buildFunnel carries each number-role its signifier: volume bucket noun + decode-on-hover titles (VIZ-10)', () => {
     const rails = buildFunnel(CONV);
     // role 1 — volume: every rail names its bucket noun + a title declaring what reached where.
-    expect(rails[3]).toMatchObject({ stage: 'connect', noun: 'entities', countTitle: '7 entities reached Linking' });
+    expect(rails[3]).toMatchObject({ stage: 'connect', noun: 'entities', countTitle: '7 entities reached Connect' });
     expect(rails[1]).toMatchObject({ stage: 'archive', noun: 'captured' }); // archive reads the captured bucket
     expect(rails[5].noun).toBe('promoted');
     // role 2 — projection: the title says it's a projection INTO the next stage, never waiting-here.
     expect(rails[3].captionTitle).toBe('projected fan-out ×3.1 into Claim extraction');
-    expect(rails[2].captionTitle).toBe('projected reduction −23 deduped into Linking');
+    expect(rails[2].captionTitle).toBe('projected reduction −23 deduped into Connect');
     expect(rails[5].captionTitle).toBe('5 of 10 captured sources promoted to main');
     expect(rails[4].captionTitle).toBe(''); // claims has no projection caption → no title
   });

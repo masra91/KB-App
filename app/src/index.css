@@ -317,8 +317,10 @@ dl.settings dd {
 /* Scale card (SPEC-0048 SCALE). The per-stage rows put the stage label and its stepper on one line;
    the pin note explains Connect's fixed 1; the hint is a brass-ruled heads-up (caution, not error). */
 .scale-stages-heading { margin: 0.8rem 0 0.2rem; font-weight: 600; color: var(--viz-ink); }
-.scale-stage-row { margin: 0.35rem 0; }
-.scale-pin-note { margin: 0; }
+/* Each cap row is a 2-col grid (label | stepper) so every stepper right-aligns into ONE column
+   regardless of label width — overrides the .settings-control flex (Design-Lead alignment ruling). */
+.scale-stage-row { display: grid; grid-template-columns: 1fr auto; align-items: center; margin: 0.35rem 0; }
+.scale-pin-note { margin: 0.1rem 0 0; } /* sits below Connect's row; its stepper stays aligned above */
 /* The hint REASSURES ("none starves") → calm/informational, NOT caution. Brass = needs-you/caution
    in our language; using it here cries wolf (the VIZ-10 principle, KB-Design-Lead's call). Neutral
    structural rule; text stays ink-muted via .settings-note. A real low-ceiling contention warning,

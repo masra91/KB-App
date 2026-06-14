@@ -138,7 +138,8 @@
 .viz-stepper__btn:hover:not(:disabled) { border-color: var(--viz-ember); color: var(--viz-ember); }
 .viz-stepper__btn:disabled { opacity: 0.4; cursor: default; }
 /* the value is a NUMBER → mono numeric face (§4: all counts → IBM Plex Mono), not signage. */
-.viz-stepper__value { font-family: var(--viz-font-numeric); font-size: 0.78rem; color: var(--viz-ink); min-width: 1.6rem; text-align: center; align-self: center; font-variant-numeric: tabular-nums; }
+/* Fixed-width value so − and + never jitter as the digit-count changes (3→10→32) — Design-Lead. */
+.viz-stepper__value { font-family: var(--viz-font-numeric); font-size: 0.78rem; color: var(--viz-ink); min-width: 2ch; text-align: center; align-self: center; font-variant-numeric: tabular-nums; }
 
 /* --- ConfirmInline (§5) — the consequence-gate; expands in place under the trigger, framed by a left
    hue rule (caution=brass default, danger=oxide). Message names what will happen; always dismissable
