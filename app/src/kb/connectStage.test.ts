@@ -12,6 +12,7 @@ import { renderEntityNode, entityFileRel, LINKS_BLOCK_START } from './connectDoc
 import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem } from './connectStage';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
+import { readDisambiguationDirectives, directiveForIdentity } from './directives';
 import type { DevLog } from './devlog';
 import { renderClaimMd } from './claimDoc';
 import { findOpenReviews, answerReview } from './reviewStore';
@@ -1058,6 +1059,100 @@ describe.skipIf(!gitAvailable)('REVIEW-18 / CONNECT-21 — durable disambiguatio
       await commitAll(root, 'fresh mention');
       await connectOne(root, key, decider);
       expect(await findOpenReviews(root)).toHaveLength(0); // a decided-same pair is not re-asked either
+    });
+  });
+});
+
+describe.skipIf(!gitAvailable)('SPEC-0050 Directives slice-1 — answered disambiguation survives ULID rebirth (DIR-2/3/4/8)', () => {
+  // Seed a same-key entity node with an explicit id (so the test can rebirth it under a NEW ULID).
+  async function seedNode(root: string, rel: string, kind: string, name: string): Promise<{ id: string; rel: string }> {
+    const id = ulid();
+    const dest = path.join(root, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(
+      dest,
+      renderEntityNode({ id, kind, name, confidence: 0.9, aliases: [id], derivedFrom: ['sources/x/01SX'], resolvedFrom: [], tags: [], createdAt: '2026-05-30T00:00:00Z', updatedAt: '2026-05-30T00:00:00Z' }),
+      'utf8',
+    );
+    return { id, rel };
+  }
+  // A decider that folds the block's candidates into `foldIntoId` AND raises a "same?" review about the
+  // existing pair — i.e. the recurring re-ask the directive must settle.
+  function pairReviewDecider(pair: [string, string], foldIntoId: string): ConnectDecider {
+    return async (set: CandidateSet): Promise<ConnectDecision> => ({
+      blockKey: set.blockKey,
+      clusters: [{ canonicalName: 'Disney', memberCandidateIds: set.candidates.map((c) => c.id), existingNodeId: foldIntoId, confidence: 0.9 }],
+      reviews: [{ question: 'Is this Disney the same organization as the other Disney?', detail: 'Two same-named orgs.', pair }],
+      agent: { via: 'copilot', model: 'test' },
+    });
+  }
+
+  // THE BUG: the legacy decision is keyed by entity ULIDs, which are reborn on a re-derive / Full Replay
+  // (entities/ is purged + rebuilt), so an answered "Disney is one org" stopped matching and the identical
+  // review re-raised. SPEC-0050 graduates the answer to a DIRECTIVE keyed on the STABLE block identity
+  // (`organization|disney`), which is content-derived and survives the rebirth — so the question stays
+  // settled. This is the hard QD-2 regression (must not re-raise across a replay).
+  it('a directive keeps an answered merge settled after the entity ULIDs are reborn (replay/re-derive) — DIR-4', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const key = 'organization|disney';
+
+      // 1. Two same-key Disney nodes; the decider asks "same?"; the Principal answers SAME (merge).
+      const a = await seedNode(root, 'entities/organization/disney.md', 'organization', 'Disney');
+      const b = await seedNode(root, 'entities/organization/disney-co.md', 'organization', 'Disney');
+      await seedCandidate(root, 'organization', 'Disney', '01SRC1');
+      await commitAll(root, 'two Disneys + a mention');
+      await connectOne(root, key, pairReviewDecider([a.id, b.id], a.id));
+      const open = await findOpenReviews(root);
+      expect(open).toHaveLength(1);
+      await answerReview(root, new Mutex(), open[0].id, { verdict: 'confirm' });
+
+      // The answer graduated to a DURABLE DIRECTIVE keyed on the STABLE block identity (not the ULIDs).
+      expect(directiveForIdentity(await readDisambiguationDirectives(root), key)?.verdict).toBe('same');
+
+      // 2. Simulate the re-derive/replay: the entities are reborn with NEW ULIDs (old nodes purged).
+      await fs.rm(path.join(root, a.rel));
+      await fs.rm(path.join(root, b.rel));
+      const a2 = await seedNode(root, 'entities/organization/disney.md', 'organization', 'Disney');
+      const b2 = await seedNode(root, 'entities/organization/disney-co.md', 'organization', 'Disney');
+      await seedCandidate(root, 'organization', 'Disney', '01SRC2');
+      await commitAll(root, 'replay rebirth: new ULIDs + a fresh mention');
+
+      // CONTROL — the legacy pair-keyed memory is BLIND to the reborn ULIDs (exactly the bug):
+      expect(decisionForPair(await readDisambiguationDecisions(root), a2.id, b2.id)).toBeUndefined();
+
+      // 3. The decider re-raises on the NEW pair, but the DIRECTIVE (block identity) suppresses it.
+      await connectOne(root, key, pairReviewDecider([a2.id, b2.id], a2.id));
+      expect(await findOpenReviews(root)).toHaveLength(0); // settled by directive — never re-asked (DIR-4)
+    });
+  });
+
+  // The cross-source half of the same regression, on the SAME entity generation: an entirely fresh
+  // same-name source must not re-raise once a directive settles the identity, even for a pair the
+  // pair-keyed store never recorded.
+  it('a directive auto-resolves a never-pair-decided disambiguation on a new same-name source (DIR-3)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const key = 'organization|disney';
+      const a = await seedNode(root, 'entities/organization/disney.md', 'organization', 'Disney');
+      const b = await seedNode(root, 'entities/organization/disney-co.md', 'organization', 'Disney');
+      await seedCandidate(root, 'organization', 'Disney', '01SRC1');
+      await commitAll(root, 'two Disneys');
+      // Answer the (a,b) question SAME → directive on the block identity.
+      await connectOne(root, key, pairReviewDecider([a.id, b.id], a.id));
+      const open = await findOpenReviews(root);
+      await answerReview(root, new Mutex(), open[0].id, { verdict: 'confirm' });
+      expect(directiveForIdentity(await readDisambiguationDirectives(root), key)?.verdict).toBe('same');
+
+      // A THIRD same-name node arrives (a new source). The decider asks about the never-decided (a,c)
+      // pair — pair-keyed memory would re-ask (see REVIEW-18 'undecided pair STILL raises'), but the
+      // block-identity directive marks the whole question settled → suppressed.
+      const c = await seedNode(root, 'entities/organization/disney-3.md', 'organization', 'Disney');
+      await seedCandidate(root, 'organization', 'Disney', '01SRC2');
+      await commitAll(root, 'a third Disney from a new source');
+      expect(decisionForPair(await readDisambiguationDecisions(root), a.id, c.id)).toBeUndefined();
+      await connectOne(root, key, pairReviewDecider([a.id, c.id], a.id));
+      expect(await findOpenReviews(root)).toHaveLength(0); // settled by directive (DIR-3)
     });
   });
 });
