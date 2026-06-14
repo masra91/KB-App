@@ -45,6 +45,14 @@ export interface CandidateSet {
    * is one node. Do NOT raise a review for a pair listed here — it has already been decided (CONNECT-21).
    */
   priorDecisions?: PriorDisambiguation[];
+  /**
+   * Map of candidate `sourceId` → the source's HUMAN TITLE (PRIN-24 / "never surface ULIDs"). The
+   * prompt references a candidate's source by this title, NEVER the raw ULID — the model can only echo
+   * what it is given, and feeding it the raw id is exactly why source ULIDs leaked into disambiguation
+   * glosses. The stage resolves these (deriveSourceTitle), so a value is always a human label, never an
+   * id; an absent entry falls back to a neutral label, still never the ULID.
+   */
+  sourceTitles?: Record<string, string>;
 }
 
 /** A decider maps a candidate set to a validated verdict. May throw (CONNECT-14). */
@@ -88,9 +96,14 @@ const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
 export const CONNECT_PROMPT_VERSION = 'connect/v1';
 
 export function buildConnectPrompt(set: CandidateSet): string {
-  const candidateLines = set.candidates.map(
-    (c) => `  - id: ${c.id}  name: ${JSON.stringify(c.name)}  source: ${c.sourceId}  mentions: ${JSON.stringify(c.mentions)}`,
-  );
+  // PRIN-24 / "never surface ULIDs": reference each candidate's source by its HUMAN TITLE, never the
+  // raw source ULID. The model only echoes what it is given — feeding `source: <ULID>` is exactly why
+  // a raw id leaked into the disambiguation gloss. `sourceTitles` (sourceId → title) is resolved by the
+  // stage and never holds an id; an absent entry collapses to a neutral label, still never the ULID.
+  const candidateLines = set.candidates.map((c) => {
+    const title = set.sourceTitles?.[c.sourceId]?.trim();
+    return `  - id: ${c.id}  name: ${JSON.stringify(c.name)}  source: ${JSON.stringify(title || 'untitled source')}  mentions: ${JSON.stringify(c.mentions)}`;
+  });
   const existingLines =
     set.existingNodes.length > 0
       ? set.existingNodes.map((n) => `  - existingNodeId: ${n.id}  name: ${JSON.stringify(n.name)}`)
@@ -133,6 +146,9 @@ export function buildConnectPrompt(set: CandidateSet): string {
     '    one-line "gloss" — what makes THIS one this one: its source context, strongest claim,',
     '    or timeframe (e.g. "from the fishing-trip notes, May 2026" vs "Dave\'s wedding guest',
     '    list"). You hold every candidate\'s mentions + source — author the gloss from them.',
+    '  - Refer to a source by the human TITLE shown in its "source:" field above, NEVER a raw id.',
+    '    The question and every gloss MUST contain NO opaque ids (ULIDs) — they are meaningless to a',
+    '    human and break the "never surface an internal id" promise (PRIN-24).',
     '  - the question itself MUST use those glosses, NOT bare names — a bare "Is Benton the same',
     '    as Benton?" is undecidable. e.g. "Is Benton (fishing-trip notes) the same person as',
     '    Benton (Dave\'s wedding list)?"',
