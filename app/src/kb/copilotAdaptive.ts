@@ -27,10 +27,9 @@ export type CopilotErrorClass = Exclude<CopilotOutcome, 'ok'>;
 
 // Case-insensitive signatures. Kept conservative + specific so a normal content/tooling error is never
 // mis-read as a rate-limit (which would wrongly throttle the pipeline).
-const RATE_LIMIT_PATTERNS: RegExp[] = [
-  /\b429\b/, // HTTP Too Many Requests
-  /\b503\b/, // Service Unavailable (overloaded)
-  /\b529\b/, // Anthropic "overloaded"
+//
+// TEXTUAL signals are unambiguous capacity language — always a rate-limit.
+const TEXTUAL_RATE_LIMIT_PATTERNS: RegExp[] = [
   /rate[\s_-]?limit/i,
   /too many requests/i,
   /overloaded/i,
@@ -40,6 +39,14 @@ const RATE_LIMIT_PATTERNS: RegExp[] = [
   /usage limit/i,
   /\bthrottl/i, // throttle / throttled / throttling
 ];
+
+// A bare HTTP-ish numeric code (429 Too Many Requests / 503 Service Unavailable / 529 Anthropic
+// "overloaded") is a rate-limit signal — UNLESS it's a JSON parse CHARACTER OFFSET (e.g. "Unterminated
+// string in JSON at position 429"), which is a truncated-JSON CONTENT error, not capacity. QD-2's #357
+// catch: `\b429\b` matched "position 429" and wrongly halved the ceiling. We disambiguate by rejecting a
+// numeric code that sits in a parse-offset context (`position|offset|index|char|column|line … <code>`).
+const NUMERIC_RATE_CODE = /\b(?:429|503|529)\b/;
+const PARSE_POSITION_CODE = /(?:position|offset|index|char(?:acter)?|column|line)\s*:?\s*(?:429|503|529)\b/i;
 
 const CONTENT_PATTERNS: RegExp[] = [
   /unexpected end of (json|input|file)/i,
@@ -72,7 +79,11 @@ function errorText(err: unknown): string {
  */
 export function classifyCopilotError(err: unknown): CopilotErrorClass {
   const text = errorText(err);
-  if (RATE_LIMIT_PATTERNS.some((re) => re.test(text))) return 'rate-limit';
+  // Unambiguous capacity language → rate-limit.
+  if (TEXTUAL_RATE_LIMIT_PATTERNS.some((re) => re.test(text))) return 'rate-limit';
+  // A bare 429/503/529 → rate-limit ONLY when it isn't a JSON parse offset ("…at position 429"), which
+  // is a truncated-content error that must NOT back the ceiling off (QD-2 #357).
+  if (NUMERIC_RATE_CODE.test(text) && !PARSE_POSITION_CODE.test(text)) return 'rate-limit';
   if (CONTENT_PATTERNS.some((re) => re.test(text))) return 'content';
   return 'other';
 }

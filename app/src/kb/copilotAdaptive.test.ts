@@ -52,8 +52,25 @@ describe('classifyCopilotError (SCALE-8 — rate-limit vs content vs other)', ()
     expect(classifyCopilotError(undefined)).toBe('other');
   });
 
-  it('checks rate-limit BEFORE content (a 429 that also mentions json is a rate-limit)', () => {
+  it('checks rate-limit BEFORE content (a 429 that LEADS — not a parse offset — is a rate-limit)', () => {
     expect(classifyCopilotError(new Error('429: could not parse error json'))).toBe('rate-limit');
+  });
+
+  // QD-2 #357 regression: a JSON parse character-offset that happens to land on 429/503/529 is a
+  // truncated-CONTENT error, NOT a rate-limit — must never back the ceiling off. `\b429\b` used to
+  // match "position 429" and misfire. The class the dispatch said must never throttle.
+  it('a parse character-offset numerically equal to a rate-limit code is CONTENT, not rate-limit', () => {
+    expect(classifyCopilotError(new Error('Unterminated string in JSON at position 429'))).toBe('content');
+    expect(classifyCopilotError(new Error('Unexpected token < at position 503'))).toBe('content');
+    expect(classifyCopilotError(new Error('Unexpected end of JSON input at offset 529'))).toBe('content');
+    expect(classifyCopilotError(new Error('SyntaxError: Unexpected token at line 429'))).toBe('content');
+    expect(classifyCopilotError('Invalid JSON returned at index 503')).toBe('content');
+  });
+
+  it('still flags a genuine numeric rate-limit code that is NOT in a parse-offset context', () => {
+    expect(classifyCopilotError(new Error('Request failed with status 429'))).toBe('rate-limit');
+    expect(classifyCopilotError(new Error('HTTP 503 from the gateway'))).toBe('rate-limit');
+    expect(classifyCopilotError(new Error('overloaded_error 529'))).toBe('rate-limit');
   });
 });
 
