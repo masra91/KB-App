@@ -14,6 +14,7 @@ import { withCopilotSlot } from './copilotConcurrency';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
+import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
 import { parseComposeDecision, type ComposeDecision } from './compose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -156,14 +157,24 @@ export function makeComposeDecider(opts: ComposeDeciderOptions = {}): ComposeDec
     const at = new Date().toISOString();
     const t0 = Date.now();
     const cs = ctx?.span?.child(COPILOT_OP);
+    // HEAL-1: self-repair wraps the launch — on a parse/validation/grounding failure, re-prompt with the
+    // error fed back (bounded) before the stage's deterministic blocks-only fallback. A launch/timeout
+    // error from `run` is not a parse error and propagates (HEAL-6 boundary).
+    const basePrompt = buildComposePrompt(input);
+    let repairs = 0;
     try {
-      const decision = parseComposeDecision(
-        await runWithModelFallback((m) => run(buildComposePrompt(input), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
-        input.entityId,
-        input.claims.length,
+      const { value: decision } = await runWithSelfRepair(
+        (repair) =>
+          runWithModelFallback((m) => run(repair ? appendRepairInstruction(basePrompt, repair) : basePrompt, cwd, m), {
+            onFallback: (_from, to) => {
+              modelUsed = to;
+            },
+          }),
+        (stdout) => parseComposeDecision(stdout, input.entityId, input.claims.length),
+        { onRepair: () => { repairs += 1; } },
       );
       cs?.end('ok');
-      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at };
+      const agent: AgentTrace = { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at, ...(repairs > 0 ? { repairs } : {}) };
       return { ...decision, agent };
     } catch (e) {
       cs?.end('error');

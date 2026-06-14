@@ -38,6 +38,7 @@ export interface AgentTrace {
   error?: string; // fallback / error reason
   ms?: number; // call duration
   at?: string; // ISO timestamp of the invocation
+  repairs?: number; // SPEC-0049 HEAL-1: self-repair rounds taken before a parseable response (0 = first try)
 }
 
 /** A decider maps a captured unit's metadata to an archival decision. */

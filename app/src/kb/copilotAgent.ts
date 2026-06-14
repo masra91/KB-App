@@ -9,6 +9,7 @@
 // that Enrich's richer agents will reuse. The subprocess is injectable so CI stays
 // deterministic and never needs real credentials.
 import { execFile } from 'node:child_process';
+import { extractBalancedJson } from './jsonExtract';
 import { promisify } from 'node:util';
 import { withCopilotSlot } from './copilotConcurrency';
 import type { CapturedMeta } from './ingest';
@@ -17,6 +18,7 @@ import { COPILOT_OP } from './tracing';
 import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
+import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 60_000;
@@ -80,9 +82,9 @@ export function buildPrompt(meta: CapturedMeta): string {
 
 /** Parse + validate the session output into a v1 ArchiveDecision (throws on anything off). */
 export function parseDecision(stdout: string, meta: CapturedMeta): ArchiveDecision {
-  const match = stdout.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('copilot: no JSON object in output');
-  const obj = JSON.parse(match[0]) as Record<string, unknown>;
+  const json = extractBalancedJson(stdout); // HEAL-2: tolerate fences/leading/trailing prose
+  if (json === null) throw new Error('copilot: no JSON object in output');
+  const obj = JSON.parse(json) as Record<string, unknown>;
   const kind = obj.kind === 'text' || obj.kind === 'file' ? obj.kind : meta.kind;
   if (obj.class !== 'primary' && obj.class !== 'secondary') throw new Error('copilot: invalid class');
   if (obj.scope !== 'global') throw new Error('copilot: invalid scope');
@@ -133,18 +135,30 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
     // OBS-13: time the Copilot call as a child of the stage's run span (failures included; the
     // archivist falls back rather than throwing, so the span ends `error` without re-throwing).
     const cs = ctx?.span?.child(COPILOT_OP);
+    // HEAL-1: self-repair tries to converge on a parseable decision (re-prompt with the error fed back,
+    // bounded) BEFORE the archivist's deterministic fallback — so a slightly-off response is corrected
+    // rather than discarded to the conservative default. A launch/timeout error still falls back as before.
+    const basePrompt = buildPrompt(meta);
+    let repairs = 0;
     try {
-      const decision = parseDecision(
-        await runWithModelFallback((m) => run(buildPrompt(meta), cwd, m), { agentKey: 'archivist', onFallback: (_from, to) => { modelUsed = to; } }),
-        meta,
+      const { value: decision } = await runWithSelfRepair(
+        (repair) =>
+          runWithModelFallback((m) => run(repair ? appendRepairInstruction(basePrompt, repair) : basePrompt, cwd, m), {
+            agentKey: 'archivist',
+            onFallback: (_from, to) => {
+              modelUsed = to;
+            },
+          }),
+        (stdout) => parseDecision(stdout, meta),
+        { onRepair: () => { repairs += 1; } },
       );
       cs?.end('ok');
-      return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at } };
+      return { ...decision, agent: { via: 'copilot', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: true, ms: Date.now() - t0, at, ...(repairs > 0 ? { repairs } : {}) } };
     } catch (err) {
       // ORCH-8 resilience: fall back, but record the failure for posterity.
       cs?.end('error');
       const error = err instanceof Error ? err.message : String(err);
-      return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: false, error, ms: Date.now() - t0, at } };
+      return { ...deterministicDecide(meta), agent: { via: 'deterministic', runtime: 'copilot', model: modelUsed, params: launchFlags(modelUsed), ok: false, error, ms: Date.now() - t0, at, ...(repairs > 0 ? { repairs } : {}) } };
     }
   };
 }

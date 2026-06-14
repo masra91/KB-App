@@ -9,6 +9,7 @@
 // `status` to land). Contrast the OPEN `kind`/signal-`type` vocabularies in decompose,
 // which are non-empty-only. Signal `type` stays OPEN here too (CLAIMS-13), so the signal
 // validator is shared with decompose.ts rather than duplicated.
+import { extractBalancedJson } from './jsonExtract';
 import type { AgentTrace } from './archivist';
 import { type SignalDecision, validSignal } from './decompose';
 import { type ReviewRequest, validReviewRequests } from './reviews';
@@ -102,9 +103,9 @@ function validClaim(v: unknown, i: number): ClaimDecision {
  *   stale/confused session claiming the wrong entity; CLAIMS-12).
  */
 export function parseClaimsDecision(stdout: string, expectedEntityId?: string): ClaimsDecision {
-  const match = stdout.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('claims: no JSON object in output');
-  const obj = JSON.parse(match[0]) as Record<string, unknown>;
+  const json = extractBalancedJson(stdout); // HEAL-2: tolerate fences/leading/trailing prose
+  if (json === null) throw new Error('claims: no JSON object in output');
+  const obj = JSON.parse(json) as Record<string, unknown>;
 
   if (!isNonEmptyString(obj.entityId)) throw new Error('claims: missing entityId');
   if (expectedEntityId && obj.entityId !== expectedEntityId) {
