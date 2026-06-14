@@ -9,6 +9,8 @@
 // Pure + injectable: the ceiling is read once from env (KB_COPILOT_MAX_CONCURRENCY) or derived
 // from CPU count, so it's deterministically testable. A FIFO queue keeps acquisition fair.
 import os from 'node:os';
+import { AdaptiveCeilingController, classifyCopilotError, DEFAULT_ADAPTIVE_CONFIG, type CopilotOutcome } from './copilotAdaptive';
+import { COPILOT_CEILING_MIN, COPILOT_CEILING_MAX } from './scaleConstants';
 
 /** Resolve the global ceiling. Env override wins (tests/measure/future per-Instance setting);
  *  else cores-aware, clamped to a small range so a many-core box can't fan out unbounded. */
@@ -213,15 +215,69 @@ export class Semaphore {
 export const copilotSemaphore = new Semaphore(resolveCeiling());
 
 /**
- * Apply the effective global ceiling to the shared semaphore (SPEC-0048 SCALE-1/4), precedence
- * **env > Settings(`configured`) > cores-derived**. Called on pipeline start with the `instance.json`
- * value, and again live on a Settings change (resizes without a restart). Returns the effective value
- * so the caller can record/surface it.
+ * The adaptive controller (SPEC-0048 SCALE-7/8). Non-null ONLY in Auto mode (no env override + no
+ * manual Settings ceiling) — a hard pin (env or a Principal-set value) disables adaptation entirely,
+ * preserving the **env > manual-Settings > adaptive(Auto)** precedence. Each recorded outcome may
+ * resize the shared semaphore. `null` = fixed mode, outcomes ignored.
+ */
+let adaptiveController: AdaptiveCeilingController | null = null;
+
+/**
+ * Apply the effective global ceiling to the shared semaphore (SPEC-0048 SCALE-1/4/7/8), precedence
+ * **env > Settings(`configured`) > Auto**. Called on pipeline start with the `instance.json` value and
+ * live on a Settings change (resizes without a restart).
+ * - env set or a manual `configured` value → FIXED: pin the semaphore, disable adaptation.
+ * - neither (Auto / "let the app decide") → seed at the cores-derived default and turn the AIMD
+ *   controller ON, so the ceiling self-tunes from real rate-limit feedback (SCALE-7/8) instead of a
+ *   static guess. Returns the effective seed/fixed value so the caller can record/surface it.
  */
 export function applyCopilotCeiling(configured?: number): number {
-  const effective = envCeilingOverride() ?? (configured !== undefined && configured >= 1 ? Math.floor(configured) : coresDerivedCeiling());
-  copilotSemaphore.resize(effective);
-  return effective;
+  const env = envCeilingOverride();
+  if (env !== undefined) {
+    adaptiveController = null; // env hard-fix wins (tests/measure) — no adaptation
+    copilotSemaphore.resize(env);
+    return env;
+  }
+  if (configured !== undefined && configured >= 1) {
+    adaptiveController = null; // the Principal pinned a manual ceiling — respect it, no adaptation
+    const eff = Math.floor(configured);
+    copilotSemaphore.resize(eff);
+    return eff;
+  }
+  // Auto → adaptive (SCALE-7/8). Seed at the cores-derived default; the controller climbs/backs off.
+  const start = coresDerivedCeiling();
+  adaptiveController = new AdaptiveCeilingController({ start, min: COPILOT_CEILING_MIN, max: COPILOT_CEILING_MAX, ...DEFAULT_ADAPTIVE_CONFIG });
+  copilotSemaphore.resize(adaptiveController.ceiling);
+  return adaptiveController.ceiling;
+}
+
+/**
+ * Record one copilot call's outcome (SCALE-7/8). A no-op unless Auto/adaptive mode is active. `undefined`
+ * `err` = a clean success; otherwise the error is classified (rate-limit vs content vs other) — only a
+ * rate-limit backs the ceiling off; content/other are neutral. When the controller's target changes, the
+ * shared semaphore is resized live. Clock injectable for tests (defaults to wall-clock).
+ */
+export function recordCopilotOutcome(err?: unknown, now: number = Date.now()): void {
+  const controller = adaptiveController;
+  if (!controller) return; // fixed mode (env/manual) — nothing adapts
+  const outcome: CopilotOutcome = err === undefined ? 'ok' : classifyCopilotError(err);
+  if (controller.onOutcome(outcome, now)) copilotSemaphore.resize(controller.ceiling);
+}
+
+/** Whether the adaptive controller is currently backed-off (post-rate-limit cooldown) — drives the
+ *  "throttled" indicator. False in fixed mode or when healthy. Clock injectable for tests. */
+export function isCopilotThrottled(now: number = Date.now()): boolean {
+  return adaptiveController?.isThrottled(now) ?? false;
+}
+
+/** Whether the ceiling is currently Auto/adaptive (vs a fixed env/manual pin) — for Settings/status. */
+export function adaptiveCeilingActive(): boolean {
+  return adaptiveController !== null;
+}
+
+/** Test seam: force the adaptive controller into a known state (or `null` to clear). Not for app use. */
+export function __setAdaptiveControllerForTest(controller: AdaptiveCeilingController | null): void {
+  adaptiveController = controller;
 }
 
 /** The current effective ceiling (for Settings display / status). */
@@ -237,7 +293,12 @@ export function currentCopilotCeiling(): number {
 export async function withCopilotSlot<T>(fn: () => Promise<T>, opts: AcquireOptions = {}): Promise<T> {
   const release = await copilotSemaphore.acquire(opts);
   try {
-    return await fn();
+    const result = await fn();
+    recordCopilotOutcome(); // clean success → feeds the AIMD healthy streak (SCALE-7/8; no-op if fixed)
+    return result;
+  } catch (err) {
+    recordCopilotOutcome(err); // classify: only a rate-limit backs off; content/other are neutral
+    throw err;
   } finally {
     release();
   }

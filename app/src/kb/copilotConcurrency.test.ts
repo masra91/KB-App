@@ -1,8 +1,20 @@
 // Tests for the process-wide copilot concurrency limit (dogfood #4). Proves the global ceiling
 // holds even when many spawners (stages + jobs + researchers) contend at once — the safety bound
 // that makes raising per-stage caps safe. Deterministic: no copilot, just instrumented async work.
-import { describe, it, expect } from 'vitest';
-import { Semaphore, withCopilotSlot, acquireCopilotSlot, copilotSemaphore, CopilotCapacityTimeoutError } from './copilotConcurrency';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  Semaphore,
+  withCopilotSlot,
+  acquireCopilotSlot,
+  copilotSemaphore,
+  CopilotCapacityTimeoutError,
+  applyCopilotCeiling,
+  recordCopilotOutcome,
+  isCopilotThrottled,
+  adaptiveCeilingActive,
+  coresDerivedCeiling,
+  __setAdaptiveControllerForTest,
+} from './copilotConcurrency';
 
 /** Run `n` tasks concurrently through `gate`, each holding its slot for a tick; return the peak
  *  number ever in-flight simultaneously. */
@@ -217,6 +229,84 @@ describe('Semaphore — SPEC-0048 SCALE-3 per-stage no-starvation reservation', 
     d[1]();
     (await pP)();
     (await bgP)();
+  });
+});
+
+describe('SPEC-0048 SCALE-7/8 — adaptive ceiling (AIMD) runtime wiring', () => {
+  const ENV_KEY = 'KB_COPILOT_MAX_CONCURRENCY';
+  let savedEnv: string | undefined;
+  let savedCeiling: number;
+  beforeEach(() => {
+    savedEnv = process.env[ENV_KEY];
+    delete process.env[ENV_KEY]; // default each test to NO env override so the Auto path is reachable
+    savedCeiling = copilotSemaphore.ceiling;
+  });
+  afterEach(() => {
+    __setAdaptiveControllerForTest(null); // clear adaptive mode so other suites see fixed behaviour
+    copilotSemaphore.resize(savedCeiling); // restore the shared global ceiling
+    if (savedEnv === undefined) delete process.env[ENV_KEY];
+    else process.env[ENV_KEY] = savedEnv;
+  });
+
+  it('Auto (no env, no manual) turns adaptation ON, seeded at the cores-derived default', () => {
+    const eff = applyCopilotCeiling(undefined);
+    expect(adaptiveCeilingActive()).toBe(true);
+    expect(eff).toBe(coresDerivedCeiling());
+    expect(copilotSemaphore.ceiling).toBe(coresDerivedCeiling());
+  });
+
+  it('a manual Settings ceiling pins FIXED mode (no adaptation)', () => {
+    const eff = applyCopilotCeiling(6);
+    expect(adaptiveCeilingActive()).toBe(false);
+    expect(eff).toBe(6);
+    expect(copilotSemaphore.ceiling).toBe(6);
+  });
+
+  it('an env override pins FIXED mode and wins over a manual value (precedence env > manual > Auto)', () => {
+    process.env[ENV_KEY] = '5';
+    const eff = applyCopilotCeiling(6); // manual present, but env wins
+    expect(adaptiveCeilingActive()).toBe(false);
+    expect(eff).toBe(5);
+    expect(copilotSemaphore.ceiling).toBe(5);
+  });
+
+  it('in Auto, a rate-limit outcome backs the live ceiling off + flips throttled', () => {
+    applyCopilotCeiling(undefined); // adaptive, seed = cores-derived (>= 2)
+    const seed = copilotSemaphore.ceiling;
+    recordCopilotOutcome(new Error('429 too many requests'), 1000);
+    expect(copilotSemaphore.ceiling).toBeLessThan(seed); // halved live
+    expect(isCopilotThrottled(1000)).toBe(true);
+  });
+
+  it('in Auto, a content/parse error does NOT back off (not a capacity signal)', () => {
+    applyCopilotCeiling(undefined);
+    const seed = copilotSemaphore.ceiling;
+    recordCopilotOutcome(new Error('Unexpected end of JSON input'), 1000);
+    expect(copilotSemaphore.ceiling).toBe(seed);
+    expect(isCopilotThrottled(1000)).toBe(false);
+  });
+
+  it('in FIXED mode, outcomes are ignored — no resize, never throttled', () => {
+    applyCopilotCeiling(6); // fixed (manual)
+    recordCopilotOutcome(new Error('429'), 1000);
+    expect(copilotSemaphore.ceiling).toBe(6);
+    expect(isCopilotThrottled(1000)).toBe(false);
+  });
+
+  it('withCopilotSlot records a rate-limit THROW → the live ceiling backs off (the chokepoint)', async () => {
+    applyCopilotCeiling(undefined);
+    const seed = copilotSemaphore.ceiling;
+    await expect(withCopilotSlot(async () => { throw new Error('HTTP 429'); })).rejects.toThrow('429');
+    expect(copilotSemaphore.ceiling).toBeLessThan(seed);
+    expect(copilotSemaphore.active).toBe(0); // slot still released
+  });
+
+  it('withCopilotSlot success records ok (feeds the streak; one success is below the increase threshold)', async () => {
+    applyCopilotCeiling(undefined);
+    const seed = copilotSemaphore.ceiling;
+    await withCopilotSlot(async () => 'fine');
+    expect(copilotSemaphore.ceiling).toBe(seed); // one ok < increaseAfter → no climb yet
+    expect(isCopilotThrottled()).toBe(false);
   });
 });
 
