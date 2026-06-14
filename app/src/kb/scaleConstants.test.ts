@@ -6,7 +6,6 @@ import {
   DEFAULT_STAGE_CAPS,
   STAGE_CAP_MAX,
   COPILOT_CEILING_MAX,
-  CONNECT_CAP_PINNED,
   clampStageCap,
   clampCopilotCeiling,
   resolveStageCaps,
@@ -24,9 +23,10 @@ describe('clampStageCap', () => {
     expect(clampStageCap('claims', 'nope' as unknown as number)).toBe(DEFAULT_STAGE_CAPS.claims);
     expect(clampStageCap('compose', Number.NaN)).toBe(DEFAULT_STAGE_CAPS.compose);
   });
-  it('pins Connect to 1 regardless of input (SCALE-5)', () => {
-    expect(clampStageCap('connect', 8)).toBe(CONNECT_CAP_PINNED);
-    expect(clampStageCap('connect', 0)).toBe(CONNECT_CAP_PINNED);
+  it('clamps Connect like any other stage now (SCALE-5: no longer pinned to 1)', () => {
+    expect(clampStageCap('connect', 8)).toBe(8);
+    expect(clampStageCap('connect', 999)).toBe(STAGE_CAP_MAX);
+    expect(clampStageCap('connect', 0)).toBe(1);
   });
 });
 
@@ -48,11 +48,11 @@ describe('resolveStageCaps', () => {
   it('returns today\'s defaults when nothing is configured', () => {
     expect(resolveStageCaps({})).toEqual(DEFAULT_STAGE_CAPS);
   });
-  it('overlays configured overrides + clamps, Connect always pinned', () => {
+  it('overlays configured overrides + clamps; Connect is honoured now (SCALE-5)', () => {
     const caps = resolveStageCaps({ stageCaps: { decompose: 5, claims: 999, connect: 4 } });
     expect(caps.decompose).toBe(5);
     expect(caps.claims).toBe(STAGE_CAP_MAX); // clamped
-    expect(caps.connect).toBe(CONNECT_CAP_PINNED); // never honoured > 1
+    expect(caps.connect).toBe(4); // SCALE-5: a Connect override is now honoured (was force-pinned to 1)
     expect(caps.compose).toBe(DEFAULT_STAGE_CAPS.compose); // untouched → default
   });
   it('drops a garbled override to the stage default (ENG-15 tolerant)', () => {

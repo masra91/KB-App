@@ -49,7 +49,7 @@ import { deriveSourceTitle } from './sourceDoc';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
-import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, withConcurrentAdvance, type PrepareContext } from './canonicalAdvance';
+import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_STAGE_CAP, withConcurrentAdvance, withEphemeralWorktree, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -548,50 +548,30 @@ export async function connectOne(
   span: ActiveSpan = noopActiveSpan,
 ): Promise<ConnectOneResult> {
   root = path.resolve(root);
-  const checkpoint = await canonicalHead(root); // the canonical commit this block prepares off
-  const { wt } = await ensureWorktree(root);
-  const wtGit = simpleGit(wt);
-  await wtGit.raw('reset', '--hard', checkpoint); // sync to the canonical checkpoint (OFF the lock)
-  await wtGit.raw('clean', '-fd', 'candidates', 'entities'); // drop stray files from a prior aborted run
-
+  void collisionAttempt; // SCALE-5: collision retry is now owned by withConcurrentAdvance (was inline recursion)
   const runId = ulid();
+  let result: ConnectOneResult = { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false };
 
-  // Advance the prepared work-branch commit onto the canonical UNDER the lock (ORCH-18): ff when the
-  // canonical is unchanged, cherry-pick replay when it moved with disjoint paths. On a same-path
-  // collision, re-sync + retry the whole block (recursion) up to K, then set aside (ORCH-19).
-  const advance = async (onSuccess: ConnectOneResult): Promise<ConnectOneResult> => {
-    const outcome = await lock.run(() => advanceOrCollide(root, WORK_BRANCH, checkpoint), 'connect:advance');
-    if (outcome === 'advanced') return onSuccess;
-    if (collisionAttempt < DEFAULT_MAX_COLLISION_RETRIES) {
-      return connectOne(root, key, decider, lock, maxAttempts, maxReviewRounds, collisionAttempt + 1, log, span);
-    }
-    // Persist the set-aside, retrying its OWN advance against a fresh checkpoint — the marker is a
-    // disjoint connect-audit append, so this converges. Never silently drop the set-aside (QA #45):
-    // if it somehow can't land, surface it rather than return a setAside we failed to commit.
-    for (let i = 0; i <= DEFAULT_MAX_COLLISION_RETRIES; i++) {
-      const cp = await canonicalHead(root);
-      await wtGit.raw('reset', '--hard', cp);
-      await wtGit.raw('clean', '-fd', 'candidates', 'entities');
-      await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
-      await wtGit.raw('add', '-A');
-      await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
-      if ((await lock.run(() => advanceOrCollide(root, WORK_BRANCH, cp), 'connect:advance-retry')) === 'advanced') {
-        log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
-        return { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
-      }
-    }
-    throw new Error(`connect: could not persist collision-exhausted set-aside for ${key}`);
-  };
+  // SCALE-5: resolve OFF the lock in a FRESH per-item EPHEMERAL worktree (was a SHARED fixed worktree,
+  // which forced cap=1 — two concurrent resolves on `entities/` would clobber its working tree). Connect
+  // now joins the cap>1 stages: withConcurrentAdvance creates the wt synced to `base`, runs this prepare,
+  // then advances UNDER the lock via the SAME advanceOrCollide primitive (ff / disjoint-replay / same-path
+  // collision → bounded retry on the moved canonical → onExhausted set-aside, ORCH-18/19). The resolve/
+  // merge body below is UNCHANGED — only the worktree source + the advance/retry wrapper moved.
+  const prepare = async ({ wt, base }: PrepareContext): Promise<boolean> => {
+    const wtGit = simpleGit(wt);
+    const checkpoint = base; // the canonical commit this block prepared off (for the catch's discard-partial)
 
-  // Re-derive the set INSIDE the worktree (authoritative view at this commit).
-  const allCandidates = await readCandidates(wt);
+    // Re-derive the set INSIDE the worktree (authoritative view at this commit).
+    const allCandidates = await readCandidates(wt);
   const setCandidates = allCandidates.filter((c) => blockKey(c.kind, c.name) === key).sort((a, b) => (a.id < b.id ? -1 : 1));
   const nodes = await readEntityNodes(wt);
   const sameKeyNodes = nodes.filter((n) => blockKey(n.kind, n.name) === key);
   const kind = setCandidates[0]?.kind ?? sameKeyNodes[0]?.kind ?? key.split('|')[0];
 
   if (setCandidates.length === 0) {
-    return { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false }; // nothing to do
+    result = { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false };
+    return false; // nothing to do → no-op (nothing committed; withConcurrentAdvance skips the advance)
   }
 
   try {
@@ -698,7 +678,8 @@ export async function connectOne(
         await wtGit.raw('add', '-A');
         await wtGit.commit(`connect: set aside ${key} (review cascade cap)`);
         log.warn('connect.setaside', { runId, itemId: key, reason: 'review-cascade-cap', rounds: prior.rounds });
-        return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true });
+        result = { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+        return true;
       }
       const createdAt = new Date().toISOString();
       const reviewIds: string[] = [];
@@ -752,7 +733,8 @@ export async function connectOne(
       await appendAudit(wt, audit);
       await wtGit.raw('add', '-A');
       await wtGit.commit(`connect: parked ${key} for review (${reviewIds.length})`);
-      return advance({ blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false, parked: true });
+      result = { blockKey: key, ok: true, nodeRels: [], deletedNodeRels: [], setAside: false, parked: true };
+      return true;
     }
 
     const now = new Date().toISOString();
@@ -865,7 +847,8 @@ export async function connectOne(
 
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: ${key} → ${nodeRels.length} node(s)${deletedNodeRels.length ? `, merged ${deletedNodeRels.length}` : ''}`);
-    return advance({ blockKey: key, ok: true, nodeRels, deletedNodeRels, setAside: false });
+    result = { blockKey: key, ok: true, nodeRels, deletedNodeRels, setAside: false };
+    return true;
   } catch (err) {
     // CONNECT-14 / ORCH-12: never lose candidates. Discard partial worktree writes, record the
     // failed attempt durably; set aside after K so a poison block can't head-of-line-block.
@@ -885,8 +868,30 @@ export async function connectOne(
     log.error('connect.failed', { runId, itemId: key, attempt, setAside, err });
     await wtGit.raw('add', '-A');
     await wtGit.commit(`connect: failed ${key} (attempt ${attempt}${setAside ? ', set aside' : ''})`);
-    return advance({ blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside, error });
+    result = { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside, error };
+    return true;
   }
+  };
+
+  // ORCH-19 collision exhaustion: the block lost the same-path race past K retries. Persist a disjoint
+  // set-aside audit (converges) in a fresh ephemeral wt, advance it, and surface the set-aside so the
+  // poison block can't head-of-line-block. (Model: decomposeStage onExhausted.)
+  const onExhausted = async (): Promise<void> => {
+    const base = await canonicalHead(root);
+    await withEphemeralWorktree(root, STAGE, base, async ({ wt, workBranch }) => {
+      const wtGit = simpleGit(wt);
+      await appendAudit(wt, auditLine({ runId, blockKey: key, event: 'setaside', reason: 'collision-exhausted' }));
+      await wtGit.raw('add', '-A');
+      await wtGit.commit(`connect: set aside ${key} (collision-exhausted)`);
+      await lock.run(() => advanceOrCollide(root, workBranch, base), 'connect:setaside-advance');
+    });
+    log.warn('connect.setaside', { runId, itemId: key, reason: 'collision-exhausted' });
+    result = { blockKey: key, ok: false, nodeRels: [], deletedNodeRels: [], setAside: true };
+  };
+
+  // cap>1 safe: each attempt prepares in its own ephemeral worktree; the advance serializes under `lock`.
+  await withConcurrentAdvance({ root, lock, stage: STAGE, label: 'connect:advance', log }, prepare, onExhausted);
+  return result;
 }
 
 // ── Link promotion (CONNECT-12/13): relatesTo hints → real Obsidian [[wikilinks]] ───────────
@@ -1125,6 +1130,7 @@ export class ConnectStage {
   private readonly decider: ConnectDecider;
   private readonly lock: Mutex;
   private readonly maxAttempts: number;
+  private cap: number; // SPEC-0048 SCALE-1/5: mutable for live-apply (see setCap); resolve drain slices `cap` per pass
   private readonly afterDrain?: () => Promise<void>;
   private readonly log: DevLog;
   private readonly tracer: Tracer;
@@ -1148,14 +1154,28 @@ export class ConnectStage {
     afterDrain?: () => Promise<void>,
     log: DevLog = noopDevLog,
     tracer: Tracer = noopTracer,
+    cap: number = DEFAULT_STAGE_CAP, // SPEC-0048 SCALE-5: resolve-stage concurrency (appended so existing call sites are unaffected)
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
     this.lock = lock;
     this.maxAttempts = maxAttempts;
+    this.cap = Math.max(1, Math.floor(cap));
     this.afterDrain = afterDrain;
     this.log = log.child({ scope: 'connect' });
     this.tracer = tracer;
+  }
+
+  /** Live-apply the resolve-stage concurrency cap (SPEC-0048 SCALE-4): the next drain pass slices this
+   *  many blocks per batch, so a Settings change applies without a restart. The link/dedup sweeps stay
+   *  serial under the lock regardless (SCALE-5 — they still share a fixed worktree). */
+  setCap(cap: number): void {
+    this.cap = Math.max(1, Math.floor(cap));
+  }
+
+  /** The current resolve-stage cap (Status VIZ-2 / diagnostics). */
+  getCap(): number {
+    return this.cap;
   }
 
   start(sweepMs = 30_000): void {
@@ -1212,30 +1232,43 @@ export class ConnectStage {
   }
 
   private async drainOnce(): Promise<void> {
-    let queue = await readConnectQueue(this.root, this.maxAttempts);
     let worked = false;
-    while (queue.length > 0) {
-      const key = queue[0].blockKey;
-      const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: key });
-      try {
-        // ORCH-17/18: connectOne prepares OFF the lock and advances UNDER it (shared lock passed in).
-        // (The link-promotion pass below stays coarse-locked for slice 1 — narrowing it is a follow-up.)
-        // OBS-12: the `stage.run` span wraps the decider's `copilot.invoke` child (incl. collision re-runs).
-        const r = await connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log, span);
-        // LOCUS DISTINCTION: connectOne RETURNS for a per-item failure it could record (set aside after
-        // K) — carry its message onto the error span (robustness batch). It THROWS only when it could
-        // NOT record (a wedged writer — systemic), handled below.
-        span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
-        worked = true;
-      } catch (err) {
-        // Systemic/unexpected (the write/advance was wedged — connectOne handles per-item failures by
-        // returning). End the span WITH the message + log it (a failed stage must be diagnosable, never a
-        // silent "N in queue, nothing happened"), then stop this pass; a later poke/sweep retries.
-        span.end('error', err instanceof Error ? err.message : String(err));
-        this.log.error('connect.drain-error', { itemId: key, err });
-        return;
+    try {
+      let queue = await readConnectQueue(this.root, this.maxAttempts);
+      while (queue.length > 0) {
+        // SCALE-5: resolve up to `cap` blocks CONCURRENTLY — each connectOne prepares OFF the lock in its
+        // own ephemeral worktree (was a shared fixed worktree → cap pinned at 1), advances UNDER the shared
+        // lock (cap=1 ⇒ serial, output-identical). OBS-12: each item's `stage.run` span wraps its decider's
+        // `copilot.invoke` child (incl. collision re-runs).
+        const batch = queue.slice(0, this.cap);
+        // LOCUS DISTINCTION (#256): connectOne RETURNS for a per-item failure it could RECORD (set aside
+        // after K — the writer is fine) → that item's span ends, the batch drains on. It THROWS only when
+        // it could NOT record (a wedged writer/advance — SYSTEMIC) → the batch rejects → the catch stops
+        // this pass (a later poke/sweep retries). A settled per-item failure never reaches the catch.
+        await Promise.all(
+          batch.map((item) => {
+            const key = item.blockKey;
+            const span = this.tracer.start(STAGE_RUN_OP, { stage: STAGE, itemId: key });
+            return connectOne(this.root, key, this.decider, this.lock, this.maxAttempts, DEFAULT_MAX_REVIEW_ROUNDS, 0, this.log, span).then(
+              (r) => {
+                span.end(r.ok ? 'ok' : r.setAside ? 'setaside' : 'error', r.error);
+                worked = true;
+              },
+              (err) => {
+                span.end('error', err instanceof Error ? err.message : String(err));
+                throw err; // systemic — propagate to stop the pass
+              },
+            );
+          }),
+        );
+        queue = await readConnectQueue(this.root, this.maxAttempts);
       }
-      queue = await readConnectQueue(this.root, this.maxAttempts);
+    } catch (err) {
+      // Systemic/unexpected (the queue read or canonical writer is wedged — affects EVERY item, not one).
+      // Log it (a failed stage must be diagnosable, never a silent "N in queue, nothing happened") + stop
+      // this pass; a later poke/sweep retries. Per-item failures are handled in connectOne (it RETURNS).
+      this.log.error('connect.drain-error', { err });
+      return;
     }
     // Link-promotion pass (CONNECT-12): once blocks are resolved and Claims has left `relatesTo`
     // hints, promote them into `[[wikilinks]]`. Process each queued node once; `linkOne` is a

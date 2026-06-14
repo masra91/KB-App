@@ -39,14 +39,13 @@ import {
   STAGE_CAP_MAX,
   COPILOT_CEILING_MIN,
   COPILOT_CEILING_MAX,
-  CONNECT_CAP_PINNED,
   clampStageCap,
   clampCopilotCeiling,
   resolveStageCaps,
   resolveCeilingWrite,
   type ScaleStage,
 } from './scaleConstants';
-export { SCALE_STAGES, DEFAULT_STAGE_CAPS, STAGE_CAP_MAX, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX, CONNECT_CAP_PINNED, clampStageCap, clampCopilotCeiling, resolveStageCaps, resolveCeilingWrite };
+export { SCALE_STAGES, DEFAULT_STAGE_CAPS, STAGE_CAP_MAX, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX, clampStageCap, clampCopilotCeiling, resolveStageCaps, resolveCeilingWrite };
 export type { ScaleStage };
 
 /** Instance-wide settings (PANEL-5). v1 holds the autonomy default; grows as Settings does. */
@@ -54,8 +53,8 @@ export interface InstanceConfig {
   /** The Instance-wide default autonomy posture (AUTO-12). Jobs inherit it unless they override. */
   autonomyDefault: AutonomyPosture;
   /** SPEC-0048 SCALE-2: per-stage concurrency cap overrides (`{decompose: 3, claims: 2, …}`). Absent
-   *  keys ⇒ today's default ({@link DEFAULT_STAGE_CAPS}); Connect is always pinned to 1 (SCALE-5).
-   *  Read via {@link resolveStageCaps}. */
+   *  keys ⇒ today's default ({@link DEFAULT_STAGE_CAPS}). Read via {@link resolveStageCaps}. (SCALE-5:
+   *  Connect is now cap-configurable too — its resolve drain migrated to per-item ephemeral worktrees.) */
   stageCaps?: Partial<Record<ScaleStage, number>>;
   /** SPEC-0048 SCALE-1: the global Copilot concurrency ceiling override (ORCH-23). Omitted ⇒ the
    *  engine's cores-derived default; env `KB_COPILOT_MAX_CONCURRENCY` still wins over both. */
@@ -144,9 +143,9 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
   // SPEC-0048 MODEL: the global model override — a non-empty string persists; validation against the
   // live CLI catalog happens at startup (initLaunchModel) / at set-time (the picker IPC), not here.
   const model = typeof o.model === 'string' && o.model.trim().length > 0 ? o.model.trim() : undefined;
-  // SCALE-1/2: optional scale overrides — each stage cap clamped (Connect pinned to 1, SCALE-5); the
-  // global ceiling clamped or omitted (⇒ cores-derived default). Junk keys/values are dropped, never
-  // throw — a hand-edited/old `instance.json` degrades to today's behaviour.
+  // SCALE-1/2: optional scale overrides — each stage cap clamped (SCALE-5: Connect clamps like the rest
+  // now, no longer pinned); the global ceiling clamped or omitted (⇒ cores-derived default). Junk
+  // keys/values are dropped, never throw — a hand-edited/old `instance.json` degrades to today's behaviour.
   let stageCaps: Partial<Record<ScaleStage, number>> | undefined;
   if (typeof o.stageCaps === 'object' && o.stageCaps !== null) {
     const raw = o.stageCaps as Record<string, unknown>;

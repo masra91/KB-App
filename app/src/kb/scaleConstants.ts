@@ -25,15 +25,10 @@ export const STAGE_CAP_MAX = 8;
 export const COPILOT_CEILING_MIN = 1;
 export const COPILOT_CEILING_MAX = 32;
 
-/** SCALE-5: Connect's resolver races on shared `entities/` until its ephemeral-worktree migration
- *  (Phase 2). Until then its cap is PINNED to 1 — enforced here (defense-in-depth) so a hand-edited
- *  `instance.json` can't set Connect>1 and corrupt dedup; the UI also pins it with a note. */
-export const CONNECT_CAP_PINNED = 1;
-
-/** Clamp one stage's configured cap into [1, {@link STAGE_CAP_MAX}]; Connect is pinned to 1 (SCALE-5).
- *  A non-finite value falls back to that stage's default (today's behaviour). */
+/** Clamp one stage's configured cap into [1, {@link STAGE_CAP_MAX}]. A non-finite value falls back to
+ *  that stage's default (today's behaviour). (SCALE-5: Connect is no longer pinned — its resolve drain
+ *  migrated to per-item ephemeral worktrees, so it clamps like any other stage.) */
 export function clampStageCap(stage: ScaleStage, v: unknown): number {
-  if (stage === 'connect') return CONNECT_CAP_PINNED;
   const n = typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : DEFAULT_STAGE_CAPS[stage];
   return Math.max(1, Math.min(STAGE_CAP_MAX, n));
 }
@@ -58,15 +53,15 @@ export function resolveCeilingWrite(prior: number | undefined, incoming: number 
   return clampCopilotCeiling(incoming);
 }
 
-/** The effective per-stage caps: today's defaults overlaid with any configured overrides (Connect
- *  pinned). The pipeline reads THIS to size each stage; the Settings UI renders it. Structural input
- *  (just `{ stageCaps? }`) so this module stays decoupled from the node-only `InstanceConfig`. */
+/** The effective per-stage caps: today's defaults overlaid with any configured overrides. The pipeline
+ *  reads THIS to size each stage; the Settings UI renders it. Structural input (just `{ stageCaps? }`)
+ *  so this module stays decoupled from the node-only `InstanceConfig`. (SCALE-5: Connect is no longer
+ *  force-pinned — it takes its configured/default cap like every other stage.) */
 export function resolveStageCaps(cfg: { stageCaps?: Partial<Record<ScaleStage, number>> }): Record<ScaleStage, number> {
   const out = { ...DEFAULT_STAGE_CAPS };
   for (const stage of SCALE_STAGES) {
     const configured = cfg.stageCaps?.[stage];
     out[stage] = configured === undefined ? DEFAULT_STAGE_CAPS[stage] : clampStageCap(stage, configured);
   }
-  out.connect = CONNECT_CAP_PINNED; // SCALE-5 always
   return out;
 }
