@@ -336,10 +336,21 @@ describe('The Line — set-aside siding (VIZ-7 / OBS-17, contract unchanged)', (
     expect(h).not.toContain('viz-state-error'); // oxide rides the badge fill + the siding's CSS border, not the text
   });
 
-  it('disables the buttons + shows the outcome banner while/after acting', () => {
-    const h = sidingHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' }], { acting: true, actionMsg: 'Retrying Ada Lovelace.' });
-    expect(h).toContain('disabled');
-    expect(h).toContain('Retrying Ada Lovelace.');
+  it('HEAL-8: a re-surfaced item whose async action failed shows a per-item retryable error (no global disable)', () => {
+    const failures = new Map([['claims:01ADAID', 'Couldn’t complete that — please try again.']]);
+    const h = sidingHtml([{ stage: 'claims', itemId: '01ADAID', name: 'Ada Lovelace' }], { failures });
+    expect(h).toContain('line-siding-error');
+    expect(h).toContain('role="alert"');
+    expect(h).toContain('try again');
+    expect(h).not.toContain('disabled'); // buttons stay enabled so the Principal can retry
+  });
+
+  it('HEAL-8: lineBodyHtml suppresses an optimistically-acted item even when the view still lists it (no flicker-back)', () => {
+    // STALLED still lists the claims set-aside item; `actedKeys` (the Principal just clicked Retry/Dismiss)
+    // must keep it off the siding so a reconcile poll can't bounce it back before the backend catches up.
+    const actedKeys = new Set(['claims:01ADAID']);
+    const html = lineBodyHtml({ view: STALLED, loading: false, errorMsg: '', expanded: new Set(), lens: 'stage', actedKeys, failedActs: new Map() }, NOW);
+    expect(html).not.toContain('line-siding'); // its only set-aside item is suppressed → no siding section
   });
 
   it('is empty when nothing is set aside (clean → no siding)', () => {
@@ -492,24 +503,55 @@ describe('mountStatus (OBS-8/9 — live + read-only; VIZ-5 pivot)', () => {
     expect(openSettings).toHaveBeenCalledOnce();
   });
 
-  it('Retry on a set-aside item calls pipelineControl{retry} then re-fetches (OBS-17)', async () => {
-    const statusFn = vi.fn().mockResolvedValue(STALLED);
-    const control = vi.fn().mockResolvedValue({ ok: true, message: 'Retrying Ada Lovelace.' });
+  // HEAL-8 (SPEC-0049) — Retry/Dismiss is OPTIMISTIC: the item leaves the siding the INSTANT the
+  // Principal clicks; the IPC fires async; on failure the item is restored with a retryable error.
+  it('HEAL-8: Retry removes the item from the siding IMMEDIATELY — before the IPC resolves (UI never waits)', async () => {
+    const statusFn = vi.fn().mockResolvedValue(STALLED); // one set-aside item (claims 01ADAID)
+    let resolveCtl!: (v: { ok: boolean; message: string }) => void;
+    const control = vi.fn(() => new Promise((res) => { resolveCtl = res; })); // pending until we resolve
     setApi(statusFn, control as unknown as KbApi['pipelineControl']);
     mountStatus(root);
     await Promise.resolve(); await Promise.resolve();
+    expect(root.querySelector('.line-siding-retry')).not.toBeNull();
 
-    const retry = root.querySelector<HTMLButtonElement>('.line-siding-retry');
-    expect(retry).not.toBeNull();
-    retry!.click();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-
+    root.querySelector<HTMLButtonElement>('.line-siding-retry')!.click();
+    // Synchronously after the click — the siding is gone though the IPC promise is still PENDING.
     expect(control).toHaveBeenCalledWith({ action: 'retry', stage: 'claims', itemId: '01ADAID' });
-    expect(statusFn.mock.calls.length).toBeGreaterThanOrEqual(2); // re-fetched after the action
-    expect(root.textContent).toContain('Retrying Ada Lovelace.'); // outcome banner
+    expect(root.querySelector('.line-siding')).toBeNull(); // the only item left instantly → no siding
+    resolveCtl({ ok: true, message: 'Retrying Ada Lovelace.' });
+    await Promise.resolve(); await Promise.resolve();
+    expect(root.querySelector('.line-siding')).toBeNull(); // stays gone
   });
 
-  it('Dismiss confirms first, then calls pipelineControl{dismiss}; cancelling does nothing (OBS-17)', async () => {
+  it('HEAL-8: a failed (ok:false) action restores the item with a retryable error affordance', async () => {
+    const control = vi.fn().mockResolvedValue({ ok: false, message: 'canonical lock busy' });
+    setApi(vi.fn().mockResolvedValue(STALLED), control as unknown as KbApi['pipelineControl']);
+    mountStatus(root);
+    await Promise.resolve(); await Promise.resolve();
+    root.querySelector<HTMLButtonElement>('.line-siding-retry')!.click();
+    expect(root.querySelector('.line-siding')).toBeNull(); // optimistically gone
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    // Restored — back on the siding, carrying an honest alert, still actionable.
+    expect(root.querySelector('.line-siding-item')).not.toBeNull();
+    expect(root.querySelector('.line-siding-error')?.getAttribute('role')).toBe('alert');
+    expect(root.textContent).toContain('canonical lock busy');
+    expect(root.querySelector('.line-siding-retry')).not.toBeNull();
+  });
+
+  it('HEAL-8: a thrown IPC also restores the item (honest rollback, not a silent drop)', async () => {
+    const control = vi.fn().mockRejectedValue(new Error('ipc channel died'));
+    setApi(vi.fn().mockResolvedValue(STALLED), control as unknown as KbApi['pipelineControl']);
+    mountStatus(root);
+    await Promise.resolve(); await Promise.resolve();
+    root.querySelector<HTMLButtonElement>('.line-siding-retry')!.click(); // retry path (no confirm)
+    expect(root.querySelector('.line-siding')).toBeNull(); // optimistically gone
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(root.querySelector('.line-siding-item')).not.toBeNull(); // restored
+    expect(root.querySelector('.line-siding-error')).not.toBeNull();
+    expect(root.textContent).toContain('ipc channel died');
+  });
+
+  it('Dismiss confirms first; cancelling does nothing, confirming dispatches the action (stage-agnostic)', async () => {
     const control = vi.fn().mockResolvedValue({ ok: true, message: 'Dismissed Ada Lovelace.' });
     setApi(vi.fn().mockResolvedValue(STALLED), control as unknown as KbApi['pipelineControl']);
     mountStatus(root);
@@ -519,11 +561,13 @@ describe('mountStatus (OBS-8/9 — live + read-only; VIZ-5 pivot)', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
     dismiss().click();
     await Promise.resolve();
-    expect(control).not.toHaveBeenCalled(); // cancelled
+    expect(control).not.toHaveBeenCalled(); // cancelled → not even optimistically removed
+    expect(root.querySelector('.line-siding-item')).not.toBeNull();
 
     confirmSpy.mockReturnValue(true);
     dismiss().click();
-    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(root.querySelector('.line-siding')).toBeNull(); // optimistically removed on confirm
+    await Promise.resolve(); await Promise.resolve();
     expect(control).toHaveBeenCalledWith({ action: 'dismiss', stage: 'claims', itemId: '01ADAID' });
   });
 

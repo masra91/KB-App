@@ -377,9 +377,15 @@
   border-left: 3px solid var(--viz-oxide);
   padding-left: 0.75rem;
 }
-.line-siding-msg {
-  color: var(--viz-ink-muted);
-  font-size: 0.78rem;
+/* HEAL-8: a re-surfaced item whose async Retry/Dismiss failed carries an inline retryable error. Sits
+   on its own line (flex wrap); the oxide rides only the glyph (off small text, §3), the message is ink. */
+.line-siding-error {
+  flex-basis: 100%;
+  color: var(--viz-ink);
+  font-size: 0.8rem;
+}
+.line-siding-error-glyph {
+  margin-right: 0.2rem;
 }
 .line-siding-items {
   list-style: none;

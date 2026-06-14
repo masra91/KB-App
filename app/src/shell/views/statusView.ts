@@ -44,8 +44,14 @@ let errorMsg = '';
 let expanded = new Set<number>(); // recent-error rows drilled-down to their cause (OBS-6)
 let lens: Lens = 'stage'; // pivot toggle (VIZ-5)
 let timer: ReturnType<typeof setInterval> | null = null;
-let actionMsg = ''; // transient outcome of the last OBS-17 retry/dismiss
-let acting = false; // a recovery action is in flight — disable the buttons so it can't double-fire
+// HEAL-8 (SPEC-0049) — set-aside Retry/Dismiss is OPTIMISTIC: the item leaves the siding INSTANTLY on
+// click; the under-lock audit-append + re-enqueue/re-run run async (the UI never waits — today it
+// blocked on a multi-second under-lock git commit). `actedKeys` (keyed `stage:itemId`) suppresses an
+// optimistically-removed item from the 2.5s poll so it can't bounce back before the backend (and the
+// status projection) catch up; `failedActs` re-surfaces an item whose async action failed, with an
+// honest retryable error. Mirrors the REVIEW-20 `answeredIds`/`failedIds` optimistic seam.
+let actedKeys = new Set<string>();
+let failedActs = new Map<string, string>();
 let lastHtml = ''; // change-guard: skip re-rendering identical HTML so CSS motion doesn't restart (VIZ-9)
 // §5 motion carry-over: the last odometer value per key + the last stepper position per carriage, so
 // a repaint can roll the number / index the advance from where it was (not snap). Reset on mount.
@@ -57,8 +63,8 @@ export function mountStatus(container: HTMLElement): void {
   errorMsg = '';
   expanded = new Set();
   lens = 'stage';
-  actionMsg = '';
-  acting = false;
+  actedKeys = new Set();
+  failedActs = new Map();
   lastHtml = '';
   motionStores = createMotionStores(); // fresh motion history per mount (no carry-over across vault switches)
   container.innerHTML = `<div class="viz-surface the-line"><div class="line-body" id="lineBody"></div></div>`;
@@ -95,6 +101,10 @@ async function load(container: HTMLElement): Promise<void> {
     // "Loading…". The live poll (POLL_MS) then auto-retries, so no manual retry button is needed here.
     view = await withTimeout(window.kbApi.pipelineStatusView());
     errorMsg = '';
+    // HEAL-8: prune the optimistic-acted set — once the backend stops returning an item, the action
+    // landed; drop its key so the set can't grow and a future same-key item isn't wrongly suppressed.
+    const present = new Set((view?.setAsideItems ?? []).map(sideKey));
+    for (const k of Array.from(actedKeys)) if (!present.has(k)) actedKeys.delete(k);
   } catch (err) {
     errorMsg = err instanceof Error ? err.message : String(err);
   } finally {
@@ -130,10 +140,9 @@ function wire(container: HTMLElement): void {
       renderBody(container);
       return;
     }
-    // OBS-17: retry / dismiss a set-aside item. Single-flight (ignore clicks while one is in flight);
-    // dismiss is confirmed first (it retires the item from the recoverable list).
+    // HEAL-8: retry / dismiss a set-aside item — OPTIMISTIC (the item leaves the siding instantly, so a
+    // double-fire is impossible — the buttons vanish with it). Dismiss is confirmed first.
     if (act === 'setaside-retry' || act === 'setaside-dismiss') {
-      if (acting) return;
       const itemId = el.dataset.id ?? '';
       if (!itemId) return;
       const action: PipelineControlRequest['action'] = act === 'setaside-retry' ? 'retry' : 'dismiss';
@@ -146,27 +155,49 @@ function wire(container: HTMLElement): void {
   });
 }
 
-/** OBS-17: invoke the pipeline-control IPC for a recovery action, then re-fetch the view (a retried/
- *  dismissed item drops off the set-aside list). Surfaces the outcome message; never throws to the UI. */
+/** The optimistic-suppression key for a set-aside item — `stage:itemId` (an itemId can repeat across
+ *  stages, so the stage qualifies it). */
+function sideKey(x: { stage: string; itemId: string }): string {
+  return `${x.stage}:${x.itemId}`;
+}
+
+/**
+ * HEAL-8 (SPEC-0049) — Retry/Dismiss a set-aside item OPTIMISTICALLY. The item leaves the siding the
+ * INSTANT the Principal clicks (no wait on the backend — today `pipelineControl` blocks on a
+ * multi-second under-lock git commit); the audit-append + re-enqueue/re-run happen async. On async
+ * failure we reconcile honestly: un-suppress the item and re-surface it with a retryable error. Mirrors
+ * the REVIEW-20 optimistic confirm/deny seam; stage-agnostic, so it covers claims + connect + any
+ * future set-aside.
+ */
 async function runControl(container: HTMLElement, req: PipelineControlRequest): Promise<void> {
-  acting = true;
-  actionMsg = '';
-  renderBody(container); // reflect the disabled/acting state immediately
+  const k = sideKey(req);
+  failedActs.delete(k); // a fresh click clears any prior failure affordance
+  actedKeys.add(k); // optimistic: suppress from the siding + the reconcile poll
+  renderBody(container); // the item leaves the siding immediately — the UI never waits
+  let ok = false;
+  let message = '';
   try {
     const res = await window.kbApi.pipelineControl(req);
-    actionMsg = res.message ?? (res.ok ? 'Done.' : 'Action failed.');
+    ok = !!res?.ok;
+    message = res?.message ?? '';
   } catch (err) {
-    actionMsg = err instanceof Error ? err.message : String(err);
-  } finally {
-    acting = false;
-    await load(container); // re-render with the fresh list + the outcome banner
+    ok = false;
+    message = err instanceof Error ? err.message : String(err);
   }
+  if (ok) {
+    void load(container); // reconcile against fresh state (prunes the acted key once the backend drops it)
+    return;
+  }
+  // FAILED → honest rollback: un-suppress + re-surface the item carrying a retryable error affordance.
+  actedKeys.delete(k);
+  failedActs.set(k, message || 'Couldn’t complete that — please try again.');
+  renderBody(container);
 }
 
 function renderBody(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#lineBody');
   if (!el) return;
-  const html = lineBodyHtml({ view, loading, errorMsg, expanded, lens, actionMsg, acting }, Date.now());
+  const html = lineBodyHtml({ view, loading, errorMsg, expanded, lens, actedKeys, failedActs }, Date.now());
   // VIZ-9 change-guard: only touch the DOM when the markup actually changed, so an unchanged poll
   // doesn't restart the ember-breathe / stepper animations (and saves layout on the calm idle).
   if (html !== lastHtml) {
@@ -187,8 +218,8 @@ interface BodyState {
   errorMsg: string;
   expanded: Set<number>;
   lens: Lens;
-  actionMsg?: string; // OBS-17: outcome of the last retry/dismiss
-  acting?: boolean; // OBS-17: a recovery action is in flight (buttons disabled)
+  actedKeys?: Set<string>; // HEAL-8: set-aside items optimistically removed (suppressed from the siding)
+  failedActs?: Map<string, string>; // HEAL-8: key → error for a re-surfaced item whose async act failed
 }
 
 /** The whole Line body (`nowMs` injected for the carriage dwell so it's testable without a clock). */
@@ -206,7 +237,10 @@ export function lineBodyHtml(s: BodyState, nowMs: number): string {
     spineHtml(stations),
     carriagesHtml(shown, more),
     `</div>`,
-    sidingHtml(s.view.setAsideItems, { actionMsg: s.actionMsg, acting: s.acting }),
+    sidingHtml(
+      s.view.setAsideItems.filter((it) => !s.actedKeys?.has(`${it.stage}:${it.itemId}`)),
+      { failures: s.failedActs },
+    ),
     readoutHtml(s.view, s.expanded),
   ].join('');
 }
@@ -382,28 +416,34 @@ function carriageHtml(c: CarriageModel): string {
 /** §2/§6 VIZ-7: the set-aside siding — errored/poison items pulled OFF the line, oxide-prominent, each
  *  carrying Retry / Dismiss (OBS-17). Reuses the existing `kb:pipelineControl` contract verbatim
  *  (`data-act`/`data-stage`/`data-id`) — no new mutation surface. Oxide carries the badge fill + the
- *  siding's left border; the reason line stays ink (§3). `acting` disables the buttons single-flight;
- *  `actionMsg` reports the last outcome. */
-export function sidingHtml(items: SetAsideView[], opts: { actionMsg?: string; acting?: boolean } = {}): string {
+ *  siding's left border; the reason line stays ink (§3). HEAL-8: the action is OPTIMISTIC (the item is
+ *  removed by the caller before this renders, so there's no global "acting" disable); `failures` carries
+ *  a per-item retryable error for an item whose async action failed and was re-surfaced. */
+export function sidingHtml(items: SetAsideView[], opts: { failures?: Map<string, string> } = {}): string {
   if (items.length === 0) return '';
-  const dis = opts.acting ? ' disabled' : '';
-  const banner = opts.actionMsg ? `<p class="line-siding-msg viz-body">${esc(opts.actionMsg)}</p>` : '';
+  const failures = opts.failures;
   const rows = items
     .map((it) => {
       const label = it.name ?? it.itemId;
       const data = `data-stage="${esc(it.stage)}" data-id="${esc(it.itemId)}" data-label="${esc(label)}"`;
+      // HEAL-8: a re-surfaced item whose async Retry/Dismiss failed carries an honest, retryable error.
+      const err = failures?.get(`${it.stage}:${it.itemId}`);
+      const errLine = err
+        ? `<span class="line-siding-error viz-body" role="alert"><span class="line-siding-error-glyph viz-state-error" aria-hidden="true">✕</span> ${esc(err)}</span>`
+        : '';
       return `<li class="line-siding-item">
         <span class="line-siding-badge" aria-hidden="true">✕ set aside</span>
         <span class="line-siding-where viz-body">${esc(stageDisplayName(it.stage))} · ${esc(label)}</span>
         ${it.reason ? `<span class="line-siding-reason viz-body">${esc(it.reason)}</span>` : ''}
+        ${errLine}
         <span class="line-siding-actions">
-          <button type="button" class="viz-btn viz-focusable line-siding-retry" data-act="setaside-retry" ${data}${dis}>Retry</button>
-          <button type="button" class="viz-btn viz-focusable line-siding-dismiss" data-act="setaside-dismiss" ${data}${dis}>Dismiss</button>
+          <button type="button" class="viz-btn viz-focusable line-siding-retry" data-act="setaside-retry" ${data}>Retry</button>
+          <button type="button" class="viz-btn viz-focusable line-siding-dismiss" data-act="setaside-dismiss" ${data}>Dismiss</button>
         </span>
       </li>`;
     })
     .join('');
-  return `<section class="line-siding"><h2 class="line-h2 viz-signage">⟂ Set aside — needs attention (<span class="viz-numeric">${items.length}</span>)</h2>${banner}<ul class="line-siding-items">${rows}</ul></section>`;
+  return `<section class="line-siding"><h2 class="line-h2 viz-signage">⟂ Set aside — needs attention (<span class="viz-numeric">${items.length}</span>)</h2><ul class="line-siding-items">${rows}</ul></section>`;
 }
 
 // ── Secondary instrument readout — retains OBS-6/7/15 depth the Line doesn't surface inline ─────────
