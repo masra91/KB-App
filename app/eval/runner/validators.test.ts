@@ -199,3 +199,34 @@ describe('setAsideRate (SPEC-0049 toss-rate metric — converge, never toss)', (
     expect(VALIDATORS.setAsideRate(s, { max: 0, allowEmpty: true }).pass).toBe(true);
   });
 });
+
+describe('graphCohesion (SPEC-0051 COHERE-3)', () => {
+  // Entity node bodies need real frontmatter (parseEntityNode) to count as graph nodes.
+  const ent = (kind: string, name: string, links: string[] = []) => ({
+    path: `entities/${kind}/${name}.md`,
+    body: `---\nid: 01${name.replace(/\W/g, '').toUpperCase()}\nkind: ${kind}\nname: ${name}\n---\n# ${name}\n${links.map((l) => `- [[${l}]]`).join('\n')}\n`,
+  });
+
+  it('FAILS on no entities unless allowEmpty', () => {
+    expect(VALIDATORS.graphCohesion(snap({ entities: [] }), {}).pass).toBe(false);
+    expect(VALIDATORS.graphCohesion(snap({ entities: [] }), { allowEmpty: true }).pass).toBe(true);
+  });
+
+  it('report-only (no thresholds) passes and always emits the metric readout', () => {
+    const s = snap({ entities: [ent('person', 'A', ['entities/person/B.md|B']), ent('person', 'B', ['entities/person/A.md|A'])] });
+    const r = VALIDATORS.graphCohesion(s, {});
+    expect(r.pass).toBe(true);
+    expect(r.detail).toMatch(/nodes=2 edges=1 .*modularity=.* giantComponent=.* orphan=/);
+  });
+
+  it('flags ISLANDS via giant-component / orphan thresholds', () => {
+    const s = snap({ entities: [ent('person', 'A'), ent('person', 'B'), ent('person', 'C')] }); // no links
+    expect(VALIDATORS.graphCohesion(s, { minGiantComponentShare: 0.9 }).pass).toBe(false);
+    expect(VALIDATORS.graphCohesion(s, { maxOrphanShare: 0.1 }).pass).toBe(false);
+  });
+
+  it('resolves bare-name links to edges (matches linkOne) so coverage shows up in the metric', () => {
+    const s = snap({ entities: [ent('person', 'Harrie', ['Mason Allen']), ent('person', 'Mason Allen')] }); // bare link
+    expect(VALIDATORS.graphCohesion(s, {}).detail).toContain('edges=1');
+  });
+});

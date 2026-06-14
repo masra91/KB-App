@@ -3,6 +3,7 @@
 // HOME (KB-Lead affirmation) for the quality asserts enrichE2eDogfood hand-wired — consolidated here so
 // scenarios reference them by name (EVAL-1/12) and the runner scores pass/fail. Pure + fork-independent.
 import { STAGE_RUN_OP } from '../../src/kb/tracing';
+import { cohesionFromFiles } from '../../src/kb/cohesion';
 import type { VaultSnapshot, VaultFile } from './snapshot';
 import type { DeterministicCheck } from './scenario';
 
@@ -191,6 +192,39 @@ export const VALIDATORS: Record<string, Validator> = {
     return rate <= max
       ? pass('setAsideRate', `${setAside}/${terminal.length} set aside${where} = ${pct}% ≤ ${cap}%`)
       : fail('setAsideRate', `${setAside}/${terminal.length} set aside${where} = ${pct}% > ${cap}% — items tossed, not converged`);
+  },
+  // SPEC-0051 COHERE-3 — graph-cohesion. Builds the entity↔entity link graph from the vault entities and
+  // asserts the cohesion shape. The detail ALWAYS reports the full metric readout (the numbers the
+  // Principal wants visible). Optional ceilings/floors gate it: `minModularity` (clusters are real, not a
+  // hairball), `maxCrossClusterRatio` (clusters don't bleed together), `minGiantComponentShare` (not
+  // fragmented islands), `maxOrphanShare` (coverage). Omit a threshold to track-without-gating. Empty
+  // entity set FAILS unless `allowEmpty:true`. See src/kb/cohesion.ts for the metric definitions.
+  graphCohesion(snap, args) {
+    const a = (args ?? {}) as {
+      minModularity?: unknown;
+      maxCrossClusterRatio?: unknown;
+      minGiantComponentShare?: unknown;
+      maxOrphanShare?: unknown;
+      allowEmpty?: unknown;
+    };
+    if (snap.entities.length === 0) {
+      return a.allowEmpty === true
+        ? pass('graphCohesion', 'no entities — vacuous (allowEmpty)')
+        : fail('graphCohesion', 'no entities — nothing to measure cohesion over');
+    }
+    const m = cohesionFromFiles(snap.entities.map((e) => ({ path: e.path, body: e.body })));
+    const readout =
+      `nodes=${m.nodes} edges=${m.edges} communities=${m.communities} ` +
+      `modularity=${m.modularity.toFixed(3)} crossCluster=${m.crossClusterRatio.toFixed(3)} ` +
+      `giantComponent=${m.giantComponentShare.toFixed(3)} orphan=${m.orphanShare.toFixed(3)}`;
+    const viol: string[] = [];
+    if (typeof a.minModularity === 'number' && m.modularity < a.minModularity) viol.push(`modularity ${m.modularity.toFixed(3)} < ${a.minModularity} (hairball/no structure)`);
+    if (typeof a.maxCrossClusterRatio === 'number' && m.crossClusterRatio > a.maxCrossClusterRatio) viol.push(`crossCluster ${m.crossClusterRatio.toFixed(3)} > ${a.maxCrossClusterRatio} (clusters bleed)`);
+    if (typeof a.minGiantComponentShare === 'number' && m.giantComponentShare < a.minGiantComponentShare) viol.push(`giantComponent ${m.giantComponentShare.toFixed(3)} < ${a.minGiantComponentShare} (islands)`);
+    if (typeof a.maxOrphanShare === 'number' && m.orphanShare > a.maxOrphanShare) viol.push(`orphan ${m.orphanShare.toFixed(3)} > ${a.maxOrphanShare} (coverage)`);
+    return viol.length === 0
+      ? pass('graphCohesion', readout)
+      : fail('graphCohesion', `${readout} — ${viol.join('; ')}`);
   },
 };
 

@@ -37,6 +37,7 @@ import {
   type NodeLink,
   type ParsedNode,
 } from './connectDoc';
+import { resolveProseWikilinks } from './composeDoc';
 import { mergeNodes } from './mergeNodes';
 import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
@@ -958,10 +959,16 @@ export async function linkOne(root: string, nodeRel: string, log: DevLog = noopD
   for (const n of await readEntityNodes(wt)) {
     nameByRel.set(n.rel, n.name);
     if (n.rel === nodeRel) continue; // never self-link
-    const key = normalizeName(n.name);
-    const arr = byName.get(key);
-    if (arr) arr.push(n.rel);
-    else byName.set(key, [n.rel]);
+    // COHERE-1: index canonical name AND aliases — a hint/woven link naming an entity by an alias
+    // (e.g. a nickname) resolves too (coverage). A collision across nodes stays AMBIGUOUS → review,
+    // never a wrong-guess (CONNECT-13 preserved by the existing multi-match handling below).
+    const keys = new Set([normalizeName(n.name), ...n.aliases.map(normalizeName)].filter((k) => k.length > 0));
+    for (const key of keys) {
+      const arr = byName.get(key);
+      if (arr) {
+        if (!arr.includes(n.rel)) arr.push(n.rel);
+      } else byName.set(key, [n.rel]);
+    }
   }
   for (const arr of byName.values()) arr.sort();
 
@@ -1011,7 +1018,15 @@ export async function linkOne(root: string, nodeRel: string, log: DevLog = noopD
   }
   links.sort((a, b) => (a.targetRel < b.targetRel ? -1 : 1)); // deterministic block order
 
-  const newMd = applyLinksBlock(nodeMd, links);
+  // COHERE-1: resolve BARE woven `[[Name]]` links in the prose (Compose writes display-name links that
+  // Obsidian can't resolve to the kind-subdir entity path → they render dead). Rewrite to `[[rel|Name]]`
+  // on a UNIQUE entity match; unknown/ambiguous stay bare (CONNECT-13). Uses the same name+alias index.
+  const resolveBare = (name: string): string | null => {
+    const matches = byName.get(normalizeName(name)) ?? [];
+    return matches.length === 1 ? matches[0] : null; // unique → path; unknown/ambiguous → leave bare
+  };
+  const proseResolved = resolveProseWikilinks(nodeMd, resolveBare);
+  const newMd = applyLinksBlock(proseResolved, links);
   const nodeChanged = newMd !== nodeMd;
   if (!nodeChanged && toRaise.length === 0) {
     return { nodeRel, changed: false, links: links.length, unresolved, reviewsRaised: 0 }; // byte-stable + nothing to ask

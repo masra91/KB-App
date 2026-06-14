@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { renderProse, applyProse, stripProse, hasProse } from './composeDoc';
+import { renderProse, applyProse, stripProse, hasProse, resolveProseWikilinks } from './composeDoc';
 import { LINKS_BLOCK_START, LINKS_BLOCK_END } from './connectDoc';
 import { CLAIMS_BLOCK_START, CLAIMS_BLOCK_END } from './claimDoc';
 import type { ComposeDecision, CitedClaim } from './compose';
@@ -155,5 +155,68 @@ describe('hasProse', () => {
   it('is false for a fresh post-Claims node and true after composing', () => {
     expect(hasProse(entityNode())).toBe(false);
     expect(hasProse(applyProse(entityNode(), renderProse(DECISION, CLAIMS)))).toBe(true);
+  });
+});
+
+describe('resolveProseWikilinks (COHERE-1 — bare [[Name]] → entity path)', () => {
+  // A composed node: H1 + prose region + the kb:links / kb:claims structured blocks below.
+  const composed = (prose: string): string =>
+    [
+      '---', 'id: 01JENT', 'kind: person', 'name: Steve Jobs', '---', '',
+      '# Steve Jobs', '',
+      prose, '',
+      LINKS_BLOCK_START, '- [[entities/organization/Apple.md|Apple]]', LINKS_BLOCK_END,
+      CLAIMS_BLOCK_START, '- [[claims/2026/05/30/01C.md]] — also names [[Harrie]]', CLAIMS_BLOCK_END, '',
+    ].join('\n');
+
+  const resolve = (name: string): string | null =>
+    ({ Harrie: 'entities/person/Harrie.md', 'Mason Allen': 'entities/person/Mason Allen.md' }[name] ?? null);
+
+  it('rewrites a bare prose [[Name]] to [[rel|Name]] on a unique match', () => {
+    const out = resolveProseWikilinks(composed('Jobs worked with [[Harrie]] and [[Mason Allen]] often.'), resolve);
+    expect(out).toContain('[[entities/person/Harrie.md|Harrie]]');
+    expect(out).toContain('[[entities/person/Mason Allen.md|Mason Allen]]');
+  });
+
+  it('leaves an UNKNOWN bare link bare (CONNECT-13 — never a dangling guess)', () => {
+    const out = resolveProseWikilinks(composed('Met [[Ghost Person]] once.'), resolve);
+    expect(out).toContain('[[Ghost Person]]');
+    expect(out).not.toContain('Ghost Person.md');
+  });
+
+  it('leaves already-piped or path-form links untouched', () => {
+    const out = resolveProseWikilinks(composed('See [[entities/org/Acme.md|Acme]] and [[some/path]].'), resolve);
+    expect(out).toContain('[[entities/org/Acme.md|Acme]]');
+    expect(out).toContain('[[some/path]]');
+  });
+
+  it('only touches the PROSE region — the kb:links / kb:claims blocks are byte-identical', () => {
+    const node = composed('Worked with [[Harrie]].');
+    const out = resolveProseWikilinks(node, resolve);
+    // prose got resolved …
+    expect(out).toContain('Worked with [[entities/person/Harrie.md|Harrie]].');
+    // … but the bare [[Harrie]] INSIDE the claims block is left alone (blocks are not prose).
+    const block = out.slice(out.indexOf(CLAIMS_BLOCK_START));
+    expect(block).toContain('also names [[Harrie]]');
+    expect(block).not.toContain('entities/person/Harrie.md|Harrie');
+  });
+
+  it('is idempotent — a resolved link (now piped) is not rewritten again', () => {
+    const once = resolveProseWikilinks(composed('Worked with [[Harrie]].'), resolve);
+    const twice = resolveProseWikilinks(once, resolve);
+    expect(twice).toBe(once);
+  });
+
+  it('ENG-16: a throwing resolver leaves the link as-is, never corrupts the doc', () => {
+    const out = resolveProseWikilinks(composed('Worked with [[Harrie]].'), () => {
+      throw new Error('resolver blew up');
+    });
+    expect(out).toContain('[[Harrie]]'); // unchanged
+  });
+
+  it('ENG-16: a node with no prose region is returned unchanged (no crash)', () => {
+    const noProse = ['---', 'id: 01X', 'kind: person', 'name: A', '---', '', '# A', '', LINKS_BLOCK_START, '- [[Harrie]]', LINKS_BLOCK_END, ''].join('\n');
+    expect(resolveProseWikilinks(noProse, resolve)).toBe(noProse);
+    expect(() => resolveProseWikilinks('just loose text [[Harrie]]', resolve)).not.toThrow();
   });
 });
