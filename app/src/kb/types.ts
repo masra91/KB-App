@@ -588,7 +588,10 @@ export interface AgentView {
   key: string; // stable agent key (e.g. 'decompose')
   label: string; // Principal-facing name
   role: string; // one-line description of what it does
-  model: string; // the model it runs (or 'deterministic' / '—' when not agent-backed)
+  model: string; // the model it ACTUALLY runs (per-agent pin → global → floor; or 'deterministic')
+  /** SPEC-0048: this agent's persisted per-agent model pick, or undefined when it uses the global
+   *  default — drives the per-agent picker's selected value + "Use default" detection. */
+  configuredModel?: string;
   instructions: string; // pointer to its instruction source (file/built-in)
   status: 'running' | 'idle'; // live: running when the pipeline is active, else idle (PANEL-9)
 }
@@ -686,6 +689,8 @@ export interface KbApi {
    *  `null`/'' clears the override (→ preference-list probe drives). Returns the new resolved model +,
    *  on a rejected id, why (the picker stays catalog-valid, so this guards a programmatic/stale call). */
   setModel(id: string | null): Promise<SetModelResult>;
+  /** SPEC-0048: set/clear ONE agent's per-agent model pick (validated). `null`/'' clears it → global. */
+  setAgentModel(agentKey: string, id: string | null): Promise<SetModelResult>;
   // SPEC-0028 Researchers (Control Panel · Manage): manage the registry + on-demand run.
   listResearchers(): Promise<ResearcherView[]>;
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;

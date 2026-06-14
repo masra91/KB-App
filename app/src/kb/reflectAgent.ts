@@ -188,6 +188,6 @@ export function makeReflectDecider(opts: ReflectDeciderOptions = {}): ReflectDec
     if (!available) throw new Error('reflect: copilot unavailable');
     // Model-pin resilience: retry once with `--model auto` if the pinned id is rejected pre-flight
     // (a job pass should not hard-fail just because a pinned model drifted out of the catalog).
-    return parseReflectResult(await runWithModelFallback((m) => run(buildReflectPrompt(ctx), cwd, m)));
+    return parseReflectResult(await runWithModelFallback((m) => run(buildReflectPrompt(ctx), cwd, m), { agentKey: 'reflect' }));
   };
 }

@@ -127,7 +127,7 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
     // ORCH-16: record what we launched and what happened on every model invocation. `modelUsed`
     // starts at the pin and is rewritten to `auto` if the pinned id is rejected and we fall back —
     // so the trace records the model that ACTUALLY ran, making a silent pin-drift visible.
-    let modelUsed = resolveCopilotModel();
+    let modelUsed = resolveCopilotModel(undefined, 'archivist'); // SPEC-0048: per-agent pin, else global
     const at = new Date().toISOString();
     const t0 = Date.now();
     // OBS-13: time the Copilot call as a child of the stage's run span (failures included; the
@@ -135,7 +135,7 @@ export function makeCopilotDecider(opts: CopilotDeciderOptions = {}): ArchivistD
     const cs = ctx?.span?.child(COPILOT_OP);
     try {
       const decision = parseDecision(
-        await runWithModelFallback((m) => run(buildPrompt(meta), cwd, m), { onFallback: (_from, to) => { modelUsed = to; } }),
+        await runWithModelFallback((m) => run(buildPrompt(meta), cwd, m), { agentKey: 'archivist', onFallback: (_from, to) => { modelUsed = to; } }),
         meta,
       );
       cs?.end('ok');

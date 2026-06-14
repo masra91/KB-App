@@ -79,6 +79,19 @@ describe('instance config store (PANEL-5)', () => {
     expect(cleaned.modelPreferences).toBeUndefined();
   });
 
+  it('SPEC-0048: agentModels (per-agent picks) round-trip; junk keys/values dropped; legacy → undefined', async () => {
+    await writeInstanceConfig(root, { ...DEF, agentModels: { connect: 'claude-sonnet-4.5', claims: 'claude-opus-4.8' } });
+    expect((await readInstanceConfig(root)).agentModels).toEqual({ connect: 'claude-sonnet-4.5', claims: 'claude-opus-4.8' });
+    // a legacy file (no field) → undefined (all agents use the global)
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF }), 'utf8');
+    expect((await readInstanceConfig(root)).agentModels).toBeUndefined();
+    // junk values dropped; an all-junk map → omitted entirely
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, agentModels: { connect: '  ', claims: 42 } }), 'utf8');
+    expect((await readInstanceConfig(root)).agentModels).toBeUndefined();
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, agentModels: { connect: 'm', bad: '' } }), 'utf8');
+    expect((await readInstanceConfig(root)).agentModels).toEqual({ connect: 'm' }); // good kept, junk dropped
+  });
+
   it('ASK-17: recallBudgetMs round-trips, clamps out-of-range, and a legacy file (no field) → default', async () => {
     await writeInstanceConfig(root, { ...DEF, recallBudgetMs: 300_000 });
     expect((await readInstanceConfig(root)).recallBudgetMs).toBe(300_000); // an in-range value round-trips

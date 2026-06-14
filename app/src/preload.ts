@@ -44,6 +44,7 @@ const kbApi: KbApi = {
   listAgents: () => ipcRenderer.invoke('kb:listAgents'),
   getModelCatalog: () => ipcRenderer.invoke('kb:getModelCatalog'),
   setModel: (id) => ipcRenderer.invoke('kb:setModel', id),
+  setAgentModel: (agentKey, id) => ipcRenderer.invoke('kb:setAgentModel', agentKey, id),
   listResearchers: () => ipcRenderer.invoke('kb:listResearchers'),
   setResearcherConfig: (patch) => ipcRenderer.invoke('kb:setResearcherConfig', patch),
   runResearcherNow: (id) => ipcRenderer.invoke('kb:runResearcherNow', id),

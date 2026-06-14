@@ -27,27 +27,36 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
   { key: 'reflect', label: 'Reflect', role: 'Periodic rumination — surfaces missed structure, links, and stale topics.', instructions: 'kb/reflectAgent.ts', agentBacked: true },
 ];
 
-/** Live context the view-model needs: the env-requested model and whether the pipeline is running. */
+/** Live context the view-model needs (PANEL-3 / SPEC-0048): a per-agent resolver for the model that
+ *  actually launches (per-agent pin → global → floor), the per-agent configured picks (for the picker),
+ *  and whether the pipeline is running. */
 export interface AgentLiveContext {
-  /** The Copilot model the agents launch with (env-requested), or undefined to show Copilot's default. */
-  requestedModel?: string;
+  /** Resolve the model an agent (by catalog key) actually launches with — its per-agent pin if set,
+   *  else the global resolved model. Empty/falsey → "Copilot (default)". */
+  resolveModel: (agentKey: string) => string;
+  /** SPEC-0048: the persisted per-agent model picks (key → id); absent key = using the global default. */
+  configuredModels?: Record<string, string>;
   /** True when a KB pipeline is active — agent-backed stages are then "running" (PANEL-9). */
   pipelineActive: boolean;
 }
 
 /**
- * Build the Agents view rows (PANEL-3) — pure: overlay live status + resolved model onto the static
- * catalog. Agent-backed agents show the env-requested model (or "Copilot (default)"); a deterministic
- * agent shows "deterministic". Status is `running` when the pipeline is active, else `idle` (PANEL-9).
+ * Build the Agents view rows (PANEL-3) — pure: overlay live status + the PER-AGENT resolved model onto
+ * the static catalog. An agent-backed agent shows the model it actually launches with (its own pin, or
+ * the global) + its configured pick (SPEC-0048); a deterministic agent shows "deterministic". Status is
+ * `running` when the pipeline is active, else `idle` (PANEL-9).
  */
 export function buildAgentViews(catalog: AgentCatalogEntry[], ctx: AgentLiveContext): AgentView[] {
-  const model = ctx.requestedModel && ctx.requestedModel.length > 0 ? ctx.requestedModel : 'Copilot (default)';
-  return catalog.map((a) => ({
-    key: a.key,
-    label: a.label,
-    role: a.role,
-    model: a.agentBacked ? model : 'deterministic',
-    instructions: a.instructions,
-    status: ctx.pipelineActive ? 'running' : 'idle',
-  }));
+  return catalog.map((a) => {
+    const resolved = ctx.resolveModel(a.key);
+    return {
+      key: a.key,
+      label: a.label,
+      role: a.role,
+      model: a.agentBacked ? (resolved && resolved.length > 0 ? resolved : 'Copilot (default)') : 'deterministic',
+      configuredModel: ctx.configuredModels?.[a.key],
+      instructions: a.instructions,
+      status: ctx.pipelineActive ? 'running' : 'idle',
+    };
+  });
 }
