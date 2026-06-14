@@ -743,9 +743,14 @@ export async function pipelineControlForActive(req: PipelineControlRequest): Pro
     if (req.action === 'retry') {
       await doRetry(plan.handle);
       pokeAfterRetry(); // re-drain promptly (don't wait for the periodic sweep)
+      // HEAL-8: push the status projection so the renderer's optimistic removal reconciles against fresh
+      // data (the item drops off the siding) without waiting for the 2.5s poll. Mirrors REVIEW-20's
+      // refreshReviewProjection seam; best-effort, off the UI ack path.
+      void refreshStatusSnapshot().catch(() => {});
       return { ok: true, message: `Retrying ${plan.label}.` };
     }
     await doDismiss(plan.handle);
+    void refreshStatusSnapshot().catch(() => {}); // HEAL-8: reconcile the siding projection (see above)
     return { ok: true, message: `Dismissed ${plan.label}.` };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
