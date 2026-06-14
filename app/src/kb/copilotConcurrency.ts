@@ -11,6 +11,7 @@
 import os from 'node:os';
 import { AdaptiveCeilingController, classifyCopilotError, DEFAULT_ADAPTIVE_CONFIG, type CopilotOutcome } from './copilotAdaptive';
 import { COPILOT_CEILING_MIN, COPILOT_CEILING_MAX } from './scaleConstants';
+import type { ScaleRuntime } from './types';
 
 /** Resolve the global ceiling. Env override wins (tests/measure/future per-Instance setting);
  *  else cores-aware, clamped to a small range so a many-core box can't fan out unbounded. */
@@ -273,6 +274,15 @@ export function isCopilotThrottled(now: number = Date.now()): boolean {
 /** Whether the ceiling is currently Auto/adaptive (vs a fixed env/manual pin) — for Settings/status. */
 export function adaptiveCeilingActive(): boolean {
   return adaptiveController !== null;
+}
+
+/** Live scale runtime snapshot for the Settings "Scale" card throttled indicator (SCALE-7/8). In fixed
+ *  mode (env/manual pin) nothing adapts, so `effective === reference`, never backed-off/throttled. */
+export function copilotScaleRuntime(now: number = Date.now()): ScaleRuntime {
+  const c = adaptiveController;
+  const effective = copilotSemaphore.ceiling;
+  if (!c) return { adaptive: false, effective, reference: effective, throttled: false, backedOff: false };
+  return { adaptive: true, effective: c.ceiling, reference: c.referenceCeiling, throttled: c.isThrottled(now), backedOff: c.isBackedOff };
 }
 
 /** Test seam: force the adaptive controller into a known state (or `null` to clear). Not for app use. */

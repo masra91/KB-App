@@ -123,16 +123,33 @@ export class AdaptiveCeilingController {
   private healthy = 0;
   /** Epoch ms until which we're throttled (no climbing; indicator on). 0 = never throttled yet. */
   private throttledUntil = 0;
+  /** High-water mark — the healthiest ceiling we've sustained (SCALE-7/8 UI). The "throttled" caption
+   *  shows `effective N of {reference} M` while a rate-limit has us backed off below it; once we
+   *  re-probe back up to the reference the indicator clears (effective is no longer < reference). */
+  private reference: number;
   private readonly cfg: AdaptiveConfig;
 
   constructor(cfg: AdaptiveConfig) {
     this.cfg = cfg;
     this.target = clamp(cfg.start, cfg.min, cfg.max);
+    this.reference = this.target;
   }
 
   /** The current target ceiling (what the semaphore should be sized to). */
   get ceiling(): number {
     return this.target;
+  }
+
+  /** The high-water reference ceiling — the "M" in "effective N of M" (the healthy level we climb back
+   *  toward after a back-off). Equals `ceiling` when fully recovered (then the indicator is absent). */
+  get referenceCeiling(): number {
+    return this.reference;
+  }
+
+  /** Whether a rate-limit currently has us backed off below the reference (drives the UI indicator —
+   *  render the "easing off rate limits" caption only while this is true). */
+  get isBackedOff(): boolean {
+    return this.target < this.reference;
   }
 
   /** Whether we're inside the post-rate-limit cooldown window at `now` (drives the "throttled" indicator). */
@@ -161,6 +178,7 @@ export class AdaptiveCeilingController {
         if (now >= this.throttledUntil && this.healthy >= this.cfg.increaseAfter && this.target < this.cfg.max) {
           this.target++;
           this.healthy = 0;
+          if (this.target > this.reference) this.reference = this.target; // new sustained high-water
         }
         break;
       case 'content':

@@ -585,6 +585,19 @@ export interface InstanceSettings {
   copilotCeiling?: number | null;
 }
 
+/** Live scale/concurrency runtime (SPEC-0048 SCALE-7/8) for the Settings "Scale" card's throttled
+ *  indicator. `adaptive` = the Auto/AIMD controller is driving (vs a fixed env/manual pin). `effective`
+ *  = the live global ceiling; `reference` = the healthy high-water it climbs back toward; `backedOff` =
+ *  `effective < reference` (a rate-limit has us reduced → show "effective N of M — easing off rate
+ *  limits"); `throttled` = inside the post-429 cooldown (the actively-easing window, drives the dot). */
+export interface ScaleRuntime {
+  adaptive: boolean;
+  effective: number;
+  reference: number;
+  throttled: boolean;
+  backedOff: boolean;
+}
+
 /** One librarian/stage agent as the Agents view needs it (PANEL-3) — observe + key config. */
 export interface AgentView {
   key: string; // stable agent key (e.g. 'decompose')
@@ -683,6 +696,8 @@ export interface KbApi {
   // Control Panel · Settings + Agents (SPEC-0027 PANEL-3/5)
   getInstanceSettings(): Promise<InstanceSettings>;
   setInstanceSettings(settings: InstanceSettings): Promise<InstanceSettings>;
+  /** Live scale runtime for the Scale card's throttled indicator (SCALE-7/8). */
+  getScaleRuntime(): Promise<ScaleRuntime>;
   listAgents(): Promise<AgentView[]>;
   /** SPEC-0048: the model picker's data — the live CLI's accepted catalog, the currently-resolved
    *  model (after override/probe/floor), and the persisted global pick (if any). */

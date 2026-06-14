@@ -13,6 +13,7 @@ import {
   isCopilotThrottled,
   adaptiveCeilingActive,
   coresDerivedCeiling,
+  copilotScaleRuntime,
   __setAdaptiveControllerForTest,
 } from './copilotConcurrency';
 
@@ -307,6 +308,24 @@ describe('SPEC-0048 SCALE-7/8 — adaptive ceiling (AIMD) runtime wiring', () =>
     await withCopilotSlot(async () => 'fine');
     expect(copilotSemaphore.ceiling).toBe(seed); // one ok < increaseAfter → no climb yet
     expect(isCopilotThrottled()).toBe(false);
+  });
+
+  it('copilotScaleRuntime: fixed mode reports not-adaptive, effective===reference, never backed-off', () => {
+    applyCopilotCeiling(6); // manual pin → fixed
+    const rt = copilotScaleRuntime(1000);
+    expect(rt).toMatchObject({ adaptive: false, effective: 6, reference: 6, throttled: false, backedOff: false });
+  });
+
+  it('copilotScaleRuntime: in Auto, a rate-limit shows backed-off with effective < reference (the indicator data)', () => {
+    applyCopilotCeiling(undefined); // adaptive, seed = cores-derived (>= 2)
+    const seed = copilotSemaphore.ceiling;
+    recordCopilotOutcome(new Error('429'), 1000);
+    const rt = copilotScaleRuntime(1000);
+    expect(rt.adaptive).toBe(true);
+    expect(rt.effective).toBeLessThan(seed);
+    expect(rt.reference).toBe(seed); // climbs back toward the pre-backoff level
+    expect(rt.backedOff).toBe(true);
+    expect(rt.throttled).toBe(true); // inside the cooldown
   });
 });
 

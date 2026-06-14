@@ -41,6 +41,7 @@ const kbApi: KbApi = {
   activityLineage: (id) => ipcRenderer.invoke('kb:activityLineage', id),
   getInstanceSettings: () => ipcRenderer.invoke('kb:getInstanceSettings'),
   setInstanceSettings: (settings) => ipcRenderer.invoke('kb:setInstanceSettings', settings),
+  getScaleRuntime: () => ipcRenderer.invoke('kb:getScaleRuntime'),
   listAgents: () => ipcRenderer.invoke('kb:listAgents'),
   getModelCatalog: () => ipcRenderer.invoke('kb:getModelCatalog'),
   setModel: (id) => ipcRenderer.invoke('kb:setModel', id),

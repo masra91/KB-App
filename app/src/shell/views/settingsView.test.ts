@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountSettings } from './settingsView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
-import type { KbApi, InstanceSettings } from '../../kb/types';
+import type { KbApi, InstanceSettings, ScaleRuntime } from '../../kb/types';
 
 function setApi(autonomyDefault: 'guarded' | 'autonomous', setSpy?: KbApi['setInstanceSettings']): {
   set: ReturnType<typeof vi.fn>;
@@ -214,14 +214,16 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
   });
   afterEach(() => vi.restoreAllMocks());
 
-  function setScaleApi(instance: Partial<InstanceSettings> = {}): { set: ReturnType<typeof vi.fn> } {
+  function setScaleApi(instance: Partial<InstanceSettings> = {}, runtime: Partial<ScaleRuntime> = {}): { set: ReturnType<typeof vi.fn> } {
     const base: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' };
     const set = vi.fn(async (s: InstanceSettings) => s); // echo; the real backend merge is node-tested
+    const rt: ScaleRuntime = { adaptive: true, effective: 4, reference: 4, throttled: false, backedOff: false, ...runtime };
     (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
       getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
       inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
       getInstanceSettings: vi.fn(async () => ({ ...base, ...instance })),
       setInstanceSettings: set as KbApi['setInstanceSettings'],
+      getScaleRuntime: vi.fn(async () => rt),
     };
     return { set };
   }
@@ -359,6 +361,43 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     expect(el.getAttribute('aria-labelledby')).toBe('cap-decompose-label');
     expect(root.querySelector('#cap-decompose-label')?.textContent).toBe('Decompose');
     expect(el.querySelector('.viz-stepper__value')?.getAttribute('aria-live')).toBe('polite');
+  });
+
+  // SPEC-0048 SCALE-7/8: the AIMD throttled indicator (DL ruling — ink-muted "effective N of M",
+  // render ONLY while backed off, ember-breathe dot while in the cooldown; never announce "not throttled").
+  it('throttled indicator: shows "effective N of M" + the ember-breathe dot when backed off in cooldown', async () => {
+    setScaleApi({}, { adaptive: true, effective: 2, reference: 4, backedOff: true, throttled: true });
+    await mountSettings(root);
+    await tick();
+    const el = root.querySelector<HTMLElement>('#scale-throttle')!;
+    expect(el.hidden).toBe(false);
+    expect(el.textContent).toMatch(/effective 2 of 4/);
+    expect(el.textContent).toMatch(/easing off rate limits/i);
+    expect(el.querySelector('.scale-throttle__dot')).toBeTruthy(); // active backing-off marker
+  });
+
+  it('throttled indicator: backed off but past the cooldown → caption, no breathe dot', async () => {
+    setScaleApi({}, { adaptive: true, effective: 3, reference: 6, backedOff: true, throttled: false });
+    await mountSettings(root);
+    await tick();
+    const el = root.querySelector<HTMLElement>('#scale-throttle')!;
+    expect(el.hidden).toBe(false);
+    expect(el.textContent).toMatch(/effective 3 of 6/);
+    expect(el.querySelector('.scale-throttle__dot')).toBeNull(); // not actively in cooldown
+  });
+
+  it('throttled indicator: ABSENT when healthy (effective === reference) — never announces "not throttled"', async () => {
+    setScaleApi({}, { adaptive: true, effective: 4, reference: 4, backedOff: false, throttled: false });
+    await mountSettings(root);
+    await tick();
+    expect(root.querySelector<HTMLElement>('#scale-throttle')!.hidden).toBe(true);
+  });
+
+  it('throttled indicator: ABSENT in fixed mode (manual/env pin — not adaptive)', async () => {
+    setScaleApi({ copilotCeiling: 6 }, { adaptive: false, effective: 6, reference: 6, backedOff: false });
+    await mountSettings(root);
+    await tick();
+    expect(root.querySelector<HTMLElement>('#scale-throttle')!.hidden).toBe(true);
   });
 });
 
