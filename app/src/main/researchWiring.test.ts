@@ -36,4 +36,16 @@ describe('webResearchOptions / researchDepsOptions (one seam for scheduler + Run
     expect(webResearchOptions(noopDevLog)).toHaveProperty('cliPath');
     expect(researchDepsOptions(noopDevLog).web).toHaveProperty('cliPath');
   });
+
+  // SPEC-0048 WS-D(c): researchers must run the PINNED model, not inherit ~/.copilot/settings.json
+  // (the #340 model-pin gap, previously closed for deciders/recall but not researchers). The SDK
+  // options now carry a concrete `model` from resolveCopilotModel (per-researcher pin → global).
+  it('pins the model on both researcher SDK option sets (WS-D — no settings.json inheritance)', () => {
+    const web = researchDepsOptions(noopDevLog).web!;
+    const code = researchDepsOptions(noopDevLog).code!;
+    expect(typeof web.model).toBe('string');
+    expect(web.model!.length).toBeGreaterThan(0); // a concrete pinned model, never undefined
+    expect(typeof code.model).toBe('string');
+    expect(code.model!.length).toBeGreaterThan(0);
+  });
 });
