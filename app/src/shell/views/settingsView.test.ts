@@ -255,6 +255,24 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     expect(root.querySelector('.scale-pin-note')?.textContent).toMatch(/pinned/i);
   });
 
+  it('cap rows align via a 2-col grid; Connect\'s note is a SIBLING below the row, not inside it (alignment)', async () => {
+    setScaleApi();
+    await mountSettings(root);
+    await tick();
+    // Every cap row carries .scale-stage-row (the grid that right-aligns the steppers into one column).
+    const rows = root.querySelectorAll('.scale-stage-row');
+    expect(rows.length).toBe(5); // decompose / connect / claims / compose / archive
+    for (const row of Array.from(rows)) {
+      // exactly label + stepper in the row → clean `1fr auto` alignment (no extra child shifting the stepper).
+      expect(row.querySelector('.viz-field__label')).toBeTruthy();
+      expect(row.querySelector('.viz-stepper')).toBeTruthy();
+      expect(row.querySelector('.scale-pin-note')).toBeNull(); // the note is NOT inside any row
+    }
+    // Connect's pin note exists as a sibling <p> directly after its row (so the stepper stays aligned above).
+    const connectRow = root.querySelector('[data-stepper="cap-connect"]')!.closest('.scale-stage-row')!;
+    expect(connectRow.nextElementSibling?.classList.contains('scale-pin-note')).toBe(true);
+  });
+
   it('renders Manual when a ceiling override is set: row + hint visible, stepper at the value', async () => {
     setScaleApi({ copilotCeiling: 6 });
     await mountSettings(root);

@@ -15,9 +15,9 @@ const ACTIONS: MenuItemConstructorOptions[] = [
 
 describe('buildTrayTemplate (QCAP-14 tray menu composition)', () => {
   it('renders the status readout as READ-ONLY (disabled, no click) above the actions — observatory invariant', () => {
-    const t = buildTrayTemplate({ statusLines: ['◐ Running — ~1,000 waiting', 'Decompose 12 · Linking 340'], actionItems: ACTIONS });
+    const t = buildTrayTemplate({ statusLines: ['◐ Running — ~1,000 waiting', 'Decompose 12 · Connect 340'], actionItems: ACTIONS });
     const status = t.slice(0, 2);
-    expect(status.map((i) => i.label)).toEqual(['◐ Running — ~1,000 waiting', 'Decompose 12 · Linking 340']);
+    expect(status.map((i) => i.label)).toEqual(['◐ Running — ~1,000 waiting', 'Decompose 12 · Connect 340']);
     expect(status.every((i) => i.enabled === false)).toBe(true); // disabled = read-only
     expect(status.every((i) => i.click === undefined)).toBe(true); // no action wired to a status line
   });

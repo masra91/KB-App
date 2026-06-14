@@ -12,7 +12,7 @@ const STAGE_LABELS: Record<string, string> = {
   archivist: 'Archiving',
   archive: 'Archiving',
   decompose: 'Decompose',
-  connect: 'Linking',
+  connect: 'Connect', // DESIGN-TERMS (#361): canonical stage name is "Connect", never "Linking" — the engine id, DESIGN-VIZ signage, and The Line station all say Connect; this display map was the lone outlier (drift). "link" stays a verb in prose only.
   claims: 'Claim extraction',
   panel: 'Control Panel', // the Control-Panel config actor — NOT "Review" (would collide with the Reviews needs-you queue; QA-2 + DEV-4 flagged)
   output: 'Saved answer',

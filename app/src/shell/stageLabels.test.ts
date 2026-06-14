@@ -6,7 +6,7 @@ import { stageDisplayName } from './stageLabels';
 describe('stageDisplayName (#4, display-only)', () => {
   it('maps the known stages/actors to readable names', () => {
     expect(stageDisplayName('claims')).toBe('Claim extraction');
-    expect(stageDisplayName('connect')).toBe('Linking');
+    expect(stageDisplayName('connect')).toBe('Connect');
     expect(stageDisplayName('archivist')).toBe('Archiving');
     expect(stageDisplayName('decompose')).toBe('Decompose');
     expect(stageDisplayName('panel')).toBe('Control Panel'); // not "Review" — avoids the Reviews-queue collision

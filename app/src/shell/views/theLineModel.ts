@@ -105,7 +105,7 @@ export interface FunnelRail {
   /** Volume bucket noun (§6 role 1 / VIZ-10) — the count self-describes as `<count> <noun>`
    *  (`399 entities`). Mirrors `bucketFor`'s stage→bucket mapping. */
   noun: string;
-  /** Decode-on-hover for the volume count (VIZ-10 `title=`): e.g. `399 entities reached Linking`. */
+  /** Decode-on-hover for the volume count (VIZ-10 `title=`): e.g. `399 entities reached Connect`. */
   countTitle: string;
   /** The role-declaring conversion-projection caption to the NEXT stage (§6 role 2 / VIZ-10):
    *  `→ −23 deduped`, `→ +15 ×3.1 fan-out`, or the terminal `5/10 · 50% complete`; '' when none.

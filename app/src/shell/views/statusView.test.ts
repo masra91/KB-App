@@ -126,7 +126,7 @@ describe('The Line — station spine + gauge-rails (§2/§6, VIZ-3/4)', () => {
 
   it('renders all six stations with their state glyph + hue (state never colour alone)', () => {
     const h = spine();
-    for (const name of ['Capture', 'Archiving', 'Decompose', 'Linking', 'Claim extraction', 'Promote']) expect(h).toContain(name);
+    for (const name of ['Capture', 'Archiving', 'Decompose', 'Connect', 'Claim extraction', 'Promote']) expect(h).toContain(name);
     expect(h).toContain('line-station-error'); // connect is error
     expect(h).toContain('line-station-glyph viz-state-error'); // its glyph carries oxide (large element — allowed)
   });
@@ -240,15 +240,15 @@ describe('The Line — funnel-caption legibility, each number declares its role 
   const spine = (): string => spineHtml(buildStations(STALLED));
 
   it('volume carries its bucket noun + a decode-on-hover title so a bare count self-describes (role 1)', () => {
-    const h = spine(); // connect (Linking) volume = entities(7)
+    const h = spine(); // connect (Connect) volume = entities(7)
     expect(h).toContain('line-rail-noun viz-signage'); // the bucket-noun micro-unit renders
-    expect(h).toContain('>entities</span>'); // Linking's volume names its bucket
-    expect(h).toContain('title="7 entities reached Linking"'); // decode-on-hover
+    expect(h).toContain('>entities</span>'); // Connect's volume names its bucket
+    expect(h).toContain('title="7 entities reached Connect"'); // decode-on-hover
   });
 
   it('the conversion projection is tied to the NEXT stage (→ + signifier + title) so it can never read as a backlog (role 2)', () => {
     const h = spine();
-    expect(h).toContain('→ +15 ×3.1 fan-out'); // Linking entities(7) → Claim extraction(22)
+    expect(h).toContain('→ +15 ×3.1 fan-out'); // Connect entities(7) → Claim extraction(22)
     expect(h).toContain('title="projected fan-out ×3.1 into Claim extraction"'); // hover decodes it as flows-to-next
   });
 
@@ -258,7 +258,7 @@ describe('The Line — funnel-caption legibility, each number declares its role 
     expect(h).toContain('line-station-rail-lane');
     expect(h).toContain('line-station-live');
     expect(h).toContain('line-station-queue'); // connect has queueDepth 1
-    expect(h).toContain('title="1 waiting to be processed at Linking"'); // queue = waiting-here, not flowing
+    expect(h).toContain('title="1 waiting to be processed at Connect"'); // queue = waiting-here, not flowing
   });
 
   it('a STUCK stage with backlog takes brass (needs-you); a deep but draining queue stays calm — cry-wolf guard (role 3)', () => {
@@ -402,7 +402,7 @@ describe('The Line — pivot toggle (VIZ-5) + secondary readout (OBS-6/7/15)', (
 
   it('lockHtml shows holder + waiters + held-duration on a normal hold; free when unheld', () => {
     const held = lockHtml({ held: true, waiters: 1, holder: 'connect', since: '2026-06-02T00:01:00.000Z', heldMs: 3000 });
-    expect(held).toContain('held by <strong>Linking</strong>'); // display name (#4)
+    expect(held).toContain('held by <strong>Connect</strong>'); // display name (#4)
     expect(held).toContain('1 waiting');
     expect(held).toContain('3s');
     expect(held).not.toContain('Stuck');

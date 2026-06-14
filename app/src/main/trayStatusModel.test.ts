@@ -28,7 +28,7 @@ describe('trayStatusModel (QCAP-14 — read-only tray live-status)', () => {
     // headline: total 1000 → rounded + `~` + the ruled noun "waiting"; per-stage counts stay exact.
     expect(lines).toEqual([
       '◐ Running — ~1,000 waiting',
-      'Decompose 12 · Linking 340 · Claim extraction 648', // canonical stageDisplayName (single-vocabulary)
+      'Decompose 12 · Connect 340 · Claim extraction 648', // canonical stageDisplayName (single-vocabulary)
     ]);
   });
 
@@ -53,7 +53,7 @@ describe('trayStatusModel (QCAP-14 — read-only tray live-status)', () => {
         { stage: 'promote', queueDepth: 5 }, // smallest → dropped from the top-3, collapses to …
       ]),
     );
-    expect(lines[1]).toBe('Decompose 12 · Linking 340 · Claim extraction 648 · …');
+    expect(lines[1]).toBe('Decompose 12 · Connect 340 · Claim extraction 648 · …');
     expect(MAX_TRAY_STAGES).toBe(3);
   });
 
