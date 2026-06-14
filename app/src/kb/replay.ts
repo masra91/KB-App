@@ -37,6 +37,19 @@ const REPLAY_AUDIT_REL = path.join('replay', 'audit.jsonl');
 /** Rebuildable status cache (gitignored): cleared so the UI reflects the rebuild ramp, not stale state. */
 const STATUS_CACHE_REL = path.join('.kb', 'cache', 'status.json');
 
+/** SPEC-0049 HEAL-9 — the GRAVEYARD a reset must NOT carry forward: the error + telemetry state that
+ *  lives OUTSIDE the purged derived trees and is NOT epoch-scoped. Set-aside/park markers live in the
+ *  (kept) source + connect audits but the readers (`readClaimsState`/connect state) scope to the
+ *  current replay epoch (REPLAY-6), so the epoch marker already voids them. What survives a replay and
+ *  keeps showing stale "graveyard" in Status is the vault-root working-zone telemetry: the perf SPANS
+ *  (`spans.jsonl` + its rotations) feeding the perf index, and the dev-log error trail (`logs/`) feeding
+ *  the Status "recent errors". Both are gitignored, never promoted, rebuilt as the pipeline re-runs —
+ *  so a reset clears them (HEAL-9). The dev-log appends per-write with no held handle, so removing the
+ *  dir mid-session is safe (the next entry re-creates it). Lives at the VAULT ROOT (the tracer + dev-log
+ *  are rooted at `vaultPath`, `createVaultTracer`/`createVaultDevLog`), not the staging worktree. */
+const RESET_TELEMETRY_GLOB = 'spans.jsonl'; // matches `spans.jsonl` + `spans.jsonl.1` … rotations
+const DEVLOG_DIR_REL = path.join('.kb', 'cache', 'logs');
+
 /** Trees `git clean` may scrub of untracked leftovers from an interrupted prior purge (REPLAY-13).
  *  Scoped to derived paths so `sources/` and `inbox/` are never touched. */
 const CLEAN_SCOPE = [...PURGE_DIRS, 'connect', 'replay'];
@@ -64,6 +77,30 @@ async function pathExists(p: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * SPEC-0049 HEAL-9 — clear the vault-root error + telemetry graveyard so a reset doesn't carry it
+ * forward: the perf `spans.jsonl` (+ its rotations) and the dev-log `logs/` error trail. Both are
+ * gitignored working-zone caches (never promoted), rebuilt as the pipeline re-runs — so a clean &
+ * rebuild starts with a clean Status surface (no stale "recent errors" / pre-reset perf). Best-effort:
+ * a clear failure must never fail the reset. (Set-aside/park markers are already voided by the replay
+ * epoch — REPLAY-6 — so they need no physical scrub.) Lives at the VAULT ROOT, where the tracer +
+ * dev-log are rooted (`createVaultTracer`/`createVaultDevLog(vaultPath)`).
+ */
+async function clearResetGraveyard(vaultRoot: string): Promise<void> {
+  const cacheDir = path.join(vaultRoot, '.kb', 'cache');
+  try {
+    const entries = await fs.readdir(cacheDir);
+    await Promise.all(
+      entries
+        .filter((e) => e === RESET_TELEMETRY_GLOB || e.startsWith(`${RESET_TELEMETRY_GLOB}.`)) // spans.jsonl + .1/.2 rotations
+        .map((e) => fs.rm(path.join(cacheDir, e), { force: true }).catch(() => {})),
+    );
+  } catch {
+    /* no cache dir yet → nothing to clear */
+  }
+  await fs.rm(path.join(vaultRoot, DEVLOG_DIR_REL), { recursive: true, force: true }).catch(() => {}); // dev-log error trail
 }
 
 /**
@@ -137,6 +174,11 @@ async function purgeResetPromote(vaultRoot: string, stagingWt: string, opts: Rep
   // 4) Clear the rebuildable status cache (gitignored; not part of the commit) so the pipeline-
   //    status surface reflects the rebuild rather than stale pre-replay numbers.
   await fs.rm(path.join(stagingWt, STATUS_CACHE_REL), { force: true }).catch(() => {});
+
+  // 4b) HEAL-9: clear the vault-root error + telemetry graveyard (perf spans + dev-log) so the reset
+  //     starts with a clean Status surface — not surfacing pre-reset errors/perf. Set-aside/park are
+  //     already voided by the epoch marker above (REPLAY-6); this covers the non-epoch-scoped state.
+  await clearResetGraveyard(vaultRoot);
 
   // 5) Commit the purge + reset as ONE atomic advance of `staging` (REPLAY-8/10/13).
   await git.raw('add', '-A');
