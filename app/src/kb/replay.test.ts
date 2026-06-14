@@ -279,3 +279,35 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
     }
   });
 });
+
+// SPEC-0049 HEAL-9 — a reset must not carry the GRAVEYARD forward. Set-aside/park markers are already
+// voided by the replay epoch (REPLAY-6, covered above); this pins the non-epoch-scoped half — the
+// vault-root error + telemetry state (perf spans + the dev-log error trail) that REPLAY did NOT clear,
+// so a clean & rebuild starts with a clean Status surface (no stale "recent errors" / pre-reset perf).
+describe.skipIf(!gitAvailable)('Full Replay — HEAL-9 reset hygiene (SPEC-0049): clears the error + telemetry graveyard', () => {
+  it('clears vault-root spans (+ rotations) and the dev-log on reset — the graveyard is not carried forward', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // Seed the graveyard at the VAULT ROOT (where the tracer + dev-log are rooted): perf spans +
+      // a rotation + a dev-log error trail — gitignored working-zone state a reset must scrub.
+      const cache = path.join(root, '.kb', 'cache');
+      await fs.mkdir(path.join(cache, 'logs'), { recursive: true });
+      await fs.writeFile(path.join(cache, 'spans.jsonl'), '{"span":"stale-perf"}\n');
+      await fs.writeFile(path.join(cache, 'spans.jsonl.1'), '{"span":"older-perf"}\n');
+      await fs.writeFile(path.join(cache, 'logs', 'pipeline.log'), '{"level":"error","event":"decompose.failed"}\n');
+
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // HEAL-9 (fails-before/passes-after): pre-fix REPLAY left these, surfacing a stale graveyard.
+      expect(await pathExists(path.join(cache, 'spans.jsonl'))).toBe(false);
+      expect(await pathExists(path.join(cache, 'spans.jsonl.1'))).toBe(false); // rotations too
+      expect(await pathExists(path.join(cache, 'logs'))).toBe(false); // dev-log error trail gone
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+});
