@@ -18,6 +18,21 @@ import type { ReviewSubjectCandidate } from '../../kb/reviews';
 /** Poll cadence — matches the rail badge (shell.ts) so the list and the count never drift. */
 const REVIEW_POLL_MS = 5000;
 
+// Canonical ULID shape (Crockford base32, 26 chars), re-stated as a pure regex — `ulid.ts` value-imports
+// `node:crypto` and THIS module is renderer-bundled (#248 boundary). Global + token-bounded so it scrubs
+// a bare ULID anywhere in user-surfaced text. Excludes I/L/O/U like Crockford's alphabet.
+const ULID_TOKEN_RE = /\b[0-9A-HJKM-NP-TV-Z]{26}\b/gi;
+
+/**
+ * Backstop render guard (PRIN-24 / "never surface ULIDs"): strip any bare source/entity ULID that a
+ * model parroted into agent-authored review text (question / detail / gloss). The PRIMARY fix feeds the
+ * Connect prompt source TITLES not ids (connectAgent.ts), so this should rarely fire — but a stray id
+ * must never reach the Principal. Replaced with a neutral word, not deleted, so the sentence still reads.
+ */
+function scrubUlids(text: string | null | undefined): string {
+  return typeof text === 'string' ? text.replace(ULID_TOKEN_RE, 'a source') : '';
+}
+
 // View-local state (the shell mounts this view once; reset on each mount for test isolation).
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 let renderedSig = ''; // the open-review id set currently painted — re-render only when it changes
@@ -179,11 +194,11 @@ function reviewItemHtml(r: ReviewSummary): string {
   return `
       <li class="review" data-id="${esc(r.id)}">
         ${err}
-        <div class="review-q">${esc(r.question)}</div>
+        <div class="review-q">${esc(scrubUlids(r.question))}</div>
         ${candidatesBlock(r)}
         <details class="review-detail">
           <summary>Why this matters</summary>
-          <p>${esc(r.detail)}</p>
+          <p>${esc(scrubUlids(r.detail))}</p>
           ${refs.length ? `<p class="muted">About: ${refs.map(esc).join(', ')}</p>` : ''}
           <p class="muted">Raised by: ${esc(r.stage)}</p>
         </details>
@@ -261,7 +276,7 @@ function candidateRowHtml(c: ReviewSubjectCandidate): string {
   return `
         <li class="review-candidate viz-spine">
           <span class="review-candidate-name viz-signage">${esc(c.name)}</span>
-          <span class="review-candidate-gloss viz-body">${esc(c.gloss)}</span>
+          <span class="review-candidate-gloss viz-body">${esc(scrubUlids(c.gloss))}</span>
           ${link}
         </li>`;
 }
