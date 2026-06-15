@@ -398,8 +398,10 @@ The point of all this (SPEC-0000):
   asar). The packaging step itself is the cheapest gate that exercises the real bundler+asar
   path, so it belongs on every PR, not just the opt-in e2e matrix. Linux suffices because the
   Vite-build + asar-pack pipeline is platform-agnostic — a bundling regression fails there
-  regardless of the shipped OS; the mac/Windows package step stays in the e2e job (where it also
-  feeds the boot smoke), so this adds a gate without paying the matrix cost.
+  regardless of the shipped OS. The macOS package build (the native-dep catch, #247) runs in a
+  dedicated `package-macos` job triggered on push-to-`main` / the `macos` PR label / dispatch (see
+  the Changelog), and the Windows package step stays in the e2e job, so the per-PR path adds the
+  gate without paying the 10× macOS matrix cost.
 - **Scope (no silent caps, TEST-11):** build-only. It catches *packaging* breaks, not packaged
   *runtime* breaks beyond what the opt-in boot-survival smoke covers. BUG #65's actual failure
   mode — a packaged **Recall** round-trip returning ungrounded — is caught by the recall-wiring
@@ -453,6 +455,14 @@ The point of all this (SPEC-0000):
 
 ## 5. Changelog
 
+- 2026-06-15 — **macOS package check moved off the per-PR path (CI-COST-REDUCTION / SPECSYS-7)**.
+  The `package` build-check had drifted to an `ubuntu+macos` matrix running on every PR; macOS cloud
+  runners bill at 10× and were the dominant recurring Actions spend. Restored TEST-20's Linux-only
+  per-PR gating intent: `package` is ubuntu-only again, and the macOS package build (the #247
+  `fsevents` / `os:["darwin"]` native-dep catch) now runs in a dedicated `package-macos` job
+  triggered on push-to-`main` (post-merge / pre-release backstop), the opt-in `macos` PR label, or
+  `workflow_dispatch` — not on routine PRs. No new deps; cost/coverage tradeoff documented in
+  `ci.yml` (TEST-11 no-silent-caps).
 - 2026-06-02 — **TEST-21 added + green** (recall-wiring regression guard, BUG #65). New
   `app/e2e/recall.e2e.ts`: drives REAL recall (no `KB_ASK_E2E_STUB`) with a fake `copilot` on
   PATH (+ a fake login shell so `ensurePath` prepends it first, beating a real install) and
