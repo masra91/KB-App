@@ -68,6 +68,9 @@ the **stage is Connect; its output is links**. "Linking" as a stage name is reti
 |---|---|---|
 | **Ceiling** | Total concurrency across all stages (`copilotCeiling`); Auto (cores-derived) or Manual | "Max", "Limit", "Parallelism" |
 | **Cap** | Per-stage concurrency (Decompose/Claims/Connect/Compose/Archive) | "Stage limit", "Slots" (in prose) |
+| **Answer time** | How long recall may work before it returns its best grounded answer so far (`recallBudgetMs`; edited in whole minutes at the UI boundary) | "Timeout", "Budget", "Max time" |
+| **Search depth** | How far recall traverses entities/claims/links to gather evidence; Auto ("Scale to KB size") or Manual — same grammar as the Ceiling toggle | "Recall budget", "Max tool calls", "Limit" |
+| **Search steps** | The per-question retrieval step count set when Search depth is Manual (`recallMaxToolCalls`, 4–24) | "Tool calls", "Iterations", "Max" |
 | **Pending** | Work not yet finished at a stage = **queued** + **in-progress** (`pendingForStage`) | "Backlog", "Waiting" (ambiguous) |
 | **Queued** | Pending items not yet picked up (the slate segment) | "Waiting", "Pending" (that's the sum) |
 | **In-progress** | Items actively draining at a stage (the ember segment) | "Active" in prose (reserve "▣ N active" for the live count glyph) |
