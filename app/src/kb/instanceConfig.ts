@@ -20,14 +20,19 @@ export const DEFAULT_DEV_LOG_LEVEL: DevLogLevel = 'info';
  *  at registration, so persistence only needs a non-empty string here. */
 export const DEFAULT_QUICK_CAPTURE_ACCELERATOR = 'Alt+Space';
 
-/** Recall's interactive work budget (ASK-17): the wall-clock the SDK `session.idle` wait is given
- *  before recall stops and returns its best grounded partial. The interactive instance of the
- *  JOBS-17 work-depth knob. The shipped 60s default was too tight for a real grounded multi-hop over
- *  a large KB (1007 entities) — raised to 4min. Principal-configurable (Settings) within sane bounds:
- *  a query the human is actively waiting on should finish, but never hang unboundedly. */
-export const DEFAULT_RECALL_BUDGET_MS = 240_000;
-export const RECALL_BUDGET_MS_MIN = 60_000; // never below the old hard 60s
-export const RECALL_BUDGET_MS_MAX = 600_000; // 10min ceiling — an interactive op must stay bounded
+// SPEC-0026 ASK-17/19 — the recall budget constants/clamps live in the PURE `recallConstants` module
+// (no node import) so the renderer's "Recall & Ask" Settings card can consume the bounds without
+// pulling this node-only file into the Vite bundle (the renderer→node-builtin boundary). Imported for
+// local use + re-exported so existing main-process import sites (recall.ts, pipeline.ts) stay unchanged.
+import {
+  DEFAULT_RECALL_BUDGET_MS,
+  RECALL_BUDGET_MS_MIN,
+  RECALL_BUDGET_MS_MAX,
+  clampRecallBudgetMs,
+  clampRecallMaxToolCalls,
+  resolveRecallMaxToolCallsWrite,
+} from './recallConstants';
+export { DEFAULT_RECALL_BUDGET_MS, RECALL_BUDGET_MS_MIN, RECALL_BUDGET_MS_MAX, clampRecallBudgetMs, clampRecallMaxToolCalls, resolveRecallMaxToolCallsWrite };
 
 // SPEC-0048 SCALE — the stage-parallelism constants/clamps live in the PURE `scaleConstants` module
 // (no node import) so the renderer's Settings UI can consume them without pulling this node-only file
@@ -67,6 +72,10 @@ export interface InstanceConfig {
    *  recall returns its best grounded partial. Default {@link DEFAULT_RECALL_BUDGET_MS}; clamped to
    *  [{@link RECALL_BUDGET_MS_MIN}, {@link RECALL_BUDGET_MS_MAX}]. */
   recallBudgetMs: number;
+  /** Recall's explicit retrieval tool-call override (ASK-19 / JOBS-17): a per-instance fixed hop/
+   *  tool-call ceiling that wins over the graph-size-scaled {@link recallBudget} default. Omitted ⇒
+   *  the scaled default ("scale to KB size"). Clamped to [{@link RECALL_BUDGET}.MIN, .MAX] on read. */
+  recallMaxToolCalls?: number;
   /** ORCH-28 model-resilience: an ordered launch-model preference list overriding the in-app default
    *  (the catalog moves faster than our releases, so re-pinning must not need a code release). Omitted
    *  ⇒ the code default (`copilotModelProbe.DEFAULT_MODEL_PREFERENCES`). The startup probe resolves the
@@ -98,13 +107,6 @@ export function defaultInstanceConfig(): InstanceConfig {
   };
 }
 
-/** Clamp a configured recall budget into the sane bounds (ASK-17); a non-finite value → default. */
-export function clampRecallBudgetMs(v: unknown): number {
-  const n = typeof v === 'number' ? v : Number.NaN;
-  if (!Number.isFinite(n)) return DEFAULT_RECALL_BUDGET_MS;
-  return Math.max(RECALL_BUDGET_MS_MIN, Math.min(RECALL_BUDGET_MS_MAX, n));
-}
-
 /** Read the Instance config (PANEL-5). Missing/malformed file or unknown posture → safe defaults. */
 export async function readInstanceConfig(root: string): Promise<InstanceConfig> {
   let raw: string;
@@ -133,6 +135,9 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
       ? o.quickCaptureAccelerator
       : DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   const recallBudgetMs = clampRecallBudgetMs(o.recallBudgetMs); // ASK-17: absent/garbled/out-of-range → safe
+  // ASK-19: the optional retrieval tool-call override — absent/garbled/out-of-range ⇒ undefined (the
+  // graph-size-scaled default applies); a sane number is clamped to [RECALL_BUDGET.MIN, .MAX].
+  const recallMaxToolCalls = clampRecallMaxToolCalls(o.recallMaxToolCalls);
   // ORCH-28: a configured preference list must be a non-empty array of non-empty strings, else omit
   // (→ the code default). Trimmed; junk entries dropped; an all-junk/empty result is treated as absent.
   let modelPreferences: string[] | undefined;
@@ -172,6 +177,7 @@ export async function readInstanceConfig(root: string): Promise<InstanceConfig> 
     devLogLevel,
     quickCaptureAccelerator,
     recallBudgetMs,
+    ...(recallMaxToolCalls !== undefined ? { recallMaxToolCalls } : {}),
     ...(modelPreferences ? { modelPreferences } : {}),
     ...(model ? { model } : {}),
     ...(agentModels ? { agentModels } : {}),

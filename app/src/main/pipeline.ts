@@ -55,7 +55,7 @@ import { readJobRegistry, patchJob, upsertJob, jobRegistryPath } from '../kb/job
 import { readJournal } from '../kb/jobStage';
 import { JOB_CATALOG, catalogEntry, facingForType } from '../kb/jobCatalog';
 import { buildJobViews, isSchedulePreset, isAutonomyPosture, jobConfigAuditEvents } from '../kb/jobsPanel';
-import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, resolveStageCaps, clampStageCap, resolveCeilingWrite, SCALE_STAGES, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type ScaleStage, type InstanceConfig } from '../kb/instanceConfig';
+import { readInstanceConfig, writeInstanceConfig, instanceConfigPath, resolveJobPosture, defaultInstanceConfig, clampRecallBudgetMs, resolveRecallMaxToolCallsWrite, resolveStageCaps, clampStageCap, resolveCeilingWrite, SCALE_STAGES, DEV_LOG_LEVELS, DEFAULT_DEV_LOG_LEVEL, DEFAULT_QUICK_CAPTURE_ACCELERATOR, DEFAULT_RECALL_BUDGET_MS, type DevLogLevel, type ScaleStage, type InstanceConfig } from '../kb/instanceConfig';
 import { applyCopilotCeiling } from '../kb/copilotConcurrency';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { AGENT_CATALOG, buildAgentViews } from '../kb/agentCatalog';
@@ -1041,6 +1041,7 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
   let devLogLevel: DevLogLevel = DEFAULT_DEV_LOG_LEVEL;
   let quickCaptureAccelerator: string = DEFAULT_QUICK_CAPTURE_ACCELERATOR;
   let recallBudgetMs: number = DEFAULT_RECALL_BUDGET_MS;
+  let recallMaxToolCalls: number | undefined;
   let stageCaps: Partial<Record<ScaleStage, number>> | undefined;
   let copilotCeiling: number | undefined;
   let priorCfg = defaultInstanceConfig();
@@ -1058,6 +1059,10 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
     // ASK-17: preserve-on-omission — an omitted recall budget keeps prior; a provided one is clamped to
     // the sane bounds. (prior.recallBudgetMs is always set: readInstanceConfig fills it.)
     recallBudgetMs = settings.recallBudgetMs === undefined ? (prior.recallBudgetMs ?? DEFAULT_RECALL_BUDGET_MS) : clampRecallBudgetMs(settings.recallBudgetMs);
+    // ASK-19: the retrieval tool-call override — `undefined` preserves prior (#102), `null` CLEARS it
+    // back to the graph-size-scaled default ("scale to KB size"), a number is clamped (pure +
+    // unit-tested in recallConstants). Omitted from the write below ⇒ no override key persisted.
+    recallMaxToolCalls = resolveRecallMaxToolCallsWrite(priorCfg.recallMaxToolCalls, settings.recallMaxToolCalls);
     // SCALE-1/2 preserve-on-omission (#102): a wholly-omitted `stageCaps`/`copilotCeiling` keeps prior;
     // a provided one is merged key-by-key + clamped (Connect pinned to 1, SCALE-5). The model override
     // + preference list (#345) are likewise preserved on the write below — InstanceSettings carries
@@ -1079,13 +1084,14 @@ export async function setActiveInstanceSettings(settings: InstanceSettings): Pro
       devLogLevel,
       quickCaptureAccelerator,
       recallBudgetMs,
+      ...(recallMaxToolCalls !== undefined ? { recallMaxToolCalls } : {}), // ASK-19: omitted ⇒ scaled default
       ...(priorCfg.modelPreferences ? { modelPreferences: priorCfg.modelPreferences } : {}), // preserve MODEL (#345)
       ...(priorCfg.model ? { model: priorCfg.model } : {}),
       ...(priorCfg.agentModels ? { agentModels: priorCfg.agentModels } : {}), // preserve per-agent picks (SPEC-0048)
       ...(stageCaps ? { stageCaps } : {}),
       ...(copilotCeiling !== undefined ? { copilotCeiling } : {}),
     });
-    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs} ceiling=${copilotCeiling ?? 'default'} caps=${JSON.stringify(stageCaps ?? {})}`);
+    await commitControlFile(root, instanceConfigPath(root), `instance autonomyDefault=${settings.autonomyDefault} devLogLevel=${devLogLevel} quickCaptureAccelerator=${quickCaptureAccelerator} recallBudgetMs=${recallBudgetMs} recallMaxToolCalls=${recallMaxToolCalls ?? 'scaled'} ceiling=${copilotCeiling ?? 'default'} caps=${JSON.stringify(stageCaps ?? {})}`);
   }, 'instance-settings:write');
   // QCAP-6: apply a changed hotkey live (no restart) — conflict-aware via the agent; degrades to the
   // menubar if the new accelerator clashes (QCAP-9). No-op when running headless without an agent.

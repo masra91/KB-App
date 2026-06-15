@@ -425,11 +425,13 @@ export function registerIpc(): void {
     // app (PATH was ensured at boot, STACK-9). Null → SDK default search (dev fallback).
     const cliPath = resolveExecutable('copilot') ?? undefined;
     // ASK-17: hand recall the Principal-configured work budget (from Instance Settings on `staging`)
-    // so a real grounded multi-hop has room to finish past the SDK's tight 60s default.
-    const { recallBudgetMs } = await getActiveInstanceSettings();
+    // so a real grounded multi-hop has room to finish past the SDK's tight 60s default. ASK-19: also
+    // forward the optional retrieval tool-call override (`undefined` ⇒ recall's graph-size-scaled
+    // default applies — see `recallBudget`; a set value wins as `opts.maxToolCalls`).
+    const { recallBudgetMs, recallMaxToolCalls } = await getActiveInstanceSettings();
     // ORCH-16: pin the model recall's SDK session runs on, same as the enrich deciders — prod
     // otherwise passed no model and the SDK inherited `~/.copilot/settings.json` (model-pin gap).
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, model: resolveCopilotModel(undefined, 'recall') });
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, maxToolCalls: recallMaxToolCalls ?? undefined, model: resolveCopilotModel(undefined, 'recall') });
   });
 
   // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,

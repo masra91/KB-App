@@ -401,6 +401,143 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
   });
 });
 
+// SPEC-0026 ASK-19 — the "Recall & Ask" card exposes the recall work budget: the answer-TIME budget
+// (edited in minutes, persisted as ms) + the retrieval SEARCH-DEPTH, Auto (scaled to KB size) unless
+// the Principal pins a manual override (recallMaxToolCalls). IPC echo-mocked; the clamp/preserve merge
+// is node-tested (recallConstants + instanceConfig + pipeline). Here we cover the view + wiring contract.
+describe('Settings · Recall & Ask (SPEC-0026 ASK-19 — recall work-budget knobs)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  function setRecallApi(instance: Partial<InstanceSettings> = {}): { set: ReturnType<typeof vi.fn> } {
+    const base: InstanceSettings = { autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space' };
+    const set = vi.fn(async (s: InstanceSettings) => s); // echo; the real backend merge is node-tested
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      getState: vi.fn(async () => ({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'KB', createdAt: 't' } })),
+      inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
+      getInstanceSettings: vi.fn(async () => ({ ...base, ...instance })),
+      setInstanceSettings: set as KbApi['setInstanceSettings'],
+      getScaleRuntime: vi.fn(async () => ({ adaptive: true, effective: 4, reference: 4, throttled: false, backedOff: false })),
+    };
+    return { set };
+  }
+  const stepper = (id: string): HTMLElement => root.querySelector<HTMLElement>(`[data-stepper="${id}"]`)!;
+  const stepperValue = (id: string): string => stepper(id).querySelector<HTMLElement>('.viz-stepper__value')!.textContent ?? '';
+  const bump = (id: string, dir: 1 | -1): void => stepper(id).querySelector<HTMLButtonElement>(`[data-step="${dir}"]`)!.click();
+  const btn = (id: string, dir: 1 | -1): HTMLButtonElement => stepper(id).querySelector<HTMLButtonElement>(`[data-step="${dir}"]`)!;
+
+  it('renders the time budget in minutes + search depth Auto by default (no override): manual row + hint state', async () => {
+    setRecallApi(); // no recallBudgetMs (legacy) → 4min default; no recallMaxToolCalls → Auto
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('recall-time')).toBe('4'); // DEFAULT_RECALL_BUDGET_MS (240000) → 4 minutes
+    expect(checked(root, 'recall-depth-mode')).toBe('auto');
+    expect((root.querySelector('#recall-depth-manual-row') as HTMLElement).hidden).toBe(true);
+    expect((root.querySelector('#recall-depth-hint') as HTMLElement).hidden).toBe(false); // the "scaled to KB" reassurance
+  });
+
+  it('reflects a saved time budget in minutes (360000ms → 6)', async () => {
+    setRecallApi({ recallBudgetMs: 360_000 });
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('recall-time')).toBe('6');
+  });
+
+  it('bumping the time stepper persists recallBudgetMs as ms (×60000), full settings (preserve-on-omission)', async () => {
+    const { set } = setRecallApi(); // seeds at 4 min
+    await mountSettings(root);
+    await tick();
+    bump('recall-time', 1); // 4 → 5 minutes
+    await tick();
+    expect(stepperValue('recall-time')).toBe('5');
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ recallBudgetMs: 300_000, autonomyDefault: 'guarded', devLogLevel: 'info' }));
+  });
+
+  it('time budget bound-affordance: at the 10-minute ceiling, increment is disabled', async () => {
+    setRecallApi({ recallBudgetMs: 600_000 }); // RECALL_BUDGET_MS_MAX → 10 minutes
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('recall-time')).toBe('10');
+    expect(btn('recall-time', 1).disabled).toBe(true); // can't exceed the 10-minute ceiling
+    expect(btn('recall-time', -1).disabled).toBe(false);
+  });
+
+  it('renders Manual search depth when an override is set: row visible, hint hidden, stepper at the value', async () => {
+    setRecallApi({ recallMaxToolCalls: 16 });
+    await mountSettings(root);
+    await tick();
+    expect(checked(root, 'recall-depth-mode')).toBe('manual');
+    expect((root.querySelector('#recall-depth-manual-row') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#recall-depth-hint') as HTMLElement).hidden).toBe(true);
+    expect(stepperValue('recall-depth')).toBe('16');
+  });
+
+  it('Auto → Manual sets recallMaxToolCalls to the stepper seed + reveals the row (ASK-19 per-instance override)', async () => {
+    const { set } = setRecallApi(); // Auto; depth stepper seeds at 12
+    await mountSettings(root);
+    await tick();
+    pick(root, 'recall-depth-mode', 'manual');
+    await tick();
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ recallMaxToolCalls: 12 }));
+    expect(checked(root, 'recall-depth-mode')).toBe('manual');
+    expect((root.querySelector('#recall-depth-manual-row') as HTMLElement).hidden).toBe(false);
+    expect((root.querySelector('#recall-depth-hint') as HTMLElement).hidden).toBe(true);
+  });
+
+  it('Manual → Auto CLEARS the override (recallMaxToolCalls: null) + hides the row, restores the hint', async () => {
+    const { set } = setRecallApi({ recallMaxToolCalls: 20 });
+    await mountSettings(root);
+    await tick();
+    pick(root, 'recall-depth-mode', 'auto');
+    await tick();
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ recallMaxToolCalls: null }));
+    expect(checked(root, 'recall-depth-mode')).toBe('auto');
+    expect((root.querySelector('#recall-depth-manual-row') as HTMLElement).hidden).toBe(true);
+    expect((root.querySelector('#recall-depth-hint') as HTMLElement).hidden).toBe(false);
+  });
+
+  it('the manual search-depth stepper persists recallMaxToolCalls on change', async () => {
+    const { set } = setRecallApi({ recallMaxToolCalls: 8 });
+    await mountSettings(root);
+    await tick();
+    bump('recall-depth', 1); // 8 → 9
+    await tick();
+    expect(stepperValue('recall-depth')).toBe('9');
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ recallMaxToolCalls: 9 }));
+  });
+
+  it('search-depth bound-affordance: clamps at the raised MAX (24) — increment disabled at the cap', async () => {
+    setRecallApi({ recallMaxToolCalls: 24 }); // RECALL_BUDGET.MAX
+    await mountSettings(root);
+    await tick();
+    expect(stepperValue('recall-depth')).toBe('24');
+    expect(btn('recall-depth', 1).disabled).toBe(true); // never above the raised cap
+  });
+
+  it('tolerates a garbled/missing time budget without crashing the card (ENG-16)', async () => {
+    setRecallApi({ recallBudgetMs: NaN as unknown as number }); // a hand-edited/old value
+    await mountSettings(root);
+    await tick();
+    expect(root.querySelector('#recall-status')).toBeTruthy(); // card rendered, not a blank/crash
+    expect(stepperValue('recall-time')).toBe('4'); // garbled → the default, in minutes
+  });
+
+  it('renders the steppers as labelled a11y groups (role=group + aria-labelledby + a live value)', async () => {
+    setRecallApi();
+    await mountSettings(root);
+    await tick();
+    const el = stepper('recall-time');
+    expect(el.getAttribute('role')).toBe('group');
+    expect(el.getAttribute('aria-labelledby')).toBe('recall-time-label');
+    expect(el.querySelector('.viz-stepper__value')?.getAttribute('aria-live')).toBe('polite');
+    expect(root.querySelector('#recall-depth-mode')?.getAttribute('role')).toBe('radiogroup');
+  });
+});
+
 describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)', () => {
   let root: HTMLElement;
   beforeEach(() => {

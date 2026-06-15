@@ -273,29 +273,39 @@ async function snapshot(root: string, subdirs: string[]): Promise<Record<string,
 }
 
 // ── Retrieval budget scaling (F3 / dogfood #5) ────────────────────────────────────────────────
-describe('recallBudget — scales the tool-call cap to graph size (dogfood #5)', () => {
+describe('recallBudget — scales the tool-call cap to graph size (dogfood #5; ASK-19 raise BASE 2→4, MAX 16→24)', () => {
+  it('the raised bounds are pinned (regression: BASE 4, MAX 24)', () => {
+    expect(RECALL_BUDGET.BASE).toBe(4);
+    expect(RECALL_BUDGET.MAX).toBe(24);
+    expect(RECALL_BUDGET.MIN).toBe(4);
+    expect(RECALL_BUDGET.BASE).toBeGreaterThan(2); // the old base was too tight (Principal-reported)
+    expect(RECALL_BUDGET.MAX).toBeGreaterThan(16); // the old ceiling capped real grounded recall
+  });
+
   it('clamps to MIN for a tiny/empty KB (no over-budget looping)', () => {
-    expect(recallBudget(0)).toBe(RECALL_BUDGET.MIN);
-    expect(recallBudget(1)).toBe(RECALL_BUDGET.MIN); // 2+ceil(0.5)=3 → clamp up to MIN(4)
+    expect(recallBudget(0)).toBe(RECALL_BUDGET.MIN); // 4 + 0 = 4
     expect(recallBudget(-5)).toBe(RECALL_BUDGET.MIN); // defensive: negative → MIN
   });
 
-  it('scales in the middle (a ~6-node KB lands ~5, not 12 — the dogfood symptom)', () => {
-    expect(recallBudget(6)).toBe(5); // 2 + ceil(0.5*6)=5
-    expect(recallBudget(10)).toBe(7); // 2 + 5
-    expect(recallBudget(6)).toBeLessThan(12); // strictly below the old fixed default
+  it('scales in the middle from the raised BASE (every query starts with more search room)', () => {
+    expect(recallBudget(1)).toBe(5); // 4 + ceil(0.5*1)=1 → 5
+    expect(recallBudget(6)).toBe(7); // 4 + ceil(0.5*6)=3 → 7
+    expect(recallBudget(10)).toBe(9); // 4 + 5 → 9
+    expect(recallBudget(28)).toBe(18); // 4 + 14 = 18 — the OLD MAX(16) would have capped here; now headroom
+    expect(recallBudget(28)).toBeLessThan(RECALL_BUDGET.MAX); // a mid-large KB still has room below the cap
   });
 
-  it('clamps to MAX for a large KB (keeps headroom, never unbounded)', () => {
-    expect(recallBudget(28)).toBe(RECALL_BUDGET.MAX); // 2+14=16
+  it('clamps to the raised MAX (24) only for a large KB (keeps headroom, never unbounded)', () => {
+    expect(recallBudget(40)).toBe(RECALL_BUDGET.MAX); // 4 + ceil(0.5*40)=20 → 24
     expect(recallBudget(1000)).toBe(RECALL_BUDGET.MAX);
   });
 
-  it('is monotonic non-decreasing in nodeCount', () => {
+  it('is monotonic non-decreasing in nodeCount, plateauing at the cap', () => {
     let prev = 0;
-    for (let n = 0; n <= 40; n++) {
+    for (let n = 0; n <= 60; n++) {
       const b = recallBudget(n);
       expect(b).toBeGreaterThanOrEqual(prev);
+      expect(b).toBeLessThanOrEqual(RECALL_BUDGET.MAX);
       prev = b;
     }
   });

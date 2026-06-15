@@ -575,6 +575,11 @@ export interface InstanceSettings {
   /** Recall interactive work budget in ms (ASK-17 / JOBS-17): how long a grounded query may run
    *  before returning its best partial. Optional in the edit contract (preserve-on-omission). */
   recallBudgetMs?: number;
+  /** Recall's explicit retrieval tool-call override (ASK-19 / JOBS-17): how far a grounded query may
+   *  search per question. A number sets the manual override (clamped); `null` CLEARS it back to the
+   *  graph-size-scaled default ("scale to KB size"); omitted (`undefined`) preserves the prior value
+   *  (the #102 preserve-on-omission rule). */
+  recallMaxToolCalls?: number | null;
   /** SPEC-0048 SCALE-2: per-stage concurrency cap overrides. Absent keys ⇒ today's default; Connect
    *  is pinned to 1 (SCALE-5). Optional in the edit contract (preserve-on-omission). */
   stageCaps?: Partial<Record<ScaleStage, number>>;
