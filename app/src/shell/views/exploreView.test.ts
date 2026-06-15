@@ -18,7 +18,7 @@ function neighborhood(over: Partial<ExploreNeighborhood> = {}): ExploreNeighborh
   return {
     found: true,
     center: { rel: 'entities/project/atlas.md', id: 'a', name: 'Project Atlas', kind: 'project', confidence: 0.9, tags: ['type/project', 'topic/q3'] },
-    claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8 }],
+    claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [] }],
     neighbors: [
       { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out' },
       { rel: 'entities/person/steve.md', id: 's', name: 'Steve Park', kind: 'person', confidence: 0.6, direction: 'in' },
@@ -32,12 +32,14 @@ function neighborhood(over: Partial<ExploreNeighborhood> = {}): ExploreNeighborh
 let exploreNeighborhood: ReturnType<typeof vi.fn>;
 let exploreEntities: ReturnType<typeof vi.fn>;
 let openCitation: ReturnType<typeof vi.fn>;
+let openSourceRef: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     exploreNeighborhood: exploreNeighborhood as unknown as KbApi['exploreNeighborhood'],
     exploreEntities: exploreEntities as unknown as KbApi['exploreEntities'],
     openCitation: openCitation as unknown as KbApi['openCitation'],
+    openSourceRef: openSourceRef as unknown as KbApi['openSourceRef'],
   };
 }
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -46,6 +48,7 @@ beforeEach(() => {
   exploreNeighborhood = vi.fn(async () => neighborhood());
   exploreEntities = vi.fn(async () => ENTITIES);
   openCitation = vi.fn(async () => ({ ok: true as const }));
+  openSourceRef = vi.fn(async () => ({ status: 'opened' as const }));
   setApi();
 });
 afterEach(() => {
@@ -123,6 +126,97 @@ describe('Explore view — click-through (EXPLORE-4)', () => {
     const c = await mount();
     c.querySelector<HTMLButtonElement>('.explore-open')!.click();
     expect(openCitation).toHaveBeenCalledWith('entities/project/atlas.md');
+  });
+});
+
+describe('Explore view — clickable wiki-citations (SPEC-0046 WS-A)', () => {
+  const cited = (): ExploreNeighborhood =>
+    neighborhood({
+      claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/ab/01JABC/source.md', title: 'Q3 board memo' }] }],
+    });
+
+  it('renders a claim\'s cited source as a clickable, titled affordance (not a ULID)', async () => {
+    exploreNeighborhood = vi.fn(async () => cited());
+    setApi();
+    const c = await mount();
+    const cite = c.querySelector<HTMLButtonElement>('.explore-cite');
+    expect(cite).not.toBeNull();
+    expect(cite!.textContent).toContain('Q3 board memo');
+    expect(cite!.textContent).not.toContain('01JABC'); // human title, never the id
+    expect(cite!.dataset.ref).toBe('sources/ab/01JABC/source.md');
+  });
+
+  it('clicking a citation opens the source working-zone-aware via openSourceRef', async () => {
+    exploreNeighborhood = vi.fn(async () => cited());
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-cite')!.click();
+    await flush();
+    expect(openSourceRef).toHaveBeenCalledWith('sources/ab/01JABC/source.md');
+    expect(c.querySelector('.explore-cite-note')?.textContent).toBe(''); // a clean open shows no error
+  });
+
+  it('a staging-only source surfaces a calm inline note, never a dead link (REVIEW-17)', async () => {
+    openSourceRef = vi.fn(async () => ({ status: 'staging' as const }));
+    exploreNeighborhood = vi.fn(async () => cited());
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-cite')!.click();
+    await flush();
+    expect(c.querySelector('.explore-cite-note')?.textContent).toMatch(/still processing/i);
+  });
+
+  it('a missing source surfaces a graceful note (not a crash)', async () => {
+    openSourceRef = vi.fn(async () => ({ status: 'missing' as const }));
+    exploreNeighborhood = vi.fn(async () => cited());
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-cite')!.click();
+    await flush();
+    expect(c.querySelector('.explore-cite-note')?.textContent).toMatch(/isn’t in your vault/i);
+  });
+
+  it('a rejected openSourceRef IPC degrades to an inline note, never throws (ENG-16)', async () => {
+    openSourceRef = vi.fn(async () => {
+      throw new Error('ipc down');
+    });
+    exploreNeighborhood = vi.fn(async () => cited());
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-cite')!.click();
+    await flush();
+    expect(c.querySelector('.explore-cite-note')?.textContent).toContain('ipc down');
+  });
+
+  it('partial data: a claim with no citations + one with a malformed citation render without breaking siblings (ENG-15/16)', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({
+        claims: [
+          { statement: 'No sources here', status: 'hypothesis', confidence: 0.4, citations: [] },
+          { statement: 'Bad ref', status: 'fact', confidence: 0.5, citations: [{ ref: '', title: 'broken' }] },
+          { statement: 'Good one', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/cd/02JXYZ/source.md', title: 'Memo' }] },
+        ],
+      }),
+    );
+    setApi();
+    const c = await mount();
+    expect(c.querySelectorAll('.explore-claim')).toHaveLength(3); // all three claims render
+    const refs = Array.from(c.querySelectorAll<HTMLButtonElement>('.explore-cite')).map((b) => b.dataset.ref);
+    expect(refs).toEqual(['sources/cd/02JXYZ/source.md']); // only the valid citation becomes a button
+  });
+
+  it('a [[Name]] woven into a claim is clickable and re-centers on that entity', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({ claims: [{ statement: 'Works with [[Finance Team]] closely', status: 'fact', confidence: 0.8, citations: [] }] }),
+    );
+    setApi();
+    const c = await mount();
+    const link = c.querySelector<HTMLButtonElement>('.explore-statement-link');
+    expect(link?.textContent).toBe('Finance Team');
+    exploreNeighborhood.mockClear();
+    link!.click();
+    await flush();
+    expect(exploreNeighborhood).toHaveBeenCalledWith('Finance Team');
   });
 });
 

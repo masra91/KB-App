@@ -10,7 +10,8 @@
 // absent", DATA-8 link-confidence isn't persisted in the link) — so a v1 edge surfaces the NEIGHBOR
 // NODE's kind + confidence (which ARE on the node), and an out/in/both direction. Typed predicates +
 // per-edge confidence are a documented v2 enhancement (EXPLORE-5 is a `should`).
-import type { RecallTools, EntityHit } from './recall';
+import type { RecallTools, EntityHit, ClaimHit } from './recall';
+import { deriveSourceTitle } from './sourceDoc';
 
 /** A lightweight entity reference for the search-to-focus picker (EXPLORE-6). */
 export interface ExploreEntityRef {
@@ -26,11 +27,22 @@ export interface ExploreNeighbor extends ExploreEntityRef {
   direction: 'out' | 'in' | 'both'; // outgoing link, incoming backlink, or both
 }
 
+/**
+ * A claim's cited source, surfaced as a **clickable wiki-citation** (SPEC-0046 WS-A). `ref` is the
+ * vault-relative `source.md` path the renderer hands to `openSourceRef` (working-zone-aware open —
+ * REVIEW-17); `title` is the **human** source title (`deriveSourceTitle`) — NEVER a ULID (PRIN-24).
+ */
+export interface ExploreCitation {
+  ref: string; // e.g. `sources/<shard>/<id>/source.md` — handed to kbApi.openSourceRef
+  title: string; // human source title, never a raw id (PRIN-24)
+}
+
 /** A center entity's claim, rendered read-only (the "leads back to reading" affordance, EXPLORE-4). */
 export interface ExploreClaim {
   statement: string;
   status: string; // fact | interpretation | hypothesis | …
   confidence: number;
+  citations: ExploreCitation[]; // the claim's cited sources, clickable (WS-A) — possibly empty
 }
 
 /** The focused entity + its bounded 1-hop neighborhood (EXPLORE-2/3/8). */
@@ -63,6 +75,46 @@ export async function listExploreEntities(tools: RecallTools): Promise<ExploreEn
   return all
     .map((e) => ({ rel: e.rel, id: e.id, name: e.name, kind: e.kind, confidence: e.confidence }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A source dir → its `source.md` ref (what `openSourceRef` resolves). Tolerates a trailing slash. */
+function sourceRefOf(dir: string): string {
+  return `${dir.replace(/\/+$/, '')}/source.md`;
+}
+
+/**
+ * SPEC-0046 WS-A — attach each claim's cited sources as clickable, **titled** citations. A claim's
+ * `derivedFrom` carries its source dir(s); we resolve each to a human title (`deriveSourceTitle`,
+ * never a ULID — PRIN-24) + the `source.md` ref the renderer opens working-zone-aware. Titles are
+ * read once per distinct source (deduped cache) and bounded by the small claim cap. ENG-16: a source
+ * whose `source.md` can't be read still surfaces by a neutral generic title — never crashes the load.
+ */
+async function withCitations(tools: RecallTools, claimsRaw: readonly ClaimHit[]): Promise<ExploreClaim[]> {
+  // Distinct source dirs across all claims → resolve each title once (bounded fan-out).
+  const dirs = new Set<string>();
+  for (const c of claimsRaw) for (const d of c.derivedFrom ?? []) if (typeof d === 'string' && d.trim()) dirs.add(d);
+  const titleByDir = new Map<string, string>();
+  await Promise.all(
+    [...dirs].map(async (dir) => {
+      let md: string | null = null;
+      try {
+        md = await tools.readSource({ dir });
+      } catch {
+        md = null; // a read failure degrades to the neutral generic title, never throws (ENG-16)
+      }
+      titleByDir.set(dir, deriveSourceTitle(md ?? ''));
+    }),
+  );
+  return claimsRaw.map((c) => {
+    const seen = new Set<string>();
+    const citations: ExploreCitation[] = [];
+    for (const dir of c.derivedFrom ?? []) {
+      if (typeof dir !== 'string' || !dir.trim() || seen.has(dir)) continue;
+      seen.add(dir);
+      citations.push({ ref: sourceRefOf(dir), title: titleByDir.get(dir) ?? deriveSourceTitle('') });
+    }
+    return { statement: c.statement, status: c.status, confidence: c.confidence, citations };
+  });
 }
 
 /**
@@ -116,7 +168,7 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
   neighbors.sort(byConfidence);
 
   const claimsRaw = await tools.claimsForEntity({ entity: center.rel, limit: CENTER_CLAIM_CAP });
-  const claims = claimsRaw.map((c) => ({ statement: c.statement, status: c.status, confidence: c.confidence }));
+  const claims = await withCitations(tools, claimsRaw);
 
   const shown = neighbors.slice(0, topK);
   return {
