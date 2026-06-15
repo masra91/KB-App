@@ -21,3 +21,9 @@ expect:
     # SPEC-0049 toss-rate (converge, never toss): good sources converge through decompose+connect+claims — 0% toss.
     - check: setAsideRate
       args: { max: 0 }
+    # SPEC-0051 COHERE-3 — surface the graph-cohesion metric on the resolved vault (always-on readout; the
+    # orphan linker now feeds it). No hard floor here (a 2-node single-edge graph is trivially Q=0); the
+    # metric's discrimination is gated at the unit level (cohesion.test / entityAffinity.test). This keeps
+    # the Principal's islands/orphans/hairball numbers visible on every connect eval run.
+    - check: graphCohesion
+      args: {}

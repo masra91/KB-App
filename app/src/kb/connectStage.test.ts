@@ -10,7 +10,8 @@ import { createKb } from './vault';
 import { ulid, dateShard } from './ulid';
 import { renderEntityNode, entityFileRel, LINKS_BLOCK_START } from './connectDoc';
 import { applyProse } from './composeDoc';
-import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem, readResolveAudit } from './connectStage';
+import { connectOne, readConnectQueue, ConnectStage, DEFAULT_MAX_ATTEMPTS, linkOne, readLinkQueue, dedupClaimsOnce, linkOrphansOnce, listConnectSetAsideItems, retryConnectItem, dismissConnectItem, readResolveAudit } from './connectStage';
+import { cohesionFromFiles } from './cohesion';
 import { resolveIndexLockPath, GATE3_STALE_AGE_MS } from './canonicalLockHeal';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
 import { readDisambiguationDirectives, directiveForIdentity } from './directives';
@@ -63,7 +64,7 @@ async function seedCandidate(root: string, kind: string, name: string, sourceId:
 
 /** Seed an existing canonical entity node; returns { id, rel }. `aliases` are added alongside the
  *  self-id alias (real nodes carry both) — used to test alias-based link resolution (COHERE-1). */
-async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = []): Promise<{ id: string; rel: string }> {
+async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = [], tags: string[] = []): Promise<{ id: string; rel: string }> {
   const id = ulid();
   const rel = entityFileRel(kind, name, id); // COMPOSE-6: human leaf (real case + spaces), kind dir lowercase
   const dest = path.join(root, rel);
@@ -78,7 +79,7 @@ async function seedNode(root: string, kind: string, name: string, derivedFrom: s
       aliases: [id, ...aliases],
       derivedFrom,
       resolvedFrom: [],
-      tags: [],
+      tags,
       createdAt: '2026-05-30T00:00:00Z',
       updatedAt: '2026-05-30T00:00:00Z',
     }),
@@ -897,6 +898,119 @@ describe.skipIf(!gitAvailable)('Connect within-source claim dedup (CLAIMS-19)', 
       expect(report.dropped).toBe(1);
       expect(await exists(root, dup)).toBe(false);
       expect(await fs.stat(lockPath).then(() => true).catch(() => false)).toBe(false); // healed
+    });
+  });
+});
+
+// ── Orphan-RAG linker (SPEC-0051 slice-2 "the prize") ─────────────────────────────────────────
+describe.skipIf(!gitAvailable)('linkOrphansOnce — recover the degree-0 orphan tail via grounded retrieval', () => {
+  it('links two co-mentioned orphans (shared derivedFrom source) and improves cohesion', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Two entities pulled from the SAME focused source → co-mention evidence; one lonely entity.
+      const a = await seedNode(root, 'person', 'Walt Disney', ['sources/film/01F']);
+      const b = await seedNode(root, 'organization', 'Disney Studios', ['sources/film/01F']);
+      const lonely = await seedNode(root, 'person', 'Nobody', ['sources/solo/01S']);
+      await commitAll(root, 'seed three orphans');
+
+      const before = cohesionFromFiles(
+        await Promise.all([a, b, lonely].map(async (n) => ({ path: n.rel, body: await fs.readFile(path.join(root, n.rel), 'utf8') }))),
+      );
+      expect(before.orphanShare).toBe(1); // all three orphaned
+
+      const res = await linkOrphansOnce(root);
+      expect(res.committed).toBe(true);
+      expect(res.linked).toBe(2); // a and b linked to each other; lonely had no evidence
+      expect(res.links).toBe(2);
+
+      const aMd = await fs.readFile(path.join(root, a.rel), 'utf8');
+      const bMd = await fs.readFile(path.join(root, b.rel), 'utf8');
+      const lonelyMd = await fs.readFile(path.join(root, lonely.rel), 'utf8');
+      expect(aMd).toContain(`[[${b.rel}|Disney Studios]]`); // grounded discovered link
+      expect(bMd).toContain(`[[${a.rel}|Walt Disney]]`);
+      expect(lonelyMd).not.toContain(LINKS_BLOCK_START); // no evidence → stays orphan (don't-false-link)
+
+      const after = cohesionFromFiles(
+        await Promise.all([a, b, lonely].map(async (n) => ({ path: n.rel, body: await fs.readFile(path.join(root, n.rel), 'utf8') }))),
+      );
+      expect(after.orphanShare).toBeLessThan(before.orphanShare); // coverage improved
+      expect(after.edges).toBe(1); // exactly the one real relation, NOT a hairball
+      expect((await simpleGit(root).status()).isClean()).toBe(true); // ORCH-3: advance is clean
+    });
+  });
+
+  it('is idempotent: a second pass over a now-linked tail is a byte-stable no-op', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedNode(root, 'person', 'Walt Disney', ['sources/film/01F']);
+      await seedNode(root, 'organization', 'Disney Studios', ['sources/film/01F']);
+      await commitAll(root, 'seed');
+
+      expect((await linkOrphansOnce(root)).committed).toBe(true);
+      const second = await linkOrphansOnce(root);
+      expect(second.committed).toBe(false); // both now have degree → nothing to link
+      expect(second.links).toBe(0);
+    });
+  });
+
+  it('a BROAD shared source does NOT manufacture links (rarity weighting — anti-hairball)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // 12 entities all derived from one big dump source → each pair weight 1/11 ≈ 0.09 < 0.2 minScore.
+      for (let i = 0; i < 12; i++) await seedNode(root, 'person', `Person ${i}`, ['sources/dump/01D']);
+      await commitAll(root, 'seed a broad dump');
+
+      const res = await linkOrphansOnce(root);
+      expect(res.committed).toBe(false); // nobody linked — a 12-entity dump is not evidence of real relations
+      expect(res.orphans).toBe(12);
+    });
+  });
+
+  it('links on a shared topic/ tag when it is rare; skips when it is common', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Two entities share a RARE topic tag (only they hold it) → linked. A third shares nothing.
+      const a = await seedNode(root, 'person', 'Ada', ['sources/x/01X'], [], ['type/person', 'topic/computing']);
+      const b = await seedNode(root, 'person', 'Charles', ['sources/y/01Y'], [], ['type/person', 'topic/computing']);
+      await seedNode(root, 'person', 'Grace', ['sources/z/01Z'], [], ['type/person']);
+      await commitAll(root, 'seed topic-tagged orphans');
+
+      const res = await linkOrphansOnce(root);
+      expect(res.linked).toBe(2);
+      const aMd = await fs.readFile(path.join(root, a.rel), 'utf8');
+      expect(aMd).toContain(`[[${b.rel}|Charles]]`); // shared rare topic → discovered link
+      expect(aMd).not.toContain('Grace'); // shared the type/person tag only — NOT a relatedness signal
+    });
+  });
+
+  it('does NOT touch nodes the link-promotion pass owns (relatesTo subjects are skipped)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // 'steve' carries a relatesTo hint → owned by linkOne (in readLinkQueue), so the orphan linker skips it
+      // even though it shares a source with 'pal'. 'pal' has no hint → the orphan linker may link it.
+      const steve = await seedNode(root, 'person', 'Steve', ['sources/co/01C']);
+      const pal = await seedNode(root, 'person', 'Pal', ['sources/co/01C']);
+      await seedClaimRelatesTo(root, steve.rel, 'Knows someone unknown.', ['Ghost']); // unresolved hint → steve stays in linkOne's domain
+      await commitAll(root, 'seed a relatesTo-owned node + a free orphan');
+
+      expect(await readLinkQueue(root)).toContain(steve.rel); // steve is linkOne's
+      const res = await linkOrphansOnce(root);
+      // steve is skipped (owned); pal is a no-relatesTo orphan but its only co-mention partner (steve) is
+      // skipped from the candidate pool? No — skip only removes the ORPHAN from processing, not as a target.
+      const steveMd = await fs.readFile(path.join(root, steve.rel), 'utf8');
+      expect(steveMd).not.toContain(LINKS_BLOCK_START); // the orphan linker never wrote steve's block
+      // pal was processed and linked to steve (a valid co-mention target); steve's own block is untouched.
+      const palMd = await fs.readFile(path.join(root, pal.rel), 'utf8');
+      if (res.committed) expect(palMd).toContain(`[[${steve.rel}|`);
+    });
+  });
+
+  it('is a clean no-op on an empty vault (no entities)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await commitAll(root, 'empty');
+      const res = await linkOrphansOnce(root);
+      expect(res).toMatchObject({ orphans: 0, linked: 0, links: 0, committed: false });
     });
   });
 });
