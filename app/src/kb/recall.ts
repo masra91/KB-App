@@ -21,6 +21,10 @@ import { RECALL_SKILL, makeSdkRecallClient } from './recallAgent';
 import { acquireInteractiveCopilotSlot, CopilotCapacityTimeoutError } from './copilotConcurrency';
 import { isModelUnavailableError, COPILOT_MODEL_AUTO } from './copilotModel';
 import { DEFAULT_RECALL_BUDGET_MS } from './instanceConfig';
+// SPEC-0026 ASK-19 — the retrieval-budget bounds + scaling live in the PURE `recallConstants` module
+// (no node import) so the renderer's "Recall & Ask" Settings card can consume the bounds. Re-exported
+// below so existing import sites (recall.test.ts) stay unchanged.
+import { RECALL_BUDGET, recallBudget } from './recallConstants';
 
 // ── Question / session ──────────────────────────────────────────────────────────────────────
 
@@ -200,20 +204,9 @@ export interface RecallOptions {
 
 export const DEFAULT_MAX_TOOL_CALLS = 12;
 
-/** Retrieval-budget bounds (F3 / dogfood #5). The budget SCALES TO GRAPH SIZE: a tiny KB is fully
- *  traversable in a few hops, so a fixed-12 budget just let the agent loop (the dogfood saw 12 calls
- *  + `truncated` on a ~6-node KB). Small KB → small cap; large KB → headroom up to MAX. */
-export const RECALL_BUDGET = { MIN: 4, BASE: 2, PER_NODE: 0.5, MAX: 16 } as const;
-
-/**
- * Scale the retrieval tool-call budget to the entity-graph size (pure; F3 / dogfood #5).
- * `clamp(MIN, BASE + ceil(PER_NODE · nodeCount), MAX)` — e.g. 0→4, 6→5, 28+→16. Entities are the
- * nodes the agent hops (claims/sources are leaves), so `nodeCount` is the entity count.
- */
-export function recallBudget(nodeCount: number): number {
-  const scaled = RECALL_BUDGET.BASE + Math.ceil(RECALL_BUDGET.PER_NODE * Math.max(0, nodeCount));
-  return Math.min(RECALL_BUDGET.MAX, Math.max(RECALL_BUDGET.MIN, scaled));
-}
+// Re-exported from the pure `recallConstants` module (imported at the top) so existing import sites
+// (recall.test.ts) keep importing the retrieval-budget bounds + scaling from `./recall` unchanged.
+export { RECALL_BUDGET, recallBudget };
 
 /** Count canonical entity nodes — the `.md` files anywhere under `entities/` — as the budget's
  *  graph-size input. Cheap recursive readdir; missing/empty `entities/` → 0. Ignores dotdirs

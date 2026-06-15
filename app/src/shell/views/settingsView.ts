@@ -14,6 +14,20 @@ import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
 // SPEC-0048 SCALE Settings (Scale card). Imported from the PURE `scaleConstants` (no node import) so
 // the renderer bundle never pulls the node-only `instanceConfig` (the renderer→node-builtin boundary).
 import { SCALE_STAGES, STAGE_CAP_MAX, COPILOT_CEILING_MIN, COPILOT_CEILING_MAX, resolveStageCaps, type ScaleStage } from '../../kb/scaleConstants';
+// SPEC-0026 ASK-19 "Recall & Ask" card — the recall budget bounds come from the PURE `recallConstants`
+// (no node import) for the same renderer→node-builtin-boundary reason as `scaleConstants` above.
+import { RECALL_BUDGET, RECALL_BUDGET_MS_MIN, RECALL_BUDGET_MS_MAX, DEFAULT_RECALL_BUDGET_MS } from '../../kb/recallConstants';
+
+/** The recall time budget is edited in whole MINUTES (the ms bounds are clean multiples of a minute);
+ *  convert at the UI boundary. A garbled stored value → the default, shown in minutes. */
+const RECALL_MIN_MINUTES = Math.round(RECALL_BUDGET_MS_MIN / 60_000); // 1
+const RECALL_MAX_MINUTES = Math.round(RECALL_BUDGET_MS_MAX / 60_000); // 10
+const msToMinutes = (ms: number | undefined): number => {
+  const m = Math.round((typeof ms === 'number' && Number.isFinite(ms) ? ms : DEFAULT_RECALL_BUDGET_MS) / 60_000);
+  return Math.max(RECALL_MIN_MINUTES, Math.min(RECALL_MAX_MINUTES, m));
+};
+/** A sensible Manual seed when the Principal first switches "Search depth" off Auto (within bounds). */
+const RECALL_DEPTH_MANUAL_SEED = 12;
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
 const REPLAY_CONFIRM =
@@ -102,6 +116,13 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         </div>`;
     };
 
+    // SPEC-0026 ASK-19 "Recall & Ask" view-model: the time budget (always set — minutes) + the
+    // retrieval search-depth, which is Auto (scaled to KB size) unless the Principal pinned an override.
+    const recallMinutes = msToMinutes(settings.recallBudgetMs);
+    const recallDepthOverride = settings.recallMaxToolCalls ?? undefined; // null|undefined ⇒ Auto
+    const recallDepthMode = recallDepthOverride === undefined ? 'auto' : 'manual';
+    const recallDepthValue = recallDepthOverride ?? RECALL_DEPTH_MANUAL_SEED;
+
     container.innerHTML = `
       <div class="card">
         <h1>⚙️ Settings</h1>
@@ -156,6 +177,24 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="scale-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>
       <div class="card">
+        <h2>Recall &amp; Ask</h2>
+        <p class="settings-note">How much room a question gets to find a complete, cited answer from this Knowledge Base. <strong>Answer time</strong> is how long recall may work before it returns its best grounded answer so far; <strong>search depth</strong> is how far it traverses entities, claims, and links to gather evidence. More is more thorough on a large Knowledge Base, but each question takes longer and more model work. Applies to your next question.</p>
+        <div class="settings-control recall-budget-row">
+          <span class="viz-field__label" id="recall-time-label">Answer time (minutes)</span>
+          ${stepper('recall-time', recallMinutes, RECALL_MIN_MINUTES, RECALL_MAX_MINUTES)}
+        </div>
+        <div class="settings-control">
+          <span class="viz-field__label" id="recall-depth-mode-label">Search depth</span>
+          <span class="viz-seg" role="radiogroup" aria-labelledby="recall-depth-mode-label" id="recall-depth-mode">${segOpt('auto', 'Scale to KB size', recallDepthMode)}${segOpt('manual', 'Manual', recallDepthMode)}</span>
+        </div>
+        <div class="settings-control recall-budget-row" id="recall-depth-manual-row"${recallDepthMode === 'manual' ? '' : ' hidden'}>
+          <span class="viz-field__label" id="recall-depth-label">Search steps per question</span>
+          ${stepper('recall-depth', recallDepthValue, RECALL_BUDGET.MIN, RECALL_BUDGET.MAX)}
+        </div>
+        <p id="recall-depth-hint" class="settings-note" role="note"${recallDepthMode === 'manual' ? ' hidden' : ''}>Recall scales how far it searches to the size of your Knowledge Base.</p>
+        <p id="recall-status" class="settings-note" role="status" aria-live="polite"></p>
+      </div>
+      <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="settings-note">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
         <button id="replay-btn" type="button" class="viz-btn viz-btn--danger viz-focusable"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild KB…</button>
@@ -178,6 +217,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     wireVerbosity(container, settings);
     wireScale(container, settings);
     void renderScaleRuntime(container);
+    wireRecall(container, settings);
     wireReplay(container);
     void wireQuiesce(container);
   } catch {
@@ -441,6 +481,92 @@ function wireScale(container: HTMLElement, settings: InstanceSettings): void {
           status.textContent = `${STAGE_LABELS[stage]} limit: ${next} (applies on the next sweep).`;
         },
         () => setStepperValue(el, prev),
+      );
+    });
+  }
+}
+
+/** Wire the "Recall & Ask" card (SPEC-0026 ASK-19): the answer-time stepper (minutes ↔ ms at the
+ *  boundary) and the search-depth Auto/Manual toggle + override stepper. Every change sends the FULL
+ *  settings (preserve-on-omission, #102). Auto sends `recallMaxToolCalls: null` to CLEAR the override
+ *  back to the graph-size-scaled default. ENG-16: a missing control degrades the card, never throws. */
+function wireRecall(container: HTMLElement, settings: InstanceSettings): void {
+  const timeStepper = container.querySelector<HTMLElement>('[data-stepper="recall-time"]');
+  const depthMode = container.querySelector<HTMLElement>('#recall-depth-mode');
+  const depthRow = container.querySelector<HTMLElement>('#recall-depth-manual-row');
+  const depthStepper = container.querySelector<HTMLElement>('[data-stepper="recall-depth"]');
+  const depthHint = container.querySelector<HTMLElement>('#recall-depth-hint');
+  const status = container.querySelector<HTMLElement>('#recall-status');
+  if (!status) return;
+
+  const save = async (patch: Partial<InstanceSettings>, onOk: () => void, onErr: () => void): Promise<void> => {
+    status.textContent = 'Saving…';
+    try {
+      const saved = await window.kbApi.setInstanceSettings({ ...settings, ...patch });
+      Object.assign(settings, saved);
+      settings.recallMaxToolCalls = saved.recallMaxToolCalls; // may be undefined ⇒ cleared (Auto)
+      onOk();
+    } catch {
+      onErr();
+      status.textContent = 'Could not save the change.';
+    }
+  };
+
+  // Answer time — a whole-minutes stepper; persist as ms (×60000).
+  if (timeStepper) {
+    wireStepper(timeStepper, (next, prev) => {
+      void save(
+        { recallBudgetMs: next * 60_000 },
+        () => {
+          status.textContent = `Answer time: ${next} minute${next === 1 ? '' : 's'} (applies to your next question).`;
+        },
+        () => setStepperValue(timeStepper, prev),
+      );
+    });
+  }
+
+  // Search depth — Auto (scale to KB size) clears the override; Manual pins the stepper's value.
+  if (depthMode) {
+    wireSegmentedRadio(depthMode, (value) => {
+      const wantManual = value === 'manual';
+      const isManual = settings.recallMaxToolCalls !== undefined && settings.recallMaxToolCalls !== null;
+      if (wantManual === isManual) return; // no-op when unchanged
+      if (wantManual) {
+        const val = readStepperValue(depthStepper) ?? RECALL_DEPTH_MANUAL_SEED;
+        void save(
+          { recallMaxToolCalls: val },
+          () => {
+            setSegChecked(depthMode, 'manual');
+            depthRow?.removeAttribute('hidden');
+            depthHint?.setAttribute('hidden', '');
+            status.textContent = `Search depth: up to ${val} step${val === 1 ? '' : 's'} per question (applies to your next question).`;
+          },
+          () => setSegChecked(depthMode, isManual ? 'manual' : 'auto'),
+        );
+      } else {
+        void save(
+          { recallMaxToolCalls: null },
+          () => {
+            setSegChecked(depthMode, 'auto');
+            depthRow?.setAttribute('hidden', '');
+            depthHint?.removeAttribute('hidden');
+            status.textContent = 'Search depth: scaled to the size of your Knowledge Base (applies to your next question).';
+          },
+          () => setSegChecked(depthMode, isManual ? 'manual' : 'auto'),
+        );
+      }
+    });
+  }
+
+  // The Manual search-depth stepper.
+  if (depthStepper) {
+    wireStepper(depthStepper, (next, prev) => {
+      void save(
+        { recallMaxToolCalls: next },
+        () => {
+          status.textContent = `Search depth: up to ${next} step${next === 1 ? '' : 's'} per question (applies to your next question).`;
+        },
+        () => setStepperValue(depthStepper, prev),
       );
     });
   }

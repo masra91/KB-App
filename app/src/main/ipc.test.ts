@@ -37,6 +37,9 @@ const mocks = vi.hoisted(() => ({
   startPipeline: vi.fn(async () => undefined),
   pipelineControl: vi.fn(async () => ({ ok: true, message: 'Retrying Ada Lovelace.' })), // OBS-17
   recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
+  // ASK-17/19: kb:ask reads the configured recall budget (time + tool-call override) from here. A vi.fn
+  // so a test can vary the configured override and assert it crosses the read-boundary into recall opts.
+  getActiveInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const, quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 })),
   // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
   listResearchers: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
   setResearcherConfig: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: true, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
@@ -83,8 +86,8 @@ vi.mock('./pipeline', () => ({
   listWatchFoldersForActive: mocks.listWatchFolders,
   setActiveWatchFolder: mocks.setWatchFolder,
   removeActiveWatchFolder: mocks.removeWatchFolder,
-  // ASK-17: kb:ask reads the configured recall budget from here before calling recall.
-  getActiveInstanceSettings: async () => ({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 }),
+  // ASK-17/19: kb:ask reads the configured recall budget from here before calling recall.
+  getActiveInstanceSettings: mocks.getActiveInstanceSettings,
 }));
 
 vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
@@ -120,6 +123,9 @@ beforeEach(async () => {
   mocks.pipelineControl.mockClear();
   mocks.recall.mockClear();
   mocks.openExternal.mockClear();
+  // ASK-19: reset to the default (no tool-call override) so a per-test mockResolvedValueOnce can't leak.
+  mocks.getActiveInstanceSettings.mockReset();
+  mocks.getActiveInstanceSettings.mockResolvedValue({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 });
   delete process.env.KB_ASK_E2E_STUB;
   registerIpc();
 });
@@ -273,6 +279,24 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     // 3rd arg carries the resolved BYOA cliPath (BUG #65); its value is env-dependent, so match loosely.
     expect(mocks.recall).toHaveBeenCalledWith(path.resolve(vaultDir), { question: 'Who?', history: [] }, expect.any(Object));
     expect(res.answer).toBe('mock recall');
+  });
+
+  it('ASK-17/19: forwards the configured time budget + tool-call override across the read-boundary into recall opts', async () => {
+    await configureVault(vaultDir);
+    // A Principal-configured manual search-depth override (recallMaxToolCalls) must reach recall as opts.maxToolCalls.
+    mocks.getActiveInstanceSettings.mockResolvedValueOnce({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 300_000, recallMaxToolCalls: 18 });
+    await invoke('kb:ask', { question: 'Who?', history: [] });
+    const opts = mocks.recall.mock.calls[0][2] as { sessionBudgetMs?: number; maxToolCalls?: number };
+    expect(opts.sessionBudgetMs).toBe(300_000); // ASK-17 time budget
+    expect(opts.maxToolCalls).toBe(18); // ASK-19 retrieval tool-call override
+  });
+
+  it('ASK-19: no configured override ⇒ recall opts.maxToolCalls is undefined (recall applies its scaled default)', async () => {
+    await configureVault(vaultDir);
+    // Default mock has no recallMaxToolCalls → the override is absent, so recall falls back to recallBudget(nodeCount).
+    await invoke('kb:ask', { question: 'Who?', history: [] });
+    const opts = mocks.recall.mock.calls[0][2] as { maxToolCalls?: number };
+    expect(opts.maxToolCalls).toBeUndefined();
   });
 
   it('returns an honest ungrounded result when no KB is configured (recall not run)', async () => {

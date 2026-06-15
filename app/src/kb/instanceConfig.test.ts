@@ -109,6 +109,26 @@ describe('instance config store (PANEL-5)', () => {
     expect((await readInstanceConfig(root)).recallBudgetMs).toBe(DEFAULT_RECALL_BUDGET_MS);
   });
 
+  it('ASK-19: recallMaxToolCalls is an OPTIONAL override — round-trips, clamps, absent/garbled ⇒ omitted (scaled default)', async () => {
+    // An in-range override round-trips (writeInstanceConfig also creates `.kb/` for the raw writes below).
+    await writeInstanceConfig(root, { ...DEF, recallMaxToolCalls: 12 });
+    expect((await readInstanceConfig(root)).recallMaxToolCalls).toBe(12);
+
+    // A legacy file (no field) reads back with NO override key → recall uses its scaled default.
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF }), 'utf8');
+    expect((await readInstanceConfig(root)).recallMaxToolCalls).toBeUndefined();
+
+    // Out-of-range clamps to [RECALL_BUDGET.MIN, .MAX] = [4, 24].
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallMaxToolCalls: 1 }), 'utf8');
+    expect((await readInstanceConfig(root)).recallMaxToolCalls).toBe(4);
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallMaxToolCalls: 999 }), 'utf8');
+    expect((await readInstanceConfig(root)).recallMaxToolCalls).toBe(24);
+
+    // A garbled value drops the override entirely (degrades to the scaled default, never throws).
+    await fs.writeFile(instanceConfigPath(root), JSON.stringify({ ...DEF, recallMaxToolCalls: 'lots' }), 'utf8');
+    expect((await readInstanceConfig(root)).recallMaxToolCalls).toBeUndefined();
+  });
+
   it('ASK-17: clampRecallBudgetMs bounds the value (default ≥ 60s, ≤ 10min)', () => {
     expect(clampRecallBudgetMs(240_000)).toBe(240_000);
     expect(clampRecallBudgetMs(1)).toBe(RECALL_BUDGET_MS_MIN);
