@@ -478,6 +478,17 @@ button:disabled {
 .explore-claim-status { font-size: 0.58rem; margin-right: 0.1rem; }
 .explore-noclaims { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
 
+/* WS-A (SPEC-0046) clickable wiki-citations: a claim's cited sources + woven [[Name]] links.
+   Muted at rest, ember on hover/focus — the established cite affordance language (mirrors .cite-ref). */
+.explore-cites { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; margin-left: 0.25rem; vertical-align: baseline; }
+.explore-cite { appearance: none; background: transparent; border: 0; padding: 0 0.15rem; cursor: pointer; font: inherit; font-size: 0.68rem; color: var(--viz-ink-muted); }
+.explore-cite .cite-mark { color: var(--viz-ember); font-weight: 600; }
+.explore-cite:hover, .explore-cite:focus-visible { color: var(--viz-ember); text-decoration: underline; }
+.explore-statement-link { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--viz-ember); }
+.explore-statement-link:hover, .explore-statement-link:focus-visible { text-decoration: underline; }
+.explore-cite-note { margin: 0.45rem 0 0; min-height: 1em; font-size: 0.78rem; color: var(--viz-brass); }
+.explore-cite-note:empty { margin: 0; min-height: 0; }
+
 /* The 1-hop neighborhood */
 .explore-neighbors-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
 .explore-neighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }

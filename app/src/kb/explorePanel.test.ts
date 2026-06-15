@@ -9,14 +9,23 @@ function hit(over: Partial<EntityHit> & Pick<EntityHit, 'rel' | 'name'>): Entity
   return { id: over.rel, kind: 'concept', aliases: [], confidence: 0.8, tags: [`type/${over.kind ?? 'concept'}`], derivedFrom: [], ...over };
 }
 
+interface FakeClaim {
+  statement: string;
+  status: string;
+  confidence: number;
+  derivedFrom?: string[]; // source dir(s) the claim cites (WS-A)
+}
+
 /** A minimal fake of the read-only surface: entities by query substring, fixed links/claims per entity. */
 function fakeTools(opts: {
   entities: EntityHit[];
   links?: Record<string, { outgoing?: string[]; incoming?: string[] }>; // keyed by rel; values are rels/names
-  claims?: Record<string, { statement: string; status: string; confidence: number }[]>;
+  claims?: Record<string, FakeClaim[]>;
+  sources?: Record<string, string>; // source dir → its source.md content (for title derivation, WS-A)
 }): RecallTools {
   const links = opts.links ?? {};
   const claims = opts.claims ?? {};
+  const sources = opts.sources ?? {};
   return {
     entityLookup: vi.fn(async ({ query }: { query: string }) => {
       const n = (query ?? '').toLowerCase();
@@ -33,7 +42,7 @@ function fakeTools(opts: {
       };
     }),
     readNode: vi.fn(async () => null),
-    readSource: vi.fn(async () => null),
+    readSource: vi.fn(async ({ dir }: { dir: string }) => sources[dir] ?? null),
     grep: vi.fn(async () => []),
   };
 }
@@ -68,7 +77,7 @@ describe('explorePanel — buildNeighborhood', () => {
     const byName = Object.fromEntries(nb.neighbors.map((x) => [x.name, x.direction]));
     expect(byName).toEqual({ 'Finance Team': 'out', 'Steve Park': 'in' });
     // the center's claims ride along (the read-only "leads back to reading" affordance)
-    expect(nb.claims).toEqual([{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8 }]);
+    expect(nb.claims).toEqual([{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [] }]);
   });
 
   it('folds a mutual link to direction "both" and never lists the focus as its own neighbor', async () => {
@@ -127,5 +136,61 @@ describe('explorePanel — buildNeighborhood', () => {
     const nb = await buildNeighborhood(fakeTools({ entities: [] }));
     expect(nb.found).toBe(false);
     expect(nb.neighbors).toHaveLength(0);
+  });
+});
+
+describe('explorePanel — clickable cited sources (SPEC-0046 WS-A)', () => {
+  it('attaches each claim its cited sources as a titled, openable ref (never a ULID)', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS],
+      claims: {
+        'entities/project/atlas.md': [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, derivedFrom: ['sources/ab/01JABC'] }],
+      },
+      sources: { 'sources/ab/01JABC': '---\ntitle: Q3 board memo\n---\nbody' },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.claims[0].citations).toEqual([{ ref: 'sources/ab/01JABC/source.md', title: 'Q3 board memo' }]);
+    // the ref is the `source.md` path (what openSourceRef resolves), the title is human — not the ULID dir
+    expect(nb.claims[0].citations[0].title).not.toContain('01JABC');
+  });
+
+  it('dedupes repeated source dirs and reads each distinct source title only once', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS],
+      claims: {
+        'entities/project/atlas.md': [
+          { statement: 'A', status: 'fact', confidence: 0.8, derivedFrom: ['sources/ab/01JABC', 'sources/ab/01JABC'] },
+          { statement: 'B', status: 'fact', confidence: 0.7, derivedFrom: ['sources/ab/01JABC'] },
+        ],
+      },
+      sources: { 'sources/ab/01JABC': '---\ntitle: Q3 board memo\n---\nbody' },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.claims[0].citations).toHaveLength(1); // de-duped within the claim
+    expect(nb.claims[1].citations[0].title).toBe('Q3 board memo');
+    expect(tools.readSource).toHaveBeenCalledTimes(1); // distinct source read once across claims
+  });
+
+  it('tolerates an unreadable / dangling source — surfaces a neutral title, never crashes (ENG-16)', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS],
+      claims: {
+        'entities/project/atlas.md': [{ statement: 'X', status: 'fact', confidence: 0.8, derivedFrom: ['sources/zz/missing'] }],
+      },
+      // no `sources` entry → readSource returns null
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.claims[0].citations).toHaveLength(1);
+    expect(nb.claims[0].citations[0].ref).toBe('sources/zz/missing/source.md');
+    expect(nb.claims[0].citations[0].title.length).toBeGreaterThan(0); // a generic, never empty / a ULID
+  });
+
+  it('a claim with no cited sources carries an empty citations list (partial-data, ENG-15)', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS],
+      claims: { 'entities/project/atlas.md': [{ statement: 'uncited', status: 'hypothesis', confidence: 0.4 }] },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.claims[0].citations).toEqual([]);
   });
 });

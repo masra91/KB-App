@@ -7,7 +7,7 @@
 // thinnest valuable slice (EXPLORE-2); whole-graph + timeline are deferred to v2.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
-import type { ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
+import type { ExploreClaim, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
 
 const HEADER = `<h1 class="explore-title viz-signage">Explore</h1><p class="explore-sub viz-body">Walk your knowledge graph — start at an entity and follow its relationships. Read-only.</p>`;
 
@@ -75,12 +75,7 @@ function centerCard(nb: ExploreNeighborhood): string {
   const c = nb.center!;
   const tags = c.tags.length ? `<div class="explore-tags">${c.tags.map((t) => `<span class="explore-tag viz-chip">${esc(t)}</span>`).join('')}</div>` : '';
   const claims = nb.claims.length
-    ? `<ul class="explore-claims">${nb.claims
-        .map(
-          (cl) =>
-            `<li class="explore-claim viz-body"><span class="explore-claim-status viz-chip" data-status="${esc(cl.status)}">${esc(cl.status)}</span> ${esc(cl.statement)} <span class="explore-conf viz-numeric">${cl.confidence.toFixed(2)}</span></li>`,
-        )
-        .join('')}</ul>`
+    ? `<ul class="explore-claims">${nb.claims.map(renderClaim).join('')}</ul>`
     : `<p class="explore-noclaims viz-body">No claims recorded for this entity yet.</p>`;
   return `
     <div class="explore-center viz-no-chrome viz-spine" data-rel="${esc(c.rel)}">
@@ -91,7 +86,48 @@ function centerCard(nb: ExploreNeighborhood): string {
       </div>
       ${tags}
       ${claims}
+      <p class="explore-cite-note viz-body" role="status" aria-live="polite"></p>
     </div>`;
+}
+
+/** Truncate a source title for the inline citation chip (full title stays in the tooltip/aria-label). */
+function clipTitle(s: string): string {
+  return s.length > 32 ? s.slice(0, 31) + '…' : s;
+}
+
+/**
+ * WS-A (SPEC-0046) — render a claim with its statement's `[[Name]]` refs linkified (click → re-center)
+ * and its **clickable cited sources** appended (click → openSourceRef). ENG-15/16: a claim with no/empty
+ * citations renders cleanly (just the statement); a citation missing a `ref` is skipped; per-claim, so
+ * one malformed claim never breaks its siblings.
+ */
+function renderClaim(cl: ExploreClaim): string {
+  const cites = (cl.citations ?? []).filter((c) => c && typeof c.ref === 'string' && c.ref.length > 0);
+  const citesHtml = cites.length
+    ? ` <span class="explore-cites">${cites
+        .map((c) => {
+          const title = c.title || 'source';
+          return `<button type="button" class="explore-cite viz-focusable" data-ref="${esc(c.ref)}" title="Open source: ${esc(title)}" aria-label="Open source ${esc(title)}"><span class="cite-mark" aria-hidden="true">↗</span> ${esc(clipTitle(title))}</button>`;
+        })
+        .join('')}</span>`
+    : '';
+  return `<li class="explore-claim viz-body"><span class="explore-claim-status viz-chip" data-status="${esc(cl.status)}">${esc(cl.status)}</span> ${linkifyStatement(cl.statement)} <span class="explore-conf viz-numeric">${cl.confidence.toFixed(2)}</span>${citesHtml}</li>`;
+}
+
+/**
+ * Linkify `[[Name]]` / `[[rel|Name]]` wikilinks in a claim statement into clickable re-center buttons
+ * (the resolveProseWikilinks / CONNECT-13 discipline, in the view): the display name is whatever's
+ * after a `|` (else the bare inner), and clicking focuses that name (the panel resolves it; an unknown
+ * name lands gracefully). The surrounding text is escaped first, so the only HTML we emit is the button
+ * around an already-escaped name — a malformed `[[` left in text is harmless (rendered as-is).
+ */
+function linkifyStatement(statement: string): string {
+  return esc(statement).replace(/\[\[([^\]]+)\]\]/g, (whole, inner: string) => {
+    const bar = inner.indexOf('|');
+    const name = (bar === -1 ? inner : inner.slice(bar + 1)).trim();
+    if (!name) return whole;
+    return `<button type="button" class="explore-statement-link viz-focusable" data-name="${name}" title="Explore ${name}">${name}</button>`;
+  });
 }
 
 /** The 1-hop neighborhood (EXPLORE-2/5/8): each neighbor a click-to-re-center row, with the edge
@@ -171,4 +207,42 @@ function wire(container: HTMLElement, state: ExploreState): void {
   openBtn?.addEventListener('click', () => {
     if (centerRel) void window.kbApi.openCitation(centerRel);
   });
+
+  // WS-A: a claim's cited source → open it working-zone-aware (REVIEW-17 openSourceRef); a staging /
+  // missing / failed open surfaces an inline note rather than a dead link.
+  for (const cite of Array.from(container.querySelectorAll<HTMLButtonElement>('.explore-cite'))) {
+    cite.addEventListener('click', () => void openSource(container, cite.dataset.ref));
+  }
+
+  // WS-A: a `[[Name]]` woven into a claim → re-center on that entity (resolved by name in the panel).
+  for (const link of Array.from(container.querySelectorAll<HTMLButtonElement>('.explore-statement-link'))) {
+    link.addEventListener('click', () => focusTo(undefined, link.dataset.name ?? ''));
+  }
+}
+
+/** Inline messages for a non-`opened` source open (working-zone-aware — REVIEW-17): never a dead link. */
+const CITE_STATUS: Record<string, string> = {
+  staging: 'That source is still processing — it’ll be in your vault shortly.',
+  missing: 'That source isn’t in your vault (it may have been removed).',
+  'invalid-ref': 'That source link is invalid.',
+  'no-vault': 'No active vault — open a vault to view sources.',
+  'open-failed': 'Couldn’t open that source.',
+};
+
+/**
+ * Open a claim's cited source via the working-zone-aware seam (`openSourceRef` — REVIEW-17): on `main`
+ * it opens in Obsidian; staging/missing/failed surface a calm inline note (never a dead link). Never
+ * throws — a rejected IPC degrades to the note (ENG-16).
+ */
+async function openSource(container: HTMLElement, ref: string | undefined): Promise<void> {
+  const slot = container.querySelector('.explore-cite-note');
+  if (!ref) return;
+  let note = '';
+  try {
+    const res = await window.kbApi.openSourceRef(ref);
+    if (res.status !== 'opened') note = CITE_STATUS[res.status] ?? 'Couldn’t open that source.';
+  } catch (err) {
+    note = err instanceof Error ? err.message : String(err);
+  }
+  if (slot) slot.textContent = note; // cleared (empty) on a successful open
 }
