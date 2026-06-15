@@ -14,7 +14,8 @@ import { promote } from './staging';
 import { runJobOnce, readJournal } from './jobStage';
 import { makeReflectJobBehavior, REFLECT_WORKING_SET_SIZE, REFLECT_JOB_TYPE, filterStatefulFindings } from './reflectJob';
 import { makeReflectDecider } from './reflectAgent';
-import { writeReviewFile, reviewRel } from './reviewStore';
+import { writeReviewFile, reviewRel, answerReview } from './reviewStore';
+import { recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair } from './directives';
 import { recordDisambiguationDecision } from './disambiguationDecisions';
 import { ulid } from './ulid';
 import type { Review } from './reviews';
@@ -38,6 +39,15 @@ async function seedEntities(root: string, n: number): Promise<void> {
     const dest = path.join(root, rel);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.writeFile(dest, `---\nid: 01E${i}\nkind: person\nname: E${i}\ntags: ["type/person"]\n---\n\n# E${i}\n\nbody ${i}\n`, 'utf8');
+  }
+}
+
+/** Rewrite the SAME entity files with FRESH ULIDs but identical content — simulates the re-derive /
+ *  Full Replay rebirth that purges + rebuilds entities/ (ULID changes, block identity stays). */
+async function rebirthEntities(root: string, n: number): Promise<void> {
+  for (let i = 0; i < n; i++) {
+    const dest = path.join(root, 'entities', 'person', `e${String(i).padStart(3, '0')}.md`);
+    await fs.writeFile(dest, `---\nid: ${ulid()}\nkind: person\nname: E${i}\ntags: ["type/person"]\n---\n\n# E${i}\n\nbody ${i}\n`, 'utf8');
   }
 }
 
@@ -257,6 +267,46 @@ describe.skipIf(!gitAvailable)('Reflect is stateful — no re-raise of open/deci
     } finally { await rmTempDir(dir); }
   });
 
+  // SPEC-0050 slice-2: the durable CONSOLIDATION DIRECTIVE keyed on STABLE block identities is what
+  // makes a settled merge/distinct survive the ULID rebirth that defeats the per-pair ULID decision.
+  it('does NOT re-raise a consolidation settled by a durable CONSOLIDATION DIRECTIVE (identity-keyed)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await seedEntities(root, 2); // identities person|e0, person|e1
+      await recordConsolidationDirective(root, { identityA: 'person|e0', identityB: 'person|e1', verdict: 'distinct', reviewId: 'R', decidedAt: '2026-06-01T00:00:00Z' });
+      const res = await makeReflectJobBehavior(consolidationDecider())(ctxWith(root));
+      expect(res.findings).toEqual([]); // settled distinct by directive — never re-ask
+    } finally { await rmTempDir(dir); }
+  });
+
+  it('the directive SURVIVES ULID rebirth where the ULID-keyed decision goes blind (the replay bug)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await seedEntities(root, 2);
+      // The Principal ruled these distinct: legacy decision keyed on the ORIGINAL ULIDs + durable
+      // directive keyed on the stable identities, exactly as answerReview records both.
+      await recordDisambiguationDecision(root, { a: '01E0', b: '01E1', verdict: 'distinct', reviewId: 'R', decidedAt: '2026-06-01T00:00:00Z' });
+      await recordConsolidationDirective(root, { identityA: 'person|e0', identityB: 'person|e1', verdict: 'distinct', reviewId: 'R', decidedAt: '2026-06-01T00:00:00Z' });
+      await rebirthEntities(root, 2); // re-derive/replay → fresh ULIDs, same identities
+      const res = await makeReflectJobBehavior(consolidationDecider())(ctxWith(root));
+      expect(res.findings).toEqual([]); // STILL suppressed — only the identity directive can carry it now
+    } finally { await rmTempDir(dir); }
+  });
+
+  it('CONTROL: the ULID decision ALONE goes blind after rebirth (this is the bug the directive fixes)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await seedEntities(root, 2);
+      await recordDisambiguationDecision(root, { a: '01E0', b: '01E1', verdict: 'distinct', reviewId: 'R', decidedAt: '2026-06-01T00:00:00Z' });
+      await rebirthEntities(root, 2); // fresh ULIDs → the ULID-keyed decision no longer matches
+      const res = await makeReflectJobBehavior(consolidationDecider())(ctxWith(root));
+      expect(res.findings).toHaveLength(1); // re-raises — proving the directive (above) is what carries it
+    } finally { await rmTempDir(dir); }
+  });
+
   it('DOES raise a FRESH finding, and an additive high-confidence finding passes through (auto-applies)', async () => {
     const dir = await makeTempDir();
     try {
@@ -292,6 +342,55 @@ describe.skipIf(!gitAvailable)('Reflect is stateful — no re-raise of open/deci
       expect(live).toHaveLength(1); // only the additive
       expect(live[0].kind).toBe('additive');
       expect(suppressed).toBe(1);
+    } finally { await rmTempDir(dir); }
+  });
+});
+
+// SPEC-0050 slice-2 producer: answering a Reflect consolidation review graduates the verdict to a
+// durable consolidation directive keyed on the STABLE block identities (the half that survives replay).
+describe.skipIf(!gitAvailable)('Reflect consolidation answer → durable directive (SPEC-0050 slice-2)', () => {
+  const CANON = 'entities/person/e000.md';
+  const LOSER = 'entities/person/e001.md';
+
+  async function openConsolidationReviewWithId(root: string): Promise<string> {
+    const id = ulid();
+    const review: Review = {
+      id, status: 'open', question: 'Merge E1 into E0?', detail: 'same entity?',
+      raisedBy: {
+        stage: 'job:reflect', runId: 'r0', item: { kind: 'job', ref: '.kb/jobs/reflect/journal.jsonl' },
+        auditRel: '.kb/jobs/reflect/journal.jsonl',
+        markerKey: { jobId: 'reflect', runId: 'r0', kind: 'consolidation', canonicalRel: CANON, loserRels: LOSER },
+      },
+      subject: {}, createdAt: '2026-06-01T00:00:00Z',
+    };
+    await writeReviewFile(path.join(root, reviewRel(id)), review);
+    await fs.mkdir(path.join(root, '.kb', 'jobs', 'reflect'), { recursive: true }); // audit marker target dir
+    return id;
+  }
+
+  it('reject → records a DISTINCT directive on the block-identity pair', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedEntities(root, 2); // identities person|e0, person|e1
+      const id = await openConsolidationReviewWithId(root);
+      await answerReview(root, new Mutex(), id, { verdict: 'reject' });
+      const map = await readConsolidationDirectives(root);
+      expect(consolidationDirectiveForPair(map, 'person|e0', 'person|e1')?.verdict).toBe('distinct');
+    } finally { await rmTempDir(dir); }
+  });
+
+  it('confirm → records a MERGE directive on the block-identity pair', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedEntities(root, 2);
+      const id = await openConsolidationReviewWithId(root);
+      await answerReview(root, new Mutex(), id, { verdict: 'confirm' });
+      const map = await readConsolidationDirectives(root);
+      expect(consolidationDirectiveForPair(map, 'person|e0', 'person|e1')?.verdict).toBe('merge');
     } finally { await rmTempDir(dir); }
   });
 });
