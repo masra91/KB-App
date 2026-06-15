@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
-import type { AppState, CreateKbResult } from '../kb/types';
+import type { AppState, CreateKbResult, InstanceSettings } from '../kb/types';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -39,7 +39,7 @@ const mocks = vi.hoisted(() => ({
   recall: vi.fn(async () => ({ question: '', answer: 'mock recall', citations: [], grounded: true, toolCalls: 1, truncated: false })),
   // ASK-17/19: kb:ask reads the configured recall budget (time + tool-call override) from here. A vi.fn
   // so a test can vary the configured override and assert it crosses the read-boundary into recall opts.
-  getActiveInstanceSettings: vi.fn(async () => ({ autonomyDefault: 'guarded' as const, devLogLevel: 'info' as const, quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 })),
+  getActiveInstanceSettings: vi.fn(async (): Promise<InstanceSettings> => ({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 240_000 })),
   // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
   listResearchers: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
   setResearcherConfig: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: true, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
@@ -286,7 +286,7 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     // A Principal-configured manual search-depth override (recallMaxToolCalls) must reach recall as opts.maxToolCalls.
     mocks.getActiveInstanceSettings.mockResolvedValueOnce({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 300_000, recallMaxToolCalls: 18 });
     await invoke('kb:ask', { question: 'Who?', history: [] });
-    const opts = mocks.recall.mock.calls[0][2] as { sessionBudgetMs?: number; maxToolCalls?: number };
+    const opts = (mocks.recall.mock.calls[0] as unknown[])[2] as { sessionBudgetMs?: number; maxToolCalls?: number };
     expect(opts.sessionBudgetMs).toBe(300_000); // ASK-17 time budget
     expect(opts.maxToolCalls).toBe(18); // ASK-19 retrieval tool-call override
   });
@@ -295,7 +295,7 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     await configureVault(vaultDir);
     // Default mock has no recallMaxToolCalls → the override is absent, so recall falls back to recallBudget(nodeCount).
     await invoke('kb:ask', { question: 'Who?', history: [] });
-    const opts = mocks.recall.mock.calls[0][2] as { maxToolCalls?: number };
+    const opts = (mocks.recall.mock.calls[0] as unknown[])[2] as { maxToolCalls?: number };
     expect(opts.maxToolCalls).toBeUndefined();
   });
 
