@@ -111,6 +111,29 @@ export function renderClaimsBlock(links: ClaimBacklink[]): string {
   return [CLAIMS_BLOCK_START, ...rows, CLAIMS_BLOCK_END].join('\n');
 }
 
+/**
+ * Extract the NL claim statements from an entity node's generated claims block (the inverse of
+ * {@link renderClaimsBlock}) — used by the RESEARCH-24 enrich-gap computation to learn what an entity's
+ * claims already cover. Reads only the rows inside the block markers, strips the `*(status, conf)*` +
+ * source-cite tail off each, and ignores the `_No claims derived yet._` placeholder. Tolerant: a node
+ * with no block (or a malformed row) yields `[]` rather than throwing (ENG-16).
+ */
+export function claimStatementsFromMd(entityMd: string): string[] {
+  const start = entityMd.indexOf(CLAIMS_BLOCK_START);
+  if (start === -1) return [];
+  const endMarker = entityMd.indexOf(CLAIMS_BLOCK_END, start);
+  const end = endMarker === -1 ? entityMd.length : endMarker;
+  const body = entityMd.slice(start + CLAIMS_BLOCK_START.length, end);
+  const out: string[] = [];
+  for (const line of body.split('\n')) {
+    const m = line.match(/^- \[\[.*?\]\] — (.*)$/);
+    if (!m) continue;
+    const statement = m[1].replace(/\s*\*\([^)]*\)\*.*$/, '').trim(); // drop the *(status, conf)* + cite tail
+    if (statement) out.push(statement);
+  }
+  return out;
+}
+
 /** Remove any existing generated claims block (and its surrounding blank lines) from a node. */
 export function stripClaimsBlock(entityMd: string): string {
   const start = entityMd.indexOf(CLAIMS_BLOCK_START);

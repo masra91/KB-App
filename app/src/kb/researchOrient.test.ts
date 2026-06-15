@@ -45,6 +45,40 @@ describe('chooseAngle / clampAngle (the gap steer)', () => {
   });
 });
 
+describe('gap-driven angle (RESEARCH-24) — a MISSING facet beats the generic fresh-neighbor steer', () => {
+  // The acceptance test: a generic angle (a fresh KB-neighbor name) and a gap-filling angle (a facet the
+  // entity's claims don't cover) COMPETE for the steer. Gap-filling must win — otherwise the pass re-chases
+  // what we already know. Hinges on the real `chooseAngle`: delete the `req.gap.missing` priority line and
+  // the steer falls back to the neighbor ('Benchmark Suite') and these go red (fails-before/passes-after).
+  it('picks the gap-MISSING facet over an available fresh neighbor', () => {
+    const req: ResearchRequest = { ...reqOf('Project Atlas'), gap: { present: ['overview or definition'], missing: ['founding date'] } };
+    const angle = chooseAngle(req, [], ['Benchmark Suite', 'Rival Corp'], [], 'Project Atlas');
+    expect(angle).toContain('founding date'); // gap-filling wins
+    expect(angle).not.toContain('Benchmark Suite'); // the generic neighbor lost
+  });
+
+  it('with NO gap, falls back to the generic fresh-neighbor steer (unchanged behavior)', () => {
+    const angle = chooseAngle(reqOf('Project Atlas'), [], ['Benchmark Suite'], [], 'Project Atlas');
+    expect(angle).toContain('Benchmark Suite');
+  });
+
+  it('a gap whose only missing facet is already named in the request is skipped (no re-establish)', () => {
+    const req: ResearchRequest = { ...reqOf('Project Atlas', 'we already know its founding date'), gap: { present: [], missing: ['founding date'] } };
+    // founding date is already in context → not fresh → falls through to the neighbor.
+    expect(chooseAngle(req, [], ['Benchmark Suite'], [], 'Project Atlas')).toContain('Benchmark Suite');
+  });
+
+  it('through the REAL orient() path: a request carrying a gap steers the oriented query at the gap', async () => {
+    await withTemp(async (root) => {
+      const req: ResearchRequest = { ...reqOf('Project Atlas'), gap: { present: ['overview or definition'], missing: ['founding date'] } };
+      const res = await orient(root, web({ egressTier: 'local-only', orientBudget: 5 }), req, { readNeighborhood: reader(), gate: sensitivityAllowsOrientRead });
+      expect(res.angle).toContain('founding date'); // orient chose the gap, not the neighbor floor
+      // "query references the gap": the oriented outbound query carries the missing facet (bounded path).
+      expect(buildOrientedQuery(req, res.angle)).toContain('founding date');
+    });
+  });
+});
+
 describe('buildOrientedQuery — THE QUERY-CONSTRUCTION GUARD (D6a/D8)', () => {
   it('an adversarial KB-dump angle can NEVER produce a verbatim-dump query (bounded by what + ≤500 ctx)', () => {
     const req = reqOf('Project Atlas');

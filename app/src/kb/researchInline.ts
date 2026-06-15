@@ -19,6 +19,7 @@ import { orient, orientedRequest, makeNeighborhoodReader } from './researchOrien
 import { sensitivityAllowsOrientRead } from './sensitivity';
 import { raiseResearchEscalation } from './researchEscalate';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
+import { isEnrichmentGap } from './enrichGap';
 import { flagSparseEntities } from './enrichTrigger';
 
 export interface ResearchDepsOptions {
@@ -170,6 +171,8 @@ export async function collectResearchRequests(root: string): Promise<ResearchReq
       context: typeof p.context === 'string' ? p.context : '',
       ...(typeof p.egressHint === 'string' ? { egressHint: p.egressHint as ResearchRequest['egressHint'] } : {}),
       dedupKey: dedupKeyFor({ what: p.what, by }),
+      // RESEARCH-24: the enrichment gap the producer stamped (shape-guarded — legacy signals lack it).
+      ...(isEnrichmentGap(p.gap) ? { gap: p.gap } : {}),
     });
   }
   // Second pass: stamp chain depth now that both lineage maps are complete.

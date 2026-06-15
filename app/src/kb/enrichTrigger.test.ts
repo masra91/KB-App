@@ -6,6 +6,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import { renderEntityNode, entityFileRel, type EntityNode } from './connectDoc';
+import { applyClaimsBlock } from './claimDoc';
 import { collectResearchRequests } from './researchInline';
 import { dedupKeyFor } from './researchers';
 import { flagSparseEntities, isSparseEntity, SPARSE_SOURCE_MAX } from './enrichTrigger';
@@ -63,6 +64,27 @@ describe('flagSparseEntities (WS-B) — the missing research-request producer', 
       expect(reqs[0]).toMatchObject({ what: 'Black Lotus', by: { stage: 'enrich', entityId: 'E_SPARSE' } });
       expect(reqs[0].dedupKey).toBe(dedupKeyFor({ what: 'Black Lotus', by: { entityId: 'E_SPARSE' } }));
       expect(reqs[0].why).toMatch(/sparse entity/i);
+    });
+  });
+
+  it('stamps the enrichment GAP from the entity claims, plumbed producer→collect (RESEARCH-24)', async () => {
+    await withRoot(async (root) => {
+      // A sparse person whose claims cover their role but not their education/birth → that's the gap.
+      const rel = entityFileRel('person', 'Ada Lovelace', 'E_ADA');
+      const abs = path.join(root, rel);
+      await fs.mkdir(path.dirname(abs), { recursive: true });
+      const md = applyClaimsBlock(renderEntityNode(node({ id: 'E_ADA', name: 'Ada Lovelace', kind: 'person', derivedFrom: ['sources/ab/01'] })), [
+        { claimPath: 'claims/x/01J.md', statement: 'Ada is a mathematician and writer.', status: 'fact', confidence: 0.9 },
+      ]);
+      await fs.writeFile(abs, md, 'utf8');
+
+      await flagSparseEntities(root, new Set(), { ts: TS });
+      const reqs = await collectResearchRequests(root);
+      expect(reqs).toHaveLength(1);
+      expect(reqs[0].gap).toBeDefined();
+      expect(reqs[0].gap?.present).toContain('role or occupation'); // covered by the present claim
+      expect(reqs[0].gap?.missing).toContain('education'); // the gap an enrichment pass should target
+      expect(reqs[0].gap?.missing).toContain('date of birth');
     });
   });
 

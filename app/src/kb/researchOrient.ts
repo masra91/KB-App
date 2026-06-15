@@ -105,11 +105,17 @@ export function orientSubject(req: ResearchRequest): string {
 }
 
 /** Derive a short steer from the gap signals, capped — never a verbatim dump. Picks the first signal not
- *  already named in the request (so the pass EXPANDS rather than re-establishes), bounded to the cap. */
+ *  already named in the request (so the pass EXPANDS rather than re-establishes), bounded to the cap.
+ *
+ *  GAP-DRIVEN priority (RESEARCH-24): a MISSING enrichment facet the request carries (`req.gap.missing` —
+ *  what the entity's claims don't yet cover) wins over the generic "first fresh neighbor" steer, so the
+ *  pass fills the KB's actual gap instead of re-chasing a facet we already know. Order: gap-missing facet
+ *  → frontier lead (a prior finding raised but didn't cover) → fresh neighbor name → gated content hint. */
 export function chooseAngle(req: ResearchRequest, frontierTerms: string[], floor: string[], contentHints: string[], centerName?: string): string {
   const already = (req.what + ' ' + req.context).toLowerCase();
   const fresh = (s: string): boolean => s.trim().length > 0 && !already.includes(s.toLowerCase());
-  const lead = frontierTerms.find(fresh) ?? floor.find(fresh) ?? contentHints.find(fresh);
+  const gapMissing = req.gap?.missing ?? [];
+  const lead = gapMissing.find(fresh) ?? frontierTerms.find(fresh) ?? floor.find(fresh) ?? contentHints.find(fresh);
   if (!lead) return '';
   const prefix = centerName && fresh(centerName) ? `re ${centerName}: ` : '';
   return clampAngle(`${prefix}${lead}`);
