@@ -15,6 +15,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { appendAuditEvent } from './audit';
 import { parseEntityNode, type ParsedNode } from './connectDoc';
+import { claimStatementsFromMd } from './claimDoc';
+import { computeEnrichmentGap } from './enrichGap';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor } from './researchers';
 
 /**
@@ -72,9 +74,11 @@ export async function flagSparseEntities(
   const rels = await walkEntityFiles(root);
   let emitted = 0;
   for (const rel of rels) {
+    let md: string;
     let node: ParsedNode;
     try {
-      node = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+      md = await fs.readFile(path.join(root, rel), 'utf8');
+      node = parseEntityNode(md);
     } catch {
       continue; // malformed/foreign node — skip, don't crash the sweep (ENG-16)
     }
@@ -83,6 +87,9 @@ export async function flagSparseEntities(
     const dedupKey = dedupKeyFor({ what: node.name, by });
     if (existingKeys.has(dedupKey)) continue; // already requested (this sweep or a prior one)
     existingKeys.add(dedupKey); // guard against duplicate entity files within one sweep
+    // RESEARCH-24: stamp the enrichment GAP from the entity's present claims so orient can steer the
+    // outbound query toward the MISSING facets (gap-filling) instead of re-chasing the bare topic.
+    const gap = computeEnrichmentGap(node.kind, claimStatementsFromMd(md));
     await appendAuditEvent(root, {
       actor: 'enrich',
       subjects: { entityId: node.id },
@@ -92,6 +99,7 @@ export async function flagSparseEntities(
         what: node.name,
         why: `sparse entity — corroborated by only ${node.derivedFrom.length} source(s); enrich with an external reference`,
         context: `${node.kind}: ${node.name}`,
+        gap,
       },
       ...(opts.ts ? { ts: opts.ts } : {}),
     });

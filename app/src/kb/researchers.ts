@@ -237,6 +237,14 @@ export interface ResearchRequest {
   /** Coalescing key so the same request doesn't fan out repeatedly (D2). */
   dedupKey: string;
   /**
+   * The entity's ENRICHMENT GAP (RESEARCH-24) — which expected facets of this entity's kind its present
+   * claims already cover (`present`) and which are absent (`missing`). Stamped by the producer (the WS-B
+   * enrich-trigger) from the entity's claims and plumbed through to orient, which biases the angle — and
+   * thus the outbound query — toward the MISSING facets so the pass fills gaps instead of re-establishing
+   * basics. Absent for non-entity / non-enrich requests (the query then falls back to the bare topic).
+   */
+  gap?: import('./enrichGap').EnrichmentGap;
+  /**
    * Chain depth of this request (RESEARCH-11 depth limit). A request born from a PRIMARY source is
    * depth 1; one born from a research-produced (`origin:'secondary'`) finding is one deeper than that
    * finding's own chain, and so on (research→finding→`research-request`→research…). Stamped at

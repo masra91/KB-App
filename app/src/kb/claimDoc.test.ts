@@ -1,6 +1,6 @@
 // Claim file rendering + the entity node's generated claims block (SPEC-0016 CLAIMS-6/9/11).
 import { describe, it, expect } from 'vitest';
-import { renderClaimMd, transformedByLabel, renderClaimsBlock, applyClaimsBlock, stripClaimsBlock, sourceLink, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END } from './claimDoc';
+import { renderClaimMd, transformedByLabel, renderClaimsBlock, applyClaimsBlock, stripClaimsBlock, claimStatementsFromMd, sourceLink, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END } from './claimDoc';
 import type { ClaimDecision } from './claims';
 
 const claim: ClaimDecision = { statement: 'Owns the Q3 budget.', status: 'interpretation', confidence: 0.7, mentions: ['Steve owns the Q3 budget'] };
@@ -105,5 +105,21 @@ describe('applyClaimsBlock is idempotent and identity-preserving (CLAIMS-9, CLAI
   it('stripClaimsBlock restores a node to its pre-claims body', () => {
     const withBlock = applyClaimsBlock(entityNode, links);
     expect(stripClaimsBlock(withBlock).trimEnd()).toBe(entityNode.trimEnd());
+  });
+});
+
+describe('claimStatementsFromMd — inverse of renderClaimsBlock (RESEARCH-24 gap input)', () => {
+  it('round-trips the NL statements out of a rendered block, dropping the *(status, conf)* + cite tail', () => {
+    const links = [
+      { claimPath: 'claims/x/01J1.md', statement: 'Owns the Q3 budget.', status: 'interpretation' as const, confidence: 0.7, source: 'sources/2026/05/30/01JSRC' },
+      { claimPath: 'claims/x/01J2.md', statement: 'Attended the offsite.', status: 'fact' as const, confidence: 0.95 },
+    ];
+    const md = applyClaimsBlock(entityNode, links);
+    expect(claimStatementsFromMd(md)).toEqual(['Owns the Q3 budget.', 'Attended the offsite.']);
+  });
+
+  it('a node with no claims block, or only the placeholder, yields [] (ENG-16 tolerant)', () => {
+    expect(claimStatementsFromMd('# Steve\n\nno block here')).toEqual([]);
+    expect(claimStatementsFromMd(applyClaimsBlock(entityNode, []))).toEqual([]); // _No claims derived yet._
   });
 });
