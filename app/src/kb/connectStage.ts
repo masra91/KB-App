@@ -39,6 +39,8 @@ import {
   type ParsedNode,
 } from './connectDoc';
 import { resolveProseWikilinks } from './composeDoc';
+import { buildEntityGraph } from './cohesion';
+import { planOrphanLinks, topicTagsOf, type AffinityEntity, type OrphanLinkOptions } from './entityAffinity';
 import { mergeNodes } from './mergeNodes';
 import { applyClaimDedup, type DedupReport } from './claimDedup';
 import { typeTag, normalizeTag } from './metaVocab';
@@ -1172,6 +1174,127 @@ export async function dedupClaimsOnce(root: string, log: DevLog = noopDevLog): P
   return { ...report, committed: true };
 }
 
+export interface OrphanLinkReport {
+  /** Orphan nodes considered (degree-0, not owned by the link-promotion pass). */
+  orphans: number;
+  /** Orphan nodes that received ≥1 discovered link this pass. */
+  linked: number;
+  /** Total discovered `[[wikilink]]` edges rendered. */
+  links: number;
+  /** Whether the pass committed + advanced (false ⇒ byte-stable no-op). */
+  committed: boolean;
+}
+
+/** Tunable knobs for the orphan linker (anti-hairball precision gates) — defaults in `entityAffinity`.
+ *  `blocked` is the SPEC-0050 suppression seam (DEV-7): a predicate forbidding a settled-`distinct`
+ *  pair. When DEV-7's `pairDirective` store lands, the wiring reads it once + closes over it here;
+ *  until then it's absent (link freely). */
+export type OrphanLinkConfig = Pick<OrphanLinkOptions, 'minScore' | 'maxLinksPerOrphan' | 'blocked'>;
+
+/**
+ * SPEC-0051 slice-2 — the **orphan-RAG linker** ("the prize"). The link-promotion pass (`linkOne`)
+ * only wires entities that Claims gave a `relatesTo` hint; the long tail of entities with NO stated
+ * relationship stays orphaned (degree-0 islands — ~89% of the vault at dispatch). This pass recovers
+ * that tail by RETRIEVING grounded candidate relations and rendering them as `[[wikilinks]]`:
+ * co-mention (shared `derivedFrom` source provenance) + shared `topic/` tags, rarity-weighted so a
+ * broad source/tag can't manufacture a hairball (`entityAffinity`). It is deterministic (no agent →
+ * no hallucinated edge), conservative (an orphan with no qualifying evidence stays unlinked — the
+ * don't-false-link bar), and capped (≤ `maxLinksPerOrphan` per node → bounded degree growth).
+ *
+ * Domain boundary (no clobber): we SKIP any node carrying `relatesTo` hints — those belong to
+ * `linkOne`, which owns and regenerates their link block (and leaving a stated-but-unresolved
+ * relationship unlinked is correct per CONNECT-13, not something to override with a guess). So the
+ * two passes write disjoint sets of nodes and neither stomps the other's block.
+ *
+ * Idempotent: once an orphan gets a discovered link it is no longer degree-0, so a later pass skips
+ * it and the block is byte-stable. Mirrors `dedupClaimsOnce`'s bulk worktree discipline — one reset,
+ * one commit, one ORCH-27 canonical advance (never a raw ff — the #256/#293 wedge class). MUST be
+ * called serialized via the shared canonical-writer lock.
+ */
+export async function linkOrphansOnce(root: string, log: DevLog = noopDevLog, config: OrphanLinkConfig = {}): Promise<OrphanLinkReport> {
+  root = path.resolve(root);
+  const { wt, base } = await ensureWorktree(root);
+  const wtGit = boundedGit(wt); // #163: bounded — runs under the canonical-writer lock
+  await wtGit.raw('reset', '--hard', base);
+  await wtGit.raw('clean', '-fd', 'entities', 'claims');
+
+  // Read every entity node ONCE (body + parsed fields). The body feeds the existing-graph build
+  // (so we orphan-detect against the real current link structure) AND the per-orphan block rewrite.
+  const nodes = await readEntityNodes(wt);
+  const bodyByRel = new Map<string, string>();
+  await Promise.all(
+    nodes.map(async (n) => {
+      try {
+        bodyByRel.set(n.rel, await fs.readFile(path.join(wt, n.rel), 'utf8'));
+      } catch {
+        /* node vanished mid-pass — drop it; the next sweep re-reads */
+      }
+    }),
+  );
+  const present = nodes.filter((n) => bodyByRel.has(n.rel));
+  if (present.length === 0) return { orphans: 0, linked: 0, links: 0, committed: false };
+
+  const { edges } = buildEntityGraph(present.map((n) => ({ path: n.rel, body: bodyByRel.get(n.rel)! })));
+  const affEntities: AffinityEntity[] = present.map((n) => ({
+    id: n.rel,
+    name: n.name,
+    kind: n.kind,
+    derivedFrom: n.derivedFrom,
+    topicTags: topicTagsOf(n.tags),
+  }));
+  const nameByRel = new Map(present.map((n) => [n.rel, n.name]));
+
+  // SKIP nodes the link-promotion pass owns (any with a `relatesTo` hint) — disjoint domains, no clobber.
+  const skip = new Set(await readLinkQueue(root));
+
+  const plans = planOrphanLinks(affEntities, edges, { ...config, skip });
+  // Count the orphans we actually considered (degree-0 ∧ not skipped) for the report/audit.
+  const incident = new Set<string>();
+  for (const e of edges) {
+    incident.add(e.from);
+    incident.add(e.to);
+  }
+  const orphanCount = present.filter((n) => !incident.has(n.rel) && !skip.has(n.rel)).length;
+
+  if (plans.length === 0) return { orphans: orphanCount, linked: 0, links: 0, committed: false };
+
+  let totalLinks = 0;
+  let audit = '';
+  const runId = ulid();
+  for (const plan of plans) {
+    const body = bodyByRel.get(plan.orphan);
+    if (body === undefined) continue;
+    const links: NodeLink[] = plan.links.map((c) => ({ targetRel: c.id, name: nameByRel.get(c.id) }));
+    links.sort((a, b) => (a.targetRel < b.targetRel ? -1 : 1)); // deterministic block order (matches linkOne)
+    const newMd = applyLinksBlock(body, links);
+    if (newMd === body) continue; // already carries exactly these links — byte-stable
+    await fs.writeFile(path.join(wt, plan.orphan), newMd, 'utf8');
+    totalLinks += links.length;
+    for (const c of plan.links) {
+      audit += auditLine({
+        runId,
+        event: 'orphan-linked',
+        node: plan.orphan,
+        target: c.id,
+        score: Number(c.score.toFixed(3)),
+        sources: c.sharedSources.length,
+        topics: c.sharedTopicTags.length,
+      });
+    }
+  }
+  if (totalLinks === 0) return { orphans: orphanCount, linked: 0, links: 0, committed: false };
+
+  audit = auditLine({ runId, event: 'orphan-link-start', orphans: orphanCount, linked: plans.length }) + audit;
+  await appendAudit(wt, audit);
+  await wtGit.raw('add', '-A');
+  await wtGit.commit(`connect: orphan-link ${plans.length} node(s) → ${totalLinks} discovered link(s)`);
+  // Serialized canonical advance through the SAME ORCH-27 discipline every other writer uses (#256
+  // second symptom) — a raw `merge --ff-only` here had the stale-`index.lock` wedge blind spot.
+  const checkpoint = await canonicalHead(root);
+  await advanceOrCollide(root, WORK_BRANCH, checkpoint, undefined, log);
+  return { orphans: orphanCount, linked: plans.length, links: totalLinks, committed: true };
+}
+
 /**
  * Owns a vault's Connect stage: a poke/sweep drain loop sharing the canonical-writer lock with
  * the other stages (SPEC-0014 §5). Restartable: re-reads the derived queue and resumes.
@@ -1345,6 +1468,21 @@ export class ConnectStage {
           }
         }
       }
+    }
+    // Orphan-RAG linker (SPEC-0051 slice-2): once `linkOne` has wired every stated relationship,
+    // recover the degree-0 tail by retrieving grounded candidate relations (co-mention + shared
+    // topic tags, rarity-weighted) and rendering them as `[[wikilinks]]`. Coarse-locked + bulk like
+    // dedup (one reset/commit/advance), deterministic, idempotent (a linked node is no longer an
+    // orphan → skipped next sweep). Best-effort: a failure is logged and a later sweep retries — it
+    // never aborts the rest of the drain.
+    try {
+      const orphan = await this.lock.run(() => linkOrphansOnce(this.root, this.log), 'connect:orphan-link');
+      if (orphan.committed) {
+        worked = true;
+        this.log.info('connect.orphan-link', { orphans: orphan.orphans, linked: orphan.linked, links: orphan.links });
+      }
+    } catch (err) {
+      this.log.warn('connect.orphan-link-error', { err }); // best-effort; a later poke/sweep retries
     }
     // Within-source claim dedup (CLAIMS-19): collapse the "same assertion restated per-entity"
     // over-extraction once Claims has settled. Coarse-locked like link-promotion (it sweeps all
