@@ -17,7 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
-import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair } from './directives';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -373,6 +373,35 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
       expect(consolidationDirectiveForPair(onStaging, 'organization|disney', 'organization|walt disney company')?.verdict).toBe('distinct');
       const onMain = await readConsolidationDirectives(root);
       expect(consolidationDirectiveForPair(onMain, 'organization|disney', 'organization|walt disney company')?.verdict).toBe('distinct');
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('keeps a correction (retract) directive on staging AND republished on main across a Full Replay', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // A settled retract (as the correction-record path will write it), committed on `staging`.
+      await recordCorrectionDirective(stagingWt, {
+        type: 'retract',
+        identityKey: 'person|steve jobs',
+        statement: 'Co-founded Apple in 1976.',
+        reviewId: 'rev-retract',
+        decidedAt: '2026-06-15T00:00:00Z',
+      });
+      const sg = simpleGit(stagingWt);
+      await sg.raw('add', '-A');
+      await sg.commit('seed: durable correction directive');
+
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // Survives on staging (the rebuild consults it — a re-derived claim stays retracted) AND on main.
+      expect(isClaimRetracted(await readCorrectionDirectives(stagingWt), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
+      expect(isClaimRetracted(await readCorrectionDirectives(root), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
     } finally {
       await rmTempDir(dir);
     }

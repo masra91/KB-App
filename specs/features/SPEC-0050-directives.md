@@ -56,8 +56,8 @@ produces them (so the directive lands in the **same commit** as the answer/corre
 |---|---|---|---|---|
 | **disambiguation** | single block identity | within-block "these same-name mentions are one entity" (`same`) / per-pair `distinct` | Connect (`connectStage`) | 1 ✅ |
 | **merge** / **distinct** (consolidation) | **pair** of block identities | ad-hoc "these two SEPARATE entities are / are not the same" | Reflect (`reflectJob`), SPEC-0051 orphan-linker | 2a ✅ |
-| **reattribute** | block identity + claim ref | "this claim belongs to entity B, not A" | Claims / Compose read path | 2b ▢ |
-| **retract** | block identity + claim ref | "this claim is wrong — suppress it" | Claims / Compose read path | 2b ▢ |
+| **retract** | block identity + normalized statement | "this claim is wrong — suppress it" | Claims block-regen + Compose cited-claims | 2b ✅ |
+| **reattribute** | block identity + claim ref | "this claim belongs to entity B, not A" | Claims / Compose read path | 2c ▢ |
 | **guidance** | block identity (or global) | freeform durable steer for an entity | relevant stage prompt | 2c ▢ |
 | **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient (`enrichGap`) | 2c ▢ |
 | **revoke** | target directive id | cancels a prior directive | the directive reader (active-set) | 2c ▢ |
@@ -100,8 +100,12 @@ gate** in addition to QD-2.
   `directivePairKey`/`consolidationDirectiveForPair`. Producer: `answerReview` on a consolidation review
   (confirm→merge, reject→distinct). Consumer: `reflectJob.filterStatefulFindings` (survives rebirth where
   the ULID decision goes blind) + the SPEC-0051 orphan-linker's `blocked` seam.
-- **Slice 2b (corrections: reattribute/retract) — ▢ next.**
-- **Slice 2c (guidance/enrich/revoke) — ▢.** `enrich` folds into RESEARCH-24's gap payload (DEV-2).
+- **Slice 2b (correction: retract) — ✅.** `directives/corrections.jsonl`, keyed on subject block identity
+  + normalized statement (`correctionClaimKey`). Enforced at the Claims block-regen (`entityBacklinks`) and
+  Compose's cited-claim read (`readCitedClaims`); claim FILE is kept (evidence), only surfaces are nudged.
+  Replay-survival tested. `recordCorrectionDirective` is the seam the slice-3 "correct this" UI calls.
+- **Slice 2c (reattribute + guidance/enrich/revoke) — ▢.** reattribute adds cross-entity surfacing (pull
+  claims to entity B); `enrich` folds into RESEARCH-24's gap payload (DEV-2).
 - **Slice 3 (Rules surface + "correct this") — ▢.** QD-2 + Design-Lead visual.
 
 ## 6. Non-goals

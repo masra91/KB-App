@@ -20,6 +20,7 @@ import { renderEntityNode, entityFileRel } from './connectDoc';
 import { ulid } from './ulid';
 import { claimsOne, readClaimsQueue, readClaimsState, findEntityFiles, parseEntityNode, parseClaimBacklink, ClaimsStage, retryClaimsItem, dismissClaimsItem, listSetAsideItems, DEFAULT_MAX_ATTEMPTS, DEFAULT_MAX_REVIEW_ROUNDS } from './claimsStage';
 import { renderClaimMd } from './claimDoc';
+import { recordCorrectionDirective } from './directives';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision, ClaimsDecision } from './claims';
 import { findOpenReviews, answerReview, getReview } from './reviewStore';
@@ -304,6 +305,32 @@ describe.skipIf(!gitAvailable)('the entity node gets a regenerable claims block 
       // Identity is untouched (CLAIMS-11): same kind/name/derivedFrom, heading preserved.
       expect(parseEntityNode(after)).toEqual(refBefore);
       expect(after).toContain('# Steve');
+    });
+  });
+
+  // SPEC-0050 slice-2b: a durable RETRACT correction suppresses the claim from the regenerated block,
+  // keyed on the subject's STABLE block identity + statement (so it outlives the claim file's reborn
+  // ULID). The claim FILE is still written — evidence is preserved; only the surface display is nudged.
+  it('a durable RETRACT suppresses the claim from the regenerated block (claim file still kept)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']); // identity person|steve
+      // The Principal retracted one claim (as the future "correct this" path will record it), committed
+      // so claimsOne's worktree (branched from HEAD) sees it.
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|steve', statement: 'Owns the Q3 budget.', reviewId: 'R', decidedAt: '2026-06-15T00:00:00Z' });
+      const git = simpleGit(root);
+      await git.raw('add', '-A');
+      await git.commit('test: retract directive');
+
+      await claimsOne(root, entityRels[0], claimsDeciderFor([
+        aClaim({ statement: 'Owns the Q3 budget.' }),
+        aClaim({ statement: 'Leads the platform team.' }),
+      ]));
+
+      const node = await fs.readFile(path.join(root, entityRels[0]), 'utf8');
+      expect(node).toContain('Leads the platform team.'); // kept claim listed
+      expect(node).not.toContain('Owns the Q3 budget.'); // retracted claim suppressed from the block
+      expect(await readClaimFiles(root)).toHaveLength(2); // BOTH claim files still on disk (evidence preserved)
     });
   });
 
