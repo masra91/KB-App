@@ -334,6 +334,30 @@ describe.skipIf(!gitAvailable)('the entity node gets a regenerable claims block 
     });
   });
 
+  // SPEC-0050 slice-2c: a REATTRIBUTE ("this claim is on the wrong subject") suppresses the claim from
+  // the WRONG subject's block too (same suppression as retract; surfacing it on the corrected target is a
+  // documented follow-up). Keyed on the wrong subject's stable identity + statement → survives replay.
+  it('a durable REATTRIBUTE suppresses the claim from the WRONG subject block (claim file still kept)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const { entityRels } = await setup(root, 'Steve owns the Q3 budget', ['Steve']); // identity person|steve
+      await recordCorrectionDirective(root, { type: 'reattribute', identityKey: 'person|steve', statement: 'Owns the Q3 budget.', toIdentity: 'person|dana', reviewId: 'R', decidedAt: '2026-06-15T00:00:00Z' });
+      const git = simpleGit(root);
+      await git.raw('add', '-A');
+      await git.commit('test: reattribute directive');
+
+      await claimsOne(root, entityRels[0], claimsDeciderFor([
+        aClaim({ statement: 'Owns the Q3 budget.' }),
+        aClaim({ statement: 'Leads the platform team.' }),
+      ]));
+
+      const node = await fs.readFile(path.join(root, entityRels[0]), 'utf8');
+      expect(node).toContain('Leads the platform team.'); // unaffected claim listed
+      expect(node).not.toContain('Owns the Q3 budget.'); // reattributed claim suppressed from the wrong subject
+      expect(await readClaimFiles(root)).toHaveLength(2); // both claim files kept (evidence preserved)
+    });
+  });
+
   it('is idempotent on re-poke: no duplicate block or claim files (CLAIMS-13/16)', async () => {
     await withTempVault(async (root) => {
       await createKb({ path: root, initGitIfNeeded: true });

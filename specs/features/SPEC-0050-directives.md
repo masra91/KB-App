@@ -57,7 +57,7 @@ produces them (so the directive lands in the **same commit** as the answer/corre
 | **disambiguation** | single block identity | within-block "these same-name mentions are one entity" (`same`) / per-pair `distinct` | Connect (`connectStage`) | 1 ✅ |
 | **merge** / **distinct** (consolidation) | **pair** of block identities | ad-hoc "these two SEPARATE entities are / are not the same" | Reflect (`reflectJob`), SPEC-0051 orphan-linker | 2a ✅ |
 | **retract** | block identity + normalized statement | "this claim is wrong — suppress it" | Claims block-regen + Compose cited-claims | 2b ✅ |
-| **reattribute** | block identity + claim ref | "this claim belongs to entity B, not A" | Claims / Compose read path | 2c ▢ |
+| **reattribute** | wrong-subject identity + statement (+ target) | "this claim is on the wrong subject (belongs to B)" | Claims block-regen + Compose (suppress-on-wrong-subject; surface-on-B is a follow-up) | 2c ✅ (v1) |
 | **guidance** | block identity (or global) | freeform durable steer for an entity | relevant stage prompt | 2c ▢ |
 | **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient (`enrichGap`) | 2c ▢ |
 | **revoke** | target directive id | cancels a prior directive | the directive reader (active-set) | 2c ▢ |
@@ -104,8 +104,11 @@ gate** in addition to QD-2.
   + normalized statement (`correctionClaimKey`). Enforced at the Claims block-regen (`entityBacklinks`) and
   Compose's cited-claim read (`readCitedClaims`); claim FILE is kept (evidence), only surfaces are nudged.
   Replay-survival tested. `recordCorrectionDirective` is the seam the slice-3 "correct this" UI calls.
-- **Slice 2c (reattribute + guidance/enrich/revoke) — ▢.** reattribute adds cross-entity surfacing (pull
-  claims to entity B); `enrich` folds into RESEARCH-24's gap payload (DEV-2).
+- **Slice 2c reattribute — ✅ (v1).** "this claim is on the wrong subject": suppresses it on the wrong
+  subject (shares `isClaimSuppressed` with retract) + records the corrected target (`toIdentity`,
+  `reattributedTarget`). SURFACING the claim on the target entity is a documented FOLLOW-UP — it needs
+  cross-entity claim injection that touches the CLAIMS-21 perf path; flagged for KB-Lead before building.
+- **Slice 2c guidance/enrich/revoke — ▢.** `enrich` folds into RESEARCH-24's gap payload (DEV-2 coord).
 - **Slice 3 (Rules surface + "correct this") — ▢.** QD-2 + Design-Lead visual.
 
 ## 6. Non-goals

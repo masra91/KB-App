@@ -21,6 +21,8 @@ import {
   correctionClaimKey,
   readCorrectionDirectives,
   isClaimRetracted,
+  isClaimSuppressed,
+  reattributedTarget,
   recordCorrectionDirective,
 } from './directives';
 
@@ -215,6 +217,55 @@ describe('correction directives (SPEC-0050 slice-2b: retract)', () => {
       expect(isClaimRetracted(map, 'person|d', 'claim four')).toBe(true); // valid, survives
       expect(isClaimRetracted(map, 'person|b', 's')).toBe(false); // bad type → dropped
       expect(isClaimRetracted(map, 'person|c', '')).toBe(false); // missing fields → dropped
+    });
+  });
+});
+
+describe('correction directives (SPEC-0050 slice-2c: reattribute)', () => {
+  it('records a reattribute with its corrected target identity', async () => {
+    await withRoot(async (root) => {
+      await recordCorrectionDirective(root, {
+        type: 'reattribute',
+        identityKey: 'person|ngan',
+        statement: 'Worked at Disney for 20 years.',
+        toIdentity: 'person|mason',
+        reviewId: 'rev1',
+        decidedAt: '2026-06-15T00:00:00Z',
+      });
+      const map = await readCorrectionDirectives(root);
+      // Suppressed on the WRONG subject (both retract + reattribute suppress) …
+      expect(isClaimSuppressed(map, 'person|ngan', 'Worked at Disney for 20 years.')).toBe(true);
+      // … but it is NOT a retract …
+      expect(isClaimRetracted(map, 'person|ngan', 'Worked at Disney for 20 years.')).toBe(false);
+      // … and the corrected target is recorded (drift-tolerant lookup).
+      expect(reattributedTarget(map, 'person|ngan', 'worked at disney for 20 years')).toBe('person|mason');
+      expect(reattributedTarget(map, 'person|mason', 'Worked at Disney for 20 years.')).toBeUndefined(); // not on the target's key
+    });
+  });
+
+  it('isClaimSuppressed covers BOTH retract and reattribute; isClaimRetracted is retract-only', async () => {
+    await withRoot(async (root) => {
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|a', statement: 'wrong fact', reviewId: 'r1', decidedAt: 'now' });
+      await recordCorrectionDirective(root, { type: 'reattribute', identityKey: 'person|b', statement: 'misattributed fact', toIdentity: 'person|c', reviewId: 'r2', decidedAt: 'now' });
+      const map = await readCorrectionDirectives(root);
+      expect(isClaimSuppressed(map, 'person|a', 'wrong fact')).toBe(true);
+      expect(isClaimSuppressed(map, 'person|b', 'misattributed fact')).toBe(true);
+      expect(isClaimRetracted(map, 'person|a', 'wrong fact')).toBe(true);
+      expect(isClaimRetracted(map, 'person|b', 'misattributed fact')).toBe(false); // reattribute ≠ retract
+    });
+  });
+
+  it('a reattribute requires a corrected target (recordCorrectionDirective throws; reader drops a malformed one)', async () => {
+    await withRoot(async (root) => {
+      await expect(
+        recordCorrectionDirective(root, { type: 'reattribute', identityKey: 'person|a', statement: 's', reviewId: 'r', decidedAt: 'now' }),
+      ).rejects.toThrow(/toIdentity/);
+      // A hand-written reattribute line missing toIdentity is dropped on read (ENG-16).
+      const file = path.join(path.resolve(root), CORRECTION_DIRECTIVES_REL);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.appendFile(file, JSON.stringify({ type: 'reattribute', correctionKey: 'person|a::s', identityKey: 'person|a', statement: 's' }) + '\n', 'utf8');
+      const map = await readCorrectionDirectives(root);
+      expect(isClaimSuppressed(map, 'person|a', 's')).toBe(false); // missing toIdentity → dropped
     });
   });
 });
