@@ -10,6 +10,13 @@
 #                   asar bug). Cheap: build-only, no Playwright, no app launch. Linux is enough
 #                   — Vite-build + asar-pack is platform-agnostic, so a bundling regression
 #                   fails here regardless of the shipped OS.
+#   COST-MOVED OFF THE PER-PR PATH (CI-COST-REDUCTION; see the `package`/`package-macos` jobs):
+#        the macOS `package` build-check used to run on every PR at the 10× macOS minute
+#        multiplier (the recurring Actions spend). It is now the separate `package-macos` job,
+#        which runs on push-to-`main` (post-merge / pre-release backstop), on the `macos` PR
+#        label, and on dispatch — NOT on routine PRs. The macOS-only native-dep regression class
+#        (#247 `fsevents`, `os: ["darwin"]`) is therefore caught on merge-to-main rather than on
+#        the PR; see the job comments for the full tradeoff.
 #   GOAL: a full matrix — every level (unit + component + e2e + packaged smoke) on BOTH
 #        macOS and Windows (the shipped targets, STACK-3). We grow toward it incrementally.
 #   The `e2e` job below is the start of that rollout: it is OPT-IN (manual dispatch or an
@@ -90,19 +97,86 @@ jobs:
   # Gating build-check (TEST-20): prove the app still PACKAGES. Build-only — no Playwright,
   # no app launch — so it's cheap enough to gate every PR, yet catches packaged-artifact
   # breaks (un-bundled deps / asar resolution) that the `quick` job structurally cannot see.
+  #
+  # ── COST / COVERAGE TRADEOFF (CI-COST-REDUCTION; TEST-11 "no silent caps") ───────────────────
+  # macOS cloud runners bill at 10× the Linux per-minute rate. Running the macOS package
+  # build-check on EVERY PR + every `synchronize` push was the dominant recurring Actions spend
+  # (it ran `npm ci` + electron-forge `npm run package` at the 10× multiplier on each PR run).
+  # So the package check is now SPLIT into two jobs:
+  #   - `package`        (this job, ubuntu) — the per-PR REQUIRED gate. Catches every
+  #                      platform-agnostic bundling regression (Vite main bundle + asar pack) —
+  #                      e.g. the `simple-git` asar class. 1× cost.
+  #   - `package-macos`  (below, macOS)     — NO LONGER runs on routine PRs. Runs on push-to-main
+  #                      (post-merge, pre-release backstop), on PRs that opt in via the `macos`
+  #                      label, and on manual dispatch.
+  # WHAT IS NO LONGER GATED PER-PR: a macOS-ONLY native-dep regression — an `os: ["darwin"]` dep
+  # such as chokidar's `fsevents` (#247, SPEC-0037). These are never installed/bundled on Linux,
+  # so the ubuntu leg structurally CANNOT see them. WHERE IT IS STILL CAUGHT: `package-macos`
+  # runs on every push to `main`, so such a regression is caught post-merge BEFORE any release
+  # build ships; and a PR that knowingly touches native deps can add the `macos` label to verify
+  # it pre-merge. This trades "caught on the PR" for "caught on merge to main (pre-release)" on
+  # routine PRs, in exchange for removing the 10× macOS cost from the per-PR path.
   package:
     name: package build-check
     strategy:
       fail-fast: false
       matrix:
-        # Ubuntu + macOS: the Vite-build + asar-pack catches platform-agnostic bundling regressions on
-        # Linux, BUT a macOS-only NATIVE dep (e.g. chokidar's `fsevents`, SPEC-0037) can break ONLY the
-        # mac package — `fsevents` has `os: ["darwin"]`, so it's never installed/bundled on Linux. The
-        # macos-latest leg is the durable catch for that class (the #247 fsevents regression the
-        # ubuntu-only matrix missed). Default `npm run package` is UNSIGNED (KB_OSX_SIGN unset), so the
-        # mac leg needs no signing cert.
-        os: [ubuntu-latest, macos-latest]
+        # Single-entry matrix retained DELIBERATELY: it keeps this job's check-context name
+        # `package build-check (ubuntu-latest)` identical to before the macOS split, so IF a branch
+        # ruleset/protection ever pins it as a required check the name stays stable. (As of this
+        # change the `main` ruleset requires only `typecheck · lint · unit (ubuntu-latest)` — neither
+        # package context is required — so dropping the macOS leg from PRs blocks no required check.)
+        # Mirrors the `quick` job's shape.
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - name: Package the app — build-only (TEST-20)
+        run: npm run package
+      - name: Assert the packaged artifact was produced (TEST-20)
+        shell: bash
+        run: |
+          # electron-forge exits non-zero on a hard failure, but assert the artifact exists too
+          # so a silently-empty package can never read as green. Per-OS output layout.
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            app=$(ls -d out/KB-App-darwin-*/KB-App.app 2>/dev/null | head -n1)
+            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/KB-App" ]; then
+              echo "::error::npm run package produced no launchable macOS .app under out/ (fsevents/native-bundling regression?)"
+              ls -R out || true
+              exit 1
+            fi
+            echo "Packaged artifact OK: $app"
+          else
+            dir=$(ls -d out/KB-App-linux-* 2>/dev/null | head -n1)
+            if [ -z "$dir" ] || [ ! -x "$dir/KB-App" ]; then
+              echo "::error::npm run package produced no runnable Linux artifact under out/"
+              ls -R out || true
+              exit 1
+            fi
+            echo "Packaged artifact OK: $dir/KB-App"
+          fi
+
+  # macOS package build-check — the durable catch for the macOS-only NATIVE-dep regression class
+  # (#247 `fsevents`: `os: ["darwin"]` deps never install/bundle on Linux, so the ubuntu `package`
+  # job above CANNOT see them). Moved OFF the per-PR path because the macOS runner bills at the 10×
+  # minute multiplier and was the recurring Actions spend on every PR. It now runs on:
+  #   - push to `main`      — post-merge / pre-release backstop (every merge is checked before any
+  #                           release build, so a native-dep break can never reach a shipped artifact)
+  #   - the `macos` PR label — opt-in PRE-merge verification for PRs that touch native deps
+  #                           (mirrors the existing `e2e`-label opt-in pattern below)
+  #   - workflow_dispatch   — manual, on demand (excludes the update_snapshots dispatch, which is
+  #                           the snapshots job's exclusive trigger — same guard as the e2e job)
+  # Default `npm run package` is UNSIGNED (KB_OSX_SIGN unset), so this leg needs no signing cert.
+  package-macos:
+    name: package build-check (macOS — native-dep catch)
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.update_snapshots != 'true') || contains(github.event.pull_request.labels.*.name, 'macos') }}
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
