@@ -25,7 +25,7 @@ import { LINKS_BLOCK_START, LINKS_BLOCK_END } from './connectDoc';
 import { deriveSourceTitle } from './sourceDoc';
 import { parseEntityNode, parseClaimBacklink, findEntityFiles } from './claimsStage';
 import { blockKey } from './connect';
-import { readCorrectionDirectives, isClaimRetracted } from './directives';
+import { readCorrectionDirectives, isClaimSuppressed } from './directives';
 import { applyProse, renderProse, hasProse } from './composeDoc';
 import type { CitedClaim } from './compose';
 import { makeComposeDecider, type ComposeDecider, type ComposeInput } from './composeAgent';
@@ -198,8 +198,9 @@ function auditLine(fields: Record<string, unknown>): string {
  *  be read still contribute (titled with the neutral generic the resolver returns for absent input). */
 async function readCitedClaims(wt: string, entityMd: string, entityRel: string): Promise<CitedClaim[]> {
   const paths = Array.from(new Set(claimBlockPaths(entityMd)));
-  // SPEC-0050 slice-2b: exclude a durably-RETRACTED claim from the composed prose + citations too (not
-  // just the structured block) — same content key (subject block identity + statement), survives replay.
+  // SPEC-0050 slice-2b/2c: exclude a durably-corrected claim from the composed prose + citations too (not
+  // just the structured block) — retract OR reattribute (wrong subject); same content key (subject block
+  // identity + statement), survives replay.
   const corrections = await readCorrectionDirectives(wt);
   const ref = parseEntityNode(entityMd);
   const identityKey = blockKey(ref.kind, ref.name);
@@ -214,7 +215,7 @@ async function readCitedClaims(wt: string, entityMd: string, entityRel: string):
     }
     const link = parseClaimBacklink(claimMd, rel, entityRel);
     if (!link || !link.source || link.statement.length === 0) continue;
-    if (isClaimRetracted(corrections, identityKey, link.statement)) continue; // retracted → omit from prose
+    if (isClaimSuppressed(corrections, identityKey, link.statement)) continue; // retracted/reattributed → omit from prose
     let title = titleCache.get(link.source);
     if (title === undefined) {
       let sourceMd = '';

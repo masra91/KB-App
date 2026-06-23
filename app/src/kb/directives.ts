@@ -273,18 +273,25 @@ export async function recordConsolidationDirective(
 // (`readCitedClaims`) drop any claim whose (identity, statement) is retracted. The CREATE affordance
 // ("correct this" UI → IPC) is slice-3; `recordCorrectionDirective` is the seam it calls.
 
-export type CorrectionType = 'retract';
+export type CorrectionType = 'retract' | 'reattribute';
 
 /**
  * One durable claim correction. Keyed on `correctionKey` = `correctionClaimKey(identityKey, statement)`
- * — the subject entity's STABLE block identity + the normalized statement (content-derived, ULID-free).
+ * — the WRONG subject's STABLE block identity + the normalized statement (content-derived, ULID-free).
  * `statement` is kept verbatim for provenance / the Rules surface (never the lookup key).
+ *
+ * - `retract`: the claim is wrong → suppress it from `identityKey`'s surfaces.
+ * - `reattribute`: the claim is on the WRONG subject (`identityKey`) → suppress it there, and `toIdentity`
+ *   is the corrected subject. (Slice-2c v1 enforces the suppress-on-wrong-subject half; SURFACING the
+ *   claim ON `toIdentity` is a documented follow-up — it needs cross-entity claim injection that touches
+ *   the CLAIMS-21 perf path. `toIdentity` is recorded now so the Rules surface + that follow-up have it.)
  */
 export interface CorrectionDirective {
-  type: CorrectionType; // 'retract' (reattribute is a later sibling)
+  type: CorrectionType;
   correctionKey: string; // correctionClaimKey(identityKey, statement)
-  identityKey: string; // subject entity block identity (kind|normalizedName)
+  identityKey: string; // the (wrong) subject entity block identity (kind|normalizedName)
   statement: string; // verbatim claim statement (provenance/display)
+  toIdentity?: string; // reattribute only: the CORRECTED subject's block identity
   reviewId: string; // provenance: the answer/correction that produced this (PRIN-5/6)
   decidedAt: string; // ISO; ordering for last-wins revisability
 }
@@ -328,15 +335,18 @@ export async function readCorrectionDirectives(root: string): Promise<Map<string
     } catch {
       continue;
     }
-    if (obj.type !== 'retract') continue;
+    if (obj.type !== 'retract' && obj.type !== 'reattribute') continue;
     if (typeof obj.correctionKey !== 'string' || obj.correctionKey.length === 0) continue;
     if (typeof obj.identityKey !== 'string' || obj.identityKey.length === 0) continue;
     if (typeof obj.statement !== 'string') continue;
+    // reattribute requires a corrected target identity; a malformed one is dropped (ENG-16).
+    if (obj.type === 'reattribute' && (typeof obj.toIdentity !== 'string' || obj.toIdentity.length === 0)) continue;
     out.set(obj.correctionKey, {
       type: obj.type,
       correctionKey: obj.correctionKey,
       identityKey: obj.identityKey,
       statement: obj.statement,
+      ...(obj.type === 'reattribute' ? { toIdentity: obj.toIdentity as string } : {}),
       reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
       decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
     });
@@ -344,13 +354,36 @@ export async function readCorrectionDirectives(root: string): Promise<Map<string
   return out;
 }
 
-/** Whether the claim {subject identity, statement} has been retracted by a durable correction. */
+/** Whether the claim {subject identity, statement} is SUPPRESSED on that subject by a durable correction —
+ *  true for BOTH `retract` (it's wrong) and `reattribute` (it's on the wrong subject). The block-regen +
+ *  compose read paths gate on this so a corrected claim leaves the wrong entity's surfaces. */
+export function isClaimSuppressed(
+  corrections: Map<string, CorrectionDirective>,
+  identityKey: string,
+  statement: string,
+): boolean {
+  const t = corrections.get(correctionClaimKey(identityKey, statement))?.type;
+  return t === 'retract' || t === 'reattribute';
+}
+
+/** Whether the claim {subject identity, statement} has specifically been RETRACTED (not reattributed). */
 export function isClaimRetracted(
   corrections: Map<string, CorrectionDirective>,
   identityKey: string,
   statement: string,
 ): boolean {
   return corrections.get(correctionClaimKey(identityKey, statement))?.type === 'retract';
+}
+
+/** The corrected target identity for a REATTRIBUTED claim, or undefined if not reattributed. Used by the
+ *  Rules surface (display) and the future surface-on-target follow-up. */
+export function reattributedTarget(
+  corrections: Map<string, CorrectionDirective>,
+  identityKey: string,
+  statement: string,
+): string | undefined {
+  const d = corrections.get(correctionClaimKey(identityKey, statement));
+  return d?.type === 'reattribute' ? d.toIdentity : undefined;
 }
 
 /**
@@ -360,13 +393,17 @@ export function isClaimRetracted(
  */
 export async function recordCorrectionDirective(
   root: string,
-  correction: { type: CorrectionType; identityKey: string; statement: string; reviewId: string; decidedAt: string },
+  correction: { type: CorrectionType; identityKey: string; statement: string; toIdentity?: string; reviewId: string; decidedAt: string },
 ): Promise<CorrectionDirective> {
+  if (correction.type === 'reattribute' && (!correction.toIdentity || correction.toIdentity.length === 0)) {
+    throw new Error('directives: a reattribute correction requires a non-empty toIdentity (the corrected subject)');
+  }
   const rec: CorrectionDirective = {
     type: correction.type,
     correctionKey: correctionClaimKey(correction.identityKey, correction.statement),
     identityKey: correction.identityKey,
     statement: correction.statement,
+    ...(correction.type === 'reattribute' ? { toIdentity: correction.toIdentity } : {}),
     reviewId: correction.reviewId,
     decidedAt: correction.decidedAt,
   };

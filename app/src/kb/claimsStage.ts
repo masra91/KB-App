@@ -24,7 +24,7 @@ import { ulid, dateShard } from './ulid';
 import { readCapturedMeta } from './ingest';
 import { renderClaimMd, applyClaimsBlock, oneLine, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END, type ClaimBacklink } from './claimDoc';
 import { blockKey } from './connect';
-import { readCorrectionDirectives, isClaimRetracted } from './directives';
+import { readCorrectionDirectives, isClaimSuppressed } from './directives';
 import type { ClaimStatus } from './claims';
 import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
 import type { SourceInput } from './decomposeAgent';
@@ -298,9 +298,10 @@ function priorClaimPaths(entityMd: string): string[] {
  *  regenerated block is deterministic / replay-stable (VAULT-10). */
 async function entityBacklinks(wt: string, entityMd: string, newClaimRels: string[], entityRel: string): Promise<ClaimBacklink[]> {
   const paths = Array.from(new Set([...priorClaimPaths(entityMd), ...newClaimRels]));
-  // SPEC-0050 slice-2b: a durable RETRACT correction (keyed on the subject's stable block identity +
-  // statement) suppresses the claim from the regenerated block — and survives re-derive/replay (the
-  // correction outlives the claim file's reborn ULID). Read once; identity from the node's own frontmatter.
+  // SPEC-0050 slice-2b/2c: a durable correction (keyed on the subject's stable block identity +
+  // statement) suppresses the claim from the regenerated block — `retract` (it's wrong) or `reattribute`
+  // (it's on the wrong subject). Survives re-derive/replay (the correction outlives the claim file's
+  // reborn ULID). Read once; identity from the node's own frontmatter.
   const corrections = await readCorrectionDirectives(wt);
   const ref = parseEntityNode(entityMd);
   const identityKey = blockKey(ref.kind, ref.name);
@@ -313,7 +314,7 @@ async function entityBacklinks(wt: string, entityMd: string, newClaimRels: strin
       continue; // referenced file no longer exists (e.g. collapsed by CLAIMS-19 dedup) — skip
     }
     const link = parseClaimBacklink(md, rel, entityRel);
-    if (link && !isClaimRetracted(corrections, identityKey, link.statement)) out.push(link);
+    if (link && !isClaimSuppressed(corrections, identityKey, link.statement)) out.push(link);
   }
   return out.sort((a, b) => (path.basename(a.claimPath) < path.basename(b.claimPath) ? -1 : 1));
 }
