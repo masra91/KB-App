@@ -15,7 +15,8 @@ import { deterministicDecider } from './archivist';
 import { renderEntityNode, entityFileRel } from './connectDoc';
 import { CLAIMS_BLOCK_START } from './claimDoc';
 import { ulid } from './ulid';
-import { claimsOne, findEntityFiles } from './claimsStage';
+import { claimsOne, findEntityFiles, ClaimsStage } from './claimsStage';
+import { recordCorrectionDirective } from './directives';
 import type { ClaimsDecider } from './claimsAgent';
 import type { ClaimDecision } from './claims';
 import {
@@ -78,6 +79,27 @@ async function seedEntity(root: string, srcRel: string, name: string): Promise<s
   return rel;
 }
 
+/** Seed a Connect-merged entity spanning multiple sources (so Claims derives one claim per source). */
+async function seedMergedEntity(root: string, name: string, srcRels: string[]): Promise<string> {
+  const id = ulid();
+  const rel = entityFileRel('person', name, id, new Set(await findEntityFiles(root)));
+  const dest = path.join(root, rel);
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const now = new Date().toISOString();
+  await fs.writeFile(
+    dest,
+    renderEntityNode({
+      id, kind: 'person', name, confidence: 0.9, aliases: [id], derivedFrom: srcRels,
+      resolvedFrom: [], tags: [], createdAt: now, updatedAt: now, agent: { via: 'copilot', model: 'test' },
+    }),
+    'utf8',
+  );
+  const git = simpleGit(root);
+  await git.raw('add', '-A');
+  await git.commit('test: seed Connect-merged entity (multi-source)');
+  return rel;
+}
+
 const aClaim = (over: Partial<ClaimDecision> = {}): ClaimDecision => ({
   statement: 'Co-founded Apple in 1976.',
   status: 'fact',
@@ -121,6 +143,48 @@ describe.skipIf(!gitAvailable)('composeOne (COMPOSE-1/2/5/7/8)', () => {
       expect(md).not.toMatch(/\[\^1\]: \[\[sources\/[^|]*\|[0-9A-HJKMNP-TV-Z]{26}\]\]/); // not a ULID label
       expect(md.indexOf('Steve Jobs co-founded')).toBeLessThan(md.indexOf(CLAIMS_BLOCK_START));
       expect(md).toContain(CLAIMS_BLOCK_START); // structured block preserved (COMPOSE-5)
+    });
+  });
+
+  // SPEC-0050 slice-2b: a durable RETRACT also excludes the claim from composed prose + citations (not
+  // just the structured block). This is the belt-and-suspenders for the window where the claims BLOCK
+  // still lists the claim (it hasn't been regenerated since the retract) but compose must already omit it.
+  // Non-vacuous: the block carries TWO claims and the decider cites BOTH, yet only ONE footnote appears
+  // → the retracted one was filtered at compose. Content key (subject identity + statement) survives replay.
+  it('a durable RETRACT drops the claim from composed citations even while the block still lists it', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const factA = 'Co-founded Apple in 1976.';
+      const factB = 'Founded NeXT in 1985.';
+      const srcA = await archiveText(root, factA);
+      const srcB = await archiveText(root, factB);
+      const entityRel = await seedMergedEntity(root, 'Steve Jobs', [srcA, srcB]); // identity person|steve jobs
+      // One claim per source, statement = source text → two distinct cited sources.
+      const perSourceClaim: ClaimsDecider = async (input) => ({
+        entityId: input.entityId,
+        claims: [aClaim({ statement: input.source.text ?? '', mentions: ['Steve Jobs'] })],
+        agent: { via: 'copilot', model: 'test' },
+      });
+      await new ClaimsStage(root, perSourceClaim).poke(); // drain → 2 claims, block links BOTH
+      const node = await fs.readFile(path.join(root, entityRel), 'utf8');
+      expect((node.match(/\[\[claims\/.+\.md\]\]/g) ?? [])).toHaveLength(2); // precondition: block lists both
+
+      // Retract factA, commit so composeOne's worktree (from HEAD) sees it.
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|steve jobs', statement: factA, reviewId: 'R', decidedAt: '2026-06-15T00:00:00Z' });
+      const git = simpleGit(root);
+      await git.raw('add', '-A');
+      await git.commit('test: retract one claim');
+
+      // First compose AFTER the retract: the decider cites both claims, but readCitedClaims has filtered
+      // the retracted one → only the surviving claim gets a footnote.
+      const both: ComposeSection[] = [{ sentences: [
+        { text: 'Steve Jobs co-founded [[Apple]].', claims: [1] },
+        { text: 'He later founded [[NeXT]].', claims: [2] },
+      ] }];
+      await composeOne(root, entityRel, composeDeciderFor(both));
+      const after = await fs.readFile(path.join(root, entityRel), 'utf8');
+      expect((after.match(/\[\^\d+\]: \[\[sources\//g) ?? [])).toHaveLength(1); // retracted claim's citation gone (2→1)
+      expect(after).toContain('Steve Jobs co-founded'); // prose still composed (non-vacuous)
     });
   });
 

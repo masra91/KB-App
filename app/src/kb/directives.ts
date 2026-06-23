@@ -30,6 +30,9 @@ export const DISAMBIGUATION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'disambig
 /** Repo-relative path of the durable consolidation-directive log (evergreen). SPEC-0050 slice-2. */
 export const CONSOLIDATION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'consolidation.jsonl');
 
+/** Repo-relative path of the durable correction-directive log (evergreen). SPEC-0050 slice-2b. */
+export const CORRECTION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'corrections.jsonl');
+
 export type DirectiveVerdict = 'same' | 'distinct';
 
 /**
@@ -246,6 +249,128 @@ export async function recordConsolidationDirective(
     decidedAt: directive.decidedAt,
   };
   const file = consolidationAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
+}
+
+// ── Correction directives (SPEC-0050 slice-2b: content corrections — retract) ──────────────────
+//
+// A CORRECTION is a durable Principal ruling on a CLAIM: "this claim is wrong — suppress it" (retract;
+// reattribute "it belongs to entity B" is a later sibling). Like the other directives it is durable +
+// rebirth-proof, so a retracted claim STAYS suppressed across a re-derive / Full Replay.
+//
+// THE KEYING PROBLEM: a claim file's id is a ULID (reborn on replay) and its `subject` is an entity PATH
+// (also reborn), so neither is a stable key. The only content-derived anchors are the SUBJECT ENTITY'S
+// block identity (`kind|normalizedName`, stable) + the claim STATEMENT text. So a correction is keyed on
+// `correctionClaimKey(identityKey, statement)`. Caveat: claim statements are LLM-authored, so a
+// re-derive can REWORD the same fact — a substantially-reworded statement won't match (it gets a fresh
+// confidence pass instead; the SPEC-0047 line). `normalizeStatement` absorbs casing/punctuation/spacing
+// drift (the common case) but not genuine rewording — documented, not silently lossy.
+//
+// Stored evergreen under `directives/corrections.jsonl` (promoted to `main`, never purged), last-wins.
+// ENFORCEMENT (the live half): the Claims block-regen (`entityBacklinks`) and Compose's cited-claim read
+// (`readCitedClaims`) drop any claim whose (identity, statement) is retracted. The CREATE affordance
+// ("correct this" UI → IPC) is slice-3; `recordCorrectionDirective` is the seam it calls.
+
+export type CorrectionType = 'retract';
+
+/**
+ * One durable claim correction. Keyed on `correctionKey` = `correctionClaimKey(identityKey, statement)`
+ * — the subject entity's STABLE block identity + the normalized statement (content-derived, ULID-free).
+ * `statement` is kept verbatim for provenance / the Rules surface (never the lookup key).
+ */
+export interface CorrectionDirective {
+  type: CorrectionType; // 'retract' (reattribute is a later sibling)
+  correctionKey: string; // correctionClaimKey(identityKey, statement)
+  identityKey: string; // subject entity block identity (kind|normalizedName)
+  statement: string; // verbatim claim statement (provenance/display)
+  reviewId: string; // provenance: the answer/correction that produced this (PRIN-5/6)
+  decidedAt: string; // ISO; ordering for last-wins revisability
+}
+
+/** Normalize a claim statement for content-keyed matching: lowercase, punctuation→space, collapse
+ *  whitespace, trim. Absorbs casing/punctuation/spacing drift across a re-derive; NOT genuine rewording. */
+export function normalizeStatement(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Stable, content-derived key for a claim correction: subject block identity + normalized statement. */
+export function correctionClaimKey(identityKey: string, statement: string): string {
+  return `${identityKey}::${normalizeStatement(statement)}`;
+}
+
+function correctionsAbs(root: string): string {
+  return path.join(path.resolve(root), CORRECTION_DIRECTIVES_REL);
+}
+
+/**
+ * Read every recorded correction into a last-wins map keyed by `correctionKey`. Absent/garbled lines are
+ * skipped; an absent file yields an empty map. Tolerant of a malformed line (ENG-16).
+ */
+export async function readCorrectionDirectives(root: string): Promise<Map<string, CorrectionDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(correctionsAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, CorrectionDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<CorrectionDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<CorrectionDirective>;
+    } catch {
+      continue;
+    }
+    if (obj.type !== 'retract') continue;
+    if (typeof obj.correctionKey !== 'string' || obj.correctionKey.length === 0) continue;
+    if (typeof obj.identityKey !== 'string' || obj.identityKey.length === 0) continue;
+    if (typeof obj.statement !== 'string') continue;
+    out.set(obj.correctionKey, {
+      type: obj.type,
+      correctionKey: obj.correctionKey,
+      identityKey: obj.identityKey,
+      statement: obj.statement,
+      reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    });
+  }
+  return out;
+}
+
+/** Whether the claim {subject identity, statement} has been retracted by a durable correction. */
+export function isClaimRetracted(
+  corrections: Map<string, CorrectionDirective>,
+  identityKey: string,
+  statement: string,
+): boolean {
+  return corrections.get(correctionClaimKey(identityKey, statement))?.type === 'retract';
+}
+
+/**
+ * Append a durable correction directive. Does NOT commit — the caller (the correction-record path) is
+ * inside the shared canonical-writer lock and stages/commits, so it lands atomically. Last-wins: a later
+ * record for the same claim supersedes (a future revoke/reattribute is a sibling type).
+ */
+export async function recordCorrectionDirective(
+  root: string,
+  correction: { type: CorrectionType; identityKey: string; statement: string; reviewId: string; decidedAt: string },
+): Promise<CorrectionDirective> {
+  const rec: CorrectionDirective = {
+    type: correction.type,
+    correctionKey: correctionClaimKey(correction.identityKey, correction.statement),
+    identityKey: correction.identityKey,
+    statement: correction.statement,
+    reviewId: correction.reviewId,
+    decidedAt: correction.decidedAt,
+  };
+  const file = correctionsAbs(root);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
   return rec;

@@ -8,6 +8,7 @@ import { makeTempDir, rmTempDir } from '../../test/tempVault';
 import {
   DISAMBIGUATION_DIRECTIVES_REL,
   CONSOLIDATION_DIRECTIVES_REL,
+  CORRECTION_DIRECTIVES_REL,
   DIRECTIVES_DIR,
   readDisambiguationDirectives,
   directiveForIdentity,
@@ -16,6 +17,11 @@ import {
   readConsolidationDirectives,
   consolidationDirectiveForPair,
   recordConsolidationDirective,
+  normalizeStatement,
+  correctionClaimKey,
+  readCorrectionDirectives,
+  isClaimRetracted,
+  recordCorrectionDirective,
 } from './directives';
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
@@ -148,6 +154,67 @@ describe('consolidation directives (SPEC-0050 slice-2: ad-hoc merge/distinct)', 
       expect(consolidationDirectiveForPair(map, 'a|s', 'a|t')?.verdict).toBe('distinct'); // valid, survives
       expect(consolidationDirectiveForPair(map, 'a|p', 'a|q')).toBeUndefined(); // bad verdict → dropped
       expect(consolidationDirectiveForPair(map, 'a|m', 'a|n')).toBeUndefined(); // missing identities → dropped
+    });
+  });
+});
+
+describe('correction directives (SPEC-0050 slice-2b: retract)', () => {
+  it('stores the corrections log under the evergreen directives/ tree', () => {
+    expect(CORRECTION_DIRECTIVES_REL.startsWith(DIRECTIVES_DIR + path.sep)).toBe(true);
+  });
+
+  it('normalizeStatement absorbs casing/punctuation/spacing drift but not rewording', () => {
+    expect(normalizeStatement('Founded Apple in 1976.')).toBe('founded apple in 1976');
+    expect(normalizeStatement('  founded   APPLE, in 1976  ')).toBe('founded apple in 1976'); // drift collapses
+    expect(normalizeStatement('co-founded Apple in 1976')).not.toBe(normalizeStatement('founded Apple in 1976')); // genuine rewording stays distinct
+  });
+
+  it('correctionClaimKey combines stable block identity + normalized statement (ULID-free)', () => {
+    const k = correctionClaimKey('person|steve jobs', 'Founded Apple in 1976.');
+    expect(k).toBe('person|steve jobs::founded apple in 1976');
+    // Same fact with punctuation/case drift → same key (survives a re-derive's cosmetic variation).
+    expect(correctionClaimKey('person|steve jobs', 'founded apple in 1976')).toBe(k);
+  });
+
+  it('an absent file reads as an empty map; no claim is retracted', async () => {
+    await withRoot(async (root) => {
+      const map = await readCorrectionDirectives(root);
+      expect(map.size).toBe(0);
+      expect(isClaimRetracted(map, 'person|steve jobs', 'anything')).toBe(false);
+    });
+  });
+
+  it('records a retract and looks it up by (identity, statement) — drift-tolerant', async () => {
+    await withRoot(async (root) => {
+      await recordCorrectionDirective(root, {
+        type: 'retract',
+        identityKey: 'person|steve jobs',
+        statement: 'Founded Apple in 1976.',
+        reviewId: 'rev1',
+        decidedAt: '2026-06-15T00:00:00Z',
+      });
+      const map = await readCorrectionDirectives(root);
+      expect(isClaimRetracted(map, 'person|steve jobs', 'Founded Apple in 1976.')).toBe(true);
+      expect(isClaimRetracted(map, 'person|steve jobs', 'founded   apple, in 1976')).toBe(true); // drift still matches
+      expect(isClaimRetracted(map, 'person|steve jobs', 'Designed the iPhone.')).toBe(false); // different claim
+      expect(isClaimRetracted(map, 'person|steve wozniak', 'Founded Apple in 1976.')).toBe(false); // different subject
+    });
+  });
+
+  it('skips garbled / malformed lines without blinding the rest (ENG-16)', async () => {
+    await withRoot(async (root) => {
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|a', statement: 'claim one', reviewId: 'r1', decidedAt: 'now' });
+      const file = path.join(path.resolve(root), CORRECTION_DIRECTIVES_REL);
+      await fs.appendFile(file, 'not json\n', 'utf8');
+      await fs.appendFile(file, JSON.stringify({ type: 'bogus', correctionKey: 'x', identityKey: 'person|b', statement: 's' }) + '\n', 'utf8');
+      await fs.appendFile(file, JSON.stringify({ type: 'retract', identityKey: 'person|c' }) + '\n', 'utf8'); // missing statement/key
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|d', statement: 'claim four', reviewId: 'r2', decidedAt: 'now' });
+
+      const map = await readCorrectionDirectives(root);
+      expect(isClaimRetracted(map, 'person|a', 'claim one')).toBe(true); // valid, survives
+      expect(isClaimRetracted(map, 'person|d', 'claim four')).toBe(true); // valid, survives
+      expect(isClaimRetracted(map, 'person|b', 's')).toBe(false); // bad type → dropped
+      expect(isClaimRetracted(map, 'person|c', '')).toBe(false); // missing fields → dropped
     });
   });
 });
