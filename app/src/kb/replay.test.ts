@@ -17,7 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
-import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity } from './directives';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -342,6 +342,37 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
       // …and republished to `main` (directives/ is evergreen → promoted), so it is the published truth.
       const onMain = await readDisambiguationDirectives(root);
       expect(directiveForIdentity(onMain, 'organization|disney')?.verdict).toBe('same');
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('keeps a consolidation (merge/distinct) directive on staging AND republished on main across a Full Replay', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // A settled cross-entity consolidation verdict (as answerReview records it), committed on `staging`.
+      await recordConsolidationDirective(stagingWt, {
+        identityA: 'organization|walt disney company',
+        identityB: 'organization|disney',
+        verdict: 'distinct',
+        reviewId: 'rev-consolidation',
+        decidedAt: '2026-06-14T00:00:00Z',
+      });
+      const sg = simpleGit(stagingWt);
+      await sg.raw('add', '-A');
+      await sg.commit('seed: durable consolidation directive');
+
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // Survives on staging (the rebuild consults it) AND republished to main (evergreen → promoted).
+      const onStaging = await readConsolidationDirectives(stagingWt);
+      expect(consolidationDirectiveForPair(onStaging, 'organization|disney', 'organization|walt disney company')?.verdict).toBe('distinct');
+      const onMain = await readConsolidationDirectives(root);
+      expect(consolidationDirectiveForPair(onMain, 'organization|disney', 'organization|walt disney company')?.verdict).toBe('distinct');
     } finally {
       await rmTempDir(dir);
     }

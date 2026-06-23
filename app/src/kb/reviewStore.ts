@@ -14,7 +14,9 @@ import { ensureGitIdentity } from './vault';
 import { captureToInbox } from './ingest';
 import { validReviewAnswerInput, type Review } from './reviews';
 import { recordDisambiguationDecision, verdictToDisambiguation } from './disambiguationDecisions';
-import { recordDisambiguationDirective } from './directives';
+import { recordDisambiguationDirective, recordConsolidationDirective } from './directives';
+import { blockKey as computeBlockKey } from './connect';
+import { parseEntityNode } from './connectDoc';
 import type { Mutex } from './stageLock';
 
 /** Repo-relative directory for a review id. */
@@ -83,6 +85,21 @@ export interface AnswerReviewResult {
   /** The stage to poke so the parked item resumes (REVIEW-6), when successful. */
   stage?: string;
   review?: Review;
+}
+
+/**
+ * Read an entity node's STABLE block identity (`kind|normalizedName`) from its rel — the content-derived
+ * key a directive is keyed on (survives the ULID rebirth that defeats the entity-ULID decision store,
+ * SPEC-0050 slice-2). Null if the node is missing/foreign/unreadable (the directive is then skipped —
+ * provenance, not correctness, so a vanished loser never breaks the answer).
+ */
+async function nodeBlockIdentity(root: string, rel: string): Promise<string | null> {
+  try {
+    const { kind, name } = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+    return computeBlockKey(kind, name);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -158,6 +175,36 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
           decidedAt: answeredAt,
           entities: [pairA, pairB],
         });
+      }
+    }
+
+    // 3c. SPEC-0050 slice-2: a CONSOLIDATION review (Reflect "should these two SEPARATE entities merge?",
+    // markerKey {kind:'consolidation', canonicalRel, loserRels}) graduates its answer to a durable
+    // CONSOLIDATION DIRECTIVE keyed on the STABLE pair of BLOCK IDENTITIES — not the entity ULIDs the
+    // legacy per-pair decision (REVIEW-18) uses, which are reborn on re-derive/replay and go blind. So a
+    // settled merge/distinct stays settled across a Full Replay (the Reflect analogue of slice-1's Disney
+    // fix). confirm→merge ("one entity"), reject→distinct ("keep separate"). One directive per
+    // canonical↔loser pair; a vanished/foreign node is skipped (provenance, not correctness).
+    if (review.raisedBy.markerKey.kind === 'consolidation' && review.raisedBy.markerKey.canonicalRel) {
+      const canonicalIdentity = await nodeBlockIdentity(root, review.raisedBy.markerKey.canonicalRel);
+      if (canonicalIdentity) {
+        const loserRels = (review.raisedBy.markerKey.loserRels ?? '').split('\n').filter(Boolean);
+        const consolidationVerdict = verdict === 'confirm' ? 'merge' : 'distinct';
+        for (const loserRel of loserRels) {
+          const loserIdentity = await nodeBlockIdentity(root, loserRel);
+          // Skip a degenerate same-identity pair: two nodes sharing a block identity can't be told apart
+          // by a content-derived key after rebirth, so the durable directive can't represent them — that
+          // (rare) within-identity case stays on the per-pair ULID decision recorded above.
+          if (loserIdentity && loserIdentity !== canonicalIdentity) {
+            await recordConsolidationDirective(root, {
+              identityA: canonicalIdentity,
+              identityB: loserIdentity,
+              verdict: consolidationVerdict,
+              reviewId: id,
+              decidedAt: answeredAt,
+            });
+          }
+        }
       }
     }
 
