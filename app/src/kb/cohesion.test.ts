@@ -113,11 +113,11 @@ describe('buildEntityGraph — resolution', () => {
 
   it('resolves a BARE [[Name]] when it uniquely names one entity (matches linkOne resolution)', () => {
     const files = [
-      entity('person', 'Harrie', ['Mason Allen']), // bare name, no path
-      entity('person', 'Mason Allen'),
+      entity('person', 'Harrie', ['Jordan Reyes']), // bare name, no path
+      entity('person', 'Jordan Reyes'),
     ];
     const { edges } = buildEntityGraph(files);
-    expect(edges).toEqual([{ from: 'entities/person/Harrie.md', to: 'entities/person/Mason Allen.md' }]);
+    expect(edges).toEqual([{ from: 'entities/person/Harrie.md', to: 'entities/person/Jordan Reyes.md' }]);
   });
 
   it('drops dangling, ambiguous, and self links; skips foreign/malformed files', () => {

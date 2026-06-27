@@ -199,12 +199,12 @@ describe('resolveProseWikilinks (COHERE-1 — bare [[Name]] → entity path)', (
     ].join('\n');
 
   const resolve = (name: string): string | null =>
-    ({ Harrie: 'entities/person/Harrie.md', 'Mason Allen': 'entities/person/Mason Allen.md' }[name] ?? null);
+    ({ Harrie: 'entities/person/Harrie.md', 'Jordan Reyes': 'entities/person/Jordan Reyes.md' }[name] ?? null);
 
   it('rewrites a bare prose [[Name]] to [[rel|Name]] on a unique match', () => {
-    const out = resolveProseWikilinks(composed('Jobs worked with [[Harrie]] and [[Mason Allen]] often.'), resolve);
+    const out = resolveProseWikilinks(composed('Jobs worked with [[Harrie]] and [[Jordan Reyes]] often.'), resolve);
     expect(out).toContain('[[entities/person/Harrie.md|Harrie]]');
-    expect(out).toContain('[[entities/person/Mason Allen.md|Mason Allen]]');
+    expect(out).toContain('[[entities/person/Jordan Reyes.md|Jordan Reyes]]');
   });
 
   it('leaves an UNKNOWN bare link bare (CONNECT-13 — never a dangling guess)', () => {
