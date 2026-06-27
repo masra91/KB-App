@@ -20,7 +20,7 @@ import { sensitivityAllowsOrientRead } from './sensitivity';
 import { raiseResearchEscalation } from './researchEscalate';
 import { RESEARCH_REQUEST_SIGNAL, dedupKeyFor, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { isEnrichmentGap } from './enrichGap';
-import { flagSparseEntities } from './enrichTrigger';
+import { flagEnrichmentGaps } from './enrichTrigger';
 
 export interface ResearchDepsOptions {
   /** Thin-CLI relevance runtime for self-nomination (omit → deterministic heuristic only). */
@@ -187,14 +187,14 @@ export async function collectResearchRequests(root: string): Promise<ResearchReq
  * them through the dispatcher. Intended to be poked after a stage drain (where unknown-term signals
  * arise) or on the researcher tick; the dedup ledger makes repeated sweeps cheap.
  *
- * WS-B: before collecting, run the enrichment trigger — scan the resolved entity graph and emit a
- * `research-request` for every SPARSE ("little reference") entity not already requested. This is the
- * producer that makes the pipeline non-inert; flagged entities then travel the exact same
- * collect→dispatch path as a stage-emitted signal. We collect once up front to pass the in-flight
- * dedupKeys (so we never re-emit), then collect again to include the freshly-flagged requests.
+ * WS-B + RESEARCH-QUALITY: before collecting, run the enrichment trigger — scan the resolved entity graph
+ * and emit a `research-request` for every entity that wants enrichment (sparse by count OR facet-thin) and
+ * is not already requested. This is the producer that makes the pipeline non-inert; flagged entities then
+ * travel the exact same collect→dispatch path as a stage-emitted signal. We collect once up front to pass
+ * the in-flight dedupKeys (so we never re-emit), then collect again to include the freshly-flagged requests.
  */
 export async function runInlineResearchSweep(root: string, opts: ResearchDepsOptions = {}): Promise<DispatchResult> {
   const existing = await collectResearchRequests(root);
-  await flagSparseEntities(root, new Set(existing.map((r) => r.dedupKey)));
+  await flagEnrichmentGaps(root, new Set(existing.map((r) => r.dedupKey)));
   return runInlineResearch(root, await collectResearchRequests(root), opts);
 }
