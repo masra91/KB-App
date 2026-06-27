@@ -4,18 +4,37 @@
 // Bases/graph views read it. Kept in code (type-checked, testable) rather than a runtime `.kb/`
 // file. Beyond the core, agents may coin EMERGENT tags freely (META-2) — they need no entry here.
 //
-// v1 curated set (PM-approved working scope; KB-Lead confirming exact namespaces in parallel —
-// a tweak is a one-line change here): `type/`, `topic/` tag namespaces; `type`, `scope`,
-// `created`, `updated` Properties. `status` + rich `sensitivity` inference are deferred.
+// v1 curated set (PM-locked 06-27; KB-Lead confirming the exact key set in parallel — a tweak is a
+// one-line change here): `type/`, `topic/` tag namespaces; `type`, `scope`, `status`, `sensitivity`,
+// `created`, `updated` Properties. Emergent agent-coined properties are DEFERRED to v2 (v1 = curated
+// keys only, no vocab sprawl). `sensitivity` value vocab tracks SPEC-0043 SENSE-A (internal/public).
 
-/** Bump when the curated core changes so views have a versioned contract (META-8). */
-export const CURATED_VOCAB_VERSION = 1;
+/** Bump when the curated core changes so views have a versioned contract (META-8). v2 = +status,
+ *  +sensitivity Properties (SPEC-0025 META v1 facet: key-value Properties). */
+export const CURATED_VOCAB_VERSION = 2;
 
 /** Curated tag namespaces the views/colors depend on (META-2). Emergent tags live outside these. */
 export const CURATED_TAG_NAMESPACES = ['type', 'topic'] as const;
 
-/** Curated frontmatter Property keys (the structured facet layer; META-1/2). */
-export const CURATED_PROPERTIES = ['type', 'scope', 'created', 'updated'] as const;
+/** Curated frontmatter Property keys (the structured facet layer; META-1/2). The views/Bases query
+ *  these; emergent properties are deferred (v1). `type` + the date keys are written from dedicated
+ *  node fields; `scope`/`status`/`sensitivity` are the dynamic curated Properties carried per node. */
+export const CURATED_PROPERTIES = ['type', 'scope', 'status', 'sensitivity', 'created', 'updated'] as const;
+
+/** The dynamic curated Property keys a node carries in its `properties` bag (vs. `type`/dates, which
+ *  derive from dedicated fields). These are the carry-forward facets (scope/status/sensitivity). */
+export const DYNAMIC_CURATED_PROPERTIES = ['scope', 'status', 'sensitivity'] as const;
+export type DynamicCuratedProperty = (typeof DYNAMIC_CURATED_PROPERTIES)[number];
+
+/** Whether `key` is a curated Property the views depend on (vs. an emergent/foreign key, dropped in v1). */
+export function isCuratedProperty(key: string): boolean {
+  return (CURATED_PROPERTIES as readonly string[]).includes(key);
+}
+
+/** Whether `key` is a dynamic curated Property carried in a node's `properties` bag (scope/status/sensitivity). */
+export function isDynamicCuratedProperty(key: string): key is DynamicCuratedProperty {
+  return (DYNAMIC_CURATED_PROPERTIES as readonly string[]).includes(key);
+}
 
 /**
  * Normalize a tag to Obsidian's `tags:` rules (META-3): lowercase; spaces/underscores → `-`;
