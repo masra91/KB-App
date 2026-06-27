@@ -1,0 +1,22 @@
+# gitleaks config for KB-App (SPEC-0029 AUDIT / security-sweep Phase-2a).
+#
+# The CI `secrets` job runs `gitleaks dir . --config .gitleaks.toml` on every PR to block any newly
+# committed credential (regression prevention — the public repo had ZERO real secrets at the Phase-1
+# sweep; this keeps it that way). Full-history exposure is handled by the one-time sweep + the
+# Phase-2b history purge, not re-scanned per PR.
+title = "KB-App gitleaks config"
+
+# Inherit gitleaks' full built-in rule set (AWS/GitHub/JWT/generic-api-key/etc.), then layer our
+# allowlist on top.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional fake-secret FIXTURES — not real credentials"
+# The cassette secret-scrubber test (EVAL-6) feeds the scrubber plausible-shaped but fabricated
+# tokens (AWS's own doc key `AKIAIOSFODNN7EXAMPLE`, `ghp_ABCDEF…`, a throwaway JWT, etc.) as INPUT.
+# They are test data by design (the file comment says so) and must never trip the gate. Matched by
+# path so the fixtures stay scannable as code without suppressing real findings elsewhere.
+paths = [
+  '''(^|/)app/eval/runner/cassette\.test\.ts$''',
+]

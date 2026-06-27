@@ -226,7 +226,7 @@ describe('graphCohesion (SPEC-0051 COHERE-3)', () => {
   });
 
   it('resolves bare-name links to edges (matches linkOne) so coverage shows up in the metric', () => {
-    const s = snap({ entities: [ent('person', 'Harrie', ['Mason Allen']), ent('person', 'Mason Allen')] }); // bare link
+    const s = snap({ entities: [ent('person', 'Harrie', ['Jordan Reyes']), ent('person', 'Jordan Reyes')] }); // bare link
     expect(VALIDATORS.graphCohesion(s, {}).detail).toContain('edges=1');
   });
 });

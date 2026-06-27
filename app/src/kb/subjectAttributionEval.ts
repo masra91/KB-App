@@ -1,8 +1,8 @@
 // Pure scoring for Claims SUBJECT-ATTRIBUTION (SPEC-0047 2b; pairs with DEV-2's prompt fix in #365). The
-// live bug: a source narrating Mason's FIRST-PERSON career co-mentioned Ngan (his partner, same employer);
-// the Claims decider, run for entity=Ngan over that source, attached Mason's WHOLE career to HER page — a
-// co-mentioned person inheriting the narrator's claims. The prompt fix anchors claims to the grammatical
-// subject; THIS metric makes the class MEASURABLE so it can't silently regress.
+// bug class: a source narrating ONE person's FIRST-PERSON career co-mentions a colleague (same employer);
+// the Claims decider, run for entity=the co-mention over that source, attaches the narrator's WHOLE career
+// to THEIR page — a co-mentioned person inheriting the narrator's claims. The prompt fix anchors claims to
+// the grammatical subject; THIS metric makes the class MEASURABLE so it can't silently regress.
 //
 // The cardinal sin (like dedup's false-merge) is a LEAK: a claim that belongs to the subject appearing on
 // the CO-MENTION's entity. It is guarded HARD (zero, every run). A secondary, soft signal is subject
@@ -14,7 +14,7 @@
 // this module is unit-tested deterministically (CI green).
 
 // Function words that carry no attribution signal — dropped before matching so a rephrase ("I joined
-// Microsoft" vs "Joined Microsoft in 2019") still matches on its CONTENT tokens, and short connective
+// Northwind" vs "Joined Northwind in 2019") still matches on its CONTENT tokens, and short connective
 // words don't manufacture spurious overlap.
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'in', 'on', 'of', 'to', 'as', 'and', 'for', 'at', 'with', 'by', 'from', 'into',

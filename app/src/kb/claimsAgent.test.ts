@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { execFile } from 'node:child_process';
 import { buildClaimsPrompt, makeClaimsDecider, type EntityInput } from './claimsAgent';
-import { ODSP_SOURCE_ID, ODSP_SOURCE_TEXT, MASON_ENTITY, NGAN_ENTITY, MASON_CAREER_CLAIMS } from './claimsSubjectAttribution.fixture';
+import { WORKHIST_SOURCE_ID, WORKHIST_SOURCE_TEXT, SUBJECT_ENTITY, COMENTION_ENTITY, SUBJECT_CAREER_CLAIMS } from './claimsSubjectAttribution.fixture';
 
 // COPILOT-CONTEXT-SCOPE-BUG: partial-mock node:child_process to drive the REAL defaultRunner and
 // assert it forwards the threaded vaultPath to execFile as `cwd` (the actual consumption site).
@@ -42,7 +42,7 @@ describe('buildClaimsPrompt (CLAIMS-3/5/8/10)', () => {
   });
 
   // SUBJECT-ATTRIBUTION (KB-Lead 04:55 #2): the prompt must anchor each claim to its ACTUAL subject and
-  // forbid attaching a narrator's first-person claims to a co-mentioned person (the Ngan-inherits-Mason bug).
+  // forbid attaching a narrator's first-person claims to a co-mentioned person (the co-mention-inherits-subject bug).
   it('anchors claims to the actual subject + forbids first-person/co-mention misattribution (SUBJECT-ATTRIBUTION)', () => {
     const p = buildClaimsPrompt(input());
     expect(p).toMatch(/SUBJECT ATTRIBUTION/);
@@ -106,37 +106,39 @@ describe('makeClaimsDecider (CLAIMS-3/4/12)', () => {
 
   // SUBJECT-ATTRIBUTION class regression, through the REAL decider path (feedback-test-real-agent-path):
   // a PROMPT-FAITHFUL runner that models the live bug — a model attributing the narrator's first-person
-  // career to a CO-MENTIONED colleague (Ngan inheriting Mason's career) — and only refrains when the
-  // prompt explicitly forbids it. So the test hinges on the PROMPT: fails-before (no instruction → the
-  // bug branch attributes Mason's career to Ngan) / passes-after (instruction present → Ngan gets none).
+  // career to a CO-MENTIONED colleague (the co-mention inheriting the subject's career) — and only refrains
+  // when the prompt explicitly forbids it. So the test hinges on the PROMPT: fails-before (no instruction →
+  // the bug branch attributes the subject's career to the co-mention) / passes-after (instruction present →
+  // the co-mention gets none).
   const subjectAttributionRunner = async (prompt: string): Promise<string> => {
     // Whether the hardened prompt forbids attaching a narrator's first-person claims to a co-mention.
     const forbidsCoMention = /co-mentioned/i.test(prompt) && /first-person/i.test(prompt);
-    const careerClaims = MASON_CAREER_CLAIMS.map((c) => ({ ...c, mentions: [...c.mentions] }));
-    if (/entity\.name: Ngan/.test(prompt)) {
-      // entity=Ngan: a naive model parrots the first-person career onto the co-mentioned colleague (the
-      // bug). A model that follows the hardened prompt attributes nothing — she is only co-mentioned.
-      return JSON.stringify({ entityId: NGAN_ENTITY.entityId, claims: forbidsCoMention ? [] : careerClaims });
+    const careerClaims = SUBJECT_CAREER_CLAIMS.map((c) => ({ ...c, mentions: [...c.mentions] }));
+    if (/entity\.name: Robin/.test(prompt)) {
+      // entity=the co-mention: a naive model parrots the first-person career onto the co-mentioned
+      // colleague (the bug). A model that follows the hardened prompt attributes nothing — they are only
+      // co-mentioned.
+      return JSON.stringify({ entityId: COMENTION_ENTITY.entityId, claims: forbidsCoMention ? [] : careerClaims });
     }
-    // entity=Mason: he IS the first-person narrator → his career attaches to him either way (the control).
-    return JSON.stringify({ entityId: MASON_ENTITY.entityId, claims: careerClaims });
+    // entity=the subject: they ARE the first-person narrator → their career attaches either way (control).
+    return JSON.stringify({ entityId: SUBJECT_ENTITY.entityId, claims: careerClaims });
   };
-  const odspInput = (entity: { entityId: string; kind: string; name: string }): EntityInput => ({
+  const workHistInput = (entity: { entityId: string; kind: string; name: string }): EntityInput => ({
     ...entity,
-    source: { sourceId: ODSP_SOURCE_ID, kind: 'text', text: ODSP_SOURCE_TEXT },
+    source: { sourceId: WORKHIST_SOURCE_ID, kind: 'text', text: WORKHIST_SOURCE_TEXT },
   });
 
   it('does NOT attach the narrator’s first-person career to a co-mentioned colleague (SUBJECT-ATTRIBUTION)', async () => {
-    const dNgan = await makeClaimsDecider({ available: true, run: subjectAttributionRunner })(odspInput(NGAN_ENTITY));
-    // The fix: Mason's career must not leak onto Ngan — she's co-mentioned, not the subject.
-    expect(dNgan.claims).toEqual([]);
-    expect(dNgan.claims.some((c) => /Senior PM|Microsoft|migration/.test(c.statement))).toBe(false);
+    const dCoMention = await makeClaimsDecider({ available: true, run: subjectAttributionRunner })(workHistInput(COMENTION_ENTITY));
+    // The fix: the subject's career must not leak onto the co-mention — they're co-mentioned, not the subject.
+    expect(dCoMention.claims).toEqual([]);
+    expect(dCoMention.claims.some((c) => /Operations Lead|Northwind|rollout/.test(c.statement))).toBe(false);
   });
 
   it('still attributes the narrator’s career to the ACTUAL subject — the fix doesn’t nuke real claims', async () => {
-    const dMason = await makeClaimsDecider({ available: true, run: subjectAttributionRunner })(odspInput(MASON_ENTITY));
-    expect(dMason.claims.length).toBeGreaterThan(0);
-    expect(dMason.claims.some((c) => /Senior PM/.test(c.statement))).toBe(true);
+    const dSubject = await makeClaimsDecider({ available: true, run: subjectAttributionRunner })(workHistInput(SUBJECT_ENTITY));
+    expect(dSubject.claims.length).toBeGreaterThan(0);
+    expect(dSubject.claims.some((c) => /Operations Lead/.test(c.statement))).toBe(true);
   });
 
   // SUBJECT-ATTRIBUTION rule 4 (omit-when-unsure), a DISTINCT real-decider case gated on the omit/unsure

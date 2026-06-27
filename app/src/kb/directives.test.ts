@@ -234,20 +234,20 @@ describe('correction directives (SPEC-0050 slice-2c: reattribute)', () => {
     await withRoot(async (root) => {
       await recordCorrectionDirective(root, {
         type: 'reattribute',
-        identityKey: 'person|ngan',
+        identityKey: 'person|robin',
         statement: 'Worked at Disney for 20 years.',
-        toIdentity: 'person|mason',
+        toIdentity: 'person|devin',
         reviewId: 'rev1',
         decidedAt: '2026-06-15T00:00:00Z',
       });
       const map = await readCorrectionDirectives(root);
       // Suppressed on the WRONG subject (both retract + reattribute suppress) …
-      expect(isClaimSuppressed(map, 'person|ngan', 'Worked at Disney for 20 years.')).toBe(true);
+      expect(isClaimSuppressed(map, 'person|robin', 'Worked at Disney for 20 years.')).toBe(true);
       // … but it is NOT a retract …
-      expect(isClaimRetracted(map, 'person|ngan', 'Worked at Disney for 20 years.')).toBe(false);
+      expect(isClaimRetracted(map, 'person|robin', 'Worked at Disney for 20 years.')).toBe(false);
       // … and the corrected target is recorded (drift-tolerant lookup).
-      expect(reattributedTarget(map, 'person|ngan', 'worked at disney for 20 years')).toBe('person|mason');
-      expect(reattributedTarget(map, 'person|mason', 'Worked at Disney for 20 years.')).toBeUndefined(); // not on the target's key
+      expect(reattributedTarget(map, 'person|robin', 'worked at disney for 20 years')).toBe('person|devin');
+      expect(reattributedTarget(map, 'person|devin', 'Worked at Disney for 20 years.')).toBeUndefined(); // not on the target's key
     });
   });
 

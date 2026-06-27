@@ -94,6 +94,29 @@ jobs:
       - name: Unit tests + coverage (TEST-2/TEST-12)
         run: npm run test:coverage
 
+  # Secret scan (security-sweep Phase-2a): block any NEWLY committed credential so the public repo
+  # stays clean (the Phase-1 sweep found ZERO real secrets — this keeps it that way). gitleaks scans
+  # the working tree with the repo-root `.gitleaks.toml`, which inherits the full default rule set and
+  # allowlists ONLY the cassette secret-scrubber's intentional fake-token fixtures (EVAL-6). Sub-second,
+  # ubuntu, 1× cost — cheap enough to gate every PR. Full-history exposure is handled by the one-time
+  # sweep + the coordinated history purge, not re-scanned here. NB: not yet pinned as a REQUIRED check
+  # in the `main` ruleset — it runs + reports on every PR; promote it to required at the repo level.
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install gitleaks
+        working-directory: ${{ github.workspace }}
+        run: |
+          VERSION=8.30.1
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" | tar -xz gitleaks
+          sudo install gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan the working tree for committed secrets (no new credentials)
+        working-directory: ${{ github.workspace }}
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
+
   # Gating build-check (TEST-20): prove the app still PACKAGES. Build-only — no Playwright,
   # no app launch — so it's cheap enough to gate every PR, yet catches packaged-artifact
   # breaks (un-bundled deps / asar resolution) that the `quick` job structurally cannot see.
