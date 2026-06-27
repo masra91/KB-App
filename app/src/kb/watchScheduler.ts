@@ -9,7 +9,7 @@
 // The watcher factory is injected (default = chokidar) so the lifecycle is unit-testable without real
 // filesystem-event timing; production wires the real chokidar.
 import chokidar from 'chokidar';
-import { reconcileWatchFolder } from './watchRun';
+import { reconcileWatchFolder, type RunWatchDeps } from './watchRun';
 import { readWatchRegistry } from './watchRegistry';
 import { checkWatchLoopSafe, effectiveWatchDepth, type WatchFolderConfig } from './watchConnectors';
 import { noopDevLog, type DevLog } from './devlog';
@@ -43,6 +43,9 @@ export interface WatchSchedulerDeps {
   now?: () => string;
   /** Debounce window collapsing a burst of events into one reconcile (default 250ms). */
   debounceMs?: number;
+  /** Injectable reconcile pass (tests drive in-flight timing to exercise coalescing); default = the real
+   *  `reconcileWatchFolder` core, so production behavior is unchanged. */
+  reconcile?: (root: string, f: WatchFolderConfig, deps: RunWatchDeps) => Promise<unknown>;
 }
 
 interface ActiveWatch {
@@ -63,8 +66,10 @@ export class WatchScheduler {
   private readonly factory: WatcherFactory;
   private readonly now: () => string;
   private readonly debounceMs: number;
+  private readonly reconcileFn: (root: string, f: WatchFolderConfig, deps: RunWatchDeps) => Promise<unknown>;
   private readonly active = new Map<string, ActiveWatch>();
   private readonly reconciling = new Set<string>(); // single-flight per folder
+  private readonly pending = new Set<string>(); // a change arrived mid-pass → one coalesced trailing pass owed
   private started = false;
 
   constructor(root: string, vaultRoot: string, log: DevLog = noopDevLog, deps: WatchSchedulerDeps = {}) {
@@ -74,6 +79,7 @@ export class WatchScheduler {
     this.factory = deps.watcherFactory ?? defaultWatcherFactory;
     this.now = deps.now ?? (() => new Date().toISOString());
     this.debounceMs = deps.debounceMs ?? 250;
+    this.reconcileFn = deps.reconcile ?? reconcileWatchFolder;
   }
 
   /** Kick off provisioning (fire-and-forget to fit the sync stage-start contract). */
@@ -144,23 +150,35 @@ export class WatchScheduler {
     if (f) await this.runReconcile(f);
   }
 
-  /** Run one reconcile pass, single-flight per folder; never throws into the watcher loop. */
+  /** Run one reconcile pass, single-flight per folder; never throws into the watcher loop.
+   *
+   * COALESCING (WATCH-2/5 reliability): a reconcile scans the whole folder once, so a file that lands
+   * AFTER that scan but BEFORE the pass finishes its copy→ingest commit would, under a plain drop-if-busy
+   * single-flight, be missed until the next unrelated event or an app restart — i.e. "doesn't reliably
+   * ingest on change". Instead, an event that arrives mid-pass is remembered (`pending`) and runs exactly
+   * ONE trailing pass when the current one finishes. The trailing pass re-reads the registry (fresh config
+   * + still-enabled check) and is idempotent (contentHash dedup), so it's a cheap no-op when nothing new
+   * actually landed, and it converges (a finite burst yields finitely many trailing passes). */
   private async runReconcile(f: WatchFolderConfig): Promise<void> {
-    if (this.reconciling.has(f.id)) return; // single-flight (WATCH-2)
+    if (this.reconciling.has(f.id)) { this.pending.add(f.id); return; } // busy → coalesce, never drop
     this.reconciling.add(f.id);
     try {
-      await reconcileWatchFolder(this.root, f, { vaultRoot: this.vaultRoot, now: this.now });
+      await this.reconcileFn(this.root, f, { vaultRoot: this.vaultRoot, now: this.now });
     } catch (err) {
       this.log.error('watch.reconcile-failed', { watchId: f.id, err });
     } finally {
       this.reconciling.delete(f.id);
     }
+    // A change arrived while we were mid-pass → run one trailing reconcile to catch it (via reconcileById
+    // so a folder disabled/removed in the meantime is correctly skipped).
+    if (this.pending.delete(f.id)) await this.reconcileById(f.id);
   }
 
   private async teardown(id: string): Promise<void> {
     const a = this.active.get(id);
     if (!a) return;
     if (a.debounce) clearTimeout(a.debounce);
+    this.pending.delete(id); // drop any coalesced trailing pass owed to a folder being torn down
     try {
       await a.handle.close();
     } catch (err) {
@@ -174,10 +192,11 @@ export class WatchScheduler {
     return new Set(this.active.keys());
   }
 
-  /** Is a folder reconcile in flight? (SPEC-0045 QUIESCE-3 — "safe to shut down" needs the watcher idle;
-   *  `stop()` tears down watchers but an in-flight reconcile finishes its copy→ingest first.) */
+  /** Is a folder reconcile in flight OR a coalesced trailing pass owed? (SPEC-0045 QUIESCE-3 — "safe to
+   *  shut down" needs the watcher idle; `stop()` tears down watchers but an in-flight reconcile finishes
+   *  its copy→ingest first, and a pending trailing pass is still unfinished work.) */
   busy(): boolean {
-    return this.reconciling.size > 0;
+    return this.reconciling.size > 0 || this.pending.size > 0;
   }
 
   /** Close every live watcher (vault switch / shutdown). */

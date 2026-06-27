@@ -81,6 +81,38 @@ describe.skipIf(!gitAvailable)('WatchScheduler (SPEC-0037)', () => {
     expect(closed).toBe(1);
   });
 
+  it('coalesces an event that arrives during an in-flight reconcile — never drops a change (WATCH-2/5)', async () => {
+    // Regression for the single-flight DROP: a reconcile scans the whole folder once, so a file that
+    // lands mid-pass (after the scan, before the commit) was silently dropped until the next event/restart.
+    // We inject a reconcile that BLOCKS on a gate so we can hold one pass "in flight" and fire another
+    // event during it — then assert a trailing pass runs (OLD code: stuck at 2 calls; FIXED: reaches 3).
+    await upsertWatchFolder(vault, { id: 'drop', folderPath: watched, enabled: true, scope: 'global', sensitivity: 'internal' });
+    let calls = 0;
+    const gates: Array<() => void> = [];
+    const reconcile = (): Promise<void> => { calls++; return new Promise<void>((res) => gates.push(res)); };
+    const releaseOne = (): void => { const r = gates.shift(); if (r) r(); };
+    const callCount = async (): Promise<number> => calls;
+
+    const sched = new WatchScheduler(vault, vault, undefined, { watcherFactory: factory, debounceMs: 0, reconcile });
+    const refreshP = sched.refresh();
+    expect(await waitUntil(callCount, 1)).toBe(1); // startup reconcile entered (blocked on its gate)
+    releaseOne();
+    await refreshP; // provisioned → `fire` captured
+    expect(fire).toBeTypeOf('function');
+
+    fire!(); // event A → reconcile #2 starts and blocks
+    expect(await waitUntil(callCount, 2)).toBe(2);
+    fire!(); // event B arrives WHILE #2 is in flight → must coalesce (pending), not drop
+    await sleep(50);
+    expect(calls).toBe(2); // still single-flight — B did not start a concurrent pass
+    expect(sched.busy()).toBe(true); // a trailing pass is owed (reconciling or pending)
+
+    releaseOne(); // #2 completes → the coalesced trailing pass must now run
+    expect(await waitUntil(callCount, 3)).toBe(3); // ← the fix: B is not lost (OLD code never reaches 3)
+    releaseOne(); // let the trailing pass finish
+    sched.stop();
+  });
+
   it('refresh tears down a watcher when its folder is disabled', async () => {
     await upsertWatchFolder(vault, { id: 'drop', folderPath: watched, enabled: true, scope: 'global', sensitivity: 'internal' });
     const sched = new WatchScheduler(vault, vault, undefined, { watcherFactory: factory, debounceMs: 0 });
