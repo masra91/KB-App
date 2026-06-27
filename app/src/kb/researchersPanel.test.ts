@@ -10,6 +10,7 @@ import {
   defaultEgressFor,
   researcherConfigAuditEvents,
   researcherRunEligibility,
+  workIqCardPresentation,
   RESEARCHER_TEMPLATE_OPTIONS,
 } from './researchersPanel';
 import type { ResearcherConfig } from './researchers';
@@ -247,5 +248,46 @@ describe('researcherConfigAuditEvents (QA-2 #81 follow-up — accurate from/to a
     expect(events[0].payload).toMatchObject({ field: 'orientBudget', from: 5, to: 8 }); // base = default (5)
     const prior = web({ orientBudget: 8 });
     expect(researcherConfigAuditEvents(prior, { id: 'web-1', orientBudget: 8 })).toEqual([]); // no-op re-assert
+  });
+});
+
+describe('workIqCardPresentation (WORKIQ-UI — m365 connector install/status card)', () => {
+  it('installed → calm patina (ok), a ✓ glyph, NO action; shows the resolved CLI path', () => {
+    const p = workIqCardPresentation({ state: 'installed', detail: '/usr/local/bin/workiq' });
+    expect(p).toMatchObject({ tone: 'ok', glyph: '✓', label: 'Installed', action: null, live: false });
+    expect(p.detail).toBe('/usr/local/bin/workiq'); // the resolved path (provenance), not a generic blurb
+  });
+
+  it('installed with no path is still calm/done with no action (detail just empty)', () => {
+    expect(workIqCardPresentation({ state: 'installed' })).toMatchObject({ tone: 'ok', glyph: '✓', action: null, detail: '' });
+  });
+
+  it('not-installed → BRASS (wait), NOT oxide — it is a needs-you state, and offers Install (VIZ-10 cry-wolf)', () => {
+    const p = workIqCardPresentation({ state: 'not-installed', detail: 'connector CLI not found on PATH' });
+    expect(p).toMatchObject({ tone: 'wait', label: 'Not installed', action: { label: 'Install', busy: false }, live: false });
+    expect(p.tone).not.toBe('error'); // never oxide for "not set up yet"
+    expect(p.detail).toBe('connector CLI not found on PATH');
+  });
+
+  it('checking → transient calm (idle), live (breathe), no action — never alarms', () => {
+    expect(workIqCardPresentation({ state: 'checking' })).toMatchObject({ tone: 'idle', label: 'Checking…', action: null, live: true });
+  });
+
+  it('installing → ember (busy), live, with a busy (disabled-feel) action button', () => {
+    expect(workIqCardPresentation({ state: 'installing' })).toMatchObject({ tone: 'busy', label: 'Installing…', action: { label: 'Install', busy: true }, live: true });
+  });
+
+  it('install-failed → OXIDE (error), offers Retry, surfaces the failure note (never masquerades as empty)', () => {
+    const p = workIqCardPresentation({ state: 'install-failed', detail: 'npm exited 1' });
+    expect(p).toMatchObject({ tone: 'error', label: 'Install failed', action: { label: 'Retry', busy: false } });
+    expect(p.detail).toBe('npm exited 1');
+  });
+
+  it('install-failed with no detail still gives an honest fallback note', () => {
+    expect(workIqCardPresentation({ state: 'install-failed' }).detail).toMatch(/did not complete/i);
+  });
+
+  it('error (detect itself failed) → oxide, offers Recheck', () => {
+    expect(workIqCardPresentation({ state: 'error', detail: 'spawn EACCES' })).toMatchObject({ tone: 'error', label: 'Status unavailable', action: { label: 'Recheck', busy: false } });
   });
 });

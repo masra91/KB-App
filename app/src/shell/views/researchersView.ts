@@ -25,11 +25,14 @@ import {
   defaultEgressFor,
   researcherOutcomeLabel,
   researcherRunEligibility,
+  workIqCardPresentation,
 } from '../../kb/researchersPanel';
 import { EGRESS_TIERS, MIN_TOOL_CALLS, MAX_TOOL_CALLS, MIN_SESSION_TIMEOUT_MS, MAX_SESSION_TIMEOUT_MS, MIN_MAX_DEPTH, MAX_MAX_DEPTH, MIN_ORIENT_BUDGET, MAX_ORIENT_BUDGET } from '../../kb/researchers';
 import { navigateTo } from '../nav';
 import { VIEW_REVIEWS } from '../views';
 import type { EgressTier } from '../../kb/researchers';
+import type { WorkIqStatus } from '../../kb/types'; // WORKIQ-UI contract — defined by DEV-3's WORKIQ-FIX
+import type { WorkIqCardModel, WorkIqCardPresentation } from '../../kb/researchersPanel';
 import type { ResearcherView, ResearcherConfigPatch } from '../../kb/types';
 
 /** Source-kind glyph (design §2) — a named instrument, not a dropdown value. */
@@ -166,6 +169,7 @@ function strip(r: ResearcherView): string {
         <span class="rdesk-kind viz-signage" title="${esc(templateDesc(r.template))}">${esc(KIND_GLYPH[r.template])} ${esc(templateLabel(r.template))}</span>
         ${clearanceLadder(r.egressTier)}
       </div>
+      ${r.template === 'm365' ? workIqCard() : ''}
       ${reachReadout(r)}
       <div class="rdesk-orders">
         <label class="rdesk-orders-label viz-field__label viz-signage">Standing orders</label>
@@ -199,6 +203,108 @@ function field(label: string, cls: string, value: string, placeholder: string): 
   return `<label class="rdesk-field viz-field"><span class="rdesk-field-label viz-field__label viz-signage">${esc(label)}</span><input type="text" class="${esc(cls)} rdesk-input viz-field__input viz-body viz-focusable" value="${esc(value)}" placeholder="${esc(placeholder)}" /></label>`;
 }
 
+/** WORKIQ-UI — the m365/WorkIQ connector install/status card (only on m365 strips). The connector CLI
+ *  is the prerequisite the researcher reaches the tenant through; absent, WORKIQ-FIX's wire has nothing
+ *  to call (silent no-finding). Renders an initial `Checking…` shell with a STABLE `role=status` live
+ *  region (so a state change announces) — `wireWorkIq` fills it from the global IPC detect and drives
+ *  Install/Retry/Recheck. State rides the DOT (a graphic ≥3:1), not the small text (the #184 AA rule,
+ *  same as `.rdesk-report`). The action button + detail live in-DOM (hidden) so only text/tone/attrs
+ *  mutate — never the live-region node itself. */
+function workIqCard(): string {
+  const p = workIqCardPresentation({ state: 'checking' });
+  return `
+      <div class="rdesk-workiq" data-state="checking">
+        <span class="rdesk-workiq-label viz-field__label viz-signage">WorkIQ connector</span>
+        <span class="rdesk-workiq-status viz-body" role="status" aria-live="polite" data-tone="${p.tone}">
+          <span class="rdesk-workiq-dot" aria-hidden="true"></span>
+          <span class="rdesk-workiq-text">${esc(workIqLine(p))}</span>
+        </span>
+        <button type="button" class="viz-btn viz-btn--sm rdesk-workiq-action viz-focusable" hidden></button>
+        <span class="rdesk-workiq-detail viz-body" hidden></span>
+      </div>`;
+}
+
+/** The status line text: label + the trailing glyph (✓) when present. */
+function workIqLine(p: WorkIqCardPresentation): string {
+  return p.glyph ? `${p.label} ${p.glyph}` : p.label;
+}
+
+/** Paint one m365 card from a presentation — mutates text/tone/state/affordance in place (keeps the
+ *  `role=status` node stable so aria-live announces the change). */
+function applyWorkIq(card: HTMLElement, p: WorkIqCardPresentation): void {
+  card.dataset.state = p.state;
+  const status = card.querySelector<HTMLElement>('.rdesk-workiq-status');
+  const text = card.querySelector<HTMLElement>('.rdesk-workiq-text');
+  const btn = card.querySelector<HTMLButtonElement>('.rdesk-workiq-action');
+  const detail = card.querySelector<HTMLElement>('.rdesk-workiq-detail');
+  if (status) status.dataset.tone = p.tone;
+  if (text) text.textContent = workIqLine(p);
+  if (btn) {
+    if (p.action) {
+      btn.textContent = p.action.label;
+      btn.hidden = false;
+      btn.disabled = p.action.busy;
+      btn.classList.toggle('viz-btn--busy', p.action.busy);
+    } else {
+      btn.hidden = true;
+      btn.disabled = false;
+      btn.classList.remove('viz-btn--busy');
+    }
+  }
+  if (detail) {
+    detail.textContent = p.detail;
+    detail.hidden = !p.detail;
+  }
+}
+
+/** Wire the m365 connector card(s). Status is GLOBAL (one connector CLI), so a single detect updates
+ *  every m365 strip. Degrades to an honest "Status unavailable / Recheck" if the IPC handler isn't
+ *  present yet (WORKIQ-FIX backend not landed) — never a silent dead control (#160 class). */
+function wireWorkIq(container: HTMLElement): void {
+  const cards = Array.from(container.querySelectorAll<HTMLElement>('.rdesk-workiq'));
+  if (!cards.length) return;
+  const paint = (m: WorkIqCardModel): void => {
+    const p = workIqCardPresentation(m);
+    for (const c of cards) applyWorkIq(c, p);
+  };
+  // Map the IPC contract → the card's view-state. Installed shows the resolved CLI path; not-installed
+  // surfaces the install command the Install button will run (so the Principal sees what happens first).
+  const toModel = (s: WorkIqStatus): WorkIqCardModel =>
+    s.installed
+      ? { state: 'installed', detail: s.cliPath }
+      : { state: 'not-installed', detail: s.installCommand };
+  const refresh = async (): Promise<void> => {
+    paint({ state: 'checking' });
+    try {
+      paint(toModel(await window.kbApi.workIqStatus()));
+    } catch {
+      paint({ state: 'error' });
+    }
+  };
+  const install = async (): Promise<void> => {
+    paint({ state: 'installing' });
+    try {
+      const res = await window.kbApi.installWorkIq();
+      // The result is a discriminated union; this repo's tsconfig is non-strict, where truthiness
+      // narrowing on `res.ok` doesn't refine the union — so distinguish the failure arm via `'error' in
+      // res`, the same idiom the RunResearcherResult union uses below.
+      if ('error' in res) paint({ state: 'install-failed', detail: res.error });
+      else paint(toModel(res.status));
+    } catch {
+      paint({ state: 'install-failed' });
+    }
+  };
+  for (const c of cards) {
+    const btn = c.querySelector<HTMLButtonElement>('.rdesk-workiq-action');
+    btn?.addEventListener('click', () => {
+      // The action is Recheck in the detect-error state, else Install/Retry.
+      if (c.dataset.state === 'error') void refresh();
+      else void install();
+    });
+  }
+  void refresh();
+}
+
 /** The add-dock (§2) — named template TILES (glyph + label), not a <select>. Each creates a disarmed
  *  researcher; arming it later is the gated step. */
 function addDock(): string {
@@ -216,6 +322,7 @@ function addDock(): string {
 
 function wire(container: HTMLElement, researchers: ResearcherView[]): void {
   const byId = new Map(researchers.map((r) => [r.id, r]));
+  wireWorkIq(container); // WORKIQ-UI: drive the m365 connector install/status card(s)
 
   // Add-from-tile: a tile selects the template (highlights) — the Name input + Enter (or re-click) creates.
   let chosenTemplate: ResearcherConfigPatch['template'] | null = null;
