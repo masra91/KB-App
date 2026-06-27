@@ -161,6 +161,52 @@ describe('Lineage (AUDIT-6)', () => {
   });
 });
 
+// AUDIT-6/7: lineage as a first-class addressable surface. The feed's per-entry "trace origin" only
+// reaches subjects in the recent window; the lookup traces ANY entity/source/claim id the Principal
+// holds (e.g. one copied from Explore) — the "per-entity lineage" + "per-source trace" surfaces.
+describe('Trace-by-id lookup (AUDIT-6/7 — per-entity lineage + per-source trace)', () => {
+  it('traces the entered id on the trace button, rendering the lineage panel', async () => {
+    activityLineage = vi.fn(async () => ({ subjectId: 'S2', kind: 'source', sources: ['S2'], events: ENTRIES[0].events, decisions: [] }) as Lineage);
+    setApi();
+    const c = await mount();
+    const input = c.querySelector<HTMLInputElement>('#activityTraceId')!;
+    input.value = 'S2';
+    c.querySelector<HTMLButtonElement>('[data-act="trace-lookup"]')!.click();
+    await flush();
+    expect(activityLineage).toHaveBeenCalledWith('S2'); // the typed id, not a feed subject
+    expect(c.querySelector('.lineage-panel')).not.toBeNull();
+  });
+
+  it('submits on Enter in the input (keyboard-first), trimming surrounding whitespace', async () => {
+    const c = await mount();
+    const input = c.querySelector<HTMLInputElement>('#activityTraceId')!;
+    input.value = '  E1  '; // a stray copy-paste space must not miss
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await flush();
+    expect(activityLineage).toHaveBeenCalledWith('E1');
+  });
+
+  it('is a no-op for a blank/whitespace id (no empty traces)', async () => {
+    const c = await mount();
+    const input = c.querySelector<HTMLInputElement>('#activityTraceId')!;
+    input.value = '   ';
+    c.querySelector<HTMLButtonElement>('[data-act="trace-lookup"]')!.click();
+    await flush();
+    expect(activityLineage).not.toHaveBeenCalled();
+  });
+
+  it('renders the lookup as a blessed .viz-field with an accessible name + read-only chrome', async () => {
+    const c = await mount();
+    const input = c.querySelector<HTMLInputElement>('#activityTraceId')!;
+    expect(input.classList.contains('viz-field__input')).toBe(true);
+    expect(input.closest('.viz-field')).not.toBeNull();
+    expect(input.getAttribute('aria-label')).toBe('Trace lineage by id');
+    const go = c.querySelector<HTMLButtonElement>('[data-act="trace-lookup"]')!;
+    expect(go.classList.contains('viz-btn')).toBe(true);
+    expect(go.getAttribute('aria-label')).toBe('Trace lineage of the entered id');
+  });
+});
+
 describe('Read-only + XSS-safety (AUDIT-8)', () => {
   it('escapes hostile content in summaries/payloads and renders no mutating controls', async () => {
     const hostile: ActivityFeedResult['entries'] = [

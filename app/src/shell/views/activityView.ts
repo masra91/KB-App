@@ -100,6 +100,14 @@ function wire(container: HTMLElement): void {
       void load(container);
     }
   });
+  // Enter in the trace-lookup input submits, mirroring the button (a keyboard-first path, AUDIT-7).
+  container.addEventListener('keydown', (e) => {
+    const t = e.target as HTMLElement;
+    if (t.id === 'activityTraceId' && (e as KeyboardEvent).key === 'Enter') {
+      e.preventDefault();
+      submitTraceLookup(container);
+    }
+  });
   container.addEventListener('click', (e) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     if (!el) return;
@@ -111,6 +119,8 @@ function wire(container: HTMLElement): void {
       renderBody(container);
     } else if (act === 'lineage') {
       void traceLineage(container, el.dataset.id!);
+    } else if (act === 'trace-lookup') {
+      submitTraceLookup(container); // AUDIT-6/7: trace any entity/source/claim id the Principal holds
     } else if (act === 'clear-lineage') {
       lineage = null;
       renderLineage(container);
@@ -118,6 +128,15 @@ function wire(container: HTMLElement): void {
       void load(container); // #145: re-run the feed load after a failure/timeout
     }
   });
+}
+
+/** Read the trace-lookup input and trace the entered id (AUDIT-6/7). A blank/whitespace id is a
+ *  no-op (no empty traces); the id is trimmed so a stray copy-paste space doesn't miss. */
+function submitTraceLookup(container: HTMLElement): void {
+  const input = container.querySelector<HTMLInputElement>('#activityTraceId');
+  const id = input?.value.trim();
+  if (!id) return;
+  void traceLineage(container, id);
 }
 
 async function traceLineage(container: HTMLElement, id: string): Promise<void> {
@@ -167,6 +186,13 @@ export function controlsHtml(actors: readonly string[], f: ActivityFilter): stri
     <label class="viz-field activity-field">
       <span class="viz-field__label viz-signage">search</span>
       <input id="activitySearch" class="activity-search viz-field__input viz-body viz-focusable" type="search" placeholder="Search activity…" aria-label="Search activity" value="${esc(f.text ?? '')}" />
+    </label>
+    <label class="viz-field activity-field activity-trace-field">
+      <span class="viz-field__label viz-signage">trace</span>
+      <span class="activity-trace-input">
+        <input id="activityTraceId" class="activity-trace-id viz-field__input viz-body viz-focusable" type="text" placeholder="entity / source / claim id…" aria-label="Trace lineage by id" />
+        <button type="button" id="activityTraceGo" class="viz-btn viz-btn--sm viz-focusable activity-trace-go" data-act="trace-lookup" aria-label="Trace lineage of the entered id">trace</button>
+      </span>
     </label>`;
 }
 
