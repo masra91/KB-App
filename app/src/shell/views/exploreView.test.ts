@@ -288,6 +288,139 @@ describe('Explore view — bounded neighborhood (EXPLORE-8)', () => {
   });
 });
 
+describe('Explore view — filter the neighborhood (EXPLORE-9)', () => {
+  // default neighborhood: Finance (organization, edge "funds", asserted) + Steve (person, no predicate
+  // → edge "linked from", speculative). Two kinds, two edge types, one speculative → a real filter bar.
+  const names = (c: HTMLElement): (string | null)[] => Array.from(c.querySelectorAll('.explore-neighbor-name')).map((n) => n.textContent);
+
+  it('renders a filter bar with chips for the distinct kinds, edge types, and a hide-speculative toggle', async () => {
+    const c = await mount();
+    expect(c.querySelector('.explore-filters')).not.toBeNull();
+    const kinds = Array.from(c.querySelectorAll('.explore-filter-chip[data-group="kind"]')).map((b) => b.getAttribute('data-value'));
+    expect(kinds.sort()).toEqual(['organization', 'person']);
+    const edges = Array.from(c.querySelectorAll('.explore-filter-chip[data-group="edge"]')).map((b) => b.getAttribute('data-value'));
+    expect(edges.sort()).toEqual(['funds', 'linked from']);
+    expect(c.querySelector('.explore-filter-chip[data-group="spec"]')).not.toBeNull();
+    expect(c.querySelectorAll('select')).toHaveLength(0); // instrument language, no native dropdown (EXPLORE-10)
+  });
+
+  it('clicking an entity-kind chip narrows to that kind; clicking again clears it', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="kind"][data-value="person"]')!.click();
+    expect(names(c)).toEqual(['Steve Park']);
+    expect(c.querySelector('.explore-filter-chip[data-group="kind"][data-value="person"]')?.getAttribute('aria-pressed')).toBe('true');
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="kind"][data-value="person"]')!.click();
+    expect(names(c).sort()).toEqual(['Finance Team', 'Steve Park']);
+  });
+
+  it('"hide speculative" drops low-confidence edges (the optional confidence filter)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="spec"]')!.click();
+    expect(names(c)).toEqual(['Finance Team']); // Steve (speculative) hidden
+  });
+
+  it('filters across groups are ANDed (kind AND edge type)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="kind"][data-value="organization"]')!.click();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="edge"][data-value="funds"]')!.click();
+    expect(names(c)).toEqual(['Finance Team']);
+  });
+
+  it('a filter combination that matches nothing shows a clear message + a clear-filters affordance', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="kind"][data-value="person"]')!.click();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="edge"][data-value="funds"]')!.click();
+    expect(c.querySelector('.explore-filter-none')).not.toBeNull();
+    expect(c.querySelectorAll('.explore-neighbor')).toHaveLength(0);
+    c.querySelector<HTMLButtonElement>('.explore-filter-none .explore-filter-clear')!.click();
+    expect(names(c).sort()).toEqual(['Finance Team', 'Steve Park']); // cleared → all back
+  });
+
+  it('shows no filter bar for a trivial neighborhood (nothing to narrow)', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({ neighbors: [{ rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.8, direction: 'out', speculative: false }], shown: 1, total: 1 }),
+    );
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.explore-filters')).toBeNull();
+  });
+
+  it('a fresh re-center resets active filters (filters are scoped to one neighborhood)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-filter-chip[data-group="spec"]')!.click();
+    expect(names(c)).toEqual(['Finance Team']);
+    c.querySelector<HTMLButtonElement>('.explore-recenter[data-rel="entities/org/finance.md"]')!.click();
+    await flush();
+    expect(c.querySelectorAll('.explore-filter-chip[aria-pressed="true"]')).toHaveLength(0); // filters cleared on re-center
+  });
+});
+
+describe('Explore view — expand-in-place (EXPLORE-7)', () => {
+  const subFor = (): ExploreNeighborhood =>
+    neighborhood({
+      center: { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, tags: [] },
+      neighbors: [{ rel: 'entities/x/sub.md', id: 'x', name: 'Sub Entity', kind: 'concept', confidence: 0.8, direction: 'out', predicate: 'reports to', speculative: false }],
+      shown: 1,
+      total: 1,
+    });
+
+  it('expanding a neighbor reveals its own links inline without changing focus', async () => {
+    exploreNeighborhood = vi.fn(async (focus?: string) => (focus === 'entities/org/finance.md' ? subFor() : neighborhood()));
+    setApi();
+    const c = await mount();
+    const expand = c.querySelector<HTMLButtonElement>('.explore-expand[data-rel="entities/org/finance.md"]')!;
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    expand.click();
+    await flush();
+    await flush();
+    const sub = c.querySelector('.explore-subneighbors');
+    expect(sub).not.toBeNull();
+    expect(sub!.textContent).toContain('Sub Entity');
+    expect(c.querySelector('.explore-expand[data-rel="entities/org/finance.md"]')?.getAttribute('aria-expanded')).toBe('true');
+    // focus is unchanged — center still the original entity, no breadcrumb pushed
+    expect(c.querySelector('.explore-center-name')?.textContent).toBe('Project Atlas');
+    expect(c.querySelectorAll('.explore-crumb[data-rel]')).toHaveLength(0);
+  });
+
+  it('a sub-neighbor is itself click-to-re-center', async () => {
+    exploreNeighborhood = vi.fn(async (focus?: string) => (focus === 'entities/org/finance.md' ? subFor() : neighborhood()));
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-expand[data-rel="entities/org/finance.md"]')!.click();
+    await flush();
+    await flush();
+    exploreNeighborhood.mockClear();
+    c.querySelector<HTMLButtonElement>('.explore-subneighbor .explore-recenter[data-rel="entities/x/sub.md"]')!.click();
+    await flush();
+    expect(exploreNeighborhood).toHaveBeenCalledWith('entities/x/sub.md');
+  });
+
+  it('collapsing hides the inline links again', async () => {
+    exploreNeighborhood = vi.fn(async (focus?: string) => (focus === 'entities/org/finance.md' ? subFor() : neighborhood()));
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-expand[data-rel="entities/org/finance.md"]')!.click();
+    await flush();
+    await flush();
+    expect(c.querySelector('.explore-subneighbors')).not.toBeNull();
+    c.querySelector<HTMLButtonElement>('.explore-expand[data-rel="entities/org/finance.md"]')!.click();
+    expect(c.querySelector('.explore-subneighbors')).toBeNull();
+  });
+
+  it('a failed expand fetch degrades to a calm "no further links", never throws (ENG-16)', async () => {
+    exploreNeighborhood = vi.fn(async (focus?: string) => {
+      if (focus === 'entities/org/finance.md') throw new Error('ipc down');
+      return neighborhood();
+    });
+    setApi();
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-expand[data-rel="entities/org/finance.md"]')!.click();
+    await flush();
+    await flush();
+    expect(c.querySelector('.explore-subneighbors')?.textContent).toMatch(/no further links/i);
+  });
+});
+
 describe('Explore view — load resilience', () => {
   it('degrades to a retryable error when the IPC fails (no infinite spinner)', async () => {
     exploreNeighborhood = vi.fn(async () => {
