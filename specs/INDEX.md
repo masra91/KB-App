@@ -58,6 +58,16 @@ and a unique `key` here.
 | SPEC-0043 | SENSE   | Sensitivity Classification (labels, propagation, the gate comparator) | feature | draft | `features/` |
 | SPEC-0046 | COMPOSE | Encyclopedic Entity Pages (Compose — human-readable top layer) | feature | draft | `features/` |
 | SPEC-0045 | QUIESCE | Graceful Shutdown (Quiesce & Drain) | feature | draft | `features/` |
+| SPEC-0047 | EVALSURF | Eval Surface (the quality instrument — per-stage/action cognition eval) | feature | draft | `features/` |
+| SPEC-0048 | SCALE   | Control Panel — user-configurable scale & model | feature | draft | `features/` |
+| SPEC-0049 | HEAL    | Self-healing deciders (converge or ask, never toss) | feature | draft | `features/` |
+| SPEC-0050 | DIR     | Directives — the interpretation layer (durable disambiguation) | feature | draft | `features/` |
+| SPEC-0051 | COHERE  | Graph Cohesion (communities, not islands or a hairball) | feature | draft | `features/` |
+| SPEC-0052 | MEDIA   | Binary / Media Intake (PDF + image OCR via Copilot SDK multimodal) | feature | draft | `features/` |
+| SPEC-0053 | AGENTSIA | Manage-section Information Architecture (Agents/Researchers/Jobs clarity, "WS-E") | feature | draft | `features/` |
+| SPEC-0054 | RMEM    | Researcher Memory & KB-Grounding (fit-and-fill, don't repeat, resume) | feature | draft | `features/` |
+| SPEC-0055 | RELEASE | Release Cadence & Signed Builds (tag-based, signed+notarized; macOS first) | feature | draft | `features/` |
+| SPEC-0056 | UPDATE  | In-app Auto-Update (electron-updater via GitHub Releases; stable+beta) | feature | draft | `features/` |
 
 ## Reserved / planned (not yet written)
 
@@ -82,5 +92,8 @@ assigned at creation time.
 | ~~REPLAY~~ | _written → SPEC-0022 (key REPLAY)_ | feature | Replay  | full rebuild v1; partial/selective replay (LIFE-12/13) still planned |
 | ~~PANEL~~  | _written → SPEC-0027 (key PANEL)_ | feature | _x-cut_  | Manage section: Jobs/Agents/Sources/Settings views |
 | ~~VAULT~~  | _written → SPEC-0031 (key VAULT)_ | feature | _x-cut_  | clean graph (entities only), readable entity pages, shipped .obsidian config |
+| ~~RELEASE~~ | _written → SPEC-0055 (key RELEASE)_ | feature | _x-cut_ | tag-based on trunk; signed+notarized macOS first |
+| ~~UPDATE~~  | _written → SPEC-0056 (key UPDATE)_  | feature | _x-cut_ | electron-updater via GitHub Releases; stable+beta |
+| BRAND      | Release Polish (branding/icons/identity) | feature | _x-cut_ | reserves SPEC-0057; co-designing identity with Principal |
 
 > Numbers are assigned at creation time, in order, to avoid gaps.
