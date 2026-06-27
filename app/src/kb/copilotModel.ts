@@ -53,16 +53,35 @@ export function setAgentModelOverrides(map: Record<string, string>): void {
   agentModelOverrides = { ...map };
 }
 
+// INGEST-PERF item 4 (SPEC-0048 per-stage model tiering): the right-sized DEFAULT model per stage,
+// keyed by AGENT_CATALOG key. Stages reason very differently beyond the raw source (Archive normalizes,
+// Decompose parses ONE source, Claims does bounded source-local extraction — all cheaper-tier-OK; Connect
+// dedups/links across the whole KB, Compose/Research synthesize — strong-tier). The copilot CLI exposes
+// ONLY `--model` (no effort/thinking flag — reasoning effort is model-side), so a stage's tier IS its
+// model id. Resolved at startup from the SAME live-catalog probe as the global model (so a stale cheap-tier
+// id degrades down to a known-good model, never bricks) and published here. Sits BELOW the Principal's
+// per-agent pick (which stays the override on top) and ABOVE the global probed model — a stage with no
+// entry falls through to the global default. Empty when a user GLOBAL override is active (their explicit
+// wholesale choice wins over our built-in per-stage defaults).
+let stageDefaultModels: Record<string, string> = {};
+
+/** Record the per-stage DEFAULT models resolved at startup (INGEST-PERF item 4). Replaces the whole map;
+ *  empty clears (e.g. a user global override is active → defer to it wholesale). */
+export function setStageDefaultModels(map: Record<string, string>): void {
+  stageDefaultModels = { ...map };
+}
+
 /**
  * Resolve the model to launch with. Order: eval `KB_COPILOT_MODEL` override (wins always) → the
- * per-AGENT pick for `agentKey` (SPEC-0048) → the GLOBAL probed/configured model (ORCH-28) →
- * `DEFAULT_COPILOT_MODEL` floor. `agentKey` (a decider's AGENT_CATALOG key) selects that agent's pin;
- * omit it for the global default.
+ * per-AGENT pick for `agentKey` (Principal picker, SPEC-0048) → the per-STAGE default for `agentKey`
+ * (INGEST-PERF item 4) → the GLOBAL probed/configured model (ORCH-28) → `DEFAULT_COPILOT_MODEL` floor.
+ * `agentKey` (a decider's AGENT_CATALOG key) selects that agent's pin/default; omit it for the global.
  */
 export function resolveCopilotModel(env: NodeJS.ProcessEnv = process.env, agentKey?: string): string {
   const override = env.KB_COPILOT_MODEL;
   if (override && override.trim().length > 0) return override; // eval harness override wins
-  if (agentKey && agentModelOverrides[agentKey]) return agentModelOverrides[agentKey]; // per-agent pick
+  if (agentKey && agentModelOverrides[agentKey]) return agentModelOverrides[agentKey]; // Principal per-agent pick
+  if (agentKey && stageDefaultModels[agentKey]) return stageDefaultModels[agentKey]; // per-stage right-sized default
   return resolvedLaunchModel ?? DEFAULT_COPILOT_MODEL; // global probed model, else the interim floor
 }
 

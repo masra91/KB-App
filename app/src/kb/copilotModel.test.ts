@@ -1,7 +1,7 @@
 // ORCH-16 / model-pin gap: resolveCopilotModel must ALWAYS yield a concrete model so prod never
 // runs unpinned (silently inheriting ~/.copilot/settings.json) and traces never record `default`.
 import { describe, it, expect, afterEach } from 'vitest';
-import { resolveCopilotModel, DEFAULT_COPILOT_MODEL, isModelUnavailableError, COPILOT_MODEL_AUTO, setAgentModelOverrides } from './copilotModel';
+import { resolveCopilotModel, DEFAULT_COPILOT_MODEL, isModelUnavailableError, COPILOT_MODEL_AUTO, setAgentModelOverrides, setStageDefaultModels } from './copilotModel';
 
 describe('resolveCopilotModel (ORCH-16 model pin)', () => {
   it('pins the in-app default when KB_COPILOT_MODEL is unset (the prod path that was broken)', () => {
@@ -47,6 +47,39 @@ describe('SPEC-0048 per-agent model override (resolveCopilotModel agentKey)', ()
     setAgentModelOverrides({ connect: 'claude-sonnet-4.5' });
     setAgentModelOverrides({});
     expect(resolveCopilotModel({}, 'connect')).toBe(DEFAULT_COPILOT_MODEL);
+  });
+});
+
+describe('INGEST-PERF item 4 — per-stage default model (resolveCopilotModel precedence)', () => {
+  afterEach(() => {
+    setStageDefaultModels({});
+    setAgentModelOverrides({});
+  });
+
+  it('a stage with a per-stage default uses it; an untiered stage / no-key falls to the global', () => {
+    setStageDefaultModels({ archivist: 'claude-haiku-4.5', decompose: 'claude-sonnet-4.6', claims: 'claude-sonnet-4.6' });
+    expect(resolveCopilotModel({}, 'archivist')).toBe('claude-haiku-4.5');
+    expect(resolveCopilotModel({}, 'decompose')).toBe('claude-sonnet-4.6');
+    expect(resolveCopilotModel({}, 'claims')).toBe('claude-sonnet-4.6');
+    expect(resolveCopilotModel({}, 'connect')).toBe(DEFAULT_COPILOT_MODEL); // strong stage → global default
+    expect(resolveCopilotModel({})).toBe(DEFAULT_COPILOT_MODEL); // no agentKey → global default
+  });
+
+  it('the Principal per-agent pick OVERRIDES the per-stage default (picker stays on top — brief requirement)', () => {
+    setStageDefaultModels({ claims: 'claude-sonnet-4.6' });
+    setAgentModelOverrides({ claims: 'claude-opus-4.8' });
+    expect(resolveCopilotModel({}, 'claims')).toBe('claude-opus-4.8'); // Principal pick wins over stage default
+  });
+
+  it('the eval KB_COPILOT_MODEL override still wins over a per-stage default', () => {
+    setStageDefaultModels({ archivist: 'claude-haiku-4.5' });
+    expect(resolveCopilotModel({ KB_COPILOT_MODEL: 'gpt-5.5' }, 'archivist')).toBe('gpt-5.5');
+  });
+
+  it('clearing the stage defaults reverts every stage to the global (the user-global-override path)', () => {
+    setStageDefaultModels({ archivist: 'claude-haiku-4.5' });
+    setStageDefaultModels({});
+    expect(resolveCopilotModel({}, 'archivist')).toBe(DEFAULT_COPILOT_MODEL);
   });
 });
 
