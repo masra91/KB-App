@@ -20,8 +20,8 @@ function neighborhood(over: Partial<ExploreNeighborhood> = {}): ExploreNeighborh
     center: { rel: 'entities/project/atlas.md', id: 'a', name: 'Project Atlas', kind: 'project', confidence: 0.9, tags: ['type/project', 'topic/q3'] },
     claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [] }],
     neighbors: [
-      { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out' },
-      { rel: 'entities/person/steve.md', id: 's', name: 'Steve Park', kind: 'person', confidence: 0.6, direction: 'in' },
+      { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out', predicate: 'funds', speculative: false },
+      { rel: 'entities/person/steve.md', id: 's', name: 'Steve Park', kind: 'person', confidence: 0.6, direction: 'in', speculative: true },
     ],
     shown: 2,
     total: 2,
@@ -78,6 +78,43 @@ describe('Explore view — neighborhood render (EXPLORE-2/4)', () => {
     expect(names).toEqual(['Finance Team', 'Steve Park']);
     const edges = Array.from(c.querySelectorAll('.explore-edge')).map((e) => e.textContent);
     expect(edges).toEqual(['→', '←']); // out, in
+  });
+
+  it('renders an edge’s relationship predicate as a label, and shows none when absent (EXPLORE-5)', async () => {
+    const c = await mount();
+    const rels = Array.from(c.querySelectorAll('.explore-rel')).map((e) => e.textContent);
+    expect(rels).toEqual(['funds']); // Finance has the predicate; Steve (no predicate) shows no label
+  });
+
+  it('marks a low-confidence edge speculative (faded class + ~conf), an asserted one not (EXPLORE-5/DATA-8)', async () => {
+    const c = await mount();
+    const items = Array.from(c.querySelectorAll('.explore-neighbor'));
+    const finance = items.find((li) => li.textContent?.includes('Finance Team'))!;
+    const steve = items.find((li) => li.textContent?.includes('Steve Park'))!;
+    expect(finance.classList.contains('explore-neighbor--speculative')).toBe(false);
+    expect(steve.classList.contains('explore-neighbor--speculative')).toBe(true);
+    // the non-color a11y signal: speculative confidence is `~`-prefixed
+    expect(steve.querySelector('.explore-conf')?.textContent).toBe('~0.60');
+    expect(finance.querySelector('.explore-conf')?.textContent).toBe('0.70');
+  });
+
+  it('partial data: a neighbor missing kind/predicate renders without breaking siblings (ENG-15/16)', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({
+        neighbors: [
+          // a legacy/partial neighbor: empty kind, no predicate, odd confidence — must not crash the row
+          { rel: 'entities/x/partial.md', id: 'p', name: 'Partial Node', kind: '', confidence: 0.5, direction: 'both', speculative: true },
+          { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out', predicate: 'funds', speculative: false },
+        ],
+        shown: 2,
+        total: 2,
+      }),
+    );
+    setApi();
+    const c = await mount();
+    expect(c.querySelectorAll('.explore-neighbor')).toHaveLength(2); // both render
+    const names = Array.from(c.querySelectorAll('.explore-neighbor-name')).map((n) => n.textContent);
+    expect(names).toEqual(['Partial Node', 'Finance Team']);
   });
 
   it('composes the instrument language — no native <select> anywhere (EXPLORE-10)', async () => {
@@ -242,7 +279,7 @@ describe('Explore view — empty + sparse states (EXPLORE-11)', () => {
 describe('Explore view — bounded neighborhood (EXPLORE-8)', () => {
   it('shows a "+N more" overflow note when the hub exceeds the shown count', async () => {
     exploreNeighborhood = vi.fn(async () =>
-      neighborhood({ neighbors: [{ rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out' }], shown: 1, total: 9 }),
+      neighborhood({ neighbors: [{ rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out', speculative: false }], shown: 1, total: 9 }),
     );
     setApi();
     const c = await mount();

@@ -130,25 +130,39 @@ function linkifyStatement(statement: string): string {
   });
 }
 
-/** The 1-hop neighborhood (EXPLORE-2/5/8): each neighbor a click-to-re-center row, with the edge
- *  direction; bounded to top-K with a "+N more" overflow note when the hub is large. */
+/** One neighbor row (EXPLORE-5): direction glyph + the relationship **label** (predicate when Connect
+ *  wrote one, else nothing — the glyph carries direction), the name, kind chip, and a confidence that
+ *  reads as **speculative** (faded, `~`-marked, no-color a11y fallback) below the asserted threshold. */
+function neighborRow(n: ExploreNeighbor): string {
+  const dirLabel = DIRECTION_LABEL[n.direction];
+  // The edge label: a Connect predicate ("funds", "owns") when present; otherwise the glyph alone
+  // conveys direction (its descriptor stays in the title/aria), keeping the common no-predicate case clean.
+  const relLabel = n.predicate ? `<span class="explore-rel viz-numeric" title="relationship">${esc(n.predicate)}</span>` : '';
+  // Confidence: `~`-prefixed + brass when speculative — a non-color signal alongside the fade (a11y).
+  const confTitle = n.speculative ? 'link confidence — speculative (low)' : 'link confidence';
+  const conf = `<span class="explore-conf viz-numeric" title="${confTitle}">${n.speculative ? '~' : ''}${n.confidence.toFixed(2)}</span>`;
+  const specClass = n.speculative ? ' explore-neighbor--speculative' : '';
+  const recenterTitle = `Explore around ${n.name}${n.speculative ? ' (speculative link)' : ''}`;
+  return `
+      <li class="explore-neighbor${specClass}">
+        <button type="button" class="explore-recenter viz-no-chrome viz-focusable" data-rel="${esc(n.rel)}" data-name="${esc(n.name)}" title="${esc(recenterTitle)}">
+          <span class="explore-edge viz-numeric" title="${esc(dirLabel)}" aria-label="${esc(dirLabel)}">${DIRECTION_GLYPH[n.direction]}</span>
+          ${relLabel}
+          <span class="explore-neighbor-name viz-body">${esc(n.name)}</span>
+          <span class="explore-kind viz-chip">${esc(n.kind)}</span>
+          ${conf}
+        </button>
+      </li>`;
+}
+
+/** The 1-hop neighborhood (EXPLORE-2/5/8): each neighbor a click-to-re-center row, with the typed,
+ *  confidence-bearing edge; bounded to top-K with a "+N more" overflow note when the hub is large. */
 function neighborsBlock(nb: ExploreNeighborhood): string {
   if (nb.neighbors.length === 0) {
     // The sparse state (EXPLORE-11): a focused entity with no promoted links renders cleanly, with why.
     return `<div class="explore-neighbors-empty viz-body"><span class="viz-signage explore-neighbors-head">Relationships</span><p>No relationships promoted yet — this entity isn't linked to others in the graph. Connect adds links as it finds them; this view gets richer as that happens.</p></div>`;
   }
-  const rows = nb.neighbors
-    .map(
-      (n) => `
-      <li class="explore-neighbor">
-        <button type="button" class="explore-recenter viz-no-chrome viz-focusable" data-rel="${esc(n.rel)}" data-name="${esc(n.name)}" title="Explore around ${esc(n.name)}">
-          <span class="explore-edge viz-numeric" title="${esc(DIRECTION_LABEL[n.direction])}" aria-label="${esc(DIRECTION_LABEL[n.direction])}">${DIRECTION_GLYPH[n.direction]}</span>
-          <span class="explore-neighbor-name viz-body">${esc(n.name)}</span>
-          ${identity(n.kind, n.confidence)}
-        </button>
-      </li>`,
-    )
-    .join('');
+  const rows = nb.neighbors.map(neighborRow).join('');
   const overflow = nb.total > nb.shown ? `<p class="explore-more viz-body">+${nb.total - nb.shown} more — narrow with a more specific focus.</p>` : '';
   return `
     <div class="explore-neighbors">

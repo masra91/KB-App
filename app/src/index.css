@@ -498,9 +498,20 @@ button:disabled {
 .explore-neighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .explore-recenter { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
 .explore-recenter:hover { border-left-color: var(--viz-ember); background: var(--viz-rule); }
-.explore-edge { color: var(--viz-idle); font-size: 0.9rem; width: 1.1rem; text-align: center; }
+.explore-edge { color: var(--viz-idle); font-size: 0.9rem; width: 1.1rem; text-align: center; flex: 0 0 auto; }
+/* The relationship label (EXPLORE-5) — a typed predicate ("funds", "owns") reads as an edge annotation:
+   small, lowercase, italic, set off in muted ink so the entity name stays the row's anchor. */
+.explore-rel { color: var(--viz-ink-muted); font-size: 0.66rem; font-style: italic; letter-spacing: 0.03em; text-transform: lowercase; flex: 0 0 auto; }
 .explore-neighbor-name { color: var(--viz-ink); }
 .explore-recenter:hover .explore-neighbor-name { color: var(--viz-ember); }
+/* Speculative / low-confidence edge (EXPLORE-5, DATA-8) — visually distinct, NOT asserted as fact:
+   faded row + a dashed (un-solid) edge in brass (the "waiting/uncertain" token). The `~`-prefixed
+   confidence is the non-color signal so the distinction survives high-contrast / mono displays (a11y). */
+.explore-neighbor--speculative .explore-recenter { opacity: 0.66; }
+.explore-neighbor--speculative .explore-edge { color: var(--viz-brass); }
+.explore-neighbor--speculative .explore-rel { color: var(--viz-brass); }
+.explore-neighbor--speculative .explore-conf { color: var(--viz-brass); }
+.explore-neighbor--speculative .explore-recenter:hover { opacity: 1; }
 .explore-more { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
 .explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
 .explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }
