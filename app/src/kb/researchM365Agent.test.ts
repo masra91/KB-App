@@ -118,15 +118,24 @@ describe('makeM365ResearchFn (RESEARCH-16) — injected session path', () => {
     expect(out.found).toBe(false);
   });
 
-  it('a session failure degrades to a graceful no-finding (never crashes dispatch)', async () => {
+  it('FAILS LOUD on a session failure (failed≠empty) without crashing dispatch (WORKIQ-FIX #160)', async () => {
+    // The OLD behavior swallowed this to a silent no-finding — exactly why WorkIQ "did nothing" in the
+    // live build. A configured-tenant pass that errors must surface as `failed` (→ research-failed audit
+    // + status card), but still RETURN (never re-throw), so one researcher's failure can't kill the batch.
     const out = await makeM365ResearchFn({ session: async () => { throw new Error('mcp/oauth down'); } })(m365(), req);
     expect(out.found).toBe(false);
+    expect(out.failed).toBe(true);
+    expect(out.error).toContain('mcp/oauth down');
     expect(out.note).toBe('');
   });
 
-  it('with no injected session AND no mcpServer wired, the live path is a safe no-finding (env-gated)', async () => {
+  it('with no injected session AND no mcpServer wired, FAILS LOUD as needs-setup (WORKIQ-FIX)', async () => {
+    // resolveWorkIqCli found no `workiq` CLI ⇒ researchWiring omits `mcpServer` ⇒ liveSdkSession throws a
+    // needs-setup error ⇒ surfaced as `failed` (NOT the old silent no-finding that hid the missing setup).
     const out = await makeM365ResearchFn({})(m365(), req); // no session, no mcpServer
-    expect(out.found).toBe(false); // liveSdkSession returns empty until the Graph MCP is wired
+    expect(out.found).toBe(false);
+    expect(out.failed).toBe(true);
+    expect(out.error).toMatch(/not set up|install/i);
   });
 });
 

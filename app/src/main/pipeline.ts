@@ -29,7 +29,7 @@ import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries, type DevLog } from '../kb/devlog';
 import { breadcrumbObserver } from '../kb/activityBreadcrumb';
 import { telemetryHealth } from './telemetry';
-import { researchDepsOptions } from './researchWiring';
+import { researchDepsOptions, intakeDepsOptions } from './researchWiring';
 import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
@@ -440,7 +440,7 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // path (origin:'external') — reusing the JOBS scheduling shape but NOT the JobBehavior write-sink
   // (the researcherScheduler seam; JOBS-10 intact). Read-only w.r.t. the world (INTAKE-7). Inert
   // until the Principal registers + enables a connector in `.kb/intake/registry.json`.
-  const intake = new IntakeScheduler(stagingWt, {}, log);
+  const intake = new IntakeScheduler(stagingWt, intakeDepsOptions(), log);
   // SPEC-0037 WATCH: live folder watchers. Each enabled, loop-safe folder gets a startup reconcile +
   // a chokidar watcher whose stable-file events drive a non-destructive copy → INGEST. The loop-guard
   // checks watched folders against the REAL vault root (vaultPath), never staging. Inert until the

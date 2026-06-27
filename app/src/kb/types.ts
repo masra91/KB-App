@@ -506,6 +506,24 @@ export type RunResearcherResult =
   | { ran: true; sourceIds: string[]; note: string; failed?: boolean; error?: string; ceilingReached?: boolean }
   | { ran: false; reason: 'not-found' | 'no-kb' };
 
+/** WORKIQ-FIX (SPEC-0028 Slice 3): the WorkIQ/M365 researcher's CLI setup status for the Sources card.
+ *  When `installed:false` the m365 researcher FAILS LOUD (a `research-failed` needs-setup audit event)
+ *  rather than the old silent no-finding — the card prompts the Principal to install the CLI. */
+export interface WorkIqStatus {
+  /** Is the `workiq` CLI resolvable on the (PATH-ensured) login-shell PATH? */
+  installed: boolean;
+  /** Resolved absolute path to the CLI when installed (provenance/debug; omitted when missing). */
+  cliPath?: string;
+  /** Principal-facing install command the card surfaces (and its button runs), e.g. `npm install -g …`. */
+  installCommand: string;
+}
+
+/** Outcome of the WorkIQ install command run from the setup card. `ok:true` ⇒ re-detected installed;
+ *  `ok:false` carries the cause + the (still-current) status so the card renders the failure inline. */
+export type InstallWorkIqResult =
+  | { ok: true; status: WorkIqStatus }
+  | { ok: false; error: string; status: WorkIqStatus };
+
 // --- Control Panel · Sources (SPEC-0027 PANEL-4 — INTAKE-14 + WATCH-9, the unified Sources view) ---
 
 /** A connector's last pull, derived from its newest `intake` audit event (or null = never run). */
@@ -718,6 +736,10 @@ export interface KbApi {
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
   runResearcherNow(id: string): Promise<RunResearcherResult>;
   listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
+  // WORKIQ-FIX (SPEC-0028 Slice 3): the WorkIQ/M365 researcher CLI setup card — read status on mount,
+  // and run the "simple workiq via CLI" install from the button (shells out in main, then re-detects).
+  workIqStatus(): Promise<WorkIqStatus>;
+  installWorkIq(): Promise<InstallWorkIqResult>;
   // SPEC-0037 WATCH-9: the unified Sources view's watched-folder rows. One list read folds config +
   // live `watching` + `lastEvent`; set (create/edit, loop-guarded at the IPC boundary) + remove.
   listWatchFolders(): Promise<WatchFolderView[]>;
