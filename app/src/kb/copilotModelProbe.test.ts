@@ -5,10 +5,12 @@ import {
   probeAcceptedModels,
   initLaunchModel,
   validateModel,
+  resolveStageDefaultModels,
+  STAGE_MODEL_PREFERENCES,
   DEFAULT_MODEL_PREFERENCES,
   LAST_RESORT_MODEL,
 } from './copilotModelProbe';
-import { resolveCopilotModel, setResolvedLaunchModel, DEFAULT_COPILOT_MODEL, COPILOT_MODEL_AUTO } from './copilotModel';
+import { resolveCopilotModel, setResolvedLaunchModel, setStageDefaultModels, DEFAULT_COPILOT_MODEL, COPILOT_MODEL_AUTO } from './copilotModel';
 
 // A faithful slice of real `copilot help config` output (CLI 1.0.62) — the accepted-model catalog.
 const HELP_CONFIG = `Configuration Settings
@@ -29,7 +31,10 @@ const HELP_CONFIG = `Configuration Settings
     - "default"
 `;
 
-afterEach(() => setResolvedLaunchModel(null)); // clear the module-level resolved cache between tests
+afterEach(() => {
+  setResolvedLaunchModel(null); // clear the module-level resolved cache between tests
+  setStageDefaultModels({}); // INGEST-PERF item 4: clear the per-stage defaults between tests
+});
 
 describe('parseAcceptedModels (probe the CLI catalog from `copilot help config`)', () => {
   it('extracts the quoted model ids under the `model` key, in document order', () => {
@@ -158,5 +163,60 @@ describe('SPEC-0048 — validated config model override (Agents-view picker)', (
     expect((await validateModel('claude-opus-4.8', async () => HELP_CONFIG)).result).toBe('accepted');
     expect((await validateModel('claude-opus-4.6', async () => HELP_CONFIG)).result).toBe('rejected'); // not in the catalog
     expect((await validateModel('anything', async () => { throw new Error('no CLI'); })).result).toBe('unknown');
+  });
+});
+
+describe('INGEST-PERF item 4 — per-stage default model resolution', () => {
+  it('the tiered stages map to their right-sized cheap tier when the catalog accepts it', () => {
+    const accepted = parseAcceptedModels(HELP_CONFIG); // includes haiku + sonnet + opus
+    const defaults = resolveStageDefaultModels(accepted);
+    expect(defaults).toEqual({
+      archivist: 'claude-haiku-4.5', // fastest/cheapest — Archive normalizes/stores
+      decompose: 'claude-sonnet-4.6', // fast — self-contained parse of one source
+      claims: 'claude-sonnet-4.6', // low–medium — bounded source-local extraction
+    });
+    // Strong stages get NO per-stage entry → they fall through to the global default.
+    expect(defaults.connect).toBeUndefined();
+    expect(defaults.compose).toBeUndefined();
+  });
+
+  it('a cheap-tier id absent from the catalog DEGRADES down its list to a known-good model (never bricks)', () => {
+    // Catalog has sonnet + opus but NOT haiku → Archive degrades haiku→sonnet-4.6 (next in its list).
+    const noHaiku = ['claude-sonnet-4.6', 'claude-sonnet-4.5', 'claude-opus-4.8'];
+    expect(resolveStageDefaultModels(noHaiku).archivist).toBe('claude-sonnet-4.6');
+    // Catalog has ONLY opus → every tiered stage degrades down to opus-4.8 (the strong fallback tail).
+    const onlyOpus = ['claude-opus-4.8', 'claude-opus-4.7'];
+    expect(resolveStageDefaultModels(onlyOpus)).toEqual({
+      archivist: 'claude-opus-4.8', decompose: 'claude-opus-4.8', claims: 'claude-opus-4.8',
+    });
+  });
+
+  it('an INCONCLUSIVE probe trusts each stage top preference (per-call auto net still guards)', () => {
+    const defaults = resolveStageDefaultModels(null);
+    expect(defaults.archivist).toBe('claude-haiku-4.5');
+    expect(defaults.decompose).toBe('claude-sonnet-4.6');
+    expect(defaults.claims).toBe('claude-sonnet-4.6');
+  });
+
+  it('initLaunchModel publishes the per-stage defaults so deciders resolve their cheap tier', async () => {
+    await initLaunchModel({ run: async () => HELP_CONFIG });
+    expect(resolveCopilotModel({}, 'archivist')).toBe('claude-haiku-4.5');
+    expect(resolveCopilotModel({}, 'decompose')).toBe('claude-sonnet-4.6');
+    expect(resolveCopilotModel({}, 'claims')).toBe('claude-sonnet-4.6');
+    expect(resolveCopilotModel({}, 'connect')).toBe('claude-opus-4.8'); // strong stage → global probed model
+  });
+
+  it('a user GLOBAL override CLEARS the per-stage defaults — every stage defers to the explicit pick', async () => {
+    await initLaunchModel({ override: 'gpt-5.5', run: async () => HELP_CONFIG });
+    expect(resolveCopilotModel({}, 'archivist')).toBe('gpt-5.5'); // not the cheap haiku default
+    expect(resolveCopilotModel({}, 'claims')).toBe('gpt-5.5');
+    expect(resolveCopilotModel({}, 'connect')).toBe('gpt-5.5');
+  });
+
+  it('STAGE_MODEL_PREFERENCES only tiers the three cheap stages; each list ends with the strong Opus tail', () => {
+    expect(Object.keys(STAGE_MODEL_PREFERENCES).sort()).toEqual(['archivist', 'claims', 'decompose']);
+    for (const list of Object.values(STAGE_MODEL_PREFERENCES)) {
+      expect(list[list.length - 1]).toBe(DEFAULT_MODEL_PREFERENCES[DEFAULT_MODEL_PREFERENCES.length - 1]); // strong fallback tail
+    }
   });
 });

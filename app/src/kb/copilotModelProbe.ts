@@ -7,7 +7,7 @@
 // degrade + visible signal".
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { setResolvedLaunchModel, DEFAULT_COPILOT_MODEL } from './copilotModel';
+import { setResolvedLaunchModel, setStageDefaultModels, DEFAULT_COPILOT_MODEL } from './copilotModel';
 
 const exec = promisify(execFile);
 
@@ -35,6 +35,39 @@ export const DEFAULT_MODEL_PREFERENCES: readonly string[] = [
 /** The last-resort fallback when no preferred id is accepted — let Copilot pick from its own catalog.
  *  Mirrors `copilotModel.COPILOT_MODEL_AUTO` (kept local to avoid a cycle; asserted equal in tests). */
 export const LAST_RESORT_MODEL = 'auto';
+
+// INGEST-PERF item 4 — per-stage model tiering. Right-size the DEFAULT model per stage by how much each
+// must reason BEYOND the raw source (KB-Lead's cognitive-load table, validated against the live catalog):
+// Archive normalizes/stores (~none) → cheapest; Decompose parses ONE self-contained source (no dedup/
+// linking) → fast; Claims does bounded source-local extraction + subject attribution → mid (gated on the
+// subject-attribution eval). Connect (dedup/entity-resolution/linking across the whole KB), Compose
+// (grounded synthesis) and Research (multi-source) stay on the STRONG global default — no entry here, so
+// they fall through to `resolvedLaunchModel`. Each list is ORDERED preference and ENDS with the strong
+// Opus list, so an absent cheap-tier id degrades down to a known-good model (never `auto`/brick — the #340
+// class) via the same `selectPreferredModel` path the global model uses. Keyed by AGENT_CATALOG key.
+export const STAGE_MODEL_PREFERENCES: Readonly<Record<string, readonly string[]>> = {
+  archivist: ['claude-haiku-4.5', 'claude-sonnet-4.6', 'claude-sonnet-4.5', ...DEFAULT_MODEL_PREFERENCES],
+  decompose: ['claude-sonnet-4.6', 'claude-sonnet-4.5', ...DEFAULT_MODEL_PREFERENCES],
+  claims: ['claude-sonnet-4.6', 'claude-sonnet-4.5', ...DEFAULT_MODEL_PREFERENCES],
+};
+
+/**
+ * Resolve the per-stage DEFAULT model for each tiered stage from the live catalog (INGEST-PERF item 4).
+ * Reuses `selectPreferredModel` per stage so each cheap-tier pick is validated against the SAME probed
+ * `accepted` set as the global model and degrades down its list to a known-good id. Returns a map keyed by
+ * AGENT_CATALOG key (only the tiered stages; strong stages are omitted ⇒ they keep the global default).
+ * `prefs` is overridable for tests.
+ */
+export function resolveStageDefaultModels(
+  accepted: readonly string[] | null,
+  prefs: Readonly<Record<string, readonly string[]>> = STAGE_MODEL_PREFERENCES,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [stage, list] of Object.entries(prefs)) {
+    out[stage] = selectPreferredModel(list, accepted).model;
+  }
+  return out;
+}
 
 /**
  * Parse the accepted-model catalog out of `copilot help config` stdout. The CLI documents the valid
@@ -150,6 +183,9 @@ export async function initLaunchModel(opts: {
   if (override) {
     if (accepted === null || accepted.includes(override)) {
       setResolvedLaunchModel(override);
+      // INGEST-PERF item 4: an explicit user GLOBAL pick wins WHOLESALE — defer to it for every stage
+      // (clear the per-stage cheap defaults) rather than silently overriding the Principal's choice.
+      setStageDefaultModels({});
       opts.log?.info?.('model.resolved', { model: override, source: 'config-override', probed: accepted !== null });
       return { model: override, degraded: false, reason: 'preferred' };
     }
@@ -158,6 +194,11 @@ export async function initLaunchModel(opts: {
 
   const selection = selectPreferredModel(preferences, accepted);
   setResolvedLaunchModel(selection.model);
+  // INGEST-PERF item 4: no user global override → publish the right-sized per-stage defaults (cheap tier
+  // for Archive/Decompose/Claims), resolved against the SAME probed catalog so each degrades gracefully.
+  const stageDefaults = resolveStageDefaultModels(accepted);
+  setStageDefaultModels(stageDefaults);
+  opts.log?.info?.('model.stage-defaults', { stageDefaults, probed: accepted !== null });
   // ORCH-28 item 3 — visible degradation, never silent. A clean top-preference pick is info; running
   // below the top tier (or all the way to `auto`) is a WARN naming what we wanted vs what we got.
   if (selection.reason === 'preferred') {
