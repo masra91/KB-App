@@ -33,6 +33,9 @@ export const CONSOLIDATION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'consolida
 /** Repo-relative path of the durable correction-directive log (evergreen). SPEC-0050 slice-2b. */
 export const CORRECTION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'corrections.jsonl');
 
+/** Repo-relative path of the durable contradiction-lifecycle log (evergreen). SPEC-0036 CONTRA. */
+export const CONTRADICTION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'contradictions.jsonl');
+
 export type DirectiveVerdict = 'same' | 'distinct';
 
 /**
@@ -408,6 +411,192 @@ export async function recordCorrectionDirective(
     decidedAt: correction.decidedAt,
   };
   const file = correctionsAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
+}
+
+// ── Contradiction lifecycle (SPEC-0036 CONTRA) ─────────────────────────────────────────────────
+//
+// A CONTRADICTION is a first-class, durable object tracking a DISAGREEMENT between ≥2 claims about ONE
+// entity (a bio says "born 1815", another "born 1816") through a small lifecycle to resolution — instead
+// of silently holding both and asserting one at recall (CONTRA-1). It is NOT a directive the human gives;
+// it is detected by agent judgment (REFLECT, CONTRA-2). But it shares the directive family's defining
+// property and lives in the SAME evergreen `directives/` tree precisely so the ENTITY FLAG it raises is
+// REBIRTH-PROOF: keyed on the entity's STABLE block identity (`kind|normalizedName`) + the conflicting
+// statements — never an entity ULID — so a flag raised before a re-derive / Full Replay still points at
+// the same entity afterward (the same durability my corrections/disambiguation directives have).
+//
+// THE STATE MACHINE (§2): detected → resolved | accepted | needs-you, re-openable. v1 collapses to the
+// states that matter for the FLAG + recall:
+//   - needs-you : detected and routed to the #192 Review queue (CONTRA-5) — an OPEN flag on the entity.
+//   - resolved  : a newer/stronger claim superseded the other; the loser is RETAINED + marked, never
+//                 deleted (CONTRA-4). Flag CLEARS; recall no longer contests (one answer won).
+//   - accepted  : both legitimately stand, attributed (a genuine disagreement). Flag CLEARS from the
+//                 needs-you queue, but recall still surfaces it as CONTESTED (CONTRA-6) — both cited.
+// `detected` is the transient pre-routing state (a finding before the Review lands); in v1 the producer
+// records `needs-you` directly (detection and routing are one step). Re-open = a later `needs-you` record
+// for the same key after a terminal state — last-wins handles it (a new conflicting claim re-raises).
+//
+// STORAGE: append-only `directives/contradictions.jsonl`, evergreen (promoted to `main`, never purged),
+// garbled-line tolerant (ENG-16), last-wins per `contradictionKey` so the lifecycle transition (and any
+// re-open) collapses to the current state. The OPEN-FLAG read (`openContradictionsForIdentity`) and the
+// CONTESTED-recall read (`contestedContradictionsForIdentity`) are the two consumers.
+
+/** The contradiction lifecycle states tracked in v1 (SPEC-0036 §2). */
+export type ContradictionState = 'detected' | 'needs-you' | 'resolved' | 'accepted';
+
+/** OPEN states — a contradiction in one of these flags its entity (in the needs-you queue + entity view). */
+const OPEN_CONTRADICTION_STATES: ReadonlySet<ContradictionState> = new Set(['detected', 'needs-you']);
+/** CONTESTED states — recall must surface the fact as disputed + cite both (open OR accepted; CONTRA-6). */
+const CONTESTED_CONTRADICTION_STATES: ReadonlySet<ContradictionState> = new Set(['detected', 'needs-you', 'accepted']);
+
+/**
+ * One tracked contradiction. Keyed on `contradictionKey` = entity block identity + the order-independent
+ * pair of NORMALIZED statements (content-derived, ULID-free → stable across rebirth). `statements` is kept
+ * verbatim for provenance / the recall "sources disagree" surface. `reviewId` is the Review this routed to
+ * (CONTRA-5 needs-you); `decidedAt` orders last-wins so a lifecycle transition supersedes the prior state.
+ */
+export interface ContradictionDirective {
+  contradictionKey: string; // contradictionClaimKey(identityKey, statementA, statementB)
+  identityKey: string; // the entity's STABLE block identity (kind|normalizedName) — the flag anchor
+  statements: [string, string]; // the two conflicting claim statements, verbatim (sorted for stability)
+  state: ContradictionState;
+  reviewId: string; // provenance: the Review the contradiction routed to (PRIN-5/6)
+  decidedAt: string; // ISO; ordering for last-wins lifecycle transitions + re-open
+}
+
+/**
+ * Stable, content-derived key for a contradiction: the entity block identity + an ORDER-INDEPENDENT pair
+ * of normalized statements. Order independence means "1815 vs 1816" and "1816 vs 1815" are ONE
+ * contradiction (so a re-detection updates, never duplicates). `normalizeStatement` (shared with
+ * corrections) absorbs casing/punctuation/spacing drift across a re-derive; genuine rewording won't match
+ * (documented — a reworded pair is a fresh contradiction, same caveat as retract).
+ */
+export function contradictionClaimKey(identityKey: string, statementA: string, statementB: string): string {
+  const a = normalizeStatement(statementA);
+  const b = normalizeStatement(statementB);
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  return `${identityKey}::${lo}::${hi}`;
+}
+
+function contradictionsAbs(root: string): string {
+  return path.join(path.resolve(root), CONTRADICTION_DIRECTIVES_REL);
+}
+
+function isContradictionState(v: unknown): v is ContradictionState {
+  return v === 'detected' || v === 'needs-you' || v === 'resolved' || v === 'accepted';
+}
+
+/**
+ * Read every recorded contradiction into a last-wins map keyed by `contradictionKey` — a lifecycle
+ * transition (needs-you → resolved/accepted) or a re-open (terminal → needs-you) supersedes the earlier
+ * record. Absent/garbled lines are skipped; an absent file yields an empty map (ENG-16 tolerant).
+ */
+export async function readContradictionDirectives(root: string): Promise<Map<string, ContradictionDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(contradictionsAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, ContradictionDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<ContradictionDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<ContradictionDirective>;
+    } catch {
+      continue;
+    }
+    if (typeof obj.contradictionKey !== 'string' || obj.contradictionKey.length === 0) continue;
+    if (typeof obj.identityKey !== 'string' || obj.identityKey.length === 0) continue;
+    if (!isContradictionState(obj.state)) continue;
+    if (!Array.isArray(obj.statements) || obj.statements.length !== 2) continue;
+    out.set(obj.contradictionKey, {
+      contradictionKey: obj.contradictionKey,
+      identityKey: obj.identityKey,
+      statements: [String(obj.statements[0]), String(obj.statements[1])],
+      state: obj.state,
+      reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    });
+  }
+  return out;
+}
+
+/** The tracked contradiction for a specific key, or undefined if never recorded. */
+export function contradictionForKey(
+  contradictions: Map<string, ContradictionDirective>,
+  identityKey: string,
+  statementA: string,
+  statementB: string,
+): ContradictionDirective | undefined {
+  return contradictions.get(contradictionClaimKey(identityKey, statementA, statementB));
+}
+
+/** The OPEN contradictions flagging an entity (state detected|needs-you) — the durable ENTITY FLAG that
+ *  persists until resolved (CONTRA-7). Empty when the entity has no open disagreement. */
+export function openContradictionsForIdentity(
+  contradictions: Map<string, ContradictionDirective>,
+  identityKey: string,
+): ContradictionDirective[] {
+  return [...contradictions.values()].filter((c) => c.identityKey === identityKey && OPEN_CONTRADICTION_STATES.has(c.state));
+}
+
+/** The CONTESTED contradictions for an entity (open OR accepted) — what recall surfaces as "sources
+ *  disagree" and cites both for (CONTRA-6). `resolved` is excluded (one claim won — no longer contested). */
+export function contestedContradictionsForIdentity(
+  contradictions: Map<string, ContradictionDirective>,
+  identityKey: string,
+): ContradictionDirective[] {
+  return [...contradictions.values()].filter((c) => c.identityKey === identityKey && CONTESTED_CONTRADICTION_STATES.has(c.state));
+}
+
+/** Whether a specific claim statement participates in a CONTESTED contradiction on the entity (per-claim
+ *  recall flag — the claim is rendered "disputed", CONTRA-6). Matched on the normalized statement so
+ *  casing/punctuation drift across a re-derive still flags it. */
+export function isStatementContested(
+  contradictions: Map<string, ContradictionDirective>,
+  identityKey: string,
+  statement: string,
+): boolean {
+  const norm = normalizeStatement(statement);
+  for (const c of contestedContradictionsForIdentity(contradictions, identityKey)) {
+    if (normalizeStatement(c.statements[0]) === norm || normalizeStatement(c.statements[1]) === norm) return true;
+  }
+  return false;
+}
+
+/**
+ * Append a contradiction-lifecycle record. Does NOT commit — the caller (the detection path in jobStage,
+ * or the resolution path in answerReview) is inside the shared canonical-writer lock / a stage worktree and
+ * stages/commits, so the record lands in the SAME commit as the Review it raises (detection) or the answer
+ * that resolves it (resolution) and is promoted to `main`. Statements are sorted so the same pair always
+ * serializes identically. Last-wins: a later record for the same key supersedes (transition / re-open).
+ */
+export async function recordContradictionDirective(
+  root: string,
+  contradiction: {
+    identityKey: string;
+    statementA: string;
+    statementB: string;
+    state: ContradictionState;
+    reviewId: string;
+    decidedAt: string;
+  },
+): Promise<ContradictionDirective> {
+  const { identityKey, statementA, statementB } = contradiction;
+  const statements: [string, string] = statementA <= statementB ? [statementA, statementB] : [statementB, statementA];
+  const rec: ContradictionDirective = {
+    contradictionKey: contradictionClaimKey(identityKey, statementA, statementB),
+    identityKey,
+    statements,
+    state: contradiction.state,
+    reviewId: contradiction.reviewId,
+    decidedAt: contradiction.decidedAt,
+  };
+  const file = contradictionsAbs(root);
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
   return rec;

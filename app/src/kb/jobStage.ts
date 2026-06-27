@@ -15,6 +15,9 @@ import { withOptimisticAdvance, advanceOrCollide, canonicalHead, DEFAULT_MAX_COL
 import { noopDevLog, type DevLog } from './devlog';
 import { checkContainedRel } from './pathContainment';
 import { reviewRel, writeReviewFile } from './reviewStore';
+import { recordContradictionDirective } from './directives';
+import { blockKey } from './connect';
+import { parseEntityNode } from './connectDoc';
 import type { Review } from './reviews';
 import {
   effectiveDisposition,
@@ -36,6 +39,19 @@ function workBranch(jobId: string): string {
 /** Per-job run-state journal (JOBS-7): tracked on `staging`, never promoted (not in EVERGREEN_PATHS). */
 export function journalRel(jobId: string): string {
   return path.join('.kb', 'jobs', jobId, 'journal.jsonl');
+}
+
+/** Read an entity node's STABLE block identity (`kind|normalizedName`) from its rel — the content-derived
+ *  key a contradiction flag is anchored on (survives the ULID rebirth a re-derive/replay inflicts;
+ *  SPEC-0036 CONTRA). Null if the node is missing/foreign/unreadable (the flag is then skipped — the
+ *  Review still raises; a vanished node never breaks the pass). */
+async function nodeBlockIdentity(root: string, rel: string): Promise<string | null> {
+  try {
+    const { kind, name } = parseEntityNode(await fs.readFile(path.join(root, rel), 'utf8'));
+    return blockKey(kind, name);
+  } catch {
+    return null;
+  }
 }
 
 async function pathExists(p: string): Promise<boolean> {
@@ -191,6 +207,12 @@ export async function runJobOnce(
         // Destructive / low-confidence / sink-rejected → raise a Review (SPEC-0018), apply NO
         // effect (JOBS-9/10). A sink rejection records the reason in the audit (no silent drop).
         const id = ulid();
+        // SPEC-0036 CONTRA-1/5: a contradiction finding flags its entity on a STABLE block identity (so
+        // the flag survives rebirth) and routes the yes/no question to Review. Resolve the identity from
+        // the entity node now (inside the worktree, where it exists); a missing node degrades to a plain
+        // review (no durable flag) rather than failing the pass.
+        const contra = finding.review?.contradiction;
+        const contraIdentity = contra ? await nodeBlockIdentity(wt, contra.entityRel) : null;
         const review: Review = {
           id,
           status: 'open',
@@ -201,16 +223,34 @@ export async function runJobOnce(
             runId,
             item: { kind: 'job', ref: journalRel(job.id) },
             auditRel: journalRel(job.id),
-            // A consolidation finding carries its merge plan into the markerKey so an APPROVED
-            // Review can be executed by the dispatch (REFLECT-7); markerKey values are strings.
-            markerKey: finding.review?.consolidation
-              ? { jobId: job.id, runId, kind: 'consolidation', canonicalRel: finding.review.consolidation.canonicalRel, loserRels: finding.review.consolidation.loserRels.join('\n') }
-              : { jobId: job.id, runId },
+            // A consolidation finding carries its merge plan into the markerKey so an APPROVED Review can
+            // be executed by the dispatch (REFLECT-7). A contradiction finding carries the entity's STABLE
+            // block identity + the two statements so answerReview can transition the durable flag at answer
+            // time WITHOUT re-reading the (possibly reborn) node (CONTRA-3). markerKey values are strings.
+            markerKey:
+              contra && contraIdentity
+                ? { jobId: job.id, runId, kind: 'contradiction', identityKey: contraIdentity, statementA: contra.statementA, statementB: contra.statementB }
+                : finding.review?.consolidation
+                  ? { jobId: job.id, runId, kind: 'consolidation', canonicalRel: finding.review.consolidation.canonicalRel, loserRels: finding.review.consolidation.loserRels.join('\n') }
+                  : { jobId: job.id, runId },
           },
           subject: {},
           createdAt: now,
         };
         await writeReviewFile(path.join(wt, reviewRel(id)), review);
+        // Record the durable ENTITY FLAG in `needs-you` state — committed in the SAME commit as the
+        // Review (atomic) and promoted to `main` (evergreen `directives/`). It persists until the human
+        // resolves the review (CONTRA-7). A sink-rejected finding is NOT a contradiction → never flags.
+        if (contra && contraIdentity && !rejection) {
+          await recordContradictionDirective(wt, {
+            identityKey: contraIdentity,
+            statementA: contra.statementA,
+            statementB: contra.statementB,
+            state: 'needs-you',
+            reviewId: id,
+            decidedAt: now,
+          });
+        }
         rec.reviewId = id;
         if (rejection) rec.rejection = rejection;
         deferred += 1;

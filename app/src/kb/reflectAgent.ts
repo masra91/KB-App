@@ -11,6 +11,7 @@ import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
 import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
+import { normalizeStatement as normalizeStatementForCompare } from './directives';
 
 const exec = promisify(execFile);
 const COPILOT_TIMEOUT_MS = 120_000;
@@ -42,7 +43,16 @@ export interface ReflectFinding {
   writes?: { rel: string; content: string }[]; // additive effects (missed claim, emergent-topic node, tag refresh)
   // destructive/low-confidence → Review proposal. A `consolidation` target names the merge an
   // approved Review will execute (REFLECT-7): the survivor node + the loser(s) to fold into it.
-  review?: { question: string; detail?: string; consolidation?: { canonicalRel: string; loserRels: string[] } };
+  // A `contradiction` target (SPEC-0036 CONTRA-2) names a detected DISAGREEMENT: the entity node and
+  // the two conflicting claim statements. The orchestrator records a durable contradiction flag on the
+  // entity (keyed on its block identity) AND routes the yes/no question to Review (CONTRA-1/5); the flag
+  // persists until the human resolves it.
+  review?: {
+    question: string;
+    detail?: string;
+    consolidation?: { canonicalRel: string; loserRels: string[] };
+    contradiction?: { entityRel: string; statementA: string; statementB: string };
+  };
 }
 
 export interface ReflectResult {
@@ -94,6 +104,13 @@ export function buildReflectPrompt(ctx: ReflectContext): string {
     'node) or low-confidence → kind "destructive" with a yes/no `review` {question, detail} and NO',
     'writes — never delete or merge directly. Finding NOTHING is a normal, good outcome (return []).',
     '',
+    'CONTRADICTIONS: if TWO claims about the SAME ONE entity assert INCOMPATIBLE facts (e.g. "born',
+    '1815" vs "born 1816"; a spec line vs its reversed revision), report it as kind "destructive" with a',
+    'yes/no `review` AND a `contradiction` {entityRel, statementA, statementB} — entityRel is that',
+    'entity\'s `rel`, and the two statements are the conflicting claims VERBATIM. Phrase the question so',
+    'CONFIRM = supersede with the newer/stronger source and REJECT = keep BOTH (a genuine disagreement,',
+    'both stay attributed). Only for a real incompatibility about one entity, NOT merely related claims.',
+    '',
     'Prior runs (for continuity — avoid re-chewing the same ground):',
     ...journalLines,
     '',
@@ -101,7 +118,7 @@ export function buildReflectPrompt(ctx: ReflectContext): string {
     ...nodeLines,
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"inspected":"<short note on what you looked at>","findings":[{"summary":"...","kind":"additive|destructive","confidence":0.0,"writes":[{"rel":"...","content":"..."}],"review":{"question":"...","detail":"..."}}]}',
+    '{"inspected":"<short note on what you looked at>","findings":[{"summary":"...","kind":"additive|destructive","confidence":0.0,"writes":[{"rel":"...","content":"..."}],"review":{"question":"...","detail":"...","contradiction":{"entityRel":"...","statementA":"...","statementB":"..."}}}]}',
   ].join('\n');
 }
 
@@ -158,6 +175,17 @@ export function parseReflectResult(stdout: string): ReflectResult {
           throw new Error(`reflect: findings[${i}].review.consolidation must be { canonicalRel, loserRels[] }`);
         }
         finding.review.consolidation = { canonicalRel: co.canonicalRel, loserRels: co.loserRels as string[] };
+      }
+      if (ro.contradiction !== undefined) {
+        // SPEC-0036 CONTRA-2: a detected disagreement — the entity node + the two conflicting statements.
+        const xo = ro.contradiction as Record<string, unknown>;
+        if (!isNonEmptyString(xo?.entityRel) || !isNonEmptyString(xo?.statementA) || !isNonEmptyString(xo?.statementB)) {
+          throw new Error(`reflect: findings[${i}].review.contradiction must be { entityRel, statementA, statementB }`);
+        }
+        if (normalizeStatementForCompare(xo.statementA) === normalizeStatementForCompare(xo.statementB)) {
+          throw new Error(`reflect: findings[${i}].review.contradiction statements must differ`);
+        }
+        finding.review.contradiction = { entityRel: xo.entityRel, statementA: xo.statementA, statementB: xo.statementB };
       }
     }
     return finding;

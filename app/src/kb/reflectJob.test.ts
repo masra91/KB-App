@@ -14,8 +14,8 @@ import { promote } from './staging';
 import { runJobOnce, readJournal } from './jobStage';
 import { makeReflectJobBehavior, REFLECT_WORKING_SET_SIZE, REFLECT_JOB_TYPE, filterStatefulFindings } from './reflectJob';
 import { makeReflectDecider } from './reflectAgent';
-import { writeReviewFile, reviewRel, answerReview } from './reviewStore';
-import { recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair } from './directives';
+import { writeReviewFile, reviewRel, answerReview, findOpenReviews } from './reviewStore';
+import { recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, readContradictionDirectives, openContradictionsForIdentity, contradictionForKey } from './directives';
 import { recordDisambiguationDecision } from './disambiguationDecisions';
 import { ulid } from './ulid';
 import type { Review } from './reviews';
@@ -171,6 +171,71 @@ describe.skipIf(!gitAvailable)('Reflect job e2e through the JOBS engine (SPEC-00
       expect(await pathExists(path.join(stagingWt, 'reviews'))).toBe(true); // destructive raised a Review
       const journal = await readJournal(stagingWt, 'reflect');
       expect(journal[0].cursor?.count).toBe(1); // working-set cursor journaled (REFLECT-8)
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  // SPEC-0036 CONTRA acceptance — the full lifecycle through the real engine: a detected contradiction
+  // raises a Review AND flags the entity durably (needs-you), and answering the review CLEARS the flag.
+  it('CONTRA: a contradiction finding raises a Review + a durable entity flag; resolving clears the flag', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+      const lock = new Mutex();
+      // Seed the entity the contradiction is about, on staging (so jobStage can resolve its block identity).
+      await fs.mkdir(path.join(stagingWt, 'entities', 'person'), { recursive: true });
+      await fs.writeFile(path.join(stagingWt, 'entities/person/ada.md'), '---\nid: 01ADA\nkind: person\nname: Ada Lovelace\ntags: ["type/person"]\n---\n# Ada Lovelace\n', 'utf8');
+      await simpleGit(stagingWt).add('-A').then(() => simpleGit(stagingWt).commit('seed'));
+
+      // The REAL decider path (makeReflectDecider + injected runner) so the contradiction prompt-contract
+      // is exercised end-to-end — the agent reports a birth-year disagreement on the one entity.
+      const decider = makeReflectDecider({
+        available: true,
+        run: async () =>
+          JSON.stringify({
+            inspected: 'rumination over Ada',
+            findings: [
+              {
+                summary: 'birth year disagrees across sources',
+                kind: 'destructive',
+                confidence: 0.6,
+                review: {
+                  question: 'Ada Lovelace born 1815 or 1816 — supersede with the newer source (confirm) or keep both (reject)?',
+                  detail: 'Two sources give different birth years.',
+                  contradiction: { entityRel: 'entities/person/ada.md', statementA: 'Born in 1815.', statementB: 'Born in 1816.' },
+                },
+              },
+            ],
+          }),
+      });
+      const job: JobConfig = { id: 'reflect', type: REFLECT_JOB_TYPE, schedule: 'several-daily', enabled: true, posture: 'guarded', facing: 'internal' };
+      const res = await runJobOnce(stagingWt, job, makeReflectJobBehavior(decider), lock);
+      expect(res.deferred).toBe(1); // routed to Review (guarded), no destructive write
+
+      const IDENTITY = 'person|ada lovelace'; // blockKey(person, Ada Lovelace) — content-derived, rebirth-stable
+
+      // (1) review-item: an OPEN contradiction Review exists, carrying the stable identity in its markerKey.
+      const open = await findOpenReviews(stagingWt);
+      const contraReview = open.find((r) => r.raisedBy.markerKey.kind === 'contradiction');
+      expect(contraReview).toBeDefined();
+      expect(contraReview!.raisedBy.markerKey.identityKey).toBe(IDENTITY);
+
+      // (2) entity-flag: a durable contradiction flag on the entity in `needs-you` — recorded in the SAME
+      // commit as the Review (atomic at detection).
+      const flags = await readContradictionDirectives(stagingWt);
+      expect(openContradictionsForIdentity(flags, IDENTITY)).toHaveLength(1);
+      expect(contradictionForKey(flags, IDENTITY, 'Born in 1815.', 'Born in 1816.')?.state).toBe('needs-you');
+
+      // (3) flag clears on resolve: answering CONFIRM transitions the flag to `resolved`; it leaves the
+      // needs-you queue. The claim files are untouched (CONTRA-4 retains both — we only nudge the flag).
+      const ans = await answerReview(stagingWt, lock, contraReview!.id, { verdict: 'confirm' });
+      expect(ans.ok).toBe(true);
+      const after = await readContradictionDirectives(stagingWt);
+      expect(openContradictionsForIdentity(after, IDENTITY)).toHaveLength(0); // flag cleared
+      expect(contradictionForKey(after, IDENTITY, 'Born in 1815.', 'Born in 1816.')?.state).toBe('resolved');
     } finally {
       await rmTempDir(dir);
     }

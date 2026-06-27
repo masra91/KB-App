@@ -82,6 +82,34 @@ detected ───────────────────────�
 - You **recall** that fact → the answer says *"sources disagree here"* and cites both — never a
   confident single answer over contested evidence.
 
+## 4.1 Implementation status (v1 — SPEC-0036 CONTRA)
+
+Principal-resolved v1: *a detected contradiction produces BOTH a review item AND a durable flag on the
+entity, and the flag persists until resolved.* Built on the SPEC-0050 directive machinery so the flag is
+**rebirth-proof** (the corrections-style stable-block-identity keying):
+
+- **Storage — ✅.** `directives/contradictions.jsonl` (a new family in `directives.ts`): a contradiction is
+  a first-class object keyed on `contradictionClaimKey(entity blockKey, normalized statement-pair)` —
+  content-derived, **never** an entity ULID — with lifecycle `state` ∈ `detected | needs-you | resolved |
+  accepted`, append-only, garbled-line tolerant (ENG-16), **last-wins** (transition + re-open). Evergreen +
+  absent from `PURGE_DIRS`, so it survives reset/replay **by construction** (CONTRA-1/3/4).
+- **Detection — ✅.** A new REFLECT **`contradiction`** finding type (`{entityRel, statementA, statementB}`,
+  agent-judgment over the bounded working set — CONTRA-2). `jobStage` raises the yes/no **Review** AND
+  records the durable **needs-you flag** in the **same commit** (atomic at detection); the flag is anchored
+  on the entity's stable block identity resolved from the node.
+- **Routing + resolution — ✅.** The Review lands in the **#192 needs-you queue** automatically (CONTRA-5).
+  `answerReview` transitions the flag on a `contradiction` markerKey: **confirm → resolved** (superseded;
+  the loser claim is **retained**, never deleted — CONTRA-4), **reject → accepted** (both stand). Either
+  terminal state **clears the open flag**; `accepted` stays *contested* for recall, `resolved` does not.
+- **Durability — ✅.** Replay-survival test (flag intact on staging AND republished on `main` across a Full
+  Replay) + an e2e through the real engine (detect → Review + flag → resolve → flag clears).
+- **Recall + entity-view surfacing (CONTRA-6/7) — ▢ fast-follow.** The read seam is shipped
+  (`openContradictionsForIdentity` = the entity flag, `contestedContradictionsForIdentity` /
+  `isStatementContested` = the recall-contested set). Wiring the entity-view "contested" badge lands in
+  `explorePanel`/`exploreView` — **coordinated with the concurrent Explore-v1 owner** to avoid a collision;
+  the recall "sources disagree, cite both" prose ties to the SPEC-0026 ASK path + the §6 open question on
+  rendering *accepted* vs *open*. Open contradictions already surface in the needs-you queue today.
+
 ## 5. Out of scope (for now)
 
 - **Detecting** which claims conflict *mechanically* (embeddings/NLI) — v1 is agent-judgment only.
@@ -102,6 +130,11 @@ detected ───────────────────────�
 
 ## 7. Changelog
 
+- 2026-06-27 — **v1 shipped (CONTRA core).** Durable contradiction-lifecycle object + entity flag on the
+  SPEC-0050 directive machinery (`directives/contradictions.jsonl`, block-identity-keyed → rebirth-proof):
+  REFLECT `contradiction` finding → Review + needs-you flag (atomic), `answerReview` transitions
+  confirm→resolved / reject→accepted clearing the flag (claims retained, CONTRA-4), replay-survival + e2e
+  tested. Recall/entity-view surfacing (CONTRA-6/7) is a coordinated fast-follow on the shipped read seam.
 - 2026-06-03 — created (draft). The **contradiction lifecycle**: a first-class tracked object over
   conflicting claims, moving `detected → resolved/accepted/needs-you` (re-openable), agent-detected,
   guarded auto/Review split into the **#192 needs-you queue**, never destroying source testimony, and

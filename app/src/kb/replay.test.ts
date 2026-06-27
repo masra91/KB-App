@@ -17,7 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
-import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted } from './directives';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted, recordContradictionDirective, readContradictionDirectives, openContradictionsForIdentity, isStatementContested } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -402,6 +402,42 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
       // Survives on staging (the rebuild consults it — a re-derived claim stays retracted) AND on main.
       expect(isClaimRetracted(await readCorrectionDirectives(stagingWt), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
       expect(isClaimRetracted(await readCorrectionDirectives(root), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  it('SPEC-0036 CONTRA: an OPEN contradiction flag survives a Full Replay on staging AND on main (rebirth-proof)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // A contradiction flag raised at detection (needs-you), keyed on the entity's STABLE block identity
+      // — NOT the entity ULID. The ULID would be reborn by replay (entities/ is purged); the block identity
+      // is content-derived, so the flag must still point at the same entity afterward.
+      await recordContradictionDirective(stagingWt, {
+        identityKey: 'person|ada lovelace',
+        statementA: 'Born in 1815.',
+        statementB: 'Born in 1816.',
+        state: 'needs-you',
+        reviewId: 'rev-contra',
+        decidedAt: '2026-06-27T00:00:00Z',
+      });
+      const sg = simpleGit(stagingWt);
+      await sg.raw('add', '-A');
+      await sg.commit('seed: durable contradiction flag');
+
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // The flag survives on staging (the rebuild consults it — a re-detected disagreement stays flagged,
+      // not re-raised from scratch) AND is republished to main (evergreen → promoted).
+      const onStaging = await readContradictionDirectives(stagingWt);
+      expect(openContradictionsForIdentity(onStaging, 'person|ada lovelace')).toHaveLength(1);
+      expect(isStatementContested(onStaging, 'person|ada lovelace', 'born in 1815')).toBe(true); // drift-tolerant
+      const onMain = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(onMain, 'person|ada lovelace')).toHaveLength(1);
     } finally {
       await rmTempDir(dir);
     }

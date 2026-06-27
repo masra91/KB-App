@@ -51,6 +51,37 @@ describe('parseReflectResult', () => {
     expect(parseReflectResult('{"inspected":"nothing","findings":[]}').findings).toEqual([]);
   });
 
+  it('SPEC-0036: parses a contradiction finding (entity + two conflicting statements)', () => {
+    const out = JSON.stringify({
+      inspected: 'looked at Ada',
+      findings: [
+        {
+          summary: 'birth year disagrees',
+          kind: 'destructive',
+          confidence: 0.7,
+          review: {
+            question: 'Born 1815 or 1816 — supersede with the newer source (confirm) or keep both (reject)?',
+            detail: 'two sources disagree',
+            contradiction: { entityRel: 'entities/person/ada-lovelace.md', statementA: 'Born in 1815.', statementB: 'Born in 1816.' },
+          },
+        },
+      ],
+    });
+    const r = parseReflectResult(out);
+    expect(r.findings[0].review?.contradiction).toEqual({
+      entityRel: 'entities/person/ada-lovelace.md',
+      statementA: 'Born in 1815.',
+      statementB: 'Born in 1816.',
+    });
+  });
+
+  it('SPEC-0036: rejects a malformed contradiction (missing field, or identical statements)', () => {
+    const missing = '{"inspected":"x","findings":[{"summary":"s","kind":"destructive","confidence":0.5,"review":{"question":"q","contradiction":{"entityRel":"e","statementA":"a"}}}]}';
+    expect(() => parseReflectResult(missing)).toThrow(/contradiction must be/);
+    const same = '{"inspected":"x","findings":[{"summary":"s","kind":"destructive","confidence":0.5,"review":{"question":"q","contradiction":{"entityRel":"e","statementA":"Born 1815.","statementB":"born   1815"}}}]}';
+    expect(() => parseReflectResult(same)).toThrow(/statements must differ/);
+  });
+
   it('throws (no fabrication) on a bad shape', () => {
     expect(() => parseReflectResult('no json here')).toThrow(/no JSON/);
     expect(() => parseReflectResult('{"inspected":"x"}')).toThrow(/findings must be an array/);
