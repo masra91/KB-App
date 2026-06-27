@@ -512,6 +512,31 @@ button:disabled {
 .explore-neighbor--speculative .explore-rel { color: var(--viz-brass); }
 .explore-neighbor--speculative .explore-conf { color: var(--viz-brass); }
 .explore-neighbor--speculative .explore-recenter:hover { opacity: 1; }
+/* Filter bar (EXPLORE-9) — chips in The Line's instrument language (no native <select>, EXPLORE-10):
+   a pressed chip reads "engaged" via the ember spine + ink, an unpressed one stays muted/outlined. */
+.explore-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; margin: 0 0 0.6rem; }
+.explore-filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+.explore-filter-label { font-size: 0.62rem; color: var(--viz-ink-muted); margin-right: 0.1rem; }
+.explore-filter-chip { appearance: none; cursor: pointer; font: inherit; font-size: 0.64rem; letter-spacing: 0.03em; color: var(--viz-ink-muted); border: 1px solid var(--viz-rule); border-radius: 999px; padding: 0.1rem 0.5rem; background: transparent; }
+.explore-filter-chip:hover, .explore-filter-chip:focus-visible { color: var(--viz-ink); border-color: var(--viz-ember); }
+.explore-filter-chip.is-on { color: var(--viz-ink); border-color: var(--viz-ember); background: var(--viz-rule); box-shadow: inset 2px 0 0 var(--viz-ember); }
+.explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-ember); }
+.explore-filter-clear:hover, .explore-filter-clear:focus-visible { text-decoration: underline; }
+.explore-filter-none { margin: 0.3rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
+/* Neighbor row = expand toggle + the re-center button; the toggle is a slim fixed gutter. */
+.explore-neighbor-row { display: flex; align-items: stretch; gap: 0.15rem; }
+.explore-neighbor-row .explore-recenter { flex: 1 1 auto; width: auto; }
+.explore-expand { appearance: none; background: transparent; border: 0; cursor: pointer; color: var(--viz-idle); font-size: 0.75rem; width: 1.2rem; flex: 0 0 auto; padding: 0; line-height: 1; }
+.explore-expand:hover, .explore-expand:focus-visible, .explore-expand.is-open { color: var(--viz-ember); }
+/* Expand-in-place peek (EXPLORE-7) — a neighbor's own links, indented under it, revealed with a brief
+   fade that degrades to instant under reduced-motion (EXPLORE-13, the @media below). */
+.explore-subneighbors { margin: 0.1rem 0 0.3rem 1.5rem; padding-left: 0.6rem; border-left: 1px dashed var(--viz-rule); animation: explore-reveal var(--viz-dur-state, 240ms) ease-out; }
+.explore-subneighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.1rem; }
+.explore-subneighbor .explore-recenter { padding: 0.2rem 0.3rem; font-size: 0.92em; }
+.explore-sub-loading, .explore-sub-empty { font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
+.explore-sub-more { font-size: 0.72rem; color: var(--viz-ink-muted); font-style: italic; padding: 0.15rem 0.3rem; }
+@keyframes explore-reveal { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .explore-subneighbors { animation: none; } }
 .explore-more { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
 .explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
 .explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }

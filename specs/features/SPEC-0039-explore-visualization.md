@@ -165,15 +165,15 @@ the neighborhood, and keep re-center/expand interactions responsive.
 | EXPLORE-2  | must  | v1 ships the **entity-neighborhood view**: a focused entity centered with its directly-linked (1-hop) entities — **not** a global graph, **not** a timeline | none-yet | LIFE-5 |
 | EXPLORE-3  | must  | Explore reads the **canonical evergreen `entities/` graph** (nodes = entities, edges = Connect-promoted entity↔entity links); it shows **nothing from working/staging state** | none-yet | DATA-3; CANON; CONNECT-3 |
 | EXPLORE-4  | must  | Each node shows **identity at a glance** (name + kind, tag-colored) and is **click-through to the full entity page** (VAULT) — exploration leads back to reading | none-yet | DATA-6; VAULT-3; META |
-| EXPLORE-5  | should | Each edge shows its **relationship type/label** and reflects **link confidence** — speculative/low-confidence links are **visually distinct**, not asserted (the Obsidian-can't differentiation) | none-yet | DATA-8; CONNECT-12,13 |
+| EXPLORE-5  | should | Each edge shows its **relationship type/label** and reflects **link confidence** — speculative/low-confidence links are **visually distinct**, not asserted (the Obsidian-can't differentiation) | explorePanel/View.test | DATA-8; CONNECT-12,13 |
 | EXPLORE-6  | must  | **Focus + navigate**: enter via **search-to-focus** or **deep-link** (from ASK/Review/entity page); **re-center** on a clicked neighbor; **breadcrumb/back** retraces | none-yet | LIFE-5; ASK-7 |
-| EXPLORE-7  | should | **Expand-in-place**: reveal a neighbor's own links without changing focus (progressive disclosure) | none-yet | LIFE-5 |
+| EXPLORE-7  | should | **Expand-in-place**: reveal a neighbor's own links without changing focus (progressive disclosure) | exploreView.test | LIFE-5 |
 | EXPLORE-8  | should | **Bounded neighborhood**: render focus + **top-K neighbors** (ranked by confidence, then recency) with a **"+N more" overflow** affordance — no unbounded hub blow-up | none-yet | PRIN-5 |
-| EXPLORE-9  | should | **Filter** the neighborhood by **edge type** and **entity kind** (optionally a confidence threshold) | none-yet | DATA-6,8 |
+| EXPLORE-9  | should | **Filter** the neighborhood by **edge type** and **entity kind** (optionally a confidence threshold) | exploreView.test | DATA-6,8 |
 | EXPLORE-10 | must  | Explore has a **distinct, app-identity visual language** (reusing VIZ's), authored + gated via the design process (SPEC-0033, net-new visual → Design-Lead review) — not Obsidian's generic graph, not the generic AI look | none-yet | DESIGN-3,4; VIZ-8 |
 | EXPLORE-11 | should | **Empty/sparse states** are clean: a focused entity with **no promoted links** renders as a single node + a plain-language "no relationships yet" (and why), never a blank/broken canvas | none-yet | PRIN-5; VAULT §10 |
 | EXPLORE-12 | should | The view is **performant** by construction — it renders a **bounded local neighborhood, never the global graph**; re-center/expand stay responsive | none-yet | PRIN-5; VIZ-9 |
-| EXPLORE-13 | should | **Reduced-motion** is honored — re-center/expand transitions degrade to instant per the design language's reduced-motion behavior | none-yet | DESIGN-5; VIZ-6 |
+| EXPLORE-13 | should | **Reduced-motion** is honored — re-center/expand transitions degrade to instant per the design language's reduced-motion behavior | index.css @media reduce | DESIGN-5; VIZ-6 |
 | EXPLORE-14 | may   | (v2) An **in-app global/whole-graph** view with real large-graph perf (LOD/clustering/virtualization) — *deferred; Obsidian covers the global graph today* | none-yet | LIFE-5 |
 | EXPLORE-15 | may   | (v2) A **timeline** view over entities/events — *deferred pending temporal-metadata maturity* | none-yet | LIFE-5 |
 
@@ -200,6 +200,17 @@ the neighborhood, and keep re-center/expand interactions responsive.
 
 ## 9. Changelog
 
+- 2026-06-27 — **v1 FULL built** (Principal: ship all of v1) by KB-Developer-4, two slices:
+  **slice 1 (#385)** — typed, confidence-bearing edges (EXPLORE-5): outgoing relationship
+  predicates parsed from the center's links block + a **speculative** distinction below
+  `EDGE_ASSERTED_AT` (0.7, per §5's worked example), rendered faded/brass with a non-color
+  `~`-confidence a11y signal. **slice 2** — **filter** the loaded neighborhood by entity kind /
+  edge type / hide-speculative (EXPLORE-9, instrument-language chips, no native select),
+  **expand-in-place** a neighbor's own links without changing focus (EXPLORE-7, lazy-fetched +
+  cached), with a reveal that degrades to instant under reduced-motion (EXPLORE-13). v1 bounds:
+  per-edge confidence uses the neighbor node's confidence as the proxy (per-link confidence isn't
+  persisted, DATA-8); incoming-edge predicates + hub-deep filtering beyond the loaded top-K are
+  v2. Gates: Design-Lead visual + KB-Quality-Driver-2 code.
 - 2026-06-06 — **renumbered SPEC-0037 → SPEC-0039** to deconflict a concurrent 4-way 0037 collision (WATCH/RICHIN/INTAKE also grabbed 0037 off a main that ended at 0036); allocation by ascending PR# posted on `control`. Key `EXPLORE` and all requirement IDs unchanged.
 - 2026-06-06 — created (draft). Drafted by KB-Developer-4 on PM dispatch; → KB-Lead (product
   review) + KB-Quality-Driver-2 (spec gate-2). Defines the **Explore** stage's feature surface:
