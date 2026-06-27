@@ -19,6 +19,7 @@ const folder: WatchFolderView = {
 
 let listIntakeConnectors: ReturnType<typeof vi.fn>;
 let setIntakeConnectorConfig: ReturnType<typeof vi.fn>;
+let removeIntakeConnector: ReturnType<typeof vi.fn>;
 let runIntakeConnectorNow: ReturnType<typeof vi.fn>;
 let listWatchFolders: ReturnType<typeof vi.fn>;
 let setWatchFolder: ReturnType<typeof vi.fn>;
@@ -29,6 +30,7 @@ function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     listIntakeConnectors: listIntakeConnectors as unknown as KbApi['listIntakeConnectors'],
     setIntakeConnectorConfig: setIntakeConnectorConfig as unknown as KbApi['setIntakeConnectorConfig'],
+    removeIntakeConnector: removeIntakeConnector as unknown as KbApi['removeIntakeConnector'],
     runIntakeConnectorNow: runIntakeConnectorNow as unknown as KbApi['runIntakeConnectorNow'],
     listWatchFolders: listWatchFolders as unknown as KbApi['listWatchFolders'],
     setWatchFolder: setWatchFolder as unknown as KbApi['setWatchFolder'],
@@ -41,6 +43,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   listIntakeConnectors = vi.fn(async () => [rss]);
   setIntakeConnectorConfig = vi.fn(async () => [{ ...rss, enabled: true }]);
+  removeIntakeConnector = vi.fn(async () => []);
   runIntakeConnectorNow = vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'ok' }));
   listWatchFolders = vi.fn(async () => [folder]);
   setWatchFolder = vi.fn(async () => [folder]);
@@ -152,6 +155,54 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     const c = await mount();
     expect(c.querySelector('.src-section .rdesk-empty')!.textContent).toMatch(/No feeds yet/);
     expect(c.querySelector('.rdesk-tile[data-type]')).toBeTruthy(); // feed add-dock still present
+  });
+
+  // PANEL-11 lifecycle delete — a user-added feed is REMOVABLE behind a destructive confirm; the produced
+  // items + audit are retained (the copy explains it), only the config is purged.
+  it('a feed has a Remove affordance with its OWN destructive (danger) confirm', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-id="news"]')!;
+    const removeBtn = strip.querySelector('.intake-remove') as HTMLButtonElement;
+    expect(removeBtn).toBeTruthy();
+    // The remove confirm is its own block with a danger-styled Confirm — not the primary enable/pull confirm.
+    expect(strip.querySelector('.intake-remove-confirm .viz-btn--danger')).toBeTruthy();
+  });
+
+  it('Remove gates behind a confirm (items kept), then calls removeIntakeConnector only on confirm', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-id="news"]')!;
+    (strip.querySelector('.intake-remove') as HTMLButtonElement).click();
+    await flush();
+    const confirm = strip.querySelector('.intake-remove-confirm') as HTMLElement;
+    expect(confirm.hidden).toBe(false);
+    expect(strip.querySelector('.intake-remove-confirm-msg')!.textContent).toMatch(/Items already brought in.*stay in your KB/i);
+    expect(removeIntakeConnector).not.toHaveBeenCalled(); // gated — not removed yet
+    (strip.querySelector('.intake-remove-confirm-go') as HTMLButtonElement).click();
+    await flush();
+    expect(removeIntakeConnector).toHaveBeenCalledWith('news');
+  });
+
+  it('Remove can be cancelled — nothing is removed', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-id="news"]')!;
+    (strip.querySelector('.intake-remove') as HTMLButtonElement).click();
+    await flush();
+    (strip.querySelector('.intake-remove-confirm-cancel') as HTMLButtonElement).click();
+    await flush();
+    expect((strip.querySelector('.intake-remove-confirm') as HTMLElement).hidden).toBe(true);
+    expect(removeIntakeConnector).not.toHaveBeenCalled();
+  });
+
+  // ENG-15/16 render safety: legacy/partial connector rows must not crash the view, and per-row isolation
+  // means a malformed row never takes out a well-formed neighbor's Remove affordance.
+  it('renders partial/legacy connector rows without crashing, keeping per-row Remove', async () => {
+    const partial = { id: 'legacy', type: 'rss' } as unknown as IntakeConnectorView; // missing typeLabel/label/feedUrl/etc.
+    listIntakeConnectors = vi.fn(async () => [partial, rss]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelectorAll('.rdesk-strip[data-id]').length).toBe(2); // both rows rendered, neither crashed
+    expect(c.querySelector('.rdesk-strip[data-id="legacy"] .intake-remove')).toBeTruthy();
+    expect(c.querySelector('.rdesk-strip[data-id="news"] .intake-remove')).toBeTruthy();
   });
 });
 

@@ -63,7 +63,7 @@ import { resolveCopilotModel, setResolvedLaunchModel, setAgentModelOverrides } f
 import { initLaunchModel, probeAcceptedModels, validateModel } from '../kb/copilotModelProbe';
 import { appendAuditEvent } from '../kb/audit';
 import { readEvents } from '../kb/activityIndex';
-import { readResearcherRegistry, upsertResearcher, patchResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
+import { readResearcherRegistry, upsertResearcher, patchResearcher, deleteResearcher, researcherRegistryPath } from '../kb/researcherRegistry';
 import { seedDefaultResearcherIfAbsent } from '../kb/researcherSeed';
 import { buildResearcherViews, isEgressTier, isResearcherTemplate, defaultEgressFor, researcherConfigAuditEvents } from '../kb/researchersPanel';
 import { runResearcher } from '../kb/researchRun';
@@ -73,13 +73,13 @@ import { WatchScheduler } from '../kb/watchScheduler';
 import { readWatchRegistry, writeWatchRegistry, upsertWatchFolder, patchWatchFolder, watchRegistryPath } from '../kb/watchRegistry';
 import { checkWatchLoopSafe, isSafeWatchId, DEFAULT_WATCH_SCOPE, DEFAULT_WATCH_SENSITIVITY, WATCH_MAX_DEPTH_CAP } from '../kb/watchConnectors';
 import { buildWatchFolderViews } from '../kb/watchPanel';
-import { readIntakeRegistry, upsertIntakeConnector, patchIntakeConnector, intakeRegistryPath } from '../kb/intakeRegistry';
+import { readIntakeRegistry, upsertIntakeConnector, patchIntakeConnector, deleteIntakeConnector, intakeRegistryPath } from '../kb/intakeRegistry';
 import { runIntakeConnector } from '../kb/intakeRun';
-import { DEFAULT_INTAKE_SCOPE, DEFAULT_INTAKE_SENSITIVITY, type IntakeConnectorConfig } from '../kb/intakeConnectors';
+import { DEFAULT_INTAKE_SCOPE, DEFAULT_INTAKE_SENSITIVITY, isSafeConnectorId, type IntakeConnectorConfig } from '../kb/intakeConnectors';
 import { buildIntakeConnectorViews, isIntakeConnectorType, clampMaxItems, intakeConfigAuditEvents } from '../kb/intakeSourcingPanel';
 import type { WatchFolderView, WatchFolderPatch, IntakeConnectorView, IntakeConnectorConfigPatch, RunIntakeConnectorResult } from '../kb/types';
 import { isSafeGhRepo } from '../kb/ghRead';
-import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, clampOrientBudget, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
+import { DEFAULT_RESEARCHER_BUDGET, dedupKeyFor, researchWhatFor, clampToolCalls, clampTimeoutMs, clampMaxDepth, clampOrientBudget, isSafeResearcherId, type ResearchRequest, type ResearcherConfig } from '../kb/researchers';
 import { ulid, dateShard, isUlid } from '../kb/ulid';
 import { setSensitivityOverride, sensitivityOverridesPath } from '../kb/sensitivityOverride';
 import { readSourceSensitivities, type SourceSensitivity } from '../kb/sensitivityRead';
@@ -1490,6 +1490,33 @@ export async function setActiveResearcherConfig(patch: ResearcherConfigPatch): P
 }
 
 /**
+ * Delete a researcher (PANEL-11 lifecycle delete): PURGE its config row from the registry, audit the
+ * removal (`panel` actor, `removed: true`), and let the scheduler tear its standing pass down naturally
+ * (it re-reads the registry each tick — PANEL-6 — so a removed researcher is simply never scheduled
+ * again; no live handle to stop, unlike a watched folder's fs watcher). Already-produced sources +
+ * findings + the full audit trail are RETAINED — ground truth is sacred (PANEL-11); only the config/
+ * registration is purged. An unsafe id is a no-op (the registry guard rejects it anyway). Mirrors
+ * `removeActiveWatchFolder`.
+ */
+export async function removeActiveResearcher(id: string): Promise<ResearcherView[]> {
+  if (!active) return [];
+  if (!isSafeResearcherId(id)) return listResearchersForActive();
+  const root = active.stagingWt;
+  let removed = false;
+  await active.lock.run(async () => {
+    const registry = await readResearcherRegistry(root);
+    if (!registry.some((r) => r.id === id)) return;
+    await deleteResearcher(root, id);
+    removed = true;
+    await commitControlFile(root, researcherRegistryPath(root), `researcher ${id} removed`);
+  }, 'researcher-config:remove');
+  if (removed) {
+    await appendAuditEvent(root, { actor: 'panel', eventType: 'researcher-config-change', subjects: { researcherId: id }, payload: { removed: true, why: 'Principal removed a researcher via Control Panel (config purged; sources + audit retained)' } });
+  }
+  return listResearchersForActive();
+}
+
+/**
  * Manual "Run now" for a researcher (RESEARCH-15, "run-now to test") — a single on-demand pass via
  * the run-pass against a synthetic request derived from the researcher's config. It runs the REAL
  * cognition (`makeWebResearchFn` — egress-gated + SSRF-safe), the same adapter the scheduler uses, so
@@ -1627,6 +1654,31 @@ export async function setActiveIntakeConnectorConfig(patch: IntakeConnectorConfi
   if (applied) {
     // Conforming `panel` audit: one event per changed behavior-relevant field (validated values only).
     for (const event of intakeConfigAuditEvents(prior, clean)) await appendAuditEvent(root, event);
+  }
+  return listIntakeConnectorsForActive();
+}
+
+/**
+ * Delete an intake feed connector (PANEL-11 lifecycle delete): PURGE its config row from the registry,
+ * audit the removal (`panel` actor, `removed: true`), and let the scheduler tear its standing pull down
+ * naturally (it re-reads the registry each tick — PANEL-6). Already-produced sources + the full audit
+ * trail are RETAINED — only the config/registration is purged (ground truth is sacred, PANEL-11). An
+ * unsafe id is a no-op (the registry guard rejects it anyway). Mirrors `removeActiveResearcher`.
+ */
+export async function removeActiveIntakeConnector(id: string): Promise<IntakeConnectorView[]> {
+  if (!active) return [];
+  if (!isSafeConnectorId(id)) return listIntakeConnectorsForActive();
+  const root = active.stagingWt;
+  let removed = false;
+  await active.lock.run(async () => {
+    const registry = await readIntakeRegistry(root);
+    if (!registry.some((c) => c.id === id)) return;
+    await deleteIntakeConnector(root, id);
+    removed = true;
+    await commitControlFile(root, intakeRegistryPath(root), `intake ${id} removed`);
+  }, 'intake-config:remove');
+  if (removed) {
+    await appendAuditEvent(root, { actor: 'panel', eventType: 'intake-config-change', subjects: { intakeId: id }, payload: { removed: true, why: 'Principal removed an intake feed via Control Panel (config purged; sources + audit retained)' } });
   }
   return listIntakeConnectorsForActive();
 }

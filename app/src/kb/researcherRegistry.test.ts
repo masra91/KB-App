@@ -9,6 +9,7 @@ import {
   writeResearcherRegistry,
   upsertResearcher,
   patchResearcher,
+  deleteResearcher,
   researcherRegistryPath,
 } from './researcherRegistry';
 import type { ResearcherConfig } from './researchers';
@@ -117,6 +118,34 @@ describe('upsertResearcher / patchResearcher', () => {
       expect(r).toMatchObject({ enabled: true, schedule: 'daily', posture: 'autonomous' });
       await patchResearcher(root, 'nope', { enabled: false }); // absent → no throw, no change
       expect((await readResearcherRegistry(root)).length).toBe(1);
+    });
+  });
+});
+
+describe('deleteResearcher (PANEL-11 lifecycle delete)', () => {
+  it('purges one researcher by id, leaving the others', async () => {
+    await withTemp(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1' }));
+      await upsertResearcher(root, web({ id: 'web-2' }));
+      const remaining = await deleteResearcher(root, 'web-1');
+      expect(remaining.map((r) => r.id)).toEqual(['web-2']);
+      expect((await readResearcherRegistry(root)).map((r) => r.id)).toEqual(['web-2']); // persisted
+    });
+  });
+
+  it('is a no-op on an absent id (no throw, registry unchanged)', async () => {
+    await withTemp(async (root) => {
+      await upsertResearcher(root, web({ id: 'web-1' }));
+      const remaining = await deleteResearcher(root, 'nope');
+      expect(remaining.map((r) => r.id)).toEqual(['web-1']);
+      expect((await readResearcherRegistry(root)).length).toBe(1);
+    });
+  });
+
+  it('rejects an unsafe id at the write boundary (#29 path-injection guard)', async () => {
+    await withTemp(async (root) => {
+      await expect(deleteResearcher(root, '../escape')).rejects.toThrow(/unsafe id/);
+      await expect(deleteResearcher(root, 'a/b')).rejects.toThrow(/unsafe id/);
     });
   });
 });

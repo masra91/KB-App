@@ -126,17 +126,24 @@ function reportLine(r: ResearcherView): string {
  *  the tool allowlist (SECURITY surface) stays READ-ONLY. Edits persist via setResearcherConfig (clamped at
  *  the IPC boundary). */
 function reachReadout(r: ResearcherView): string {
-  const tools = r.allowedTools.length ? r.allowedTools.join(' · ') : 'template default';
-  const timeoutMin = Math.max(1, Math.round(r.timeoutMs / 60_000));
+  // ENG-15/16 render safety: a legacy/partial row may be missing the derived `budget`/`allowedTools`/
+  // numeric fields. Coalesce so a malformed row degrades to blanks (still wireable + still Retire-able —
+  // PANEL-11's "remove a misconfigured entity") instead of THROWING inside the roster `.map` and blanking
+  // the whole list (the ENG-16 `title:null` class). Production rows arrive complete via buildResearcherViews.
+  const tools = (r.allowedTools ?? []).length ? r.allowedTools.join(' · ') : 'template default';
+  const timeoutMin = typeof r.timeoutMs === 'number' && Number.isFinite(r.timeoutMs) ? Math.max(1, Math.round(r.timeoutMs / 60_000)) : '';
+  const maxCalls = r.budget?.maxToolCalls ?? '';
+  const maxDepth = r.budget?.maxDepth ?? '';
+  const orient = r.orientBudget ?? '';
   return `
     <div class="rdesk-reach viz-numeric">
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">reads / pass</span>
-        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxcalls viz-focusable" min="${MIN_TOOL_CALLS}" max="${MAX_TOOL_CALLS}" step="1" value="${r.budget.maxToolCalls}" aria-label="Max retrieval calls per pass" />
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxcalls viz-focusable" min="${MIN_TOOL_CALLS}" max="${MAX_TOOL_CALLS}" step="1" value="${maxCalls}" aria-label="Max retrieval calls per pass" />
       </label>
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">orient / pass</span>
-        <input type="number" class="viz-field__input viz-field__input--numeric researcher-orient viz-focusable" min="${MIN_ORIENT_BUDGET}" max="${MAX_ORIENT_BUDGET}" step="1" value="${r.orientBudget}" aria-label="Local orient/awareness reads per pass (non-egress)" />
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-orient viz-focusable" min="${MIN_ORIENT_BUDGET}" max="${MAX_ORIENT_BUDGET}" step="1" value="${orient}" aria-label="Local orient/awareness reads per pass (non-egress)" />
       </label>
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">timeout (min)</span>
@@ -144,7 +151,7 @@ function reachReadout(r: ResearcherView): string {
       </label>
       <label class="viz-field rdesk-reach-field">
         <span class="viz-field__label">depth ≤</span>
-        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxdepth viz-focusable" min="${MIN_MAX_DEPTH}" max="${MAX_MAX_DEPTH}" step="1" value="${r.budget.maxDepth}" aria-label="Max research chain depth" />
+        <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxdepth viz-focusable" min="${MIN_MAX_DEPTH}" max="${MAX_MAX_DEPTH}" step="1" value="${maxDepth}" aria-label="Max research chain depth" />
       </label>
       <span class="rdesk-reach-ro">tools: ${esc(tools)}</span>
     </div>`;
@@ -187,6 +194,7 @@ function strip(r: ResearcherView): string {
       <p class="rdesk-eligibility researcher-eligibility viz-body" data-will-run="${elig.willRun ? 'true' : 'false'}">${esc(elig.note)}</p>
       <div class="rdesk-footer viz-ruled">
         ${reportLine(r)}
+        <button type="button" class="viz-btn researcher-remove rdesk-remove" title="Retire this researcher — remove it from your roster">Retire</button>
         <button type="button" class="viz-btn rdesk-run researcher-run" data-clearance="${esc(r.egressTier)}">▷ Run</button>
       </div>
       <div class="rdesk-confirm viz-confirm researcher-confirm" hidden>
@@ -359,6 +367,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     const maxDepthEl = li.querySelector<HTMLInputElement>('.researcher-maxdepth')!; // WS3 Slice-2 editable chain-depth bound
     const orientEl = li.querySelector<HTMLInputElement>('.researcher-orient')!; // warm-start editable orient budget
     const runBtn = li.querySelector<HTMLButtonElement>('.researcher-run')!;
+    const removeBtn = li.querySelector<HTMLButtonElement>('.researcher-remove')!; // PANEL-11 lifecycle delete
     const reviewLink = li.querySelector<HTMLButtonElement>('.rdesk-review-link'); // only on an escalated last-run
     const confirm = li.querySelector<HTMLElement>('.researcher-confirm')!;
     const confirmMsg = li.querySelector<HTMLElement>('.researcher-confirm-msg')!;
@@ -487,6 +496,25 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
             runBtn.disabled = false;
             runBtn.textContent = '▷ Run';
             runBtn.classList.remove('viz-btn--busy');
+          }
+        },
+        () => {},
+      );
+    });
+
+    // Retire (PANEL-11 lifecycle delete) — DESTRUCTIVE: purges the researcher's config. The confirm is the
+    // shared danger-styled affordance (rdesk-confirm-go is viz-btn--danger). Sources it already brought
+    // back + its full activity trail are RETAINED — only the config/registration is removed.
+    removeBtn.addEventListener('click', () => {
+      askConfirm(
+        `Retire “${current.label}”? Its configuration is removed and it stops running. Sources it already brought in — and its full activity trail — stay in your KB.`,
+        async () => {
+          status.textContent = 'Retiring…';
+          try {
+            await window.kbApi.removeResearcher(id);
+            await render(container);
+          } catch {
+            status.textContent = 'Could not retire this researcher.';
           }
         },
         () => {},

@@ -119,6 +119,16 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     expect(setJobConfig).toHaveBeenCalledWith({ id: 'reflect', type: 'reflect', enabled: true });
   });
 
+  it('PANEL-11 gate: a built-in job is DISABLE-ONLY — it has an enable/disable switch but NO delete/retire affordance', async () => {
+    setApi({ listJobs: vi.fn(async () => [job({ id: 'reflect' })]), setJobConfig: vi.fn(), runJobNow: vi.fn() });
+    await mountJobs(root);
+    const row = li(root, 'reflect');
+    // Built-in entities (the autonomous-job catalog) are disable-forever, not deletable — the lifecycle-delete
+    // gate (user-added → removable; built-in → disable-only) means no remove/retire/delete control here.
+    expect(row.querySelector('.job-enabled')).toBeTruthy(); // can disable
+    expect(row.querySelector('.job-remove, .job-delete, .job-retire')).toBeNull(); // cannot delete
+  });
+
   it('cancelling a risky change reverts the control and does not persist (PANEL-7)', async () => {
     const setJobConfig = vi.fn();
     setApi({ listJobs: vi.fn(async () => [job({ id: 'reflect' })]), setJobConfig, runJobNow: vi.fn() });

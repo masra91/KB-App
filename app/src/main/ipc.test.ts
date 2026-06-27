@@ -43,12 +43,14 @@ const mocks = vi.hoisted(() => ({
   // SPEC-0028 researcher pipeline helpers (the IPC handlers delegate to these).
   listResearchers: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
   setResearcherConfig: vi.fn(async () => [{ id: 'web-1', template: 'web', label: 'Web', egressTier: 'public-web', scope: 'global', enabled: true, schedule: 'off', posture: 'guarded', topics: [], lastRun: null }]),
+  removeResearcher: vi.fn(async () => []), // PANEL-11 lifecycle delete
   runResearcherNow: vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'secondary source SRC1' })),
   listResearcherRuns: vi.fn(async () => [{ ts: '2026-06-02T00:00:00.000Z', eventType: 'researched', what: 'Atlas', sourceId: 'SRC1', citations: 1 }]),
   // SPEC-0037 WATCH pipeline helpers (the IPC handlers delegate to these).
   listWatchFolders: vi.fn(async () => [{ id: 'drop', folderPath: '/abs/inbox', label: 'drop', enabled: false, scope: 'global', sensitivity: 'internal', ignoreGlobs: [], watching: false, lastEvent: null }]),
   setWatchFolder: vi.fn(async () => [{ id: 'drop', folderPath: '/abs/inbox', label: 'drop', enabled: true, scope: 'global', sensitivity: 'internal', ignoreGlobs: [], watching: true, lastEvent: null }]),
   removeWatchFolder: vi.fn(async () => []),
+  removeIntakeConnector: vi.fn(async () => []), // PANEL-11 lifecycle delete
 }));
 
 vi.mock('electron', () => ({
@@ -81,11 +83,13 @@ vi.mock('./pipeline', () => ({
   composeBacklogStatus: async () => ({ ok: false, message: 'no active kb' }),
   listResearchersForActive: mocks.listResearchers,
   setActiveResearcherConfig: mocks.setResearcherConfig,
+  removeActiveResearcher: mocks.removeResearcher,
   runActiveResearcherNow: mocks.runResearcherNow,
   listResearcherRunsForActive: mocks.listResearcherRuns,
   listWatchFoldersForActive: mocks.listWatchFolders,
   setActiveWatchFolder: mocks.setWatchFolder,
   removeActiveWatchFolder: mocks.removeWatchFolder,
+  removeActiveIntakeConnector: mocks.removeIntakeConnector,
   // ASK-17/19: kb:ask reads the configured recall budget from here before calling recall.
   getActiveInstanceSettings: mocks.getActiveInstanceSettings,
 }));
@@ -448,6 +452,18 @@ describe('SPEC-0028 Researchers — Control Panel IPC delegates to the pipeline 
   it('kb:removeWatchFolder forwards the id + returns the refreshed list', async () => {
     const views = await invoke<unknown[]>('kb:removeWatchFolder', 'drop');
     expect(mocks.removeWatchFolder).toHaveBeenCalledWith('drop');
+    expect(views).toEqual([]);
+  });
+
+  it('kb:removeResearcher (PANEL-11) forwards the id + returns the refreshed roster', async () => {
+    const views = await invoke<unknown[]>('kb:removeResearcher', 'web-1');
+    expect(mocks.removeResearcher).toHaveBeenCalledWith('web-1');
+    expect(views).toEqual([]);
+  });
+
+  it('kb:removeIntakeConnector (PANEL-11) forwards the id + returns the refreshed list', async () => {
+    const views = await invoke<unknown[]>('kb:removeIntakeConnector', 'hn');
+    expect(mocks.removeIntakeConnector).toHaveBeenCalledWith('hn');
     expect(views).toEqual([]);
   });
 

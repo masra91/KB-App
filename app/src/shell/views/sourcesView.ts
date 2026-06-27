@@ -148,12 +148,18 @@ function strip(c: IntakeConnectorView): string {
       <p class="rdesk-eligibility intake-eligibility viz-body" data-will-run="${elig.willRun ? 'true' : 'false'}">${esc(elig.note)}</p>
       <div class="rdesk-footer viz-ruled">
         ${reportLine(c)}
+        <button type="button" class="viz-btn intake-remove" title="Remove this feed — forget its configuration">Remove</button>
         <button type="button" class="viz-btn rdesk-run intake-run">▷ Pull now</button>
       </div>
       <div class="rdesk-confirm viz-confirm intake-confirm" hidden>
         <p class="rdesk-confirm-msg viz-confirm__msg intake-confirm-msg viz-body"></p>
         <button type="button" class="viz-btn intake-confirm-cancel">Cancel</button>
         <button type="button" class="viz-btn viz-btn--primary intake-confirm-go">Confirm</button>
+      </div>
+      <div class="rdesk-confirm viz-confirm intake-remove-confirm" hidden>
+        <p class="rdesk-confirm-msg viz-confirm__msg intake-remove-confirm-msg viz-body"></p>
+        <button type="button" class="viz-btn intake-remove-confirm-cancel">Cancel</button>
+        <button type="button" class="viz-btn viz-btn--danger intake-remove-confirm-go">Remove</button>
       </div>
       <p class="rdesk-status intake-status viz-body" role="status" aria-live="polite"></p>
     </li>`;
@@ -214,6 +220,7 @@ function wire(container: HTMLElement, connectors: IntakeConnectorView[]): void {
     const maxItemsEl = li.querySelector<HTMLInputElement>('.intake-maxitems')!;
     const saveBtn = li.querySelector<HTMLButtonElement>('.intake-save')!;
     const runBtn = li.querySelector<HTMLButtonElement>('.intake-run')!;
+    const removeBtn = li.querySelector<HTMLButtonElement>('.intake-remove')!; // PANEL-11 lifecycle delete
     const confirm = li.querySelector<HTMLElement>('.intake-confirm')!;
     const confirmMsg = li.querySelector<HTMLElement>('.intake-confirm-msg')!;
     const confirmGo = li.querySelector<HTMLButtonElement>('.intake-confirm-go')!;
@@ -309,6 +316,31 @@ function wire(container: HTMLElement, connectors: IntakeConnectorView[]): void {
       if (run) void run();
     });
     confirmCancel.addEventListener('click', () => hideConfirm());
+
+    // Remove (PANEL-11 lifecycle delete) — DESTRUCTIVE: purges the feed's config. Its own dedicated
+    // danger-styled confirm (the shared intake confirm is primary-styled for benign enable/pull). Items it
+    // already brought in — and the audit trail — are RETAINED; only the configuration is forgotten.
+    const removeConfirm = li.querySelector<HTMLElement>('.intake-remove-confirm')!;
+    const removeConfirmMsg = li.querySelector<HTMLElement>('.intake-remove-confirm-msg')!;
+    const removeConfirmGo = li.querySelector<HTMLButtonElement>('.intake-remove-confirm-go')!;
+    const removeConfirmCancel = li.querySelector<HTMLButtonElement>('.intake-remove-confirm-cancel')!;
+    removeBtn.addEventListener('click', () => {
+      removeConfirmMsg.textContent = `Remove “${current.label}”? Its configuration is forgotten and it stops pulling. Items already brought in — and its activity trail — stay in your KB.`;
+      removeConfirm.hidden = false;
+    });
+    removeConfirmGo.addEventListener('click', async () => {
+      removeConfirm.hidden = true;
+      status.textContent = 'Removing…';
+      try {
+        await window.kbApi.removeIntakeConnector(id);
+        await render(container);
+      } catch {
+        status.textContent = 'Could not remove this feed.';
+      }
+    });
+    removeConfirmCancel.addEventListener('click', () => {
+      removeConfirm.hidden = true;
+    });
   }
 }
 

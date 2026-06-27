@@ -145,6 +145,21 @@ export async function upsertResearcher(root: string, researcher: ResearcherConfi
   return researchers;
 }
 
+/**
+ * Delete one researcher by `id` from the registry (PANEL-11 lifecycle delete), returning the updated
+ * registry. PURGES the config row only — already-produced sources/findings + the audit trail are NOT
+ * touched here (ground truth is sacred; the caller audits the removal). No-op (returns the list
+ * unchanged) if the id is absent. Rejects an unsafe `id` at the boundary (the read guard would drop it
+ * anyway, but fail loud at the write seam too — never let a traversal id reach `.kb/researchers/<id>/`).
+ */
+export async function deleteResearcher(root: string, id: string): Promise<ResearcherConfig[]> {
+  if (!isSafeResearcherId(id)) throw new Error(`refusing to delete researcher with unsafe id: ${JSON.stringify(id)}`);
+  const researchers = await readResearcherRegistry(root);
+  const remaining = researchers.filter((r) => r.id !== id);
+  if (remaining.length !== researchers.length) await writeResearcherRegistry(root, remaining);
+  return remaining;
+}
+
 /** Patch one researcher's mutable fields; no-op if absent. Rejects an unsafe `id` at the boundary. */
 export async function patchResearcher(
   root: string,

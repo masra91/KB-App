@@ -9,6 +9,7 @@ import {
   readIntakeRegistry,
   upsertIntakeConnector,
   patchIntakeConnector,
+  deleteIntakeConnector,
   intakeRegistryPath,
 } from './intakeRegistry';
 import type { IntakeConnectorConfig } from './intakeConnectors';
@@ -76,5 +77,20 @@ describe('intakeRegistry (INTAKE-4)', () => {
 
   it('missing registry file → empty', async () => {
     expect(await readIntakeRegistry(root)).toEqual([]);
+  });
+
+  it('deleteIntakeConnector (PANEL-11) purges one by id, leaving the others', async () => {
+    await upsertIntakeConnector(root, rss({ id: 'news' }));
+    await upsertIntakeConnector(root, rss({ id: 'hn' }));
+    const remaining = await deleteIntakeConnector(root, 'news');
+    expect(remaining.map((c) => c.id)).toEqual(['hn']);
+    expect((await readIntakeRegistry(root)).map((c) => c.id)).toEqual(['hn']); // persisted
+  });
+
+  it('deleteIntakeConnector is a no-op on an absent id, and rejects an unsafe id', async () => {
+    await upsertIntakeConnector(root, rss({ id: 'news' }));
+    const remaining = await deleteIntakeConnector(root, 'ghost');
+    expect(remaining.map((c) => c.id)).toEqual(['news']);
+    await expect(deleteIntakeConnector(root, '../escape')).rejects.toThrow(/unsafe id/);
   });
 });

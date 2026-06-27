@@ -734,6 +734,9 @@ export interface KbApi {
   // SPEC-0028 Researchers (Control Panel · Manage): manage the registry + on-demand run.
   listResearchers(): Promise<ResearcherView[]>;
   setResearcherConfig(patch: ResearcherConfigPatch): Promise<ResearcherView[]>;
+  /** PANEL-11 lifecycle delete: purge a (user-added) researcher's config + audit the removal. Already-
+   *  produced sources/findings + the audit trail are RETAINED. Returns the refreshed roster. */
+  removeResearcher(id: string): Promise<ResearcherView[]>;
   runResearcherNow(id: string): Promise<RunResearcherResult>;
   listResearcherRuns(id: string): Promise<ResearcherLastRun[]>;
   // WORKIQ-FIX (SPEC-0028 Slice 3): the WorkIQ/M365 researcher CLI setup card — read status on mount,
@@ -748,6 +751,9 @@ export interface KbApi {
   // SPEC-0027 PANEL-4 · Sources (INTAKE-14): manage intake feed connectors + on-demand run.
   listIntakeConnectors(): Promise<IntakeConnectorView[]>;
   setIntakeConnectorConfig(patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]>;
+  /** PANEL-11 lifecycle delete: purge a (user-added) intake feed's config + audit the removal. Already-
+   *  produced sources + the audit trail are RETAINED. Returns the refreshed list. */
+  removeIntakeConnector(id: string): Promise<IntakeConnectorView[]>;
   runIntakeConnectorNow(id: string): Promise<RunIntakeConnectorResult>;
   // SPEC-0043 SENSE-7: Principal override of a source's sensitivity label (audited + Replay-sticky).
   // An empty `label` clears the override. Returns the applied label (or a reason when it couldn't apply).

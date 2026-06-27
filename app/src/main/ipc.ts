@@ -28,6 +28,7 @@ import {
   setActiveAgentModel,
   listResearchersForActive,
   setActiveResearcherConfig,
+  removeActiveResearcher,
   runActiveResearcherNow,
   listResearcherRunsForActive,
   listWatchFoldersForActive,
@@ -35,6 +36,7 @@ import {
   removeActiveWatchFolder,
   listIntakeConnectorsForActive,
   setActiveIntakeConnectorConfig,
+  removeActiveIntakeConnector,
   runActiveIntakeConnectorNow,
   setActiveSourceSensitivity,
   getActiveSourceSensitivities,
@@ -578,6 +580,9 @@ export function registerIpc(): void {
 
   ipcMain.handle('kb:setResearcherConfig', async (_e, patch: ResearcherConfigPatch): Promise<ResearcherView[]> => setActiveResearcherConfig(patch));
 
+  // PANEL-11 lifecycle delete: purge a (user-added) researcher's config; sources + audit retained.
+  ipcMain.handle('kb:removeResearcher', async (_e, id: string): Promise<ResearcherView[]> => removeActiveResearcher(id));
+
   ipcMain.handle('kb:runResearcherNow', async (_e, id: string): Promise<RunResearcherResult> => {
     try {
       return await runActiveResearcherNow(id);
@@ -604,6 +609,9 @@ export function registerIpc(): void {
   ipcMain.handle('kb:listIntakeConnectors', async (): Promise<IntakeConnectorView[]> => listIntakeConnectorsForActive());
 
   ipcMain.handle('kb:setIntakeConnectorConfig', async (_e, patch: IntakeConnectorConfigPatch): Promise<IntakeConnectorView[]> => setActiveIntakeConnectorConfig(patch));
+
+  // PANEL-11 lifecycle delete: purge a (user-added) intake feed's config; sources + audit retained.
+  ipcMain.handle('kb:removeIntakeConnector', async (_e, id: string): Promise<IntakeConnectorView[]> => removeActiveIntakeConnector(id));
 
   ipcMain.handle('kb:runIntakeConnectorNow', async (_e, id: string): Promise<RunIntakeConnectorResult> => {
     try {
