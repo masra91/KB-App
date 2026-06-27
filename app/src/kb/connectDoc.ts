@@ -9,6 +9,7 @@
 import path from 'node:path';
 import type { AgentTrace } from './archivist';
 import { CLAIMS_BLOCK_START } from './claimDoc';
+import { DYNAMIC_CURATED_PROPERTIES, isDynamicCuratedProperty } from './metaVocab';
 
 /** Quote a scalar only when it contains YAML-significant characters. */
 function scalar(s: string): string {
@@ -93,9 +94,27 @@ export interface EntityNode {
   derivedFrom: string[]; // ALL contributing source dirs (CONNECT-8)
   resolvedFrom: string[]; // candidate ids this node consumed (lineage; CONNECT-8)
   tags: string[]; // Obsidian `tags:` — curated `type/<kind>` + emergent topic tags (SPEC-0025 META-1/2)
-  createdAt: string; // ISO
-  updatedAt: string; // ISO
+  /** Dynamic curated key-value Properties carried per node (SPEC-0025 META v1: `scope`/`status`/
+   *  `sensitivity`). Obsidian-native flat frontmatter Properties the views/Bases query. Only curated keys
+   *  are emitted (emergent props deferred to v2); absent/empty values are omitted. `type` + the dates are
+   *  written from their own dedicated fields, not this bag. */
+  properties?: Record<string, string>;
+  createdAt: string; // ISO — written as the Obsidian-native `created` Property (META-2)
+  updatedAt: string; // ISO — written as the Obsidian-native `updated` Property (META-2)
   agent?: AgentTrace;
+}
+
+/** The dynamic curated Property lines for a node's identity frontmatter (SPEC-0025 META): each present,
+ *  non-empty curated key (`scope`/`status`/`sensitivity`) rendered as a flat Obsidian Property, in the
+ *  fixed curated order (deterministic output). Absent/foreign keys are omitted. */
+function curatedPropertyLines(properties: Record<string, string> | undefined): string[] {
+  if (!properties) return [];
+  const out: string[] = [];
+  for (const key of DYNAMIC_CURATED_PROPERTIES) {
+    const v = properties[key];
+    if (typeof v === 'string' && v.trim().length > 0) out.push(`${key}: ${scalar(v.trim())}`);
+  }
+  return out;
 }
 
 export const NODE_BODY_MARK = ''; // body begins with the H1; blocks (claims/links) appended later
@@ -117,12 +136,17 @@ export function renderEntityNode(node: EntityNode): string {
     // Obsidian-native `tags:` (META-1/3): curated `type/<kind>` + emergent topic tags. The graph
     // colors + Bases filter off these. A node always has at least its `type/<kind>` tag.
     `tags: ${flowSeq(node.tags)}`,
+    // Dynamic curated key-value Properties (SPEC-0025 META v1): scope/status/sensitivity, when carried.
+    ...curatedPropertyLines(node.properties),
     'provenance:',
     `  derivedFrom: ${flowSeq(node.derivedFrom)}`,
     `  resolvedFrom: ${flowSeq(node.resolvedFrom)}`,
     `  transformedBy: ${scalar(transformedByLabel(node.agent))}`,
-    `createdAt: ${node.createdAt}`,
-    `updatedAt: ${node.updatedAt}`,
+    // Obsidian-native curated date Properties (META-2): `created`/`updated` (were `createdAt`/`updatedAt`
+    // — migrated to the curated names so Bases/graph can date-sort/filter; parse still reads the legacy
+    // names for back-compat fold-in).
+    `created: ${node.createdAt}`,
+    `updated: ${node.updatedAt}`,
   ];
   return `---\n${fm.join('\n')}\n---\n\n# ${node.name}\n`;
 }
@@ -138,6 +162,8 @@ export interface ParsedNode {
   derivedFrom: string[];
   resolvedFrom: string[];
   tags: string[];
+  /** Dynamic curated key-value Properties read back (scope/status/sensitivity); foreign keys dropped. */
+  properties: Record<string, string>;
   createdAt: string;
 }
 
@@ -178,6 +204,7 @@ export function parseEntityNode(md: string): ParsedNode {
   let derivedFrom: string[] = [];
   let resolvedFrom: string[] = [];
   let tags: string[] = [];
+  const properties: Record<string, string> = {};
   let createdAt = '';
   for (const line of fm.split('\n')) {
     let m: RegExpMatchArray | null;
@@ -189,10 +216,14 @@ export function parseEntityNode(md: string): ParsedNode {
     else if ((m = line.match(/^tags:\s*(\[.*\])\s*$/))) tags = fmSeq(m[1]);
     else if ((m = line.match(/^\s+derivedFrom:\s*(\[.*\])\s*$/))) derivedFrom = fmSeq(m[1]);
     else if ((m = line.match(/^\s+resolvedFrom:\s*(\[.*\])\s*$/))) resolvedFrom = fmSeq(m[1]);
-    else if ((m = line.match(/^createdAt:\s*(.+)$/))) createdAt = fmScalar(m[1]);
+    // Obsidian-native curated `created` (META-2), or the legacy `createdAt` (back-compat fold-in).
+    else if ((m = line.match(/^created:\s*(.+)$/))) createdAt = fmScalar(m[1]);
+    else if ((m = line.match(/^createdAt:\s*(.+)$/))) createdAt = createdAt || fmScalar(m[1]);
+    // Dynamic curated key-value Properties (scope/status/sensitivity) — only curated keys are kept.
+    else if ((m = line.match(/^([a-z]+):\s*(.+)$/)) && isDynamicCuratedProperty(m[1])) properties[m[1]] = fmScalar(m[2]);
   }
   if (!id || !kind || !name) throw new Error('connect: entity node missing id/kind/name');
-  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, tags, createdAt };
+  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, tags, properties, createdAt };
 }
 
 /** Union helper preserving order, de-duplicated — for folding derivedFrom/resolvedFrom/aliases. */

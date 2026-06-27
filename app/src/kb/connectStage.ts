@@ -834,6 +834,10 @@ export async function connectOne(
             [typeTag(kind), ...(cluster.tags ?? []).map(normalizeTag)].filter((t) => t.length > 0),
           ),
         ),
+        // SPEC-0025 META v1: dynamic curated key-value Properties (scope/status/sensitivity). Carried
+        // WHOLE across re-resolves/merges (idempotent) — canonical's win, then any loser's fill a gap.
+        // Empty until the carry-forward sourcing slice (S1b) populates them; the mechanism is here now.
+        properties: { ...losers.reduce((acc, l) => ({ ...l.properties, ...acc }), {}), ...(canonical?.properties ?? {}) },
         createdAt: canonical?.createdAt || now,
         updatedAt: now,
         agent: decision.agent,

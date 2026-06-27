@@ -1,6 +1,16 @@
 // Curated-vocabulary + tag-normalization tests (SPEC-0025 META-2/3/8). Pure functions, no FS/git.
 import { describe, it, expect } from 'vitest';
-import { normalizeTag, typeTag, tagNamespace, isCuratedTag, CURATED_TAG_NAMESPACES } from './metaVocab';
+import {
+  normalizeTag,
+  typeTag,
+  tagNamespace,
+  isCuratedTag,
+  CURATED_TAG_NAMESPACES,
+  CURATED_PROPERTIES,
+  CURATED_VOCAB_VERSION,
+  isCuratedProperty,
+  isDynamicCuratedProperty,
+} from './metaVocab';
 
 describe('normalizeTag (META-3: Obsidian tag rules)', () => {
   it('lowercases, turns spaces/underscores into hyphens, preserves nesting', () => {
@@ -47,5 +57,29 @@ describe('typeTag + curated classification (META-2)', () => {
     expect(isCuratedTag('topic/ml')).toBe(true);
     expect(isCuratedTag('mood/curious')).toBe(false); // emergent namespace
     expect(CURATED_TAG_NAMESPACES).toContain('type');
+  });
+});
+
+describe('curated Properties (SPEC-0025 META v1 — key-value Properties)', () => {
+  it('the v1 curated key set + version bump (META-8 versioned contract)', () => {
+    expect(CURATED_VOCAB_VERSION).toBe(2); // v2 added status + sensitivity
+    for (const k of ['type', 'scope', 'status', 'sensitivity', 'created', 'updated']) {
+      expect(CURATED_PROPERTIES).toContain(k);
+    }
+  });
+
+  it('isCuratedProperty accepts curated keys, rejects emergent/foreign ones (v1 = curated only)', () => {
+    expect(isCuratedProperty('scope')).toBe(true);
+    expect(isCuratedProperty('sensitivity')).toBe(true);
+    expect(isCuratedProperty('created')).toBe(true);
+    expect(isCuratedProperty('mood')).toBe(false); // emergent → deferred to v2
+  });
+
+  it('isDynamicCuratedProperty isolates the carry-forward bag (scope/status/sensitivity), not type/dates', () => {
+    expect(isDynamicCuratedProperty('scope')).toBe(true);
+    expect(isDynamicCuratedProperty('status')).toBe(true);
+    expect(isDynamicCuratedProperty('sensitivity')).toBe(true);
+    expect(isDynamicCuratedProperty('type')).toBe(false); // derived from kind, not a dynamic prop
+    expect(isDynamicCuratedProperty('created')).toBe(false); // a date field, not the bag
   });
 });
