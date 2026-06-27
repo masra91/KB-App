@@ -24,6 +24,14 @@ import {
   isClaimSuppressed,
   reattributedTarget,
   recordCorrectionDirective,
+  CONTRADICTION_DIRECTIVES_REL,
+  contradictionClaimKey,
+  readContradictionDirectives,
+  recordContradictionDirective,
+  contradictionForKey,
+  openContradictionsForIdentity,
+  contestedContradictionsForIdentity,
+  isStatementContested,
 } from './directives';
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
@@ -266,6 +274,91 @@ describe('correction directives (SPEC-0050 slice-2c: reattribute)', () => {
       await fs.appendFile(file, JSON.stringify({ type: 'reattribute', correctionKey: 'person|a::s', identityKey: 'person|a', statement: 's' }) + '\n', 'utf8');
       const map = await readCorrectionDirectives(root);
       expect(isClaimSuppressed(map, 'person|a', 's')).toBe(false); // missing toIdentity → dropped
+    });
+  });
+});
+
+describe('contradiction lifecycle (SPEC-0036 CONTRA)', () => {
+  const A = 'Born in 1815.';
+  const B = 'Born in 1816.';
+
+  it('the key is content-derived + order-independent over the two statements', () => {
+    // Same entity + same pair in either order → ONE key (so a re-detection updates, never duplicates).
+    expect(contradictionClaimKey('person|ada lovelace', A, B)).toBe(contradictionClaimKey('person|ada lovelace', B, A));
+    // Casing/punctuation drift across a re-derive still collapses to the same key (normalizeStatement).
+    expect(contradictionClaimKey('person|ada lovelace', 'BORN IN 1815', B)).toBe(contradictionClaimKey('person|ada lovelace', A, B));
+    // A different entity is a different contradiction.
+    expect(contradictionClaimKey('person|ada lovelace', A, B)).not.toBe(contradictionClaimKey('person|charles babbage', A, B));
+  });
+
+  it('records a needs-you flag that surfaces as an OPEN contradiction on the entity', async () => {
+    await withRoot(async (root) => {
+      await recordContradictionDirective(root, {
+        identityKey: 'person|ada lovelace',
+        statementA: A,
+        statementB: B,
+        state: 'needs-you',
+        reviewId: 'rev-contra-1',
+        decidedAt: '2026-06-27T00:00:00Z',
+      });
+      const map = await readContradictionDirectives(root);
+      const open = openContradictionsForIdentity(map, 'person|ada lovelace');
+      expect(open).toHaveLength(1);
+      expect(open[0].state).toBe('needs-you');
+      expect(open[0].statements).toEqual([A, B].sort()); // statements stored sorted for stability
+      // It is also CONTESTED at recall, and each statement flags individually.
+      expect(contestedContradictionsForIdentity(map, 'person|ada lovelace')).toHaveLength(1);
+      expect(isStatementContested(map, 'person|ada lovelace', 'born in 1815')).toBe(true); // drift-tolerant
+      expect(isStatementContested(map, 'person|ada lovelace', 'Died in 1852.')).toBe(false);
+    });
+  });
+
+  it('resolving CLEARS the open flag (last-wins) but leaves no contest; accepting clears the flag yet stays contested', async () => {
+    await withRoot(async (root) => {
+      // resolved: superseded → flag clears, not contested at recall (one answer won).
+      await recordContradictionDirective(root, { identityKey: 'person|x', statementA: A, statementB: B, state: 'needs-you', reviewId: 'r', decidedAt: '1' });
+      await recordContradictionDirective(root, { identityKey: 'person|x', statementA: A, statementB: B, state: 'resolved', reviewId: 'r', decidedAt: '2' });
+      let map = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(map, 'person|x')).toHaveLength(0);
+      expect(contestedContradictionsForIdentity(map, 'person|x')).toHaveLength(0);
+      expect(contradictionForKey(map, 'person|x', A, B)?.state).toBe('resolved'); // last-wins
+
+      // accepted: both stand → flag clears from the queue, but recall still surfaces it as contested.
+      await recordContradictionDirective(root, { identityKey: 'person|y', statementA: A, statementB: B, state: 'needs-you', reviewId: 'r', decidedAt: '1' });
+      await recordContradictionDirective(root, { identityKey: 'person|y', statementA: A, statementB: B, state: 'accepted', reviewId: 'r', decidedAt: '2' });
+      map = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(map, 'person|y')).toHaveLength(0);
+      expect(contestedContradictionsForIdentity(map, 'person|y')).toHaveLength(1); // accepted = still contested
+      expect(isStatementContested(map, 'person|y', A)).toBe(true);
+    });
+  });
+
+  it('re-opens a terminal contradiction when a fresh needs-you lands later (last-wins)', async () => {
+    await withRoot(async (root) => {
+      await recordContradictionDirective(root, { identityKey: 'person|z', statementA: A, statementB: B, state: 'resolved', reviewId: 'r', decidedAt: '1' });
+      await recordContradictionDirective(root, { identityKey: 'person|z', statementA: A, statementB: B, state: 'needs-you', reviewId: 'r2', decidedAt: '2' });
+      const map = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(map, 'person|z')).toHaveLength(1); // re-opened
+      expect(contradictionForKey(map, 'person|z', A, B)?.state).toBe('needs-you');
+    });
+  });
+
+  it('tolerates a garbled line + drops malformed records (ENG-16)', async () => {
+    await withRoot(async (root) => {
+      const file = path.join(path.resolve(root), CONTRADICTION_DIRECTIVES_REL);
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      const good = JSON.stringify({ contradictionKey: contradictionClaimKey('person|g', A, B), identityKey: 'person|g', statements: [A, B], state: 'needs-you', reviewId: 'r', decidedAt: '1' });
+      await fs.appendFile(file, '{not json\n' + good + '\n' + JSON.stringify({ identityKey: 'person|g', state: 'bogus' }) + '\n', 'utf8');
+      const map = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(map, 'person|g')).toHaveLength(1); // the one good line survives
+    });
+  });
+
+  it('an absent store yields no flags', async () => {
+    await withRoot(async (root) => {
+      const map = await readContradictionDirectives(root);
+      expect(openContradictionsForIdentity(map, 'person|nobody')).toEqual([]);
+      expect(isStatementContested(map, 'person|nobody', A)).toBe(false);
     });
   });
 });
