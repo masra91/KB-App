@@ -18,7 +18,7 @@
 import type { EgressTier } from './researchers';
 import { resolveOrientBudget, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { buildOutboundQuery } from './researchRun';
-import { deriveNotebook, knownSourceUrls } from './researchNotebook';
+import { areaKey, deriveNotebook, knownSourceUrls } from './researchNotebook';
 import { buildNeighborhood } from './explorePanel';
 import { makeReadOnlyTools } from './recallTools';
 
@@ -93,9 +93,15 @@ export async function orient(root: string, r: ResearcherConfig, req: ResearchReq
   }
   const contentRead = contentHints.length > 0;
 
-  // Choose the gap/angle: prefer an explicit expand-next frontier lead, else steer toward a known neighbor
-  // the request doesn't already name (expand the frontier), else a gated content hint, else cold ('').
-  const angle = chooseAngle(req, notebook.frontier.map((f) => f.term), floor, contentHints, centerName);
+  // The facets this subject was already drilled on (RESEARCH-QUALITY) — the per-area exclusion set so a
+  // re-run ROTATES to a different missing facet instead of re-issuing the identical gap query. Keyed the
+  // same way deriveNotebook stamps areas (normalized `what` + entityId).
+  const targetedFacets = notebook.areas.find((a) => a.key === areaKey(orientSubject(req), req.by.entityId))?.targetedFacets ?? [];
+
+  // Choose the gap/angle: prefer the entity's still-MISSING gap facet (skipping any already drilled), else
+  // an expand-next frontier lead, else a known neighbor the request doesn't already name, else a gated
+  // content hint, else cold ('').
+  const angle = chooseAngle(req, notebook.frontier.map((f) => f.term), floor, contentHints, centerName, targetedFacets);
   return { angle, dedupSet, reads, floor, contentRead };
 }
 
@@ -105,17 +111,27 @@ export function orientSubject(req: ResearchRequest): string {
 }
 
 /** Derive a short steer from the gap signals, capped — never a verbatim dump. Picks the first signal not
- *  already named in the request (so the pass EXPANDS rather than re-establishes), bounded to the cap.
+ *  already named in the request (so the pass EXPANDS rather than re-establishes) AND not already drilled on
+ *  a prior pass (so re-runs ROTATE), bounded to the cap.
  *
  *  GAP-DRIVEN priority (RESEARCH-24): a MISSING enrichment facet the request carries (`req.gap.missing` —
  *  what the entity's claims don't yet cover) wins over the generic "first fresh neighbor" steer, so the
  *  pass fills the KB's actual gap instead of re-chasing a facet we already know. Order: gap-missing facet
- *  → frontier lead (a prior finding raised but didn't cover) → fresh neighbor name → gated content hint. */
-export function chooseAngle(req: ResearchRequest, frontierTerms: string[], floor: string[], contentHints: string[], centerName?: string): string {
+ *  → frontier lead (a prior finding raised but didn't cover) → fresh neighbor name → gated content hint.
+ *
+ *  CROSS-RUN ROTATION (RESEARCH-QUALITY): `targetedAngles` are the steers prior passes already drilled for
+ *  this subject (from the field notebook). A candidate is skipped when ANY recorded angle already contains
+ *  it — so two runs on the same entity steer at DIFFERENT missing facets, yielding materially different
+ *  queries instead of the same generic one. When every gap facet is exhausted the steer falls through to
+ *  neighbors/content and finally cold (''), which is the honest "nothing left to target" signal. */
+export function chooseAngle(req: ResearchRequest, frontierTerms: string[], floor: string[], contentHints: string[], centerName?: string, targetedAngles: readonly string[] = []): string {
   const already = (req.what + ' ' + req.context).toLowerCase();
+  const drilled = targetedAngles.map((a) => a.toLowerCase());
   const fresh = (s: string): boolean => s.trim().length > 0 && !already.includes(s.toLowerCase());
+  const notDrilled = (s: string): boolean => !drilled.some((a) => a.includes(s.trim().toLowerCase()));
+  const usable = (s: string): boolean => fresh(s) && notDrilled(s);
   const gapMissing = req.gap?.missing ?? [];
-  const lead = gapMissing.find(fresh) ?? frontierTerms.find(fresh) ?? floor.find(fresh) ?? contentHints.find(fresh);
+  const lead = gapMissing.find(usable) ?? frontierTerms.find(usable) ?? floor.find(usable) ?? contentHints.find(usable);
   if (!lead) return '';
   const prefix = centerName && fresh(centerName) ? `re ${centerName}: ` : '';
   return clampAngle(`${prefix}${lead}`);

@@ -96,6 +96,18 @@ export function computeEnrichmentGap(kind: string, claimStatements: readonly str
   return { present, missing };
 }
 
+/**
+ * Is this entity FACET-THIN — covering fewer of its kind's expected facets than it's missing
+ * (RESEARCH-QUALITY)? This is the QUALITATIVE gap signal that complements the count-only sparse check:
+ * an entity can be corroborated by several sources yet still be a stub on the facets that matter (a
+ * person with three sources but no birth date, education, or role). `missing.length > present.length`
+ * means it covers under half of what we'd expect to know — a real gap worth an enrichment pass — while
+ * a `{present:[], missing:[]}` (no expectations) or a well-covered entity reads as `false`. Pure.
+ */
+export function isFacetThin(gap: EnrichmentGap): boolean {
+  return gap.missing.length > gap.present.length;
+}
+
 /** Runtime shape-guard for a gap read back off an audit payload (foreign/legacy-tolerant — ENG-16). */
 export function isEnrichmentGap(v: unknown): v is EnrichmentGap {
   const o = v as EnrichmentGap;

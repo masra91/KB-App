@@ -92,7 +92,7 @@ describe('deriveNotebook — rebuilt from the researcher OWN audit (RESEARCH-6, 
       await appendAuditEvent(root, { actor: 'researcher', eventType: 'researched', ts: '2026-02-02T00:00:00.000Z', subjects: { researcherId: 'web-2' }, payload: { what: 'Other', citations: ['https://other.com/x'] } });
 
       const now = Date.parse('2026-02-15T00:00:00.000Z');
-      const derived = await deriveNotebook(root, 'web-1', now, nb({ frontier: [{ term: 'surface codes', fromSourceId: 'SRC1', ts: now }] }));
+      const derived = await deriveNotebook(root, 'web-1', now);
 
       // The subject with an entity keys with the entity; newest outcome (finding, 2 citations) wins.
       const area = derived.areas.find((a) => a.key === areaKey('Project Atlas', 'ent-atlas'));
@@ -100,8 +100,46 @@ describe('deriveNotebook — rebuilt from the researcher OWN audit (RESEARCH-6, 
       // Harvested carries the cited URLs (host extracted), and NOT the other researcher's source.
       expect(knownSourceUrls(derived)).toEqual(new Set(['https://arxiv.org/abs/1', 'https://example.com/p']));
       expect(derived.harvested.find((s) => s.url === 'https://arxiv.org/abs/1')?.host).toBe('arxiv.org');
-      // frontier is carried from prior (maintained incrementally, not audit-derived).
-      expect(derived.frontier).toEqual([{ term: 'surface codes', fromSourceId: 'SRC1', ts: now }]);
+      // No event carried a gap/angle → nothing to seed the frontier (it's audit-derived now, not carried).
+      expect(derived.frontier).toEqual([]);
+    });
+  });
+
+  it('RESEARCH-QUALITY: derives the frontier from gap leads + marks drilled facets, so re-runs rotate', async () => {
+    await withTemp(async (root) => {
+      const gap = { present: ['role or occupation'], missing: ['education', 'date of birth', 'notable work or achievement'] };
+      // One pass drilled the `education` facet (angle records it) against a 3-missing-facet gap.
+      await appendAuditEvent(root, {
+        actor: 'researcher', eventType: 'researched', ts: '2026-02-01T00:00:00.000Z',
+        subjects: { researcherId: 'web-1', sourceId: 'SRC1', entityId: 'ent-ada' },
+        payload: { what: 'Ada Lovelace', citations: ['https://x.com/a'], angle: 're Ada Lovelace: education', gap },
+      });
+      const now = Date.parse('2026-02-10T00:00:00.000Z');
+      const derived = await deriveNotebook(root, 'web-1', now);
+
+      const key = areaKey('Ada Lovelace', 'ent-ada');
+      // The drilled angle is recorded on the area → orient's exclusion set.
+      expect(derived.areas.find((a) => a.key === key)?.targetedFacets).toEqual(['re Ada Lovelace: education']);
+      // The frontier holds the STILL-uncovered facets (not the one already drilled) — the rotation pool.
+      const terms = derived.frontier.map((f) => f.term).sort();
+      expect(terms).toEqual(['date of birth', 'notable work or achievement']);
+      expect(derived.frontier.every((f) => f.fromSourceId === 'SRC1')).toBe(true);
+    });
+  });
+
+  it('RESEARCH-QUALITY: a stale drilled facet re-opens (drops out of the exclusion set)', async () => {
+    await withTemp(async (root) => {
+      const gap: { present: string[]; missing: string[] } = { present: [], missing: ['founding date'] };
+      await appendAuditEvent(root, {
+        actor: 'researcher', eventType: 'researched', ts: '2026-01-01T00:00:00.000Z',
+        subjects: { researcherId: 'web-1', sourceId: 'SRC1', entityId: 'ent-acme' },
+        payload: { what: 'Acme Corp', citations: [], angle: 're Acme Corp: founding date', gap },
+      });
+      // Well past the staleness window → the old drilled facet no longer suppresses, and re-surfaces as a lead.
+      const now = Date.parse('2026-01-01T00:00:00.000Z') + NOTEBOOK_STALE_MS + 1;
+      const derived = await deriveNotebook(root, 'web-1', now);
+      expect(derived.areas.find((a) => a.key === areaKey('Acme Corp', 'ent-acme'))?.targetedFacets ?? []).toEqual([]);
+      expect(derived.frontier.map((f) => f.term)).toEqual(['founding date']);
     });
   });
 });

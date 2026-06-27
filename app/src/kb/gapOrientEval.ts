@@ -1,10 +1,13 @@
-// SPEC-0028 RESEARCH-24 — gap-targeting coverage metric. The gap-driven orient (chooseAngle biases the
-// outbound query toward an entity's MISSING enrichment facets) is the fix; this metric measures whether it
-// actually LANDS — what fraction of gap-bearing oriented queries reference a missing facet — so a future
-// prompt/decider regression back to the bare-topic query (re-chasing what we already know) turns red in the
-// eval instead of shipping silently. Pure → CI-testable; mirrors `topicTagEval` and available to DEV-1's
-// eval lane. The metric is over QUERIES (the egress-facing artifact), so it gates the real outcome the
-// brief asks for ("query targets the gap"), not an internal intermediate.
+// SPEC-0028 RESEARCH-24 + RESEARCH-QUALITY — gap-targeting AND diversity metrics for the research orient.
+// Two complementary measures over QUERIES (the egress-facing artifact), so they gate the real outcomes the
+// briefs ask for, not internal intermediates:
+//   - `gapTargetingCoverage` (RESEARCH-24): what fraction of gap-bearing oriented queries reference a missing
+//     facet — so a regression back to the bare-topic query (re-chasing what we already know) turns red.
+//   - `queryDiversity` (RESEARCH-QUALITY): across successive runs on the SAME entity, what fraction of the
+//     outbound queries are distinct — so the Principal's "researchers return almost the same thing each time"
+//     defect (a static per-entity query) turns red. The gap-driven facet ROTATION lifts it toward 1.0.
+// High diversity AND high targeting together prove the runs are different *and* each is aimed at a real gap.
+// Pure → CI-testable; mirrors `topicTagEval` and available to DEV-1's eval lane.
 import type { EnrichmentGap } from './enrichGap';
 
 /** Does `query` reference any of the gap's MISSING facets (the gap-filling steer landed in the query)?
@@ -36,4 +39,27 @@ export function gapTargetingCoverage(samples: readonly { query: string; gap?: En
   const total = scorable.length;
   const targeted = scorable.filter((s) => queryTargetsGap(s.query, s.gap)).length;
   return { total, targeted, coverage: total === 0 ? 0 : targeted / total };
+}
+
+export interface QueryDiversity {
+  /** Total non-empty queries in the run sequence (the denominator). */
+  total: number;
+  /** How many are distinct (case-insensitive, trimmed). */
+  distinct: number;
+  /** `distinct / total` in [0,1]; 0 when `total` is 0. 1.0 = every run produced a different query. */
+  ratio: number;
+}
+
+/**
+ * Diversity of a sequence of outbound queries for the SAME entity across successive research runs
+ * (RESEARCH-QUALITY). The Principal's core defect — "researchers return almost the same thing each time" —
+ * is a DIVERSITY failure: a static per-entity query re-issued every pass. This measures the fraction of
+ * distinct queries; the gap-driven facet rotation lifts it toward 1.0, while the dead-rail regression (no
+ * rotation → the same query every run) floors it at `1/total`. Pair with {@link gapTargetingCoverage}: high
+ * diversity AND high targeting together prove the runs are different *and* each is aimed at a real gap.
+ */
+export function queryDiversity(queries: readonly string[]): QueryDiversity {
+  const norm = queries.map((q) => q.trim().toLowerCase()).filter((q) => q.length > 0);
+  const distinct = new Set(norm).size;
+  return { total: norm.length, distinct, ratio: norm.length === 0 ? 0 : distinct / norm.length };
 }
