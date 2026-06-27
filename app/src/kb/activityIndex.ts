@@ -82,6 +82,21 @@ async function findFiles(dir: string, name: string): Promise<string[]> {
   return out;
 }
 
+/** Collect every `*.jsonl` file directly under `dir` (the connect/blocks layout is flat). Missing
+ *  dir → []. Sorted for a deterministic, reproducible read order (AUDIT-4). */
+async function findJsonlFiles(dir: string): Promise<string[]> {
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return []; // absent tree — nothing to read
+  }
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith('.jsonl'))
+    .map((e) => path.join(dir, e.name))
+    .sort();
+}
+
 /** Enumerate every audit/journal file in the vault, tagged with its path-derived hints. */
 async function listAuditFiles(root: string): Promise<AuditFile[]> {
   const files: AuditFile[] = [];
@@ -90,9 +105,17 @@ async function listAuditFiles(root: string): Promise<AuditFile[]> {
   for (const abs of await findFiles(path.join(root, 'sources'), 'audit.jsonl')) {
     files.push({ abs, rel: path.relative(root, abs), sourceId: path.basename(path.dirname(abs)) });
   }
-  // connect/audit.jsonl — the stage-wide resolve log (no per-item subject from the path).
+  // connect/audit.jsonl — the legacy stage-wide log (link reviews + pre-SCALE-5 resolves still
+  // append here). No per-item subject from the path; the line's own `node`/subjects carry it.
   const connectAbs = path.join(root, 'connect', 'audit.jsonl');
   if (await fileExists(connectAbs)) files.push({ abs: connectAbs, rel: path.relative(root, connectAbs) });
+  // connect/blocks/*.jsonl — SCALE-5 split the RESOLVE (entity-merge) audit per block so concurrent
+  // resolve commits touch disjoint paths. Those per-block files hold connect's actual merge
+  // transformations; without reading them, connect is invisible to the feed/lineage/source-trace
+  // whenever cap>1 (the post-SCALE default). Enumerate every .jsonl under connect/blocks/.
+  for (const abs of await findJsonlFiles(path.join(root, 'connect', 'blocks'))) {
+    files.push({ abs, rel: path.relative(root, abs) });
+  }
 
   // .kb/jobs/<jobId>/journal.jsonl — the job id is the parent dir name.
   for (const abs of await findFiles(path.join(root, '.kb', 'jobs'), 'journal.jsonl')) {

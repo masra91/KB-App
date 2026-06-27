@@ -760,6 +760,10 @@ option { background: var(--card); color: var(--fg); }
 .activity-controls { display: flex; gap: 0.8rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.6rem; }
 .activity-field { flex: 0 1 auto; }
 .activity-field .viz-field__input { min-width: 12rem; }
+/* Trace-by-id lookup (AUDIT-6/7): the id input + "trace" submit sit together on the field's baseline,
+   so the lookup reads as one affordance distinct from the actor/search filters. */
+.activity-trace-input { display: flex; gap: 0.4rem; align-items: stretch; }
+.activity-trace-go { flex: none; white-space: nowrap; }
 /* Flat-ruled entry — no card chrome (DESIGN-LEGACY-VIEWS §2 "flat ruled per WS2"); a top rule separates rows. */
 .activity-entry { border: 0; border-top: 1px solid var(--viz-rule); border-radius: 0; background: transparent; overflow: hidden; }
 .activity-entry:first-child { border-top: 0; }
