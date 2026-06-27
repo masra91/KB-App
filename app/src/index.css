@@ -709,6 +709,28 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-add-id { display: block; margin-top: 0.6rem; background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.35rem 0.5rem; min-width: 28ch; }
 .rdesk-add-status { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--viz-ink-muted); }
 
+/* WORKIQ-UI — the m365/WorkIQ connector install/status card on the m365 strip. The connector CLI is the
+   prerequisite the researcher reaches the tenant through; without it the wire has nothing to call (silent
+   no-finding). A compact instrument readout: a captioned label · a status (dot + text) · an Install/Retry/
+   Recheck action · a quiet detail line. The state hue rides the DOT (a graphic ≥3:1) so the small status
+   text can stay --viz-ink for AA — the #184 rule, same as .rdesk-report. brass = not-installed (a needs-you
+   state, NOT a fault, VIZ-10 cry-wolf) · oxide = a real install/detect failure · patina = installed ·
+   ember (breathe) = installing/checking transients. */
+.rdesk-workiq { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; margin: 0.5rem 0 0; }
+.rdesk-workiq-label { align-self: center; }
+.rdesk-workiq-status { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--viz-ink); }
+.rdesk-workiq-text { color: var(--viz-ink); }
+.rdesk-workiq-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-idle); flex: none; }
+.rdesk-workiq-status[data-tone='ok'] .rdesk-workiq-dot { background: var(--viz-patina); }
+.rdesk-workiq-status[data-tone='wait'] .rdesk-workiq-dot { background: var(--viz-brass); }
+.rdesk-workiq-status[data-tone='error'] .rdesk-workiq-dot { background: var(--viz-oxide); }
+.rdesk-workiq-status[data-tone='busy'] .rdesk-workiq-dot,
+.rdesk-workiq-status[data-tone='idle'] .rdesk-workiq-dot { background: var(--viz-ember); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
+/* idle (Checking…) is the calmer transient — ember dot but a muted text, distinct from active install. */
+.rdesk-workiq-status[data-tone='idle'] .rdesk-workiq-dot { background: var(--viz-idle); }
+.rdesk-workiq-detail { font-size: 0.72rem; color: var(--viz-ink-muted); }
+.rdesk-workiq-detail[hidden], .rdesk-workiq-action[hidden] { display: none; }
+
 /* Sources view (SPEC-0027 PANEL-4) — two sections (Feeds · Watched folders) over the shared rdesk
    strip layout. Only the section divider is Sources-specific; everything else reuses the WS2 primitives. */
 .src-section { margin-top: 1.6rem; }

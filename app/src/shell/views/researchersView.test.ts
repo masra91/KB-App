@@ -11,6 +11,7 @@ import type { ResearcherView, KbApi } from '../../kb/types';
 const base: Omit<ResearcherView, 'id' | 'template' | 'label' | 'egressTier'> = { prompt: 'find prior art', repoPath: '', prRepo: '', tenantId: '', scope: 'global', enabled: false, schedule: 'off', posture: 'guarded', topics: ['atlas'], budget: { maxToolCalls: 8, maxDepth: 2 }, timeoutMs: 15 * 60_000, orientBudget: 5, allowedTools: [], lastRun: null };
 const webRow: ResearcherView = { ...base, id: 'web-1', template: 'web', label: 'Prior art', egressTier: 'public-web' };
 const codeRow: ResearcherView = { ...base, id: 'code-1', template: 'code', label: 'Repo', repoPath: '/repos/app', prRepo: 'octocat/hello-world', egressTier: 'local-only', topics: [] };
+const m365Row: ResearcherView = { ...base, id: 'm365-1', template: 'm365', label: 'WorkIQ', tenantId: 'acme.onmicrosoft.com', egressTier: 'internal-tenant', topics: [] };
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
@@ -437,5 +438,93 @@ describe('Field Desk — WS3/warm-start editable budget + timeout + orient + dep
     const ro = c.querySelector('.rdesk-reach-ro');
     expect(ro?.textContent).toMatch(/tools: fetch · web_search/); // allowlist shown as read-only text
     expect(ro?.querySelector('input')).toBeNull(); // no editable control for the tool allowlist (security surface)
+  });
+});
+
+describe('Field Desk — WorkIQ connector install/status card (WORKIQ-UI)', () => {
+  // The card drives DEV-3's WORKIQ-FIX IPC. We set window.kbApi directly so we can add the two new
+  // channels alongside listResearchers (which serves an m365 strip).
+  function setWorkIqApi(over: Partial<KbApi>): void {
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+      listResearchers: vi.fn(async () => [m365Row]) as unknown as KbApi['listResearchers'],
+      setResearcherConfig: vi.fn(async () => [m365Row]) as unknown as KbApi['setResearcherConfig'],
+      runResearcherNow: vi.fn(async () => ({ ran: true, sourceIds: [], note: 'ok' })) as unknown as KbApi['runResearcherNow'],
+      ...over,
+    };
+  }
+
+  it('renders the card ONLY on the m365 strip — not on web/code strips', async () => {
+    setWorkIqApi({
+      listResearchers: vi.fn(async () => [webRow, codeRow]) as unknown as KbApi['listResearchers'],
+      workIqStatus: vi.fn(async () => ({ installed: true, installCommand: 'npm install -g @workiq/cli', cliPath: '/bin/workiq' })) as unknown as KbApi['workIqStatus'],
+    });
+    const c = await mount();
+    await flush();
+    expect(c.querySelectorAll('.rdesk-workiq')).toHaveLength(0); // no m365 strip ⇒ no card
+  });
+
+  it('installed → patina (ok) dot, ✓ in the line, NO action button', async () => {
+    setWorkIqApi({ workIqStatus: vi.fn(async () => ({ installed: true, installCommand: 'npm install -g @workiq/cli', cliPath: '/bin/workiq' })) as unknown as KbApi['workIqStatus'] });
+    const c = await mount();
+    await flush();
+    const card = c.querySelector('.rdesk-workiq')!;
+    expect(card.getAttribute('data-state')).toBe('installed');
+    expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('ok');
+    expect(card.querySelector('.rdesk-workiq-text')?.textContent).toContain('✓');
+    expect(card.querySelector<HTMLButtonElement>('.rdesk-workiq-action')?.hidden).toBe(true);
+    expect(card.querySelector('.rdesk-workiq-detail')?.textContent).toBe('/bin/workiq'); // resolved CLI path
+  });
+
+  it('not-installed → BRASS (wait) dot (not oxide) + a visible Install button (the actionable state)', async () => {
+    setWorkIqApi({ workIqStatus: vi.fn(async () => ({ installed: false, installCommand: 'npm install -g @workiq/cli', detail: 'connector CLI not found' })) as unknown as KbApi['workIqStatus'] });
+    const c = await mount();
+    await flush();
+    const card = c.querySelector('.rdesk-workiq')!;
+    expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('wait');
+    const btn = card.querySelector<HTMLButtonElement>('.rdesk-workiq-action')!;
+    expect(btn.hidden).toBe(false);
+    expect(btn.textContent).toBe('Install');
+  });
+
+  it('clicking Install drives installing → installed via installWorkIq (live feedback, not silent)', async () => {
+    const installWorkIq = vi.fn(async () => ({ ok: true, status: { installed: true as const, installCommand: 'npm install -g @workiq/cli', cliPath: '/bin/workiq' } }));
+    setWorkIqApi({
+      workIqStatus: vi.fn(async () => ({ installed: false, installCommand: 'npm install -g @workiq/cli', detail: 'not found' })) as unknown as KbApi['workIqStatus'],
+      installWorkIq: installWorkIq as unknown as KbApi['installWorkIq'],
+    });
+    const c = await mount();
+    await flush();
+    const card = c.querySelector('.rdesk-workiq')!;
+    card.querySelector<HTMLButtonElement>('.rdesk-workiq-action')!.click();
+    await flush();
+    expect(installWorkIq).toHaveBeenCalledOnce();
+    expect(card.getAttribute('data-state')).toBe('installed');
+    expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('ok');
+  });
+
+  it('a failed install → OXIDE (error) + a Retry button + the surfaced failure detail (#160: never silent)', async () => {
+    setWorkIqApi({
+      workIqStatus: vi.fn(async () => ({ installed: false, installCommand: 'npm install -g @workiq/cli', detail: 'not found' })) as unknown as KbApi['workIqStatus'],
+      installWorkIq: vi.fn(async () => ({ ok: false, error: 'npm exited 1', status: { installed: false as const, installCommand: 'npm install -g @workiq/cli' } })) as unknown as KbApi['installWorkIq'],
+    });
+    const c = await mount();
+    await flush();
+    const card = c.querySelector('.rdesk-workiq')!;
+    card.querySelector<HTMLButtonElement>('.rdesk-workiq-action')!.click();
+    await flush();
+    expect(card.getAttribute('data-state')).toBe('install-failed');
+    expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('error');
+    expect(card.querySelector('.rdesk-workiq-action')?.textContent).toBe('Retry');
+    expect(card.querySelector('.rdesk-workiq-detail')?.textContent).toBe('npm exited 1');
+  });
+
+  it('degrades honestly when the IPC handler is absent (WORKIQ-FIX not landed) → error + Recheck, never a dead control', async () => {
+    setWorkIqApi({}); // no workIqStatus ⇒ window.kbApi.workIqStatus is undefined → call throws
+    const c = await mount();
+    await flush();
+    const card = c.querySelector('.rdesk-workiq')!;
+    expect(card.getAttribute('data-state')).toBe('error');
+    expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('error');
+    expect(card.querySelector('.rdesk-workiq-action')?.textContent).toBe('Recheck');
   });
 });

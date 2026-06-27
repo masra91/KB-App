@@ -141,6 +141,65 @@ export function researcherRunEligibility(r: Pick<ResearcherView, 'enabled' | 'sc
 }
 
 /**
+ * WORKIQ-UI — the m365 connector install/status card's pure presentation logic (DOM-free; the renderer
+ * assembles HTML from this). The card state is broader than the IPC `WorkIqStatus`: it adds the two
+ * renderer-owned TRANSIENT states shown while an IPC call is in flight (`checking`, `installing`) plus
+ * `install-failed` (a failed `installWorkIq`). The tone follows this view's own typed-report color
+ * language (see the file header: found=patina / nothing=calm / failed=oxide / paused=brass):
+ *   - `installed`     → `ok`    (patina)  — calm, done; no action
+ *   - `not-installed` → `wait`  (brass)   — needs-you/actionable (NOT an error — like paused-rate-limit);
+ *                                            offers Install
+ *   - `installing`    → `busy`  (ember)   — active work; the breathe pulse
+ *   - `checking`      → `idle`  (muted)   — transient, calm; no alarm
+ *   - `install-failed`→ `error` (oxide)   — a genuine failure; offers Retry
+ *   - `error`         → `error` (oxide)   — detect itself failed; offers Recheck
+ * Brass-not-oxide for `not-installed` is the VIZ-10 cry-wolf call: "not yet set up" is a needs-you
+ * state, not a fault — oxide is reserved for an actual install/detect failure.
+ */
+export type WorkIqCardState = 'checking' | 'installed' | 'not-installed' | 'installing' | 'install-failed' | 'error';
+
+export interface WorkIqCardModel {
+  state: WorkIqCardState;
+  /** Secondary line: resolved CLI path (installed) / the install command (not-installed) / the failure
+   *  note (install-failed/error). Derived from the IPC `WorkIqStatus` (cliPath/installCommand) by the view. */
+  detail?: string;
+}
+
+export interface WorkIqCardPresentation {
+  state: WorkIqCardState;
+  /** The signage status line (e.g. "Installed", "Not installed", "Checking…"). */
+  label: string;
+  /** Trailing glyph appended to the label ("✓" when installed); '' if none. Monochrome — no emoji (§6). */
+  glyph: string;
+  /** Tone token → CSS `data-tone` (dot + text hue): ok=patina · wait=brass · busy=ember · error=oxide · idle=muted. */
+  tone: 'ok' | 'wait' | 'busy' | 'error' | 'idle';
+  /** The action affordance, or null when none. `busy` dims+breathes the button mid-install. */
+  action: { label: string; busy: boolean } | null;
+  /** Secondary detail text ('' if none). */
+  detail: string;
+  /** Whether the ember breathe applies (transient/active states); reduced-motion makes it static. */
+  live: boolean;
+}
+
+export function workIqCardPresentation(model: WorkIqCardModel): WorkIqCardPresentation {
+  const detail = model.detail?.trim() ?? '';
+  switch (model.state) {
+    case 'installed':
+      return { state: model.state, label: 'Installed', glyph: '✓', tone: 'ok', action: null, detail, live: false };
+    case 'not-installed':
+      return { state: model.state, label: 'Not installed', glyph: '', tone: 'wait', action: { label: 'Install', busy: false }, detail, live: false };
+    case 'checking':
+      return { state: model.state, label: 'Checking…', glyph: '', tone: 'idle', action: null, detail: '', live: true };
+    case 'installing':
+      return { state: model.state, label: 'Installing…', glyph: '', tone: 'busy', action: { label: 'Install', busy: true }, detail: '', live: true };
+    case 'install-failed':
+      return { state: model.state, label: 'Install failed', glyph: '', tone: 'error', action: { label: 'Retry', busy: false }, detail: detail || 'The connector install did not complete.', live: false };
+    case 'error':
+      return { state: model.state, label: 'Status unavailable', glyph: '', tone: 'error', action: { label: 'Recheck', busy: false }, detail: detail || "Couldn't check the connector.", live: false };
+  }
+}
+
+/**
  * Which config changes are risky enough to require an explicit confirm + audit (RESEARCH-15, like
  * PANEL-7): **enabling** a researcher (starts external egress), flipping to **autonomous** (its
  * findings auto-apply without Review), or **widening egress** to a more-exposed tier (more KB content
