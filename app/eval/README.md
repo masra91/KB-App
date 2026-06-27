@@ -191,3 +191,25 @@ KB_EVAL=1 npm run eval -- dedupQuality      # real copilot; reports precision/re
 
 The metric + the verdict→groups reducers are unit-tested deterministically (`src/kb/dedupEval.test.ts`,
 CI-green); only the live-copilot behavioural run is opt-in. Fixtures are shared with the Reflect impl.
+
+### Claims subject-attribution eval — also the per-stage-tier guardrail (SPEC-0047 2b / INGEST-PERF item 4)
+
+`subjectAttribution.eval.ts` drives the REAL Claims decider over the shared fixture and asserts the
+subject's career claims never leak onto a co-mentioned person (HARD: zero leak; SOFT: subject keeps his
+own claims above a recall floor). It is **also the guardrail for the Claims per-stage model downgrade** —
+the INGEST-PERF item-4 rule is "a cheaper tier (Claims → `claude-sonnet-4.6`) ships only if this eval
+stays green."
+
+**Tier↔eval durability:** an eval process never calls `initLaunchModel()`, so by default
+`resolveCopilotModel('claims')` would fall to the global opus floor — testing the *wrong* model. So this
+eval resolves the **shipped per-stage tier from the live catalog** in a `beforeAll` and **logs the model
+it ran on** (`[eval] Claims subject-attribution runs on model: …`). The default run therefore exercises
+exactly the Claims tier that ships, and the tier can't silently drift away from what the guardrail tests.
+
+```sh
+KB_EVAL=1 npm run eval -- subjectAttribution                                  # runs on the SHIPPED Claims tier (logs it)
+KB_COPILOT_MODEL=claude-sonnet-4.6 KB_EVAL=1 npm run eval -- subjectAttribution  # ad-hoc: pin a specific tier
+```
+
+The deterministic CI gate is the pure metric (`src/kb/subjectAttributionEval.test.ts`); only the
+live-copilot behavioural run is opt-in.

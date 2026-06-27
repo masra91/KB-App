@@ -9,10 +9,21 @@
 //
 //   Run:  cd app && KB_EVAL=1 npm run eval -- subjectAttribution
 //
+// INGEST-PERF item 4 — tier↔eval durability: this is also the guardrail for the Claims per-stage model
+// downgrade ("cheaper tier ships only if this eval stays green"). An eval process never calls
+// initLaunchModel(), so `resolveCopilotModel('claims')` would otherwise fall to the GLOBAL floor (opus),
+// NOT the shipped per-stage tier (sonnet) — the eval would silently test the wrong model. The beforeAll
+// below resolves the real per-stage defaults from the LIVE catalog so the default run exercises exactly the
+// Claims tier that ships; it logs that model so the PASS is on the shipped tier on the record. An explicit
+// KB_COPILOT_MODEL still wins (ad-hoc pinning a specific tier), e.g.:
+//   KB_COPILOT_MODEL=claude-sonnet-4.6 KB_EVAL=1 npm run eval -- subjectAttribution
+//
 // It drives the SAME scenario as 2a's prompt-faithful test (claimsAgent.test.ts), imported from the shared
 // fixture, so the fix and its eval can't drift.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { makeClaimsDecider, type EntityInput } from '../src/kb/claimsAgent';
+import { initLaunchModel } from '../src/kb/copilotModelProbe';
+import { resolveCopilotModel } from '../src/kb/copilotModel';
 import {
   scoreAttribution,
   aggregateAttribution,
@@ -47,6 +58,14 @@ function entityInput(entity: { entityId: string; kind: string; name: string }): 
 
 describe.skipIf(!ENABLED)('SPEC-0047 2b — Claims subject-attribution (opt-in; real copilot)', () => {
   const decide = makeClaimsDecider(); // production decider — shells to `copilot -p`
+
+  beforeAll(async () => {
+    // INGEST-PERF item 4: resolve the SHIPPED per-stage tier so the guardrail exercises the model that
+    // actually ships for Claims (sonnet), not the global opus floor. An explicit KB_COPILOT_MODEL wins, so
+    // this never fights a manual ad-hoc pin. Logs the resolved Claims model so the proof names the tier.
+    if (!process.env.KB_COPILOT_MODEL) await initLaunchModel();
+    console.log(`\n[eval] Claims subject-attribution runs on model: ${resolveCopilotModel(undefined, 'claims')}\n`);
+  });
 
   it(
     `the co-mention (${NGAN_ENTITY.name}) never inherits the subject (${MASON_ENTITY.name})'s career claims (≥${RUNS} runs)`,
