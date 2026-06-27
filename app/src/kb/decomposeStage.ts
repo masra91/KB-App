@@ -31,6 +31,7 @@ import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan, type SpanOutcome } from './tracing';
+import { CanonicalQueueCache } from './queueCache';
 
 const STAGE = 'decompose';
 
@@ -276,6 +277,9 @@ export class DecomposeStage {
   private pending = false;
   private current: Promise<void> | null = null;
   private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
+  // INGEST-PERF item 1: memoize the O(N) queue walk against the canonical HEAD sha — both call sites
+  // below share it, and an idle sweep on an unchanged canonical skips the walk entirely.
+  private readonly queueCache = new CanonicalQueueCache<string[]>();
   // #256 circuit-breaker: a wedged canonical writer makes every drain fail; back the stage off
   // (exponential, capped) instead of re-attempting on every sweep forever (which spins cognition +
   // grows the spans file → the heap-exhaustion crash). A clean drain resets it; items are NOT set
@@ -333,6 +337,12 @@ export class DecomposeStage {
     return this.cap;
   }
 
+  /** INGEST-PERF item 1 perf proof/telemetry: how many queue reads were served from the canonical-HEAD
+   *  memo (`hits` = O(N) walks skipped) vs recomputed (`misses` = walks actually run). */
+  queueCacheStats(): { hits: number; misses: number } {
+    return { hits: this.queueCache.hits, misses: this.queueCache.misses };
+  }
+
   /** Is this stage actively draining right now? (OBS-5 per-stage `running` state.) */
   busy(): boolean {
     return this.draining;
@@ -388,7 +398,7 @@ export class DecomposeStage {
    *  {@link runDrains} can back off, true on a clean pass. */
   private async drainOnce(): Promise<boolean> {
     try {
-      let queue = await readDecomposeQueue(this.root, this.maxAttempts);
+      let queue = await this.queueCache.read(this.root, () => readDecomposeQueue(this.root, this.maxAttempts));
       while (queue.length > 0) {
         // ORCH-17/18/20: process up to `cap` sources concurrently — each prepares OFF the lock in its
         // own ephemeral worktree, advances UNDER the shared lock (cap=1 ⇒ serial; cross-stage cognition
@@ -418,7 +428,7 @@ export class DecomposeStage {
             );
           }),
         );
-        queue = await readDecomposeQueue(this.root, this.maxAttempts);
+        queue = await this.queueCache.read(this.root, () => readDecomposeQueue(this.root, this.maxAttempts));
       }
       return true;
     } catch (err) {
