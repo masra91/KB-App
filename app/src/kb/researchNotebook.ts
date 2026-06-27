@@ -13,6 +13,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readEvents } from './activityIndex';
+import { isEnrichmentGap } from './enrichGap';
 import { isSafeResearcherId, normalizeTerm } from './researchers';
 
 /** A subject/area the researcher has already drilled (re-opens when stale, see {@link isAreaStale}). */
@@ -21,6 +22,14 @@ export interface NotebookArea {
   lastRunTs: number;
   returned: 'finding' | 'no-finding' | 'failed';
   citations: number;
+  /**
+   * The orient ANGLES already drilled for this area within the staleness window (RESEARCH-QUALITY) — the
+   * decorated steers (e.g. `re Ada Lovelace: education`) the prior passes targeted. Orient passes these to
+   * `chooseAngle` as the exclusion set so a re-run on the SAME entity ROTATES to a different missing facet
+   * (different query → different results) instead of re-issuing the identical gap query every pass. Only
+   * non-stale angles are kept, so a facet drilled long ago legitimately re-opens. Absent on legacy notebooks.
+   */
+  targetedFacets?: string[];
 }
 /** A source the researcher has already fetched+cited → result-level dedup (don't re-find page 1). */
 export interface NotebookSource {
@@ -110,13 +119,23 @@ export function boundNotebook(nb: FieldNotebook, nowMs: number): FieldNotebook {
  * Rebuild a researcher's notebook from its OWN audit lineage (RESEARCH-6) — the canonical source. Reads
  * the researcher's `researched`/`no-finding`/`research-failed` events, folds them into areas (by subject
  * key, newest outcome + citation count) + harvested sources (cited URLs → host/url, newest ts), then
- * bounds. `frontier` is carried from `prior` (it's maintained incrementally by the run phase, not derived
- * from audit). Returns a fresh, bounded notebook — the digest is always reconstructable from the audit.
+ * bounds. Returns a fresh, bounded notebook — the digest is always reconstructable from the audit.
+ *
+ * RESEARCH-QUALITY — the frontier is now DERIVED from the audit (it was dead code: `NotebookFrontier`
+ * existed but nothing ever populated it, so orient saw no fresh leads and re-issued the same angle every
+ * run). Each pass records the GAP it ran against + the ANGLE it drilled on its audit event; here we fold
+ * those across the lineage into:
+ *   - `area.targetedFacets` — the angles already drilled for a subject (within the staleness window), so
+ *     orient can EXCLUDE them and rotate to a different missing facet on the next run; and
+ *   - `frontier` — the gap's MISSING facets that NO pass has targeted yet (the uncovered leads), so even a
+ *     re-dispatch whose request lost its gap still has gap-grounded angles to pursue.
  */
-export async function deriveNotebook(root: string, researcherId: string, nowMs: number, prior?: FieldNotebook): Promise<FieldNotebook> {
+export async function deriveNotebook(root: string, researcherId: string, nowMs: number): Promise<FieldNotebook> {
   const events = await readEvents(root, { actors: ['researcher'], subjectId: researcherId }); // newest-first
   const areasByKey = new Map<string, NotebookArea>();
   const sourcesByUrl = new Map<string, NotebookSource>();
+  const targetedByKey = new Map<string, string[]>(); // area key → angles drilled (non-stale)
+  const missingByKey = new Map<string, Map<string, { ts: number; fromSourceId: string }>>(); // area key → facet → newest lead
   for (const e of events) {
     const ts = Date.parse(e.ts) || 0;
     const what = typeof e.payload.what === 'string' ? e.payload.what : '';
@@ -135,12 +154,44 @@ export async function deriveNotebook(root: string, researcherId: string, nowMs: 
         if (!existing || ts > existing.ts) sourcesByUrl.set(url, { host, url, ts });
       }
     }
+    // The angle drilled this pass — kept only when non-stale so an old facet re-opens for re-research.
+    const angle = typeof e.payload.angle === 'string' ? e.payload.angle.trim() : '';
+    if (angle && nowMs - ts < NOTEBOOK_STALE_MS) {
+      const arr = targetedByKey.get(key) ?? [];
+      arr.push(angle);
+      targetedByKey.set(key, arr);
+    }
+    // The gap the pass ran against → its missing facets are candidate frontier leads (newest ts wins).
+    if (isEnrichmentGap(e.payload.gap)) {
+      const fm = missingByKey.get(key) ?? new Map<string, { ts: number; fromSourceId: string }>();
+      const fromSourceId = e.subjects.sourceId ?? e.subjects.requestId ?? '';
+      for (const facet of e.payload.gap.missing) {
+        if (typeof facet !== 'string' || facet.trim().length === 0) continue;
+        const prev = fm.get(facet);
+        if (!prev || ts > prev.ts) fm.set(facet, { ts, fromSourceId });
+      }
+      missingByKey.set(key, fm);
+    }
+  }
+  // Attach the per-area exclusion set (dedup the angle strings, keep insertion order).
+  for (const [key, angles] of targetedByKey) {
+    const area = areasByKey.get(key);
+    if (area) area.targetedFacets = [...new Set(angles)];
+  }
+  // Frontier: a gap facet is a live lead only if NO recorded angle for its area already targeted it.
+  const frontier: NotebookFrontier[] = [];
+  for (const [key, facets] of missingByKey) {
+    const drilled = (targetedByKey.get(key) ?? []).map((a) => a.toLowerCase());
+    for (const [facet, info] of facets) {
+      if (drilled.some((a) => a.includes(facet.toLowerCase()))) continue; // already covered by a prior angle
+      frontier.push({ term: facet, fromSourceId: info.fromSourceId, ts: info.ts });
+    }
   }
   const derived: FieldNotebook = {
     researcherId,
     areas: [...areasByKey.values()],
     harvested: [...sourcesByUrl.values()],
-    frontier: prior?.frontier ?? [],
+    frontier,
   };
   return boundNotebook(derived, nowMs);
 }

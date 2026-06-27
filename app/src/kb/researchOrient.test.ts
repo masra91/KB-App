@@ -79,6 +79,42 @@ describe('gap-driven angle (RESEARCH-24) — a MISSING facet beats the generic f
   });
 });
 
+describe('cross-run facet rotation (RESEARCH-QUALITY) — two runs on the same entity differ', () => {
+  // The Principal's core defect: "researchers return almost the same thing each time." With a static gap a
+  // re-run re-issued the IDENTICAL first-facet query. `targetedAngles` (from the field notebook) excludes a
+  // facet already drilled so the steer rotates. Delete the `notDrilled` filter in chooseAngle and these go
+  // red (fails-before/passes-after).
+  it('chooseAngle skips a facet already drilled on a prior pass, then goes cold when all are exhausted', () => {
+    const req: ResearchRequest = { ...reqOf('Acme Corp'), gap: { present: [], missing: ['founding date', 'leadership'] } };
+    // founding date already drilled (the decorated angle contains it) → rotate to the next missing facet.
+    expect(chooseAngle(req, [], [], [], undefined, ['re Acme Corp: founding date'])).toContain('leadership');
+    // every gap facet drilled → nothing left to target → honest cold steer (don't re-issue a stale query).
+    expect(chooseAngle(req, [], [], [], undefined, ['founding date', 'leadership'])).toBe('');
+  });
+
+  it('through the REAL orient() path: run 2 rotates to a different missing facet → a different query', async () => {
+    await withTemp(async (root) => {
+      const gap: { present: string[]; missing: string[] } = { present: [], missing: ['founding date', 'headquarters or location', 'leadership'] };
+      const req: ResearchRequest = { ...reqOf('Acme Corp'), by: { stage: 'enrich', entityId: 'ent-acme' }, gap };
+      const cfg = web({ egressTier: 'local-only', orientBudget: 5 });
+      const noNeighbors = { readNeighborhood: reader({ found: false }), gate: sensitivityAllowsOrientRead, now: () => '2026-02-02T00:00:00.000Z' };
+
+      // Run 1: no history → the first missing facet.
+      const r1 = await orient(root, cfg, req, noNeighbors);
+      expect(r1.angle).toContain('founding date');
+      // Persist run 1's outcome the way runResearcher does (angle + gap on the `researched` event).
+      await appendAuditEvent(root, { actor: 'researcher', eventType: 'researched', ts: '2026-02-01T00:00:00.000Z', subjects: { researcherId: 'web-1', sourceId: 'SRC1', entityId: 'ent-acme' }, payload: { what: 'Acme Corp', citations: [], angle: r1.angle, gap } });
+
+      // Run 2: the notebook now excludes the drilled facet → orient rotates.
+      const r2 = await orient(root, cfg, req, noNeighbors);
+      expect(r2.angle).not.toContain('founding date');
+      expect(r2.angle).toContain('headquarters or location');
+      // The egress-facing artifact actually differs — that's the diversity the Principal asked for.
+      expect(buildOrientedQuery(req, r1.angle)).not.toBe(buildOrientedQuery(req, r2.angle));
+    });
+  });
+});
+
 describe('buildOrientedQuery — THE QUERY-CONSTRUCTION GUARD (D6a/D8)', () => {
   it('an adversarial KB-dump angle can NEVER produce a verbatim-dump query (bounded by what + ≤500 ctx)', () => {
     const req = reqOf('Project Atlas');

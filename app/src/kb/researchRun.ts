@@ -108,11 +108,15 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
   // its reads never increment the egress fetch budget. A failure here must never block the research pass
   // (degrade to a cold start), so it's swallowed to a no-op.
   let researchReq = req;
+  let chosenAngle = '';
   if (deps.orient) {
     try {
-      researchReq = (await deps.orient(r, req)).orientedReq;
+      const oriented = await deps.orient(r, req);
+      researchReq = oriented.orientedReq;
+      chosenAngle = oriented.angle; // recorded on the audit so the notebook can rotate the next run (RESEARCH-QUALITY)
     } catch {
       researchReq = req; // orient is best-effort awareness; never block egress on it
+      chosenAngle = '';
     }
   }
 
@@ -139,7 +143,10 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
       eventType: 'no-finding',
       ts: now(), // stamp with the pass's (injectable) clock — keeps audit ts == the run, not wall-clock
       subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
-      payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier },
+      // RESEARCH-QUALITY: stamp the drilled `angle` + the `gap` so the field notebook can mark this facet
+      // targeted and rotate the NEXT pass to a different missing facet (a looked-and-found-nothing pass
+      // still counts as drilled — don't immediately re-issue the same query).
+      payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier, ...(chosenAngle ? { angle: chosenAngle } : {}), ...(req.gap ? { gap: req.gap } : {}) },
     });
     return { sourceIds: [], note: 'no finding' };
   }
@@ -163,7 +170,9 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
     eventType: 'researched',
     ts: fetchedAt, // == the pass clock (matches provenance.fetchedAt), not wall-clock
     subjects: { researcherId: r.id, requestId: req.id, sourceId: out.ids[0], ...(req.by.entityId ? { entityId: req.by.entityId } : {}) },
-    payload: { what: req.what, why: req.why, query: findings.query, citations: findings.citations, egressTier: r.egressTier, externallySourced: true },
+    // RESEARCH-QUALITY: `angle` (the facet drilled) + `gap` let deriveNotebook mark this facet targeted and
+    // surface the still-uncovered facets as frontier leads — so the next pass on this entity rotates.
+    payload: { what: req.what, why: req.why, query: findings.query, citations: findings.citations, egressTier: r.egressTier, externallySourced: true, ...(chosenAngle ? { angle: chosenAngle } : {}), ...(req.gap ? { gap: req.gap } : {}) },
   });
 
   // Warm-start (RESEARCH-21): refresh the field notebook from the audit (which now includes this
