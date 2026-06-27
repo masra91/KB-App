@@ -120,6 +120,35 @@ describe.skipIf(!gitAvailable)('readAllAuditEvents — the walker (AUDIT-4/10)',
       expect(events[0].eventType).toBe('connected');
     });
   });
+
+  // Regression (SPEC-0029 AUDIT-6/10): post-SCALE-5, connect writes its RESOLVE (entity-merge) audit
+  // PER-BLOCK under `connect/blocks/*.jsonl`, not the legacy shared `connect/audit.jsonl`. The walker
+  // must read those per-block files or connect's transformations vanish from the feed/lineage/source
+  // trace whenever cap>1 (the default). Fails-before (walker only read connect/audit.jsonl) → passes-after.
+  it('reads connect RESOLVE audit from the per-block connect/blocks/*.jsonl files (SCALE-5)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // Two concurrent blocks, each its own disjoint per-block file (the SCALE-5 layout). No shared
+      // connect/audit.jsonl is written for resolves at cap>1.
+      await writeAudit(root, path.join('connect', 'blocks', 'person-atlas-1a2b3c4d.jsonl'), [
+        { ts: '2026-01-01T00:03:00.000Z', stage: 'connect', runId: 'N1', blockKey: 'person|atlas', model: 'm', event: 'resolved', node: 'entities/2026/01/E1.md', candidates: 2, merged: 1 },
+      ]);
+      await writeAudit(root, path.join('connect', 'blocks', 'org-acme-9f8e7d6c.jsonl'), [
+        { ts: '2026-01-01T00:04:00.000Z', stage: 'connect', runId: 'N2', blockKey: 'org|acme', model: 'm', event: 'resolved', node: 'entities/2026/01/E2.md', candidates: 3, merged: 2 },
+      ]);
+      const events = await readAllAuditEvents(root);
+      const connectEvents = events.filter((e) => e.actor === 'connect');
+      expect(connectEvents).toHaveLength(2);
+      // Each per-block resolve surfaces with its merged entity as the subject (so it joins lineage).
+      expect(connectEvents.map((e) => e.subjects.entityId).sort()).toEqual(['E1', 'E2']);
+      // Provenance points back at the per-block file + line for raw drill-down (AUDIT-5).
+      expect(connectEvents.find((e) => e.subjects.entityId === 'E1')!.provenance.file).toBe(
+        path.join('connect', 'blocks', 'person-atlas-1a2b3c4d.jsonl'),
+      );
+      // And the per-block resolve is reachable by subject filter (AUDIT-7) — what the source trace uses.
+      expect(filterEvents(events, { subjectId: 'E2' }).some((e) => e.actor === 'connect')).toBe(true);
+    });
+  });
 });
 
 describe.skipIf(!gitAvailable)('buildActivityIndex — cap + determinism (AUDIT-4)', () => {
