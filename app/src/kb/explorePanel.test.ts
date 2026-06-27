@@ -2,7 +2,7 @@
 // feeds controlled entities/links/claims; we assert the 1-hop neighborhood, direction folding,
 // bounded top-K + overflow, the center's claims, and the focus fallback + empty-graph behavior.
 import { describe, it, expect, vi } from 'vitest';
-import { buildNeighborhood, listExploreEntities, DEFAULT_TOP_K } from './explorePanel';
+import { buildNeighborhood, listExploreEntities, DEFAULT_TOP_K, EDGE_ASSERTED_AT } from './explorePanel';
 import type { RecallTools, EntityHit } from './recall';
 
 function hit(over: Partial<EntityHit> & Pick<EntityHit, 'rel' | 'name'>): EntityHit {
@@ -22,10 +22,12 @@ function fakeTools(opts: {
   links?: Record<string, { outgoing?: string[]; incoming?: string[] }>; // keyed by rel; values are rels/names
   claims?: Record<string, FakeClaim[]>;
   sources?: Record<string, string>; // source dir → its source.md content (for title derivation, WS-A)
+  nodes?: Record<string, string>; // entity rel → its node markdown (the links block, for predicate parse)
 }): RecallTools {
   const links = opts.links ?? {};
   const claims = opts.claims ?? {};
   const sources = opts.sources ?? {};
+  const nodes = opts.nodes ?? {};
   return {
     entityLookup: vi.fn(async ({ query }: { query: string }) => {
       const n = (query ?? '').toLowerCase();
@@ -41,7 +43,7 @@ function fakeTools(opts: {
         incoming: (l.incoming ?? []).map((from) => ({ from, to: entity })),
       };
     }),
-    readNode: vi.fn(async () => null),
+    readNode: vi.fn(async ({ rel }: { rel: string }) => nodes[rel] ?? null),
     readSource: vi.fn(async ({ dir }: { dir: string }) => sources[dir] ?? null),
     grep: vi.fn(async () => []),
   };
@@ -136,6 +138,68 @@ describe('explorePanel — buildNeighborhood', () => {
     const nb = await buildNeighborhood(fakeTools({ entities: [] }));
     expect(nb.found).toBe(false);
     expect(nb.neighbors).toHaveLength(0);
+  });
+});
+
+describe('explorePanel — typed, confidence-bearing edges (EXPLORE-5)', () => {
+  // A center node's generated links block (CONNECT-12): `- <predicate> [[targetRel|Name]]`, plus a
+  // bare (predicate-less) link and a claims-block row that must NOT leak a predicate to any entity.
+  const ATLAS_NODE = [
+    '# Project Atlas',
+    '<!-- kb:links:start (generated — edit via Connect, not here) -->',
+    '- funds [[entities/org/finance.md|Finance Team]]',
+    '- [[entities/person/steve.md|Steve Park]]',
+    '<!-- kb:links:end -->',
+    '<!-- kb:claims:start -->',
+    '- [[claims/01H.md]] — Funded for Q3 *(fact, 0.8)*',
+    '<!-- kb:claims:end -->',
+  ].join('\n');
+
+  it('surfaces an outgoing edge’s relationship predicate from the center’s links block', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS, FINANCE, STEVE],
+      nodes: { 'entities/project/atlas.md': ATLAS_NODE },
+      links: {
+        'entities/project/atlas.md': { outgoing: ['entities/org/finance.md|Finance Team', 'entities/person/steve.md|Steve Park'] },
+      },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    const byName = Object.fromEntries(nb.neighbors.map((n) => [n.name, n.predicate]));
+    expect(byName['Finance Team']).toBe('funds'); // typed edge
+    expect(byName['Steve Park']).toBeUndefined(); // bare link → no predicate (the usual v1 case)
+  });
+
+  it('does not assign a predicate to incoming-only edges in v1 (documented bound)', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS, FINANCE],
+      nodes: { 'entities/project/atlas.md': ATLAS_NODE },
+      links: { 'entities/project/atlas.md': { incoming: ['entities/org/finance.md'] } },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.neighbors[0]).toMatchObject({ name: 'Finance Team', direction: 'in', predicate: undefined });
+  });
+
+  it('flags low-confidence edges speculative and asserted edges not (the EDGE_ASSERTED_AT cut)', async () => {
+    const high = hit({ rel: 'entities/x/high.md', name: 'High', confidence: EDGE_ASSERTED_AT }); // == cut → asserted
+    const low = hit({ rel: 'entities/x/low.md', name: 'Low', confidence: EDGE_ASSERTED_AT - 0.1 }); // below → speculative
+    const tools = fakeTools({
+      entities: [ATLAS, high, low],
+      links: { 'entities/project/atlas.md': { outgoing: ['entities/x/high.md', 'entities/x/low.md'] } },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    const spec = Object.fromEntries(nb.neighbors.map((n) => [n.name, n.speculative]));
+    expect(spec).toEqual({ High: false, Low: true });
+  });
+
+  it('tolerates an unreadable center node — edges still render, just without predicates (ENG-16)', async () => {
+    const tools = fakeTools({
+      entities: [ATLAS, FINANCE],
+      // no `nodes` entry → readNode returns null
+      links: { 'entities/project/atlas.md': { outgoing: ['entities/org/finance.md|Finance Team'] } },
+    });
+    const nb = await buildNeighborhood(tools, 'Project Atlas');
+    expect(nb.neighbors).toHaveLength(1);
+    expect(nb.neighbors[0]).toMatchObject({ name: 'Finance Team', predicate: undefined });
   });
 });
 

@@ -5,11 +5,14 @@
 // node-tested logic (EXPLORE-1 read-only by construction — it only calls the read-only RecallTools);
 // the IPC handler (main) and the DOM view (renderer) are thin shells over it.
 //
-// Edges: Connect promotes entity↔entity `[[wikilinks]]` (CONNECT-12). The rendered wikilink carries
-// the target + display name but NOT a per-link predicate/confidence in v1 (predicates are "usually
-// absent", DATA-8 link-confidence isn't persisted in the link) — so a v1 edge surfaces the NEIGHBOR
-// NODE's kind + confidence (which ARE on the node), and an out/in/both direction. Typed predicates +
-// per-edge confidence are a documented v2 enhancement (EXPLORE-5 is a `should`).
+// Edges: Connect promotes entity↔entity `[[wikilinks]]` (CONNECT-12) into a generated links block:
+// `- <predicate> [[targetRel|Name]]`. The wikilink itself carries no per-link confidence (DATA-8
+// isn't persisted in the link), so a v1 edge surfaces (a) the NEIGHBOR NODE's kind + confidence
+// (which ARE on the node), (b) an out/in/both direction, (c) the relationship **predicate/label**
+// when Connect wrote one (parsed from the center's links block — usually absent for bare hints), and
+// (d) a **speculative** flag when the edge confidence reads low (EXPLORE-5 / DATA-8: speculative links
+// are visually distinct, not asserted as fact). Per-edge confidence uses the neighbor node's
+// confidence as the v1 proxy; persisted per-link confidence + incoming-edge predicates are v2.
 import type { RecallTools, EntityHit, ClaimHit } from './recall';
 import { deriveSourceTitle } from './sourceDoc';
 
@@ -22,9 +25,11 @@ export interface ExploreEntityRef {
   confidence: number;
 }
 
-/** A 1-hop neighbor of the focused entity, with the edge direction. */
+/** A 1-hop neighbor of the focused entity, with the typed, confidence-bearing edge (EXPLORE-5). */
 export interface ExploreNeighbor extends ExploreEntityRef {
   direction: 'out' | 'in' | 'both'; // outgoing link, incoming backlink, or both
+  predicate?: string; // relationship label from the center's links block (outgoing only in v1; usually absent)
+  speculative: boolean; // low-confidence edge — rendered visually distinct, not asserted (DATA-8); see EDGE_ASSERTED_AT
 }
 
 /**
@@ -60,10 +65,38 @@ export const DEFAULT_TOP_K = 12;
 const CENTER_CLAIM_CAP = 8;
 const ENTITY_SCAN_LIMIT = 2000;
 
+/**
+ * Edge confidence at/above which a link reads as **asserted**; below it the edge is **speculative**
+ * and rendered visually distinct (EXPLORE-5 / DATA-8). The cut matches SPEC-0039 §5's worked example
+ * (a 0.7 "funds" edge asserted; a 0.6 "approver" edge speculative-and-faded). v1 uses the neighbor
+ * NODE's confidence as the per-edge confidence proxy — per-link confidence isn't persisted (DATA-8).
+ */
+export const EDGE_ASSERTED_AT = 0.7;
+
 /** Parse a wikilink target (`entities/kind/slug.md|Display Name` or a bare name) → its path/name part. */
 function linkTargetPath(to: string): string {
   const bar = to.indexOf('|');
   return (bar === -1 ? to : to.slice(0, bar)).trim();
+}
+
+/**
+ * Map each outgoing link target (its `linkTargetPath`) → the relationship **predicate** Connect wrote
+ * for it, parsed from a node's generated links block (CONNECT-12: `- <predicate> [[targetRel|Name]]`).
+ * Predicates are usually absent in v1 (bare `relatesTo` hints) — a line with no text before the `[[`
+ * yields no entry. Tolerant by construction: claims-block rows (`- [[claims/…]] — …`) have no leading
+ * predicate so they're skipped, and a malformed line simply doesn't match. First predicate per target wins.
+ */
+function parseLinkPredicates(nodeMd: string | null): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!nodeMd) return out;
+  const re = /^\s*-\s*(.*?)\s*\[\[([^\]]+)\]\]/gm;
+  for (let m = re.exec(nodeMd); m; m = re.exec(nodeMd)) {
+    const predicate = m[1].trim();
+    if (!predicate) continue;
+    const target = linkTargetPath(m[2]);
+    if (target && !out.has(target)) out.set(target, predicate);
+  }
+  return out;
 }
 
 const byConfidence = (a: ExploreEntityRef, b: ExploreEntityRef): number =>
@@ -144,7 +177,18 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
   // (incoming `from` can be a claim file — those aren't graph nodes, VAULT-2 — so we keep only ones
   // that resolve to a known entity). Direction folds to 'both' when a pair links mutually.
   const { outgoing, incoming } = await tools.linkTraversal({ entity: center.rel });
+  // Relationship predicates live in the center node's links block (EXPLORE-5). Read it once; a missing /
+  // unreadable node degrades to no predicates (every edge still renders by direction + confidence).
+  let centerMd: string | null = null;
+  try {
+    centerMd = await tools.readNode({ rel: center.rel });
+  } catch {
+    centerMd = null;
+  }
+  const predByTarget = parseLinkPredicates(centerMd);
+
   const dir = new Map<string, 'out' | 'in' | 'both'>();
+  const predByRel = new Map<string, string>(); // resolved-neighbor rel → relationship label
   const mark = (rel: string, d: 'out' | 'in'): void => {
     if (rel === center!.rel) return; // never list the focus as its own neighbor
     const cur = dir.get(rel);
@@ -153,7 +197,11 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
   for (const o of outgoing) {
     const tp = linkTargetPath(o.to);
     const hit = byRel.get(tp) ?? byName.get(tp.toLowerCase());
-    if (hit) mark(hit.rel, 'out');
+    if (hit) {
+      mark(hit.rel, 'out');
+      const pred = predByTarget.get(tp);
+      if (pred && !predByRel.has(hit.rel)) predByRel.set(hit.rel, pred);
+    }
   }
   for (const i of incoming) {
     const hit = byRel.get(i.from);
@@ -163,7 +211,17 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
   const neighbors: ExploreNeighbor[] = [];
   for (const [rel, d] of dir) {
     const e = byRel.get(rel);
-    if (e) neighbors.push({ rel, id: e.id, name: e.name, kind: e.kind, confidence: e.confidence, direction: d });
+    if (e)
+      neighbors.push({
+        rel,
+        id: e.id,
+        name: e.name,
+        kind: e.kind,
+        confidence: e.confidence,
+        direction: d,
+        predicate: predByRel.get(rel),
+        speculative: e.confidence < EDGE_ASSERTED_AT,
+      });
   }
   neighbors.sort(byConfidence);
 
