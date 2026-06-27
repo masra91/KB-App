@@ -113,6 +113,20 @@ export async function upsertIntakeConnector(root: string, connector: IntakeConne
   return connectors;
 }
 
+/**
+ * Delete one intake connector by `id` from the registry (PANEL-11 lifecycle delete), returning the
+ * updated registry. PURGES the config row only — already-produced sources/findings + the audit trail
+ * are NOT touched here (ground truth is sacred; the caller audits the removal). No-op (returns the list
+ * unchanged) if the id is absent. Rejects an unsafe `id` at the boundary (fail loud at the write seam).
+ */
+export async function deleteIntakeConnector(root: string, id: string): Promise<IntakeConnectorConfig[]> {
+  if (!isSafeConnectorId(id)) throw new Error(`refusing to delete intake connector with unsafe id: ${JSON.stringify(id)}`);
+  const connectors = await readIntakeRegistry(root);
+  const remaining = connectors.filter((c) => c.id !== id);
+  if (remaining.length !== connectors.length) await writeIntakeRegistry(root, remaining);
+  return remaining;
+}
+
 /** Patch one connector's mutable fields; no-op if absent. Rejects an unsafe `id` at the boundary. */
 export async function patchIntakeConnector(
   root: string,

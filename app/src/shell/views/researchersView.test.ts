@@ -15,12 +15,14 @@ const m365Row: ResearcherView = { ...base, id: 'm365-1', template: 'm365', label
 
 let listResearchers: ReturnType<typeof vi.fn>;
 let setResearcherConfig: ReturnType<typeof vi.fn>;
+let removeResearcher: ReturnType<typeof vi.fn>;
 let runResearcherNow: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     listResearchers: listResearchers as unknown as KbApi['listResearchers'],
     setResearcherConfig: setResearcherConfig as unknown as KbApi['setResearcherConfig'],
+    removeResearcher: removeResearcher as unknown as KbApi['removeResearcher'],
     runResearcherNow: runResearcherNow as unknown as KbApi['runResearcherNow'],
   };
 }
@@ -29,6 +31,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   listResearchers = vi.fn(async () => [webRow]);
   setResearcherConfig = vi.fn(async () => [{ ...webRow, enabled: true }]);
+  removeResearcher = vi.fn(async () => []);
   runResearcherNow = vi.fn(async () => ({ ran: true, sourceIds: ['SRC1'], note: 'ok' }));
   setApi();
 });
@@ -526,5 +529,50 @@ describe('Field Desk — WorkIQ connector install/status card (WORKIQ-UI)', () =
     expect(card.getAttribute('data-state')).toBe('error');
     expect(card.querySelector('.rdesk-workiq-status')?.getAttribute('data-tone')).toBe('error');
     expect(card.querySelector('.rdesk-workiq-action')?.textContent).toBe('Recheck');
+  });
+});
+
+// PANEL-11 lifecycle delete — a user-added researcher is REMOVABLE (not merely disable-forever): a Retire
+// affordance behind a DESTRUCTIVE confirm. Sources it produced + its audit trail are RETAINED — the
+// confirm copy makes that explicit; only the config is purged.
+describe('Field Desk — lifecycle delete / Retire (PANEL-11)', () => {
+  it('every researcher strip carries a Retire affordance', async () => {
+    const c = await mount();
+    const strip = c.querySelector('.rdesk-strip[data-id="web-1"]')!;
+    expect(strip.querySelector('.researcher-remove')).toBeTruthy();
+    // The strip's shared confirm action is the danger-styled affordance the destructive Retire reuses.
+    expect(strip.querySelector('.researcher-confirm-go')?.classList.contains('viz-btn--danger')).toBe(true);
+  });
+
+  it('Retire reveals a destructive confirm worded to RETAIN already-produced sources; gated until confirm', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-remove')!.click();
+    const confirm = c.querySelector<HTMLElement>('.researcher-confirm')!;
+    expect(confirm.hidden).toBe(false);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/Retire .*stay in your KB/i);
+    expect(removeResearcher).not.toHaveBeenCalled(); // gated — not purged yet
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
+    await flush();
+    expect(removeResearcher).toHaveBeenCalledWith('web-1');
+  });
+
+  it('cancelling Retire purges nothing', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.researcher-remove')!.click();
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-cancel')!.click();
+    await flush();
+    expect(removeResearcher).not.toHaveBeenCalled();
+  });
+
+  // ENG-15/16 render safety: a legacy/partial researcher row must not crash the view, and per-row
+  // isolation keeps a well-formed neighbor's Retire affordance intact.
+  it('renders a partial/legacy researcher row without crashing, keeping per-row Retire', async () => {
+    const partial = { id: 'legacy', template: 'web', label: 'Legacy' } as unknown as ResearcherView; // missing budget/topics/etc.
+    listResearchers = vi.fn(async () => [partial, webRow]);
+    setApi();
+    const c = await mount();
+    expect(c.querySelectorAll('.rdesk-strip[data-id]').length).toBe(2); // both rows rendered, neither crashed
+    expect(c.querySelector('.rdesk-strip[data-id="legacy"] .researcher-remove')).toBeTruthy();
+    expect(c.querySelector('.rdesk-strip[data-id="web-1"] .researcher-remove')).toBeTruthy();
   });
 });
