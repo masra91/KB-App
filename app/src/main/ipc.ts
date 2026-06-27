@@ -108,7 +108,10 @@ import type {
   IntakeConnectorView,
   IntakeConnectorConfigPatch,
   RunIntakeConnectorResult,
+  WorkIqStatus,
+  InstallWorkIqResult,
 } from '../kb/types';
+import { workIqStatus, installWorkIq } from './researchWiring';
 
 async function loadVaultConfig(vaultPath: string): Promise<VaultConfig | null> {
   try {
@@ -584,6 +587,12 @@ export function registerIpc(): void {
   });
 
   ipcMain.handle('kb:listResearcherRuns', async (_e, id: string): Promise<ResearcherLastRun[]> => listResearcherRunsForActive(id));
+
+  // WORKIQ-FIX (SPEC-0028 Slice 3): the WorkIQ/M365 researcher CLI setup card. `kb:workIqStatus` reports
+  // whether the `workiq` CLI is on PATH (the researcher fails loud until it is); `kb:installWorkIq` runs
+  // the "simple workiq via CLI" install and re-detects. Pure status read needs no active vault.
+  ipcMain.handle('kb:workIqStatus', async (): Promise<WorkIqStatus> => workIqStatus());
+  ipcMain.handle('kb:installWorkIq', async (): Promise<InstallWorkIqResult> => installWorkIq());
 
   // SPEC-0037 WATCH-9: the unified Sources view's watched-folder rows. One list read folds config +
   // live `watching` + `lastEvent`; set/remove validate + loop-guard at this boundary (in the pipeline fn).

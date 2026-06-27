@@ -161,8 +161,17 @@ export function makeM365ResearchFn(opts: M365ResearchOptions = {}): ResearchFn {
       const citations = filterCitations(out.citations);
       const note = out.note.trim();
       return { found: note.length > 0, note, citations, query };
-    } catch {
-      return { found: false, note: '', citations: [], query };
+    } catch (err) {
+      // FAIL LOUD (#160 / RESEARCH-16 — failed ≠ empty): a CONFIGURED tenant whose WorkIQ CLI/MCP can't
+      // start (not installed, OAuth/MCP down, session error) is a NEEDS-SETUP failure, NOT a silent
+      // no-finding. The old bare `catch { return {found:false} }` is exactly why WorkIQ "did nothing"
+      // (researchDepsOptions never wired `mcpServer`, so every live pass hit the un-wired branch and
+      // returned empty). Surface it as `failed` so `runResearcher` audits a distinct `research-failed`
+      // event (Activity feed + the WorkIQ status card show it) instead of a dead-silent no-op. Returning
+      // (never re-throwing) keeps the dispatch resilient — one researcher's missing setup never crashes
+      // the batch. Mirrors researchWebAgent's failure contract.
+      const error = err instanceof Error ? err.message : String(err);
+      return { found: false, note: '', citations: [], query, failed: true, error };
     }
   };
 }
@@ -183,7 +192,11 @@ export function makeM365ResearchFn(opts: M365ResearchOptions = {}): ResearchFn {
  */
 function liveSdkSession(opts: M365ResearchOptions): NonNullable<M365ResearchOptions['session']> {
   return async ({ skill, prompt, query, maxToolCalls, timeoutMs, tenantId, surfaces }) => {
-    if (!opts.mcpServer) return { note: '', citations: [] }; // no concrete Graph MCP wired yet (env-gated)
+    // No WorkIQ/Graph MCP injected ⇒ the CLI isn't installed (researchWiring only provides `mcpServer`
+    // when `resolveWorkIqCli` finds the binary). THROW a needs-setup error so `makeM365ResearchFn`'s
+    // catch surfaces it as `failed` (research-failed audit + status card) — never the silent no-finding
+    // that hid the missing setup in the live build (WORKIQ-FIX, fail-loud).
+    if (!opts.mcpServer) throw new Error('WorkIQ/M365 is not set up — install the WorkIQ CLI to enable tenant research');
     const { CopilotClient, defineTool, approveAll, RuntimeConnection } = await import('@github/copilot-sdk');
     const { server, readTools } = opts.mcpServer({ tenantId, surfaces });
     let submitted: { note: string; citations: string[] } | null = null;
