@@ -156,7 +156,7 @@ function strip(c: IntakeConnectorView): string {
         <button type="button" class="viz-btn intake-confirm-cancel">Cancel</button>
         <button type="button" class="viz-btn viz-btn--primary intake-confirm-go">Confirm</button>
       </div>
-      <div class="rdesk-confirm viz-confirm intake-remove-confirm" hidden>
+      <div class="rdesk-confirm viz-confirm viz-confirm--danger intake-remove-confirm" hidden>
         <p class="rdesk-confirm-msg viz-confirm__msg intake-remove-confirm-msg viz-body"></p>
         <button type="button" class="viz-btn intake-remove-confirm-cancel">Cancel</button>
         <button type="button" class="viz-btn viz-btn--danger intake-remove-confirm-go">Remove</button>

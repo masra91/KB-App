@@ -166,6 +166,8 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(removeBtn).toBeTruthy();
     // The remove confirm is its own block with a danger-styled Confirm — not the primary enable/pull confirm.
     expect(strip.querySelector('.intake-remove-confirm .viz-btn--danger')).toBeTruthy();
+    // ...and the confirm frame itself is oxide (viz-confirm--danger) to match the danger button (DL coherence).
+    expect(strip.querySelector('.intake-remove-confirm')?.classList.contains('viz-confirm--danger')).toBe(true);
   });
 
   it('Remove gates behind a confirm (items kept), then calls removeIntakeConnector only on confirm', async () => {

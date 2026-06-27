@@ -549,11 +549,26 @@ describe('Field Desk — lifecycle delete / Retire (PANEL-11)', () => {
     c.querySelector<HTMLButtonElement>('.researcher-remove')!.click();
     const confirm = c.querySelector<HTMLElement>('.researcher-confirm')!;
     expect(confirm.hidden).toBe(false);
+    // Destructive → the frame goes oxide to match the danger go-button (DL ConfirmInline coherence).
+    expect(confirm.classList.contains('viz-confirm--danger')).toBe(true);
     expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/Retire .*stay in your KB/i);
     expect(removeResearcher).not.toHaveBeenCalled(); // gated — not purged yet
     c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
     await flush();
     expect(removeResearcher).toHaveBeenCalledWith('web-1');
+  });
+
+  it('the danger frame is per-action — a benign arm confirm is NOT oxide, and Retire→cancel→arm resets it', async () => {
+    const c = await mount();
+    // Retire shows the oxide frame...
+    c.querySelector<HTMLButtonElement>('.researcher-remove')!.click();
+    expect(c.querySelector<HTMLElement>('.researcher-confirm')!.classList.contains('viz-confirm--danger')).toBe(true);
+    // ...cancel, then arm (egress caution, not destructive) → frame must be back to the brass default.
+    c.querySelector<HTMLButtonElement>('.researcher-confirm-cancel')!.click();
+    c.querySelector<HTMLButtonElement>('.rdesk-arm')!.click();
+    const confirm = c.querySelector<HTMLElement>('.researcher-confirm')!;
+    expect(confirm.hidden).toBe(false);
+    expect(confirm.classList.contains('viz-confirm--danger')).toBe(false);
   });
 
   it('cancelling Retire purges nothing', async () => {

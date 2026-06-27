@@ -379,14 +379,19 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     let revert: (() => void) | null = null;
     const hideConfirm = (): void => {
       confirm.hidden = true;
+      confirm.classList.remove('viz-confirm--danger'); // reset the frame hue so the next (benign) confirm isn't left oxide
       confirmMsg.textContent = ''; // WS1 #1: clear the prompt on dismiss so a stale message can't linger
       pending = null;
       revert = null;
     };
-    const askConfirm = (message: string, run: () => Promise<void>, undo: () => void): void => {
+    // `danger` paints the confirm frame oxide to match a destructive go-button (DL ConfirmInline: danger=oxide).
+    // The shared confirm serves both the destructive Retire (danger) and the egress-caution arm/widen prompts,
+    // so the hue is per-invocation — set here, cleared in hideConfirm.
+    const askConfirm = (message: string, run: () => Promise<void>, undo: () => void, danger = false): void => {
       pending = run;
       revert = undo;
       confirmMsg.textContent = message;
+      confirm.classList.toggle('viz-confirm--danger', danger);
       confirm.hidden = false;
     };
     const apply = async (patch: ResearcherConfigPatch): Promise<void> => {
@@ -502,9 +507,10 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
       );
     });
 
-    // Retire (PANEL-11 lifecycle delete) — DESTRUCTIVE: purges the researcher's config. The confirm is the
-    // shared danger-styled affordance (rdesk-confirm-go is viz-btn--danger). Sources it already brought
-    // back + its full activity trail are RETAINED — only the config/registration is removed.
+    // Retire (PANEL-11 lifecycle delete) — DESTRUCTIVE: purges the researcher's config. Confirm via the
+    // shared danger-styled affordance, flagged `danger` so the frame goes oxide to match the go-button
+    // (DL ConfirmInline coherence). Sources it already brought back + its full activity trail are RETAINED
+    // — only the config/registration is removed.
     removeBtn.addEventListener('click', () => {
       askConfirm(
         `Retire “${current.label}”? Its configuration is removed and it stops running. Sources it already brought in — and its full activity trail — stay in your KB.`,
@@ -518,6 +524,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
           }
         },
         () => {},
+        true, // destructive → oxide confirm frame
       );
     });
 
