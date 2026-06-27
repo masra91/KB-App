@@ -352,3 +352,50 @@ describe.skipIf(!gitAvailable)('shared canonical-writer lock serializes stages (
     });
   });
 });
+
+describe.skipIf(!gitAvailable)('INGEST-PERF item 1 — canonical-HEAD queue memo (before/after perf proof)', () => {
+  it('an idle re-poke on an UNCHANGED canonical skips the O(N) queue walk entirely', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await archiveText(root, 'alpha');
+      await archiveText(root, 'beta');
+
+      const stage = new DecomposeStage(root, deciderFor(['A']));
+      // First drain: every read recomputes because each processed batch advances the canonical (HEAD
+      // moves) — so the memo never goes stale during an active drain (hits stay 0, misses ≥ 2).
+      await stage.poke();
+      expect(await readDecomposeQueue(root)).toHaveLength(0); // drained to empty
+      const afterDrain = stage.queueCacheStats();
+      expect(afterDrain.hits).toBe(0);
+      expect(afterDrain.misses).toBeGreaterThanOrEqual(2);
+
+      // Second drain (a 30s safety-net sweep) over the SAME canonical — no commit since last read, so
+      // the walk is SKIPPED: exactly one cache hit, zero new walks. This is the idle-sweep waste the
+      // brief targets (re-reading every audit.jsonl every 30s for nothing).
+      await stage.poke();
+      const afterIdle = stage.queueCacheStats();
+      expect(afterIdle.hits).toBe(1); // the idle sweep was served from the memo
+      expect(afterIdle.misses).toBe(afterDrain.misses); // ZERO additional tree walks
+    });
+  });
+
+  it('recomputes a FRESH queue after a new source is archived (HEAD moved) — no staleness', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await archiveText(root, 'first');
+
+      const stage = new DecomposeStage(root, deciderFor(['A']));
+      await stage.poke(); // drain the one source
+      const afterFirst = stage.queueCacheStats();
+
+      // A new source is archived → the canonical HEAD moves → the next poke MUST re-walk (cache miss)
+      // and pick it up, never serve the stale empty queue.
+      await archiveText(root, 'second');
+      await stage.poke();
+      expect(await readDecomposeQueue(root)).toHaveLength(0); // the new source was processed
+      expect(stage.queueCacheStats().misses).toBeGreaterThan(afterFirst.misses); // a real walk ran
+      // Both sources produced candidates → the freshly-archived one was not missed.
+      expect(await readCandidateFiles(root)).toHaveLength(2);
+    });
+  });
+});

@@ -33,6 +33,7 @@ import type { Review } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { withConcurrentAdvance, withEphemeralWorktree, advanceOrCollide, canonicalHead, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
+import { CanonicalQueueCache } from './queueCache';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -677,6 +678,9 @@ export class ClaimsStage {
   private pending = false;
   private current: Promise<void> | null = null;
   private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
+  // INGEST-PERF item 1: memoize the O(N) entity-tree walk against the canonical HEAD sha — both call
+  // sites share it, and an idle sweep on an unchanged canonical skips the walk entirely.
+  private readonly queueCache = new CanonicalQueueCache<string[]>();
 
   /**
    * @param afterDrain optional hook run (serialized under the shared lock) after a drain that
@@ -731,6 +735,12 @@ export class ClaimsStage {
     return this.cap;
   }
 
+  /** INGEST-PERF item 1 perf proof/telemetry: queue reads served from the canonical-HEAD memo
+   *  (`hits` = O(N) walks skipped) vs recomputed (`misses` = walks actually run). */
+  queueCacheStats(): { hits: number; misses: number } {
+    return { hits: this.queueCache.hits, misses: this.queueCache.misses };
+  }
+
   /** Is this stage actively draining right now? (OBS-5 per-stage `running` state.) */
   busy(): boolean {
     return this.draining;
@@ -771,7 +781,7 @@ export class ClaimsStage {
   }
 
   private async drainOnce(): Promise<void> {
-    let queue = await readClaimsQueue(this.root, this.maxAttempts);
+    let queue = await this.queueCache.read(this.root, () => readClaimsQueue(this.root, this.maxAttempts));
     let worked = false;
     while (queue.length > 0) {
       // ORCH-17/18/20: process up to `cap` entities concurrently (each in its own ephemeral worktree;
@@ -805,7 +815,7 @@ export class ClaimsStage {
         this.log.error('claims.drain-error', { err }); // systemic — stop this pass; a later poke/sweep retries
         return;
       }
-      queue = await readClaimsQueue(this.root, this.maxAttempts);
+      queue = await this.queueCache.read(this.root, () => readClaimsQueue(this.root, this.maxAttempts));
     }
     // Publish entity nodes' newly-attached claims staging→main (STAGING-3/11), serialized under
     // the shared lock. Gated on `worked` so idle sweeps don't churn the gate (it's idempotent).

@@ -19,10 +19,17 @@ function resolveCeiling(): number {
   return envCeilingOverride() ?? coresDerivedCeiling();
 }
 
-/** The cores-derived ceiling — SCALE-1's "current cores-derived default" (no env, no Settings). */
+/** The cores-derived ceiling — SCALE-1's "current cores-derived default" (no env, no Settings).
+ *  INGEST-PERF item 2: the old `min(4, …)` cap was the real ingest limiter — it sat BELOW the per-stage
+ *  caps of 3, so a cap-3 stage (decompose/claims/compose) could never actually run 3 in flight, and two
+ *  stages overlapping starved each other under the SCALE-3 reservation. Raise the cap to 8 (tie the
+ *  ceiling to `cores-1`, the real parallelism) so a cap-3 stage can fill its cap AND leave slots for
+ *  downstream stages' reserved first slot. This is just the SEED/fixed-mode value; in Auto mode the AIMD
+ *  controller (SCALE-7/8) climbs/backs off from here on real rate-limit feedback, so a too-high seed
+ *  self-corrects rather than thrashing the CLI. Env + manual Settings overrides still win unchanged. */
 export function coresDerivedCeiling(): number {
   const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-  return Math.max(2, Math.min(4, cores - 1));
+  return Math.max(2, Math.min(8, cores - 1));
 }
 
 /** The env ceiling override (`KB_COPILOT_MAX_CONCURRENCY`) if a valid ≥1 int, else undefined. SCALE-1:

@@ -53,6 +53,7 @@ import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
 import { advanceOrCollide, boundedGit, canonicalHead, DEFAULT_MAX_COLLISION_RETRIES, DEFAULT_STAGE_CAP, withConcurrentAdvance, withEphemeralWorktree, type PrepareContext } from './canonicalAdvance';
+import { CanonicalQueueCache } from './queueCache';
 import { noopDevLog, type DevLog } from './devlog';
 import { noopTracer, noopActiveSpan, STAGE_RUN_OP, type Tracer, type ActiveSpan } from './tracing';
 
@@ -1313,6 +1314,9 @@ export class ConnectStage {
   private pending = false;
   private current: Promise<void> | null = null;
   private drainStartedAt: string | null = null; // when the active drain began (OBS/VIZ in-flight dwell)
+  // INGEST-PERF item 1: memoize the O(N) candidate/node walk against the canonical HEAD sha — both
+  // call sites share it, and an idle sweep on an unchanged canonical skips the walk entirely.
+  private readonly queueCache = new CanonicalQueueCache<CandidateSet[]>();
 
   /**
    * @param afterDrain optional hook run (serialized under the shared lock) after a drain that
@@ -1350,6 +1354,12 @@ export class ConnectStage {
   /** The current resolve-stage cap (Status VIZ-2 / diagnostics). */
   getCap(): number {
     return this.cap;
+  }
+
+  /** INGEST-PERF item 1 perf proof/telemetry: queue reads served from the canonical-HEAD memo
+   *  (`hits` = O(N) walks skipped) vs recomputed (`misses` = walks actually run). */
+  queueCacheStats(): { hits: number; misses: number } {
+    return { hits: this.queueCache.hits, misses: this.queueCache.misses };
   }
 
   start(sweepMs = 30_000): void {
@@ -1408,7 +1418,7 @@ export class ConnectStage {
   private async drainOnce(): Promise<void> {
     let worked = false;
     try {
-      let queue = await readConnectQueue(this.root, this.maxAttempts);
+      let queue = await this.queueCache.read(this.root, () => readConnectQueue(this.root, this.maxAttempts));
       while (queue.length > 0) {
         // SCALE-5: resolve up to `cap` blocks CONCURRENTLY — each connectOne prepares OFF the lock in its
         // own ephemeral worktree (was a shared fixed worktree → cap pinned at 1), advances UNDER the shared
@@ -1435,7 +1445,7 @@ export class ConnectStage {
             );
           }),
         );
-        queue = await readConnectQueue(this.root, this.maxAttempts);
+        queue = await this.queueCache.read(this.root, () => readConnectQueue(this.root, this.maxAttempts));
       }
     } catch (err) {
       // Systemic/unexpected (the queue read or canonical writer is wedged — affects EVERY item, not one).

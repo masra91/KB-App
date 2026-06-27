@@ -244,7 +244,7 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     expect(stepperValue('cap-decompose')).toBe('3');
     expect(stepperValue('cap-claims')).toBe('3');
     expect(stepperValue('cap-compose')).toBe('3');
-    expect(stepperValue('cap-archive')).toBe('1');
+    expect(stepperValue('cap-archive')).toBe('3'); // INGEST-PERF item 3: Archive un-serialized (1→3)
   });
 
   it('Connect is an editable cap now — not pinned/disabled, and a bump persists it (SCALE-5 unpin)', async () => {

@@ -8,10 +8,14 @@
 export const SCALE_STAGES = ['archive', 'decompose', 'connect', 'claims', 'compose'] as const;
 export type ScaleStage = (typeof SCALE_STAGES)[number];
 
-/** Today's per-stage caps (SCALE-2 default = current behaviour). Decompose/Claims/Compose ran the
- *  hardcoded `STAGE_CAP=3`; Connect & Archive ran serial (1). */
+/** Per-stage caps. Decompose/Claims/Compose ran the hardcoded `STAGE_CAP=3`; Connect & Archive ran
+ *  serial (1). INGEST-PERF item 3: un-serialize Archive (1→3, matching decompose/claims) — its drain
+ *  already processes each item in its own ephemeral worktree with per-source files (no shared-state
+ *  collision, unlike the pre-SCALE-5 Connect shared-audit case), so cap>1 is safe and the raised global
+ *  ceiling (item 2) supports it. Connect is left at 1 by default (its per-block resolve is the heaviest,
+ *  cross-KB cognition); it remains overridable via Settings (SCALE-5). */
 export const DEFAULT_STAGE_CAPS: Record<ScaleStage, number> = {
-  archive: 1,
+  archive: 3,
   decompose: 3,
   connect: 1,
   claims: 3,
