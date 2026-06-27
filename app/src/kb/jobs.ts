@@ -82,8 +82,15 @@ export interface JobFinding {
   writes?: { rel: string; content: string }[]; // additive effects (relative to the worktree root)
   // raised when the finding routes to Review. A `consolidation` target carries the merge plan an
   // approved Review executes (SPEC-0024 REFLECT-7) — propagated into the Review's markerKey so the
-  // dispatch can run it via the entity-merge core; absent for non-consolidation reviews.
-  review?: { question: string; detail?: string; consolidation?: { canonicalRel: string; loserRels: string[] } };
+  // dispatch can run it via the entity-merge core; absent for non-consolidation reviews. A
+  // `contradiction` target (SPEC-0036 CONTRA) carries the entity + two conflicting statements so the
+  // runner flags the entity durably and answerReview can transition the flag; absent otherwise.
+  review?: {
+    question: string;
+    detail?: string;
+    consolidation?: { canonicalRel: string; loserRels: string[] };
+    contradiction?: { entityRel: string; statementA: string; statementB: string };
+  };
 }
 
 /** What a bounded pass returns (JOBS-4/8): what it looked at, what it found, and a cursor for the

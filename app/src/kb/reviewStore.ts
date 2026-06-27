@@ -14,7 +14,7 @@ import { ensureGitIdentity } from './vault';
 import { captureToInbox } from './ingest';
 import { validReviewAnswerInput, type Review } from './reviews';
 import { recordDisambiguationDecision, verdictToDisambiguation } from './disambiguationDecisions';
-import { recordDisambiguationDirective, recordConsolidationDirective } from './directives';
+import { recordDisambiguationDirective, recordConsolidationDirective, recordContradictionDirective } from './directives';
 import { blockKey as computeBlockKey } from './connect';
 import { parseEntityNode } from './connectDoc';
 import type { Mutex } from './stageLock';
@@ -205,6 +205,27 @@ export async function answerReview(root: string, lock: Mutex, id: string, answer
             });
           }
         }
+      }
+    }
+
+    // 3d. SPEC-0036 CONTRA-3/4: a CONTRADICTION review (markerKey {kind:'contradiction', identityKey,
+    // statementA, statementB}) transitions the durable entity flag at answer time. confirm → RESOLVED
+    // (a newer/stronger claim superseded the other — the loser is RETAINED + marked, never deleted, per
+    // CONTRA-4; we only clear the flag, the claim files are untouched); reject → ACCEPTED (both legitimately
+    // stand, attributed). EITHER terminal state clears the OPEN flag (it leaves the needs-you queue);
+    // `accepted` stays CONTESTED at recall (CONTRA-6), `resolved` does not. Keyed on the STABLE block
+    // identity carried in the markerKey, so the transition lands on the same entity even after a rebirth.
+    if (review.raisedBy.markerKey.kind === 'contradiction' && review.raisedBy.markerKey.identityKey) {
+      const { identityKey, statementA, statementB } = review.raisedBy.markerKey;
+      if (statementA && statementB) {
+        await recordContradictionDirective(root, {
+          identityKey,
+          statementA,
+          statementB,
+          state: verdict === 'confirm' ? 'resolved' : 'accepted',
+          reviewId: id,
+          decidedAt: answeredAt,
+        });
       }
     }
 
