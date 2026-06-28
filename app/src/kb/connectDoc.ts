@@ -10,6 +10,7 @@ import path from 'node:path';
 import type { AgentTrace } from './archivist';
 import { CLAIMS_BLOCK_START } from './claimDoc';
 import { DYNAMIC_CURATED_PROPERTIES, isDynamicCuratedProperty } from './metaVocab';
+import { eventPrecisionKey, type EventDate, type EventDatePrecision } from './eventDate';
 
 /** Quote a scalar only when it contains YAML-significant characters. */
 function scalar(s: string): string {
@@ -99,6 +100,10 @@ export interface EntityNode {
    *  are emitted (emergent props deferred to v2); absent/empty values are omitted. `type` + the dates are
    *  written from their own dedicated fields, not this bag. */
   properties?: Record<string, string>;
+  /** Entity event dates (SPEC-0025 META Slice-2): each rendered as an Obsidian-native `date` Property
+   *  `<label>: YYYY-MM-DD` + a `<label>_precision:` marker (ruling b — date-sortable + precision-honest;
+   *  enables the timeline). Coined by the agent (`ClusterDecision.dates`), normalized + deduped by label. */
+  dates?: EventDate[];
   createdAt: string; // ISO — written as the Obsidian-native `created` Property (META-2)
   updatedAt: string; // ISO — written as the Obsidian-native `updated` Property (META-2)
   agent?: AgentTrace;
@@ -113,6 +118,20 @@ function curatedPropertyLines(properties: Record<string, string> | undefined): s
   for (const key of DYNAMIC_CURATED_PROPERTIES) {
     const v = properties[key];
     if (typeof v === 'string' && v.trim().length > 0) out.push(`${key}: ${scalar(v.trim())}`);
+  }
+  return out;
+}
+
+/** Event-date Property lines (SPEC-0025 META Slice-2, ruling b): for each date, a full Obsidian-native
+ *  `date` Property `<label>: YYYY-MM-DD` followed by its `<label>_precision:` marker. Dates are pre-sorted
+ *  by label (deterministic). Labels are already normalized slugs, so they're written bare (no quoting). */
+function eventDateLines(dates: EventDate[] | undefined): string[] {
+  if (!dates) return [];
+  const out: string[] = [];
+  for (const d of dates) {
+    if (!d.label || !d.date) continue;
+    out.push(`${d.label}: ${d.date}`);
+    out.push(`${eventPrecisionKey(d.label)}: ${d.precision}`);
   }
   return out;
 }
@@ -138,6 +157,8 @@ export function renderEntityNode(node: EntityNode): string {
     `tags: ${flowSeq(node.tags)}`,
     // Dynamic curated key-value Properties (SPEC-0025 META v1): scope/status/sensitivity, when carried.
     ...curatedPropertyLines(node.properties),
+    // Event-date Properties (SPEC-0025 META Slice-2): `<label>: <date>` + `<label>_precision:` markers.
+    ...eventDateLines(node.dates),
     'provenance:',
     `  derivedFrom: ${flowSeq(node.derivedFrom)}`,
     `  resolvedFrom: ${flowSeq(node.resolvedFrom)}`,
@@ -164,6 +185,9 @@ export interface ParsedNode {
   tags: string[];
   /** Dynamic curated key-value Properties read back (scope/status/sensitivity); foreign keys dropped. */
   properties: Record<string, string>;
+  /** Event dates read back (SPEC-0025 META S2): each `<label>: <date>` paired with its `<label>_precision:`
+   *  sibling; an unpaired date (no precision marker) is NOT an event date and is ignored. */
+  dates: EventDate[];
   createdAt: string;
 }
 
@@ -205,6 +229,8 @@ export function parseEntityNode(md: string): ParsedNode {
   let resolvedFrom: string[] = [];
   let tags: string[] = [];
   const properties: Record<string, string> = {};
+  const dateVals: Record<string, string> = {}; // `<label>` → YYYY-MM-DD
+  const datePrec: Record<string, EventDatePrecision> = {}; // `<label>` → precision (from the `_precision` sibling)
   let createdAt = '';
   for (const line of fm.split('\n')) {
     let m: RegExpMatchArray | null;
@@ -219,11 +245,20 @@ export function parseEntityNode(md: string): ParsedNode {
     // Obsidian-native curated `created` (META-2), or the legacy `createdAt` (back-compat fold-in).
     else if ((m = line.match(/^created:\s*(.+)$/))) createdAt = fmScalar(m[1]);
     else if ((m = line.match(/^createdAt:\s*(.+)$/))) createdAt = createdAt || fmScalar(m[1]);
+    // Event-date Properties (META S2): a `<label>_precision:` marker, then a `<label>: <YYYY-MM-DD>` value.
+    // The `_precision` line is matched FIRST (its key carries `_`, which the bare date-key regex excludes).
+    else if ((m = line.match(/^([a-z0-9-]+)_precision:\s*(year|month|day)\s*$/))) datePrec[m[1]] = m[2] as EventDatePrecision;
+    else if ((m = line.match(/^([a-z0-9-]+):\s*(\d{4}-\d{2}-\d{2})\s*$/))) dateVals[m[1]] = m[2];
     // Dynamic curated key-value Properties (scope/status/sensitivity) — only curated keys are kept.
     else if ((m = line.match(/^([a-z]+):\s*(.+)$/)) && isDynamicCuratedProperty(m[1])) properties[m[1]] = fmScalar(m[2]);
   }
   if (!id || !kind || !name) throw new Error('connect: entity node missing id/kind/name');
-  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, tags, properties, createdAt };
+  // An event date requires BOTH a date value and a `_precision` sibling (an unpaired date isn't one).
+  const dates: EventDate[] = Object.keys(datePrec)
+    .filter((label) => dateVals[label] !== undefined)
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((label) => ({ label, date: dateVals[label], precision: datePrec[label] }));
+  return { id, kind, name, confidence, aliases, derivedFrom, resolvedFrom, tags, properties, dates, createdAt };
 }
 
 /** Union helper preserving order, de-duplicated — for folding derivedFrom/resolvedFrom/aliases. */
