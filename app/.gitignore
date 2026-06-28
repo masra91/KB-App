@@ -99,5 +99,8 @@ playwright-report/
 test-results/
 .playwright/
 
+# Live-run walkthrough screenshots — regenerated each run for DL/QD inspection (not baselines)
+e2e/walkthrough-shots/
+
 # SPEC-0042 EVAL — last-known-good baselines are gitignored, never promoted (EVAL-8)
 eval/baselines/
