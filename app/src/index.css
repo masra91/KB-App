@@ -999,11 +999,50 @@ option { background: var(--card); color: var(--fg); }
    centered with the toggle. .viz-btn--ghost zeroes its side padding, so re-inset here. */
 .activity-entry-row .activity-trace { flex: none; padding: 0 0.7rem; white-space: nowrap; }
 /* Clipped row → keep the accent focus ring inset (the viz-focusable outward offset would be clipped);
-   matches the global --viz-accent .viz-focusable ring (interactive, not ember). */
+   matches the global --viz-accent .viz-focusable ring (interactive, not ember; #450 ember sweep). */
 .activity-entry-head:focus-visible { outline: 2px solid var(--viz-accent); outline-offset: -2px; }
-.activity-actor-badge { flex: none; } /* shape/color from .viz-chip; row just keeps it from stretching */
-.activity-summary { flex: 1; }
-.activity-ts, .activity-evcount { color: var(--viz-ink-muted); font-size: 0.78rem; flex: none; }
+.activity-actor-badge { flex: none; } /* still used by the lineage timeline steps (lineageHtml) */
+/* ── UX v2 Activity row (DL-2 contract): glyph-tile · text · compact relative timestamp ──────────── */
+/* Glyph TILE — 26×26, .5px hairline, hue typed by event kind (#184 hue-on-tile). The HUE rides the
+   tile; the row text stays ink (AA). No ember anywhere (a log of past events needs no decision). */
+.activity-gl {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0.5px solid var(--viz-rule);
+  border-radius: 5px;
+  font-size: 0.82rem;
+  line-height: 1;
+  color: var(--viz-ink-muted);
+  background: transparent;
+}
+/* kind hues — tile border + glyph tint only (rationed: gold/oxide stay meaningful, never fills/body) */
+.gl--capture  { border-color: var(--viz-accent); color: var(--viz-accent); }
+.gl--connect  { border-color: var(--viz-sprout); color: var(--viz-sprout); }
+.gl--enrich   { border-color: var(--viz-sprout); color: var(--viz-sprout); }
+.gl--research { border-color: var(--viz-sprout); color: var(--viz-sprout); }
+.gl--claim    { border-color: var(--viz-brass);  color: var(--viz-brass); }
+.gl--promote  { border-color: var(--viz-brass);  color: var(--viz-brass); }
+.gl--compose  { border-color: var(--viz-deep, var(--viz-accent)); color: var(--viz-deep, var(--viz-accent)); }
+.gl--failed   { border-color: var(--viz-oxide);  color: var(--viz-oxide); } /* honest failure, still rationed */
+.gl--reflect, .gl--recall, .gl--config, .gl--replay, .gl--event { color: var(--viz-ink-muted); }
+/* TEXT — flex:1 + min-width:0 + overflow-wrap so a long unbreakable id (ULID) shrinks/wraps and can
+   NEVER overflow into the timestamp/trace action (root-cause fix for the QD-2 overlap bug). */
+.activity-ft { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.activity-verb { color: var(--viz-ink); font-weight: 600; }
+.activity-detail { color: var(--viz-ink-muted); }
+.activity-evcount { color: var(--viz-ink-muted); font-size: 0.78rem; font-family: var(--viz-font-numeric, ui-monospace, monospace); }
+/* TIMESTAMP — flex:none + nowrap → structurally immune to text pressure; Plex-Mono, faint, compact. */
+.activity-fw {
+  flex: none;
+  white-space: nowrap;
+  color: var(--viz-ink-muted);
+  font-size: 0.78rem;
+  font-family: var(--viz-font-numeric, ui-monospace, monospace);
+}
 .activity-body { padding: 0 0.7rem 0.6rem; }
 .activity-event { background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.5rem 0.6rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; }
 .activity-event code { color: var(--viz-ink); }
