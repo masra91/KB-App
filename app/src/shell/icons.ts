@@ -6,6 +6,8 @@
 // Each entry is the inner markup of a 24×24 line glyph; `navIcon` wraps it in the shared <svg> shell.
 // All static, trusted strings — safe to inject without escaping (no user data).
 const ICON_PATHS: Record<string, string> = {
+  // home
+  today: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="4" rx="1.5"/><rect x="13" y="10" width="7" height="10" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/>', // layout-dashboard (the command-center home)
   // do
   capture: '<path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M8 11l4 4 4-4"/><path d="M12 4v11"/>', // tray + down-arrow (inbox/capture)
   ask: '<path d="M21 11.5a8.38 8.38 0 0 1-9 8.3 8.5 8.5 0 0 1-3.4-.7L3 21l1.9-5.1A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 17 0z"/>', // speech bubble
@@ -30,6 +32,7 @@ const ICON_PATHS: Record<string, string> = {
   'arrow-up-circle': '<circle cx="12" cy="12" r="9"/><path d="M12 16V8M8.5 11.5L12 8l3.5 3.5"/>', // promote → up-arrow in circle
   split: '<circle cx="7" cy="6" r="1.8"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="9" r="1.8"/><path d="M7 7.8v8.4M7 12h6a4 4 0 0 0 4-4v-.2"/>', // decompose → branch
   'alert-triangle': '<path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/>', // failed → warning triangle (pairs with oxide)
+  'circle-check': '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>', // settled / ok health row (pairs with patina)
 };
 
 /** Render an inline line-icon SVG (1em, currentColor) for ANY ICON_PATHS key — nav OR activity event-kind.

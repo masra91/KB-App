@@ -6,6 +6,7 @@
 import type { NavView } from './navModel';
 
 /** Stable view ids — referenced by the shell's mount map and by tests. */
+export const VIEW_TODAY = 'today'; // SPEC-0058 — the v2 command-center home (default on launch)
 export const VIEW_CAPTURE = 'capture';
 export const VIEW_REVIEWS = 'reviews';
 export const VIEW_ACTIVITY = 'activity';
@@ -41,6 +42,7 @@ export const GROUP_MANAGE = 'Manage';
  */
 export const NAV_VIEWS: NavView[] = [
   // icon = a key into the inline line-icon set (shell/icons.ts), NOT an emoji — UX v2 monochrome rail glyphs.
+  { id: VIEW_TODAY, label: 'Today', icon: 'today' },
   { id: VIEW_CAPTURE, label: 'Capture', icon: 'capture' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: 'reviews' },
   { id: VIEW_ACTIVITY, label: 'Activity', icon: 'activity' },
