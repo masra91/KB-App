@@ -72,7 +72,7 @@ function startQuickCapture(): void {
   const deps = electronQuickCaptureDeps({
     onOpen: () => qcapAgent?.open(),
     onClose: () => qcapAgent?.close(),
-    onShowMainWindow: () => showMainWindow(), // QCAP-11: tray "Show KB-App" restore
+    onShowMainWindow: () => showMainWindow(), // QCAP-11: tray "Show Vellum" restore
     getPipelineStatus: () => pipelineStatusForActive(), // QCAP-14: read-only tray live-status readout
     // QUIESCE-6: the optional "Prepare for shutdown / Resume" tray item — re-evaluated on each menu open,
     // so it reflects the current quiesce state. Runs in main, so it calls the controller directly.
@@ -134,7 +134,7 @@ app.on('will-quit', () => {
 
 // QCAP-8 dual-model (also CAPTURE-12 / ORCH-1): on macOS the app stays alive with no window open — a
 // persistent Dock + menubar/tray agent, the orchestrator draining the queue headlessly + the global
-// hotkey live; the tray "Show KB-App" (QCAP-11) / hotkey / Dock-icon reopen the window. Other
+// hotkey live; the tray "Show Vellum" (QCAP-11) / hotkey / Dock-icon reopen the window. Other
 // platforms quit as usual. Policy is the pure, unit-tested `shouldQuitOnWindowAllClosed`.
 app.on('window-all-closed', () => {
   if (shouldQuitOnWindowAllClosed(process.platform)) {

@@ -1,4 +1,4 @@
-// The single source of truth for which model KB-App launches the Copilot CLI/SDK with
+// The single source of truth for which model Vellum launches the Copilot CLI/SDK with
 // (ORCH-16 / model-pinning gap). Before this, prod launched with NO `--model` flag: every
 // decider read `process.env.KB_COPILOT_MODEL`, which ONLY the eval harness ever sets. With
 // it unset in prod, the `copilot` CLI silently inherited the user's `~/.copilot/settings.json`
@@ -11,7 +11,7 @@
 // each run), so eval behavior is unchanged. Because the launch is now always pinned, the
 // model recorded in every trace is the real, resolved model — no more `default`.
 
-/** The Copilot model KB-App pins when nothing overrides it. `claude-opus-4.5` is the strongest
+/** The Copilot model Vellum pins when nothing overrides it. `claude-opus-4.5` is the strongest
  *  model for the archival/enrich reasoning the pipeline does and matches the eval judge default
  *  (`eval/runner/judge.ts`). Change this one constant to re-pin every agent + recall at once.
  *

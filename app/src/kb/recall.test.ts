@@ -72,7 +72,7 @@ describe('recall loop on the Copilot SDK (SPEC-0026 slice 1)', () => {
     // Read-only enforced via the allow-list: only our read tools + submitAnswer are exposed (ASK-3).
     const cfg = lastConfig();
     expect(cfg?.allowedTools).toEqual(['entityLookup', 'claimsForEntity', 'linkTraversal', 'readNode', 'readSource', 'grep', 'submitAnswer']);
-    expect(cfg?.systemMessage?.content).toContain('KB-App Recall agent');
+    expect(cfg?.systemMessage?.content).toContain('Vellum Recall agent');
 
     const auditPath = path.join(v.root, '.kb', 'cache', 'ask', 'audit.jsonl');
     const audit = JSON.parse((await fs.readFile(auditPath, 'utf8')).trim());

@@ -80,7 +80,7 @@ export type CodeSdkSession = (input: {
  * is enforced by the tool surface (deny-by-construction), not this prompt — the prompt only steers depth.
  */
 export const CODE_RESEARCH_SKILL = [
-  'You are the KB-App Code researcher. Your job: answer the REQUESTED topic about a LOCAL code repository',
+  'You are the Vellum Code researcher. Your job: answer the REQUESTED topic about a LOCAL code repository',
   'by READING it, and return a SUBSTANTIVE, well-structured, source-attributed findings-note. This note',
   'becomes a secondary source the pipeline mines for claims, so its VALUE is in the specifics it carries.',
   '',

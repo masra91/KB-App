@@ -64,7 +64,7 @@ const defaultRunner: CopilotRunner = async (prompt, cwd, model) =>
 /** The versioned per-stage instruction template (SPEC-0014 Q9), composed per item. */
 export function buildPrompt(meta: CapturedMeta): string {
   return [
-    'You are the KB-App archivist. Classify ONE captured item for preservation.',
+    'You are the Vellum archivist. Classify ONE captured item for preservation.',
     'It is a primary source from the Principal. Use conservative defaults unless an',
     'explicit, high-confidence signal says otherwise. v1 supports only scope "global"',
     'and sensitivity "internal".',

@@ -245,7 +245,7 @@ export function registerIpc(): void {
       // #56 / MACOS-7: a folder-permission denial (TCC not granted) must route to the Blocked recovery,
       // never surface the raw `Operation not permitted` to the user (no dev jargon, no silent stall).
       if (isPermissionDeniedError(err)) {
-        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+        return { ...NO_PIPELINE, blocked: true, message: 'Vellum can’t write to your vault folder — access is turned off.' };
       }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }
@@ -276,7 +276,7 @@ export function registerIpc(): void {
       return { ok: true, ids: out.ids, captureBatch: out.captureBatch, committed: out.committed, message: `Captured ${out.ids.length} item(s).` };
     } catch (err) {
       if (isPermissionDeniedError(err)) {
-        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+        return { ...NO_PIPELINE, blocked: true, message: 'Vellum can’t write to your vault folder — access is turned off.' };
       }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }

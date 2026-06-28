@@ -10,7 +10,7 @@
 //
 // RUN RECIPE (MACOS-9):
 //   1. Build the SIGNED package (stable signing identity present in the keychain):
-//        KB_OSX_SIGN=1 npm run package         # produces out/KB-App-darwin-*/KB-App.app, hardened+signed
+//        KB_OSX_SIGN=1 npm run package         # produces out/Vellum-darwin-*/Vellum.app, hardened+signed
 //   2. Run this smoke against it:
 //        KB_SIGNED_E2E=1 ALLOW_LOCAL_E2E=1 npx playwright test signedProtectedFolder
 //   On first run macOS shows the "Allow access to Documents" prompt (MACOS-7) — click Allow once;

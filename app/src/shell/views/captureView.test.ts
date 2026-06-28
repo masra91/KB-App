@@ -55,7 +55,7 @@ describe('captureView — blocked-capture recovery (MACOS-7 / #56)', () => {
   });
 
   it('a permission-denied capture routes to the Blocked recovery (no raw OS error, no silent stall)', async () => {
-    setApi({ ok: false, blocked: true, ids: [], captureBatch: null, committed: false, message: 'KB-App can’t write to your vault folder — access is turned off.' });
+    setApi({ ok: false, blocked: true, ids: [], captureBatch: null, committed: false, message: 'Vellum can’t write to your vault folder — access is turned off.' });
     mountCapture(root, '/Users/me/Documents/MyVault', 'KB');
     (root.querySelector('#captureText') as HTMLTextAreaElement).value = 'a thought';
     root.querySelector<HTMLButtonElement>('#capture')!.click();

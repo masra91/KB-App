@@ -3,7 +3,7 @@
 // registration (conflict = register returns false → agent degrades, QCAP-9), the always-present
 // menubar/tray entry (QCAP-3), the frameless capture sheet window (loads the shared renderer at the
 // `#qcap` route, QCAP-4 headless), and focus-restore to the prior app on dismiss (QCAP-2, macOS app.hide).
-import { app, globalShortcut, Tray, Menu, BrowserWindow, nativeImage, screen, systemPreferences, clipboard, shell } from 'electron';
+import { app, globalShortcut, Tray, Menu, BrowserWindow, screen, systemPreferences, clipboard, shell } from 'electron';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { QuickCaptureDeps, SelectionRead } from './quickCaptureAgent';
 import { trayStatusModel } from './trayStatusModel';
 import { buildTrayTemplate } from './trayMenu';
+import { buildTrayImage } from './trayIcon';
 import type { PipelineStatusView } from '../kb/pipelineStatusView';
 
 const execFileP = promisify(execFile);
@@ -78,7 +79,7 @@ export interface ElectronQcapHooks {
   onOpen: () => void;
   /** Dismiss + restore focus (wired to the agent; used by sheet blur — click-away dismiss). */
   onClose: () => void;
-  /** QCAP-11: restore/focus (create-if-none) the main window — the menubar "Show KB-App" item. */
+  /** QCAP-11: restore/focus (create-if-none) the main window — the menubar "Show Vellum" item. */
   onShowMainWindow?: () => void;
   /** QCAP-14: read the OBS pipeline-status view-model for the read-only tray live-status readout.
    *  Optional — omitted in tests/headless → the readout section is simply absent. Best-effort: a
@@ -126,7 +127,7 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
   let lastStatusLines: string[] = [];
 
   /** The capture ACTION items (DEV-1, QCAP-3/9/11) — Quick Capture · Hotkey-unavailable · Enable-
-   *  selection · Show KB-App — verbatim + in order, composed into the menu's actions section. */
+   *  selection · Show Vellum — verbatim + in order, composed into the menu's actions section. */
   function buildActionItems(state: { hotkeyAccelerator: string | null }): Electron.MenuItemConstructorOptions[] {
     const accel = state.hotkeyAccelerator;
     // QCAP-9 (Slice 2): when selection-capture isn't yet granted, offer an explicit enable path from
@@ -161,7 +162,7 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
       // one-way trap. Plain instrument-voice label (design §4) — no icon/badge. onShowMainWindow
       // creates the window if none exists; omitted in tests/headless → the item is simply absent.
       ...(hooks.onShowMainWindow
-        ? [{ label: 'Show KB-App', click: () => hooks.onShowMainWindow?.() } as Electron.MenuItemConstructorOptions]
+        ? [{ label: 'Show Vellum', click: () => hooks.onShowMainWindow?.() } as Electron.MenuItemConstructorOptions]
         : []),
     ];
   }
@@ -252,11 +253,10 @@ export function electronQuickCaptureDeps(hooks: ElectronQcapHooks): QuickCapture
     },
     setTray(state) {
       if (!tray) {
-        // An empty image + a short menubar title keeps the entry visible without a bundled icon asset
-        // (a proper template icon is a polish follow-up). The tray is the always-present entry (QCAP-3).
-        tray = new Tray(nativeImage.createEmpty());
-        tray.setToolTip('KB-App — Quick Capture');
-        if (process.platform === 'darwin') tray.setTitle('⤓');
+        // #401: the Vellum mono glyph as a macOS template image (recolors with the menu bar). Replaces
+        // the prior empty-image + "⤓" title placeholder. The tray is the always-present entry (QCAP-3).
+        tray = new Tray(buildTrayImage());
+        tray.setToolTip('Vellum — Quick Capture');
         // QCAP-14: refresh the live status just before the menu opens — macOS fires mouse-enter ahead
         // of the click that shows the context menu, so the readout is fresh without a background poll.
         tray.on('mouse-enter', () => void rebuildTrayMenu());

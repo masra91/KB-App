@@ -86,7 +86,7 @@ export function buildComposePrompt(input: ComposeInput): string {
           .join(', ')}.`
       : 'There are no related entities to link.';
   return [
-    'You are the KB-App Compose editor. Write an ENCYCLOPEDIC page about ONE entity — like a',
+    'You are the Vellum Compose editor. Write an ENCYCLOPEDIC page about ONE entity — like a',
     'Wikipedia article: a lede that says what/who it is, then sections that group related facts',
     'into flowing prose. NOT a bullet list, NOT a metadata dump.',
     '',

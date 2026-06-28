@@ -86,7 +86,7 @@ export function buildClaimsPrompt(input: EntityInput): string {
   const body =
     input.source.text ?? '(no extractable text — this is an opaque file; infer only from its name/type)';
   return [
-    'You are the KB-App Claims librarian. You are given ONE entity (a node already extracted',
+    'You are the Vellum Claims librarian. You are given ONE entity (a node already extracted',
     'from a source) and the WHOLE source it was derived from. Record the CLAIMS the source',
     `makes ABOUT THIS ENTITY — assertions, not just its existence. Extract only claims`,
     'grounded in the source text; do NOT invent anything it does not support.',

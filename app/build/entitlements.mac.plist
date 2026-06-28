@@ -6,7 +6,7 @@
   spawns git/copilot subprocesses + touches user-chosen folders, which the sandbox can't allow.
   - allow-jit + allow-unsigned-executable-memory: the standard V8 pair (JIT'd code) every Electron
     app needs under the hardened runtime.
-  - disable-library-validation: required because KB-App loads native node modules (`.node`) under the
+  - disable-library-validation: required because Vellum loads native node modules (`.node`) under the
     hardened runtime — incl. the copilot SDK's vendored clipboard addon
     (`@github/copilot/.../@teddyzhu/clipboard-darwin-arm64.node`) + fsevents. Library validation
     requires every LOADED dylib/.node be signed by this app's Team ID; re-signing every
