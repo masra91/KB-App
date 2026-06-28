@@ -7,13 +7,14 @@
 // v3 (VUX-11): a full-pane chat — header (title · meta · actions) + scrolling conversation column
 // (you-bubble + grounded answer w/ seal, prose, foot-stat, references) + a floating ask bar carrying a
 // Quick/Considered effort toggle. v3 token system (no `--viz-*`). The "recall settings live on Ask"
-// IA-lock (VUX-19) = the effort toggle here. The toggle is now WIRED — onAsk sends `effort` (AskRequest,
-// #487) so Quick/Considered modulates recall depth. Past-chats + Save-chat remain DEV-1 backend slices
-// (those controls stay disabled until backed).
+// IA-lock (VUX-19) = the effort toggle here. The toggle is WIRED — onAsk sends `effort` (AskRequest,
+// #487) so Quick/Considered modulates recall depth. Past-chats + Save-chat are WIRED too (slice-3, over
+// DEV-1's #490 conversation store): Save chat persists/updates the thread, Past chats lists + reloads
+// a saved thread (reloaded turns keep the full AskResult so citations re-render faithfully).
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { esc } from '../html';
-import type { AskResult, Citation, RecallTurn } from '../../kb/types';
+import type { AskResult, Citation, RecallTurn, Conversation, ConversationSummary, ConversationTurn } from '../../kb/types';
 
 /**
  * Render the recall answer's markdown to **sanitized** HTML (#93). The answer is LLM/ingested content,
@@ -45,7 +46,8 @@ interface Turn {
   result: AskResult | null; // null while in flight
   askedAt: number; // epoch ms — for the "Nm ago" you-meta
   elapsedMs?: number; // client-measured round-trip, for the answer stat
-  effort: Effort; // the mode this turn was asked under (the user's selection)
+  effort?: Effort; // the mode this turn was asked under; UNDEFINED for a reloaded saved turn (the
+  // conversation store doesn't persist the mode) → the stat omits the mode chip then (honest).
   error?: string;
   savedRel?: string; // set once saved as an Output (ASK-6)
   saveError?: string;
@@ -56,11 +58,17 @@ interface Turn {
 let turns: Turn[] = [];
 let busy = false;
 let effort: Effort = 'considered'; // VUX-11 default — the Considered (deeper) pass
+// VUX-11 slice-3 (Past chats / Save chat): the persisted-thread id once this conversation is saved
+// (null = unsaved). A saved thread auto-updates as it grows. `pastOpen` tracks the Past-chats panel.
+let convId: string | null = null;
+let pastOpen = false;
 
 export function mountAsk(container: HTMLElement): void {
   turns = [];
   busy = false;
   effort = 'considered';
+  convId = null;
+  pastOpen = false;
   container.innerHTML = `
     <section class="ask-view" id="ask">
       <header class="ask-head">
@@ -69,9 +77,10 @@ export function mountAsk(container: HTMLElement): void {
           <div class="ask-sub" id="askSub"><span>Grounded recall over your library</span></div>
         </div>
         <div class="ask-actions">
-          <button type="button" class="ask-act is-quiet" id="askPast" disabled title="Past chats — coming soon"><span class="ask-act-i" aria-hidden="true">◷</span> Past chats</button>
-          <button type="button" class="ask-act is-quiet" id="askSaveChat" disabled title="Save chat — coming soon"><span class="ask-act-i" aria-hidden="true">◫</span> Save chat</button>
+          <button type="button" class="ask-act is-quiet" id="askPast" aria-haspopup="true" aria-expanded="false"><span class="ask-act-i" aria-hidden="true">◷</span> Past chats</button>
+          <button type="button" class="ask-act is-quiet" id="askSaveChat"><span class="ask-act-i" aria-hidden="true">◫</span> Save chat</button>
           <button type="button" class="ask-act" id="askNew"><span class="ask-act-i" aria-hidden="true">✎</span> New</button>
+          <div class="ask-pastpanel" id="askPastPanel" role="menu" aria-label="Past chats" hidden></div>
         </div>
       </header>
       <div class="ask-scroll">
@@ -107,7 +116,7 @@ export function mountAsk(container: HTMLElement): void {
   });
   input?.addEventListener('input', () => autoGrow(input));
 
-  // Effort toggle (VUX-11) — selection held client-side; recall-wiring is DEV-1's slice-2.
+  // Effort toggle (VUX-11) — the selected mode is sent on each ask (onAsk → AskRequest.effort).
   container.querySelector<HTMLElement>('#askModes')?.addEventListener('click', (e) => {
     const opt = (e.target as HTMLElement).closest<HTMLElement>('.ask-mode');
     if (!opt || busy) return;
@@ -117,9 +126,22 @@ export function mountAsk(container: HTMLElement): void {
   container.querySelector<HTMLElement>('#askNew')?.addEventListener('click', () => {
     if (busy) return;
     turns = [];
+    convId = null; // a fresh thread — the next Save chat starts a new conversation
+    closePastPanel(container);
     renderTranscript(container);
     updateHead(container);
+    updateActions(container);
     container.querySelector<HTMLTextAreaElement>('#askInput')?.focus();
+  });
+
+  // Save chat (VUX-11 slice-2c) — persist the thread; once saved, it auto-updates as it grows.
+  container.querySelector<HTMLElement>('#askSaveChat')?.addEventListener('click', () => void saveChat(container));
+  // Past chats (VUX-11 slice-2b) — toggle the panel; load the list on open.
+  container.querySelector<HTMLElement>('#askPast')?.addEventListener('click', () => void togglePastPanel(container));
+  // Delegated: load a chosen past chat (the panel re-renders, so bind on the container).
+  container.querySelector<HTMLElement>('#askPastPanel')?.addEventListener('click', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastrow');
+    if (row?.dataset.id) void loadConv(container, row.dataset.id);
   });
 
   // ASK-6/14: delegated handlers on the persistent transcript — save-to-KB + citation deep-links.
@@ -147,6 +169,7 @@ export function mountAsk(container: HTMLElement): void {
 
   renderTranscript(container);
   updateHead(container);
+  updateActions(container);
 }
 
 function autoGrow(el: HTMLTextAreaElement): void {
@@ -242,8 +265,11 @@ async function onAsk(container: HTMLElement): Promise<void> {
     setBusy(container, false);
     renderTranscript(container);
     updateHead(container);
+    updateActions(container);
     scrollToEnd(container);
     container.querySelector<HTMLTextAreaElement>('#askInput')?.focus();
+    // A saved thread stays current: re-persist in the background once this turn lands (best-effort).
+    if (convId && turn.result) void persistConversation();
   }
 }
 
@@ -277,6 +303,131 @@ function updateHead(container: HTMLElement): void {
   }
 }
 
+// ── Past chats / Save chat (VUX-11 slice-3) ──────────────────────────────────────────────────────
+
+/** Completed turns → the persistable shape (only answered turns; the FULL AskResult so a reload
+ *  re-renders citations/grounded/toolCalls faithfully, not a lossy Q+A transcript). */
+function toConversationTurns(): ConversationTurn[] {
+  return turns
+    .filter((t) => t.result !== null)
+    .map((t) => ({ result: t.result!, askedAt: new Date(t.askedAt).toISOString(), latencyMs: t.elapsedMs }));
+}
+
+/** At least one answered turn exists to save. */
+function hasSavable(): boolean {
+  return turns.some((t) => t.result !== null);
+}
+
+/** Reflect the Save-chat button state (disabled when nothing to save / busy; "Saved" once persisted). */
+function updateActions(container: HTMLElement): void {
+  const save = container.querySelector<HTMLButtonElement>('#askSaveChat');
+  if (!save) return;
+  save.disabled = busy || !hasSavable();
+  const saved = convId !== null;
+  save.classList.toggle('is-saved', saved);
+  save.innerHTML = saved
+    ? `<span class="ask-act-i" aria-hidden="true">✓</span> Saved`
+    : `<span class="ask-act-i" aria-hidden="true">◫</span> Save chat`;
+}
+
+/** Persist the current thread — create (no id) or update (id). Best-effort; sets convId on success. */
+async function persistConversation(): Promise<boolean> {
+  const convTurns = toConversationTurns();
+  if (convTurns.length === 0) return false;
+  try {
+    const res = await window.kbApi.saveConversation(convId ? { id: convId, turns: convTurns } : { turns: convTurns });
+    convId = res.id;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Save chat (manual, slice-2c): persist + reflect saved state; a transient failure flashes on the button. */
+async function saveChat(container: HTMLElement): Promise<void> {
+  if (busy || !hasSavable()) return;
+  const ok = await persistConversation();
+  updateActions(container);
+  if (!ok) {
+    const save = container.querySelector<HTMLButtonElement>('#askSaveChat');
+    if (save) {
+      save.innerHTML = `<span class="ask-act-i" aria-hidden="true">⚠</span> Couldn’t save`;
+      save.classList.add('is-error');
+      setTimeout(() => {
+        save.classList.remove('is-error');
+        updateActions(container);
+      }, 2500);
+    }
+  }
+}
+
+async function togglePastPanel(container: HTMLElement): Promise<void> {
+  if (pastOpen) {
+    closePastPanel(container);
+    return;
+  }
+  await openPastPanel(container);
+}
+
+function closePastPanel(container: HTMLElement): void {
+  pastOpen = false;
+  const panel = container.querySelector<HTMLElement>('#askPastPanel');
+  if (panel) panel.hidden = true;
+  container.querySelector<HTMLElement>('#askPast')?.setAttribute('aria-expanded', 'false');
+}
+
+/** Open the Past-chats panel + load the saved-thread list (slice-2b). */
+async function openPastPanel(container: HTMLElement): Promise<void> {
+  const panel = container.querySelector<HTMLElement>('#askPastPanel');
+  if (!panel) return;
+  pastOpen = true;
+  container.querySelector<HTMLElement>('#askPast')?.setAttribute('aria-expanded', 'true');
+  panel.hidden = false;
+  panel.innerHTML = `<div class="ask-past-status">Loading…</div>`;
+  let list: ConversationSummary[];
+  try {
+    list = await window.kbApi.listConversations();
+  } catch {
+    panel.innerHTML = `<div class="ask-past-status error">Couldn’t load past chats.</div>`;
+    return;
+  }
+  if (!pastOpen) return; // closed while loading
+  panel.innerHTML = list.length === 0 ? `<div class="ask-past-status">No saved chats yet.</div>` : list.map(pastRow).join('');
+}
+
+function pastRow(c: ConversationSummary): string {
+  const meta = `${c.turnCount} turn${c.turnCount === 1 ? '' : 's'} · ${relTime(Date.parse(c.updatedAt) || Date.now())}`;
+  return `<button type="button" class="ask-pastrow" role="menuitem" data-id="${esc(c.id)}">
+    <span class="ask-pasttitle">${esc(c.title || 'Untitled chat')}</span>
+    <span class="ask-pastmeta">${esc(meta)}</span>
+    ${c.preview ? `<span class="ask-pastprev">${esc(c.preview)}</span>` : ''}
+  </button>`;
+}
+
+/** Load a saved chat into the view (replaces the current thread). Reloaded turns carry the full
+ *  AskResult (citations/grounding re-render faithfully); mode wasn't persisted, so the stat omits it. */
+async function loadConv(container: HTMLElement, id: string): Promise<void> {
+  let conv: Conversation | null;
+  try {
+    conv = await window.kbApi.loadConversation(id);
+  } catch {
+    conv = null;
+  }
+  closePastPanel(container);
+  if (!conv) return;
+  convId = conv.id;
+  turns = conv.turns.map((ct) => ({
+    question: ct.result.question,
+    result: ct.result,
+    askedAt: Date.parse(ct.askedAt) || Date.now(),
+    elapsedMs: ct.latencyMs,
+  }));
+  renderTranscript(container);
+  updateHead(container);
+  updateActions(container);
+  scrollToEnd(container);
+}
+
 const CITATION_KIND_LABEL: Record<string, string> = { entity: 'Entity', claim: 'Claim', source: 'Source' };
 const CITATION_KIND_CLASS: Record<string, string> = { entity: 'k-entity', claim: 'k-claim', source: 'k-source' };
 
@@ -307,9 +458,10 @@ function renderAnswer(t: Turn, turnIndex: number): string {
   const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex, r.citations));
   const citeErr = t.citeError ? `<div class="ask-cite-status error">${esc(t.citeError)}</div>` : '';
 
-  // Honest stat (no confidence — AskResult has none; not faked). Mode (the user's selection) ·
-  // retrievals (toolCalls) · client-measured latency. Plus honest grounding/budget flags.
-  const stat: string[] = [`<span class="smode">${t.effort === 'quick' ? 'Quick' : 'Considered'}</span>`];
+  // Honest stat (no confidence — AskResult has none; not faked). Mode (the user's selection, omitted
+  // for a reloaded turn whose mode wasn't persisted) · retrievals (toolCalls) · client-measured latency.
+  const stat: string[] = [];
+  if (t.effort) stat.push(`<span class="smode">${t.effort === 'quick' ? 'Quick' : 'Considered'}</span>`);
   if (typeof r.toolCalls === 'number') stat.push(`<span>${r.toolCalls} retrieval${r.toolCalls === 1 ? '' : 's'}</span>`);
   if (t.elapsedMs) stat.push(`<span>${(t.elapsedMs / 1000).toFixed(1)}s</span>`);
   const statHtml = `<div class="ask-stat">${stat.join('<span class="sdot"></span>')}</div>`;

@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { mountAsk, linkifyCitationMarkers } from './askView';
-import type { AskResult, Citation, KbApi } from '../../kb/types';
+import type { AskResult, Citation, KbApi, Conversation, ConversationSummary } from '../../kb/types';
 
 const GROUNDED: AskResult = {
   question: 'Who was Ada Lovelace?',
@@ -498,5 +498,97 @@ describe('VUX-1 v3 token migration (SPEC-0060 — off --viz-*)', () => {
     expect(askBlock).toMatch(/var\(--viridian\b/); // the recall identity colour
     expect(askBlock).toMatch(/var\(--ink\b/);
     expect(askBlock).toMatch(/var\(--linen\b|var\(--parchment\b/);
+  });
+});
+
+describe('Ask view · Past chats + Save chat (VUX-11 slice-3)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="r"></div>';
+    root = document.getElementById('r')!;
+  });
+
+  function setApi(extra: Partial<KbApi> = {}): void {
+    (window as unknown as { kbApi: Partial<KbApi> }).kbApi = { ask: vi.fn(async () => GROUNDED), ...extra };
+  }
+  async function ask(q: string): Promise<void> {
+    type(root, q);
+    submit(root);
+    await tick();
+  }
+  const iso = '2026-06-28T12:00:00.000Z';
+
+  it('Save chat is disabled until there is an answered turn, then enabled', async () => {
+    setApi();
+    mountAsk(root);
+    const save = root.querySelector<HTMLButtonElement>('#askSaveChat')!;
+    expect(save.disabled).toBe(true); // nothing to save yet
+    await ask('q');
+    expect(save.disabled).toBe(false);
+  });
+
+  it('Save chat persists the thread (full AskResult), shows saved state, and auto-updates the same id', async () => {
+    const saveConversation = vi.fn<KbApi['saveConversation']>(async () => ({ id: 'C1' }));
+    setApi({ saveConversation });
+    mountAsk(root);
+    await ask('q1');
+    root.querySelector<HTMLButtonElement>('#askSaveChat')!.click();
+    await tick();
+    expect(saveConversation).toHaveBeenCalledTimes(1);
+    const arg = saveConversation.mock.calls[0][0] as { turns: Array<{ result: AskResult; askedAt: string }>; id?: string };
+    expect(arg.id).toBeUndefined(); // first save creates (no id)
+    expect(arg.turns[0].result).toBe(GROUNDED); // the FULL AskResult is persisted, not a lossy transcript
+    expect(typeof arg.turns[0].askedAt).toBe('string');
+    const save = root.querySelector<HTMLButtonElement>('#askSaveChat')!;
+    expect(save.classList.contains('is-saved')).toBe(true);
+    expect(save.textContent).toContain('Saved');
+    // a saved thread stays current — the next ask auto-updates the SAME id
+    await ask('q2');
+    await tick();
+    expect(saveConversation).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'C1' }));
+  });
+
+  it('Past chats lists saved threads and reloads one faithfully (citations re-render; no faked mode)', async () => {
+    const summaries: ConversationSummary[] = [{ id: 'C1', title: 'Ada chat', updatedAt: iso, turnCount: 1, preview: 'who was…' }];
+    const conv: Conversation = { id: 'C1', title: 'Ada chat', createdAt: iso, updatedAt: iso, turns: [{ result: GROUNDED, askedAt: iso, latencyMs: 1200 }] };
+    setApi({ listConversations: vi.fn(async () => summaries), loadConversation: vi.fn(async () => conv) });
+    mountAsk(root);
+    root.querySelector<HTMLButtonElement>('#askPast')!.click();
+    await tick();
+    const rows = root.querySelectorAll<HTMLElement>('.ask-pastrow');
+    expect(rows).toHaveLength(1);
+    expect(root.querySelector('.ask-pasttitle')?.textContent).toBe('Ada chat');
+    rows[0].click();
+    await tick();
+    // the reloaded thread re-renders the answer + its reference card (full AskResult, faithful)
+    expect(root.querySelector('.ask-prose')?.textContent).toContain('first computer programmer');
+    expect(root.querySelector('.ask-ref')).toBeTruthy();
+    expect(root.querySelector('#askTitle')?.textContent).toBe(GROUNDED.question);
+    // mode wasn't persisted → the stat omits the Quick/Considered chip (honest, not faked)
+    expect(root.querySelector('.ask-stat .smode')).toBeNull();
+    expect(root.querySelector('#askPastPanel')?.hasAttribute('hidden')).toBe(true); // panel closed after load
+  });
+
+  it('Past chats shows a calm empty state when there are no saved chats', async () => {
+    setApi({ listConversations: vi.fn(async () => []) });
+    mountAsk(root);
+    root.querySelector<HTMLButtonElement>('#askPast')!.click();
+    await tick();
+    expect(root.querySelector('.ask-past-status')?.textContent).toContain('No saved chats');
+  });
+
+  it('New starts a fresh thread — the next Save creates a NEW conversation (no stale id)', async () => {
+    const saveConversation = vi.fn(async () => ({ id: 'C1' }));
+    setApi({ saveConversation });
+    mountAsk(root);
+    await ask('q1');
+    root.querySelector<HTMLButtonElement>('#askSaveChat')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('#askNew')!.click();
+    expect(root.querySelector<HTMLButtonElement>('#askSaveChat')!.classList.contains('is-saved')).toBe(false); // reset
+    await ask('q2');
+    root.querySelector<HTMLButtonElement>('#askSaveChat')!.click();
+    await tick();
+    expect(saveConversation).toHaveBeenLastCalledWith(expect.not.objectContaining({ id: 'C1' })); // new thread
   });
 });
