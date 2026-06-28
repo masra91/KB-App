@@ -16,6 +16,7 @@ import { dateShard } from './ulid';
 import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { readSensitivityOverrides } from './sensitivityOverride';
+import { applyClassification, classifierInputFrom, type SensitivityClassifier } from './sensitivityClassifier';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
 import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
@@ -66,6 +67,7 @@ export async function archiveOne(
   decider: ArchivistDecider = deterministicDecider,
   lock: Mutex = new Mutex(),
   span: ActiveSpan = noopActiveSpan,
+  classify?: SensitivityClassifier,
 ): Promise<string> {
   root = path.resolve(root);
   const destRel = path.join('sources', dateShard(id), id);
@@ -76,20 +78,43 @@ export async function archiveOne(
     const unitDir = path.join(wt, 'inbox', id);
     const meta = await readCapturedMeta(unitDir);
     const baseDecision = await decider(meta, { span });
+    // The source body, read once at the ingest boundary (before the rename) — used both for the classifier
+    // (SENSE-4, content in hand) and as the rendered source.md body, so we never read the bytes twice.
+    const textContent = meta.kind === 'text' ? await fs.readFile(path.join(unitDir, meta.raw), 'utf8') : null;
+    // SENSE-4 Slice 2: classify sensitivity at the ingest boundary, but ONLY when no higher-priority signal
+    // (connector default / pending Principal override) already set the label — `applyClassification` enforces
+    // that. A confident `shareable` verdict re-opens public-web research egress (SENSE-9); a sub-threshold
+    // lean records a `suggested` label for Review. Best-effort: a classifier throw must not fail the archive.
+    let classifiedDecision = baseDecision;
+    if (classify && baseDecision.sensitivityBy === 'default') {
+      try {
+        const verdict = await classify(classifierInputFrom(meta, textContent ?? ''));
+        const applied = applyClassification({ sensitivity: baseDecision.sensitivity, sensitivityBy: baseDecision.sensitivityBy }, verdict);
+        classifiedDecision = {
+          ...baseDecision,
+          sensitivity: applied.sensitivity,
+          sensitivityBy: applied.sensitivityBy,
+          ...(applied.confidence !== undefined ? { sensitivityConfidence: applied.confidence } : {}),
+          ...(applied.suggested !== undefined ? { sensitivitySuggested: applied.suggested } : {}),
+        };
+      } catch {
+        classifiedDecision = baseDecision; // classification is best-effort; never block the archive
+      }
+    }
     // SENSE-7: a Principal override wins over whatever the classifier/default decided, and re-applies on
     // EVERY archive (incl. Replay) — read from the worktree snapshot so a rebuild stays sticky and the
-    // classifier never overwrites a `by: principal` label. Absent an override, the decision is unchanged.
+    // classifier never overwrites a `by: principal` label. An override also CLEARS any classifier confidence/
+    // suggestion (SPEC-0043 §7). Absent an override, the classified decision stands.
     const override = (await readSensitivityOverrides(wt))[id];
     const decision = override
-      ? { ...baseDecision, sensitivity: override.label, sensitivityBy: 'principal' as const, sensitivityAt: override.at || undefined }
-      : baseDecision;
+      ? { ...classifiedDecision, sensitivity: override.label, sensitivityBy: 'principal' as const, sensitivityAt: override.at || undefined, sensitivityConfidence: undefined, sensitivitySuggested: undefined }
+      : classifiedDecision;
 
     const dest = path.join(wt, destRel);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.rename(unitDir, dest); // move the raw bytes verbatim — never rewritten (DATA-2)
 
     const archivedAt = new Date().toISOString();
-    const textContent = meta.kind === 'text' ? await fs.readFile(path.join(dest, meta.raw), 'utf8') : null;
     await fs.writeFile(path.join(dest, 'source.md'), renderSourceMd(meta, decision, archivedAt, bodyFor(meta, textContent)), 'utf8');
     // ORCH-16: record the agent invocation (runtime/model/params/outcome) for posterity.
     const { agent, ...coreDecision } = decision;
@@ -150,6 +175,7 @@ export class Orchestrator {
   private cap: number; // mutable for SPEC-0048 SCALE-4 live-apply (see setCap)
   private readonly log: DevLog;
   private readonly tracer: Tracer;
+  private readonly classify?: SensitivityClassifier;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -171,6 +197,7 @@ export class Orchestrator {
     cap: number = DEFAULT_STAGE_CAP,
     log: DevLog = noopDevLog,
     tracer: Tracer = noopTracer,
+    classify?: SensitivityClassifier,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -179,6 +206,7 @@ export class Orchestrator {
     this.cap = Math.max(1, Math.floor(cap));
     this.log = log.child({ scope: 'archive' });
     this.tracer = tracer;
+    this.classify = classify; // SENSE-4 Slice 2: optional ingest-boundary sensitivity classifier
   }
 
   /** Live-set the per-stage concurrency cap (SPEC-0048 SCALE-4): the new value is read on the NEXT
@@ -272,7 +300,7 @@ export class Orchestrator {
         await Promise.all(
           batch.map((id) => {
             const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
-            return archiveOne(this.root, id, this.decider, this.lock, span).then(
+            return archiveOne(this.root, id, this.decider, this.lock, span, this.classify).then(
               () => {
                 span.end('ok');
                 this.lastArchived = id;

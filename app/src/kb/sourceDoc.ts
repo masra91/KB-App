@@ -120,14 +120,16 @@ export function renderSourceMd(
     `scope: ${decision.scope}`,
     `sensitivity: ${scalar(decision.sensitivity)}`,
     // SENSE-1/8 (SPEC-0043 §7): the label's provenance lives beside it so the scalar stays clean for the
-    // comparator + human reading. Slice 1 records `by` + `at`; `confidence` (by: classifier) and
-    // `suggested` (open Review suggestion) arrive in Slice 2.
+    // comparator + human reading. `by` + `at` always; `confidence` rides a `by: classifier` label (SENSE-4),
+    // and `suggested` rides while a sub-threshold Review suggestion is open (cleared by a Principal override).
     'sensitivityMeta:',
     `  by: ${decision.sensitivityBy}`,
     `  at: ${decision.sensitivityAt ?? archivedAt}`, // override time (sticky on Replay) else archive time
-    `raw: ${meta.raw}`,
-    `contentHash: ${meta.contentHash}`,
   ];
+  if (typeof decision.sensitivityConfidence === 'number') fm.push(`  confidence: ${decision.sensitivityConfidence}`);
+  if (decision.sensitivitySuggested) fm.push(`  suggested: ${scalar(decision.sensitivitySuggested)}`);
+  fm.push(`raw: ${meta.raw}`);
+  fm.push(`contentHash: ${meta.contentHash}`);
   // RICHIN-10: capture-fidelity provenance for a derived text payload — how `raw.md` was
   // produced (html→md) and the verbatim original kept alongside it. Auditable + re-derivable.
   if (meta.clip) {
