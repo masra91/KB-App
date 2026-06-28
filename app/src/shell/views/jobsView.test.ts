@@ -63,7 +63,7 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
     });
     await mountJobs(root);
 
-    expect(root.querySelector('h1')?.textContent).toContain('Jobs');
+    expect(root.querySelector('.job-sub')?.textContent).toContain('Recurring'); // section sub-note (hub owns the "Schedules" title — WS-E)
     expect(root.querySelectorAll('.job')).toHaveLength(2);
     expect(li(root, 'reflect').querySelector('.job-label')?.textContent).toBe('Reflect');
     // The non-production reference job is badged (a viz-chip); the production one is not.

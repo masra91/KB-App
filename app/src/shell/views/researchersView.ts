@@ -50,7 +50,9 @@ const TEMPLATE_BY_KEY = new Map(RESEARCHER_TEMPLATE_OPTIONS.map((o) => [o.templa
 const templateLabel = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.label ?? t;
 const templateDesc = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.get(t)?.description ?? '';
 
-const HEADER = `<h1 class="rdesk-title viz-signage">Researchers</h1><p class="rdesk-sub viz-body">Agents you brief and dispatch outside your KB — they bring back cited sources. Clearance shows how far each one's data can travel.</p>`;
+// Mounted as the **Researchers** section of the Agents hub (SPEC-0053 WS-E): the hub owns the group
+// header/naming, so this section drops its own page-title h1 and renders the field desk directly.
+const HEADER = `<p class="rdesk-sub viz-body">Agents you brief and dispatch outside your KB — they bring back cited sources. Clearance shows how far each one's data can travel.</p>`;
 
 export async function mountResearchers(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="rdesk viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;

@@ -572,6 +572,22 @@ button:disabled {
 .health-more { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
 .health-footnote { margin: 0.8rem 0 0; font-size: 0.76rem; color: var(--viz-ink-muted); font-style: italic; max-width: 64ch; }
 
+/* --- Agents hub: direction-framed Manage IA (SPEC-0053 WS-E) ---
+   One "Agents" surface; two groups framed inward (Librarians + their Schedules) vs outward (Researchers).
+   Group headers carry the naming + the inward/outward descriptor; each group body is an existing view. */
+.agents-hub { padding: 0.25rem 0; }
+.agents-hub-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
+.agents-hub-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1.2rem; max-width: 64ch; }
+.agents-group { margin: 0 0 1.6rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--viz-rule); }
+.agents-group-head { display: block; font-size: 0.95rem; letter-spacing: 0.04em; color: var(--viz-ink); margin: 0; }
+.agents-group-why { color: var(--viz-ink-muted); font-size: 0.8rem; margin: 0.2rem 0 0.8rem; max-width: 68ch; }
+.agents-group-why strong { color: var(--viz-ink); font-weight: 600; }
+/* Schedules nests under Librarians — a quieter, indented sub-band. */
+.agents-subgroup { margin: 1rem 0 0; padding: 0 0 0 0.8rem; border-left: 1px dashed var(--viz-rule); }
+.agents-subgroup-head { display: block; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--viz-ink-muted); margin: 0; }
+.agents-subgroup-why { color: var(--viz-ink-muted); font-size: 0.74rem; margin: 0.1rem 0 0.5rem; max-width: 64ch; }
+.agents-section { margin: 0; }
+
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {
   margin: 0.75rem 0.7rem 0.2rem;
