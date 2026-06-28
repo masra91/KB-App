@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vellum — Brand Guidelines</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --vellum:#F4EFE3; --parchment:#ECE4D2; --linen:#FBF7EC;
+    --viridian:#2F6B5B; --sprout:#3E9E82; --deep:#1E3557; --slate:#3A6E88; --mist:#BFD7E6;
+    --gold:#C9A35A; --gold-deep:#A8823C; --ember:#C8743C; --ink:#2B2F36; --stone:#6A6456; --hair:#E0D6BE;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--vellum);color:var(--ink);font-family:Inter,system-ui,sans-serif;line-height:1.7;
+       background-image:radial-gradient(120% 80% at 80% -10%, #EFE7D4 0%, transparent 60%)}
+  .wrap{max-width:980px;margin:0 auto;padding:0 32px}
+  header.hero{padding:96px 0 60px;position:relative;overflow:hidden}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:3px;text-transform:uppercase;color:var(--gold-deep)}
+  .hero h1{font-family:Spectral,serif;font-weight:500;font-size:96px;line-height:1;margin:18px 0 10px;color:var(--viridian);letter-spacing:1px}
+  .hero .pos{font-family:Spectral,serif;font-size:22px;font-weight:400;color:var(--ink);max-width:620px;line-height:1.45}
+  .hero .mark{position:absolute;right:-40px;top:40px;opacity:.92;width:340px;height:340px}
+  .rule{height:0.5px;background:var(--hair);margin:8px 0}
+  .corner{position:absolute;width:46px;height:46px;border:0.5px solid var(--gold);opacity:.5}
+  section{padding:56px 0;border-top:0.5px solid var(--hair)}
+  .num{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:2px;color:var(--gold-deep)}
+  h2{font-family:Spectral,serif;font-weight:500;font-size:34px;margin:6px 0 6px;color:var(--ink)}
+  .lead{font-size:16px;color:var(--stone);max-width:680px;margin:0 0 26px}
+  h3{font-family:Spectral,serif;font-weight:500;font-size:19px;margin:26px 0 10px;color:var(--ink)}
+  p{margin:0 0 14px}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:780px){.g2,.g3,.g4{grid-template-columns:1fr 1fr}.hero h1{font-size:64px}.hero .mark{display:none}}
+  .sw{border-radius:12px;overflow:hidden;border:0.5px solid var(--hair);background:var(--linen)}
+  .sw .chip{height:84px;display:flex;align-items:flex-end;padding:9px 11px}
+  .sw .hex{font-family:'IBM Plex Mono',monospace;font-size:11px}
+  .sw .meta{padding:9px 11px}
+  .sw .nm{font-size:13.5px;font-weight:500}.sw .role{font-size:11.5px;color:var(--stone)}
+  .gradbar{height:42px;border-radius:10px;background:linear-gradient(90deg,#173B4E,#1E3557 26%,#3A6E88 55%,#2F6B5B 82%,#3E9E82);margin:6px 0 4px}
+  .goldbar{height:18px;border-radius:9px;background:linear-gradient(90deg,#A8823C,#E6CE86 50%,#A8823C);margin:6px 0 4px}
+  .card{background:var(--linen);border:0.5px solid var(--hair);border-radius:14px;padding:20px 22px}
+  .type-sample{border:0.5px solid var(--hair);border-radius:14px;background:var(--linen);padding:22px 24px;margin-bottom:12px}
+  .type-sample .role{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--gold-deep);margin-bottom:8px}
+  .scale span{display:block;font-family:Spectral,serif;color:var(--ink);line-height:1.15}
+  .dd{border-radius:14px;padding:20px 22px;border:0.5px solid var(--hair)}
+  .dd.do{background:#EAF3EE;border-color:#BFD8CC}
+  .dd.dont{background:#FBF1E9;border-color:#E7CBB6}
+  .dd h4{margin:0 0 4px;font-family:Spectral,serif;font-weight:500;font-size:17px;display:flex;align-items:center;gap:9px}
+  .dd.do h4{color:var(--viridian)} .dd.dont h4{color:#9A4E22}
+  .dd p{font-size:13px;color:var(--stone);margin:0}
+  .badge{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;color:#fff;font-size:13px}
+  .badge.y{background:var(--viridian)}.badge.n{background:var(--ember)}
+  ul.clean{list-style:none;padding:0;margin:0}
+  ul.clean li{padding:9px 0;border-top:0.5px solid var(--hair);font-size:14.5px;display:flex;gap:12px}
+  ul.clean li b{font-family:Spectral,serif;font-weight:500;color:var(--ink);min-width:150px}
+  .iconrow{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;margin:10px 0 4px}
+  .iconrow figure{margin:0;text-align:center}
+  .iconrow img{display:block;border-radius:22%;box-shadow:0 8px 22px -10px rgba(20,40,55,.5)}
+  .iconrow figcaption{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--stone);margin-top:7px}
+  .shot{width:100%;border-radius:12px;border:0.5px solid var(--hair);box-shadow:0 18px 50px -22px rgba(20,40,55,.45);display:block}
+  .cap{font-size:13px;color:var(--stone);margin:9px 0 0}
+  .pillrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .pill{font-size:12px;border-radius:20px;padding:4px 12px;border:0.5px solid var(--hair);background:var(--vellum);color:var(--ink)}
+  footer{padding:50px 0 70px;border-top:0.5px solid var(--hair);color:var(--stone);font-size:13px}
+  .mono{font-family:'IBM Plex Mono',monospace}
+  a{color:var(--viridian)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="corner" style="left:-16px;top:24px;border-right:none;border-bottom:none"></span>
+    <div class="eyebrow">Brand guidelines · v1</div>
+    <h1>Vellum</h1>
+    <p class="pos">A calm second brain for your markdown notes — it turns scattered fragments into grounded, connected, citation-backed recall.</p>
+    <svg class="mark" viewBox="0 0 340 340" aria-hidden="true">
+      <defs>
+        <linearGradient id="hg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#E6CE86"/><stop offset="55%" stop-color="#C9A35A"/><stop offset="100%" stop-color="#A8823C"/></linearGradient>
+        <radialGradient id="hc" cx="50%" cy="42%" r="60%"><stop offset="0%" stop-color="#FBF7EC"/><stop offset="55%" stop-color="#E6CE86"/><stop offset="100%" stop-color="#C9A35A"/></radialGradient>
+      </defs>
+      <g transform="translate(170,170)" fill="none" stroke="url(#hg)" stroke-linejoin="round">
+        <polygon points="100,-100 100,100 -100,100 -100,-100" stroke-width="1" opacity="0.32"/>
+        <line x1="-130" y1="0" x2="130" y2="0" stroke-width="1.4" opacity="0.5"/>
+        <line x1="0" y1="-130" x2="0" y2="130" stroke-width="1.4" opacity="0.5"/>
+        <polygon points="0,-130 130,0 0,130 -130,0" stroke-width="3"/>
+        <polygon points="0,-65 65,0 0,65 -65,0" stroke-width="2"/>
+        <polygon points="0,-32 32,0 0,32 -32,0" stroke-width="1.4"/>
+      </g>
+      <g transform="translate(170,170)" fill="url(#hg)">
+        <circle cx="0" cy="-130" r="6"/><circle cx="130" cy="0" r="6"/><circle cx="0" cy="130" r="6"/><circle cx="-130" cy="0" r="6"/>
+        <circle cx="0" cy="-65" r="4.5"/><circle cx="65" cy="0" r="4.5"/><circle cx="0" cy="65" r="4.5"/><circle cx="-65" cy="0" r="4.5"/>
+      </g>
+      <circle cx="170" cy="170" r="13" fill="url(#hc)"/>
+    </svg>
+  </header>
+
+  <section id="idea">
+    <div class="num">01</div>
+    <h2>The idea</h2>
+    <p class="lead">Vellum sits quietly above your Obsidian or markdown vault — a calm intelligence layer that works so you can think.</p>
+    <p>You capture anything, loosely. Behind the scenes, autonomous agents archive what matters, decompose complex ideas into atomic claims, surface latent connections, and compose synthesis into citation-backed recall. It is minimal and mostly headless — it does a librarian's work so you don't have to. Your notes remain yours; Vellum helps them grow into lasting, trustworthy knowledge.</p>
+    <p>The brand voice is a <b>quiet, gilded study</b>: scholarly and warm, never clinical. The reference point is crystalline, not botanical — knowledge as <em>pattern, fractal, and symmetry</em>, not as foliage. Alive and generative, but rendered as math.</p>
+  </section>
+
+  <section id="mark">
+    <div class="num">02</div>
+    <h2>The mark &amp; icon family</h2>
+    <p class="lead">A self-similar fractal lattice — nested diamonds climbing toward one luminous center node: the fragment that has linked itself into structure.</p>
+    <div class="iconrow">
+      <figure><img src="assets/icon/png/vellum-icon-256.png" width="148" height="148" alt="Vellum icon 1024"><figcaption>dock · 1024–128</figcaption></figure>
+      <figure><img src="assets/icon/png/vellum-icon-64.png" width="64" height="64" alt="Vellum icon 64"><figcaption>64</figcaption></figure>
+      <figure><img src="assets/icon/png/vellum-icon-32.png" width="32" height="32" alt="Vellum icon 32"><figcaption>32</figcaption></figure>
+      <figure style="text-align:center">
+        <span style="display:inline-flex;width:36px;height:36px;align-items:center;justify-content:center;color:var(--ink);border:0.5px solid var(--hair);border-radius:9px;background:var(--linen)">
+          <svg width="22" height="22" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-linejoin="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.5"/><polygon points="12,7 17,12 12,17 7,12" stroke-width="1.2"/></g><circle cx="12" cy="12" r="1.9" fill="currentColor"/></svg>
+        </span>
+        <figcaption>menu-bar glyph</figcaption>
+      </figure>
+    </div>
+    <p>The lush render is the <b>dock / Finder / About</b> expression — high-DPI detail is a feature here. At <b>32px and below, switch to the monochrome glyph</b> (a template image — single color, no gradient). They are the same identity at two zoom levels, sharing the same DNA: diamond lattice, one center node. Because the mark is a fractal, the same shape works at 16px, inside a graph node, and as the whole knowledge graph.</p>
+    <div class="grid g2" style="margin-top:18px">
+      <div class="dd do"><h4><span class="badge y">✓</span> Do</h4><p>Keep the lattice symmetric and the center node the brightest point. Let the background fractal field carry hero detail and drop away as it scales.</p></div>
+      <div class="dd dont"><h4><span class="badge n">✕</span> Don't</h4><p>Add orbital/mandala rings, recolor the gold, or stretch the squircle. Don't ship the detailed render below 32px — use the glyph.</p></div>
+    </div>
+  </section>
+
+  <section id="color">
+    <div class="num">03</div>
+    <h2>Color</h2>
+    <p class="lead">Warm cream as the ground, viridian and deep blue for structure, gold rationed as the gilded accent, and one ember tone held back for a single job.</p>
+    <div class="grid g4">
+      <div class="sw"><div class="chip" style="background:#F4EFE3"><span class="hex" style="color:#2B2F36">#F4EFE3</span></div><div class="meta"><div class="nm">Vellum</div><div class="role">canvas / background</div></div></div>
+      <div class="sw"><div class="chip" style="background:#2F6B5B"><span class="hex" style="color:#EAF3EE">#2F6B5B</span></div><div class="meta"><div class="nm">Viridian</div><div class="role">primary brand</div></div></div>
+      <div class="sw"><div class="chip" style="background:#1E3557"><span class="hex" style="color:#CFE0F0">#1E3557</span></div><div class="meta"><div class="nm">Deep Blue</div><div class="role">depth / secondary</div></div></div>
+      <div class="sw"><div class="chip" style="background:#C9A35A"><span class="hex" style="color:#3A2E12">#C9A35A</span></div><div class="meta"><div class="nm">Gilded Gold</div><div class="role">accent (rationed)</div></div></div>
+      <div class="sw"><div class="chip" style="background:#3E9E82"><span class="hex" style="color:#08362A">#3E9E82</span></div><div class="meta"><div class="nm">Sprout</div><div class="role">active / in-progress</div></div></div>
+      <div class="sw"><div class="chip" style="background:#BFD7E6"><span class="hex" style="color:#1E3557">#BFD7E6</span></div><div class="meta"><div class="nm">Mist Blue</div><div class="role">gradient light</div></div></div>
+      <div class="sw"><div class="chip" style="background:#C8743C"><span class="hex" style="color:#FBEFE6">#C8743C</span></div><div class="meta"><div class="nm">Ember</div><div class="role">needs your decision</div></div></div>
+      <div class="sw"><div class="chip" style="background:#2B2F36"><span class="hex" style="color:#D7D2C5">#2B2F36</span></div><div class="meta"><div class="nm">Slate Ink</div><div class="role">text / interface</div></div></div>
+    </div>
+    <h3>Signature gradients</h3>
+    <div class="gradbar"></div><div class="mono" style="font-size:11px;color:var(--stone)">deep blue → slate → viridian → sprout · the blue-to-green field behind graphs and heroes</div>
+    <div class="goldbar"></div><div class="mono" style="font-size:11px;color:var(--stone)">gilded edge · hairline highlights only</div>
+    <h3>Rules</h3>
+    <ul class="clean">
+      <li><b>Gold is rationed.</b> Lines, nodes, hairlines, one highlight per view. Never large gold fills or gold body text.</li>
+      <li><b>Ember is reserved.</b> It appears only on “needs your decision.” If ember shows up, the user knows without reading that a choice is waiting.</li>
+      <li><b>Sprout means motion.</b> In-progress states only; idle and pending stay neutral.</li>
+      <li><b>The app skin is fixed-light.</b> Vellum's surfaces don't invert — the cream study is the product.</li>
+    </ul>
+  </section>
+
+  <section id="type">
+    <div class="num">04</div>
+    <h2>Typography</h2>
+    <p class="lead">A warm old-style serif for the voice, a clean grotesque for the interface, a measured mono for data. Numbers should always feel weighed and trustworthy.</p>
+    <div class="type-sample">
+      <div class="role">Voice · Spectral</div>
+      <div class="scale">
+        <span style="font-size:40px;font-weight:500">From fragments to clarity</span>
+        <span style="font-size:20px;font-weight:400;font-style:italic;color:var(--stone)">Used for names, idea titles, section heads, and grounded quotes.</span>
+      </div>
+    </div>
+    <div class="grid g2">
+      <div class="type-sample"><div class="role">Interface · Inter</div>
+        <div style="font-family:Inter;font-size:15px">The quiet librarian works behind the scenes.</div>
+        <div style="font-family:Inter;font-size:13px;color:var(--stone);margin-top:6px">Buttons, labels, navigation, body copy. Sentence case, never title case.</div>
+      </div>
+      <div class="type-sample"><div class="role">Data · IBM Plex Mono</div>
+        <div class="mono" style="font-size:20px">1,248 · 0.89 · 94%</div>
+        <div style="font-family:Inter;font-size:13px;color:var(--stone);margin-top:6px">Counts, confidence values, hex, timestamps.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="motif">
+    <div class="num">05</div>
+    <h2>Motif language</h2>
+    <p class="lead">Knowledge that grows and connects — rendered as a living lattice. Crystalline, not botanical.</p>
+    <img src="assets/motif/fractal-lattice.svg" alt="Fractal lattice motif" style="width:100%;max-width:560px;display:block;margin:6px 0 18px">
+    <div class="grid g2">
+      <div class="dd do"><h4><span class="badge y">✓</span> Dial up — crystalline</h4><p>Fractal lattices, nested self-similar diamonds, tessellation, mirror shards, soft blue-to-green gradients, faint drifting node fields. Geometry that reads as <em>pattern and symmetry</em>.</p></div>
+      <div class="dd dont"><h4><span class="badge n">✕</span> Dial down — botanical</h4><p>Gold leaves, vines, foliage, sprouting branches, mandala/orbital rings. These read garden / wellness / mystic and pull away from the scholarly center.</p></div>
+    </div>
+    <h3>The self-similarity principle</h3>
+    <p>The mark is the same at every scale. Use that: the icon, the node at the center of Explore, and the overall shape of a knowledge graph are all the same lattice motif, zoomed. Where you need texture — section dividers, empty states, watermarks — use a faint fractal field, never a decorative illustration.</p>
+  </section>
+
+  <section id="motion">
+    <div class="num">06</div>
+    <h2>Motion &amp; feel</h2>
+    <p class="lead">Calm and ambient. Motion shows the system is alive and working, never demands attention.</p>
+    <ul class="clean">
+      <li><b>Ambient drift</b> Background node-fields and the connecting thread drift slowly (20–30s loops), giving gentle parallax depth.</li>
+      <li><b>Breathing, not blinking</b> In-progress bars shimmer at a slow pace; the focused node gently breathes. Nothing flashes.</li>
+      <li><b>The one exception</b> The “needs your decision” cue may pulse softly in ember — the only element permitted to ask for the eye.</li>
+      <li><b>Respect reduced motion</b> All animation is opt-out under <span class="mono">prefers-reduced-motion</span>.</li>
+    </ul>
+  </section>
+
+  <section id="voice">
+    <div class="num">07</div>
+    <h2>Voice &amp; copy</h2>
+    <p class="lead">Intelligent, warm, unvarnished. Plain verbs, sentence case, no filler. The interface speaks as the product, not as a person.</p>
+    <div class="grid g2">
+      <div class="card"><b style="color:var(--viridian)">Say</b>
+        <div class="pillrow"><span class="pill">From fragments to clarity</span><span class="pill">Needs your decision</span><span class="pill">Supported by 3 sources</span><span class="pill">working quietly</span></div>
+      </div>
+      <div class="card"><b style="color:#9A4E22">Avoid</b>
+        <div class="pillrow"><span class="pill">Unlock your second brain!</span><span class="pill">AI-powered synthesis</span><span class="pill">Processing…</span><span class="pill">Error: failed</span></div>
+      </div>
+    </div>
+    <p style="margin-top:16px">Name things by what the user controls and recognizes. Describe what something does in plain terms rather than selling it. An empty screen is an invitation to capture; an error says what happened and how to fix it, in Vellum's own calm register.</p>
+  </section>
+
+  <section id="screens">
+    <div class="num">08</div>
+    <h2>The product</h2>
+    <p class="lead">Two signature surfaces show the system the way the brand intends — restrained layout, lavish detail.</p>
+    <h3>The Line — the work, in motion</h3>
+    <img class="shot" src="mockups/the-line.png" alt="Vellum — The Line screen">
+    <p class="cap">A horizontal assembly line — Capture → Archive → Decompose → Connect → Claims → Compose — strung on a gold thread. Station color matures along one ramp (raw cream to composed deep blue). Pending vs in-progress shown as soft bars; the ember cue is the only thing that asks for you.</p>
+    <h3 style="margin-top:30px">Explore — the result, as structure</h3>
+    <img class="shot" src="mockups/explore.png" alt="Vellum — Explore screen">
+    <p class="cap">One entity at center, typed neighbors with confidence on every edge, never a hairball. The center node is a fractal version of the mark — the “this contains a sub-graph” idea made visible. The rail delivers grounded, citation-backed recall.</p>
+  </section>
+
+  <footer>
+    <div class="rule"></div>
+    <p style="margin-top:18px"><span class="mono" style="color:var(--gold-deep)">VELLUM</span> · brand kit v1 · a concept pass. Assets in <span class="mono">/assets</span>, live mockups in <span class="mono">/mockups</span>. Production note: outline wordmark text to paths and redraw the icon as clean vector before shipping.</p>
+  </footer>
+
+</div>
+</body>
+</html>

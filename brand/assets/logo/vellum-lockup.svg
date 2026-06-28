@@ -1,0 +1,21 @@
+<svg width="420" height="120" viewBox="0 0 420 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vellum logo">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#EBD193"/><stop offset="55%" stop-color="#C9A35A"/><stop offset="100%" stop-color="#A8823C"/>
+    </linearGradient>
+    <radialGradient id="c" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#FBF7EC"/><stop offset="55%" stop-color="#EBD193"/><stop offset="100%" stop-color="#C9A35A"/>
+    </radialGradient>
+  </defs>
+  <g transform="translate(60,60)">
+    <line x1="-40" y1="0" x2="40" y2="0" stroke="url(#g)" stroke-width="1.4" opacity="0.6" stroke-linecap="round"/>
+    <line x1="0" y1="-40" x2="0" y2="40" stroke="url(#g)" stroke-width="1.4" opacity="0.6" stroke-linecap="round"/>
+    <polygon points="0,-40 40,0 0,40 -40,0" fill="none" stroke="url(#g)" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="0,-20 20,0 0,20 -20,0" fill="none" stroke="url(#g)" stroke-width="2" stroke-linejoin="round" opacity="0.9"/>
+    <g fill="url(#g)">
+      <circle cx="0" cy="-40" r="4"/><circle cx="40" cy="0" r="4"/><circle cx="0" cy="40" r="4"/><circle cx="-40" cy="0" r="4"/>
+    </g>
+    <circle r="7.5" fill="url(#c)"/>
+  </g>
+  <text x="128" y="74" font-family="Spectral, 'Iowan Old Style', Palatino, Georgia, serif" font-size="58" fill="#2F6B5B" letter-spacing="0.5">Vellum</text>
+</svg>
