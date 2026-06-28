@@ -220,6 +220,70 @@ export interface Projection<T> {
   stale: boolean;
 }
 
+// --- Today (SPEC-0058 STATE-7) — the v2 command-center home's exact view data-contract ---
+// "Design from the screens inward": Today draws everything below from ONE projection read (no
+// supplementary live fetch). Built by `buildTodayProjection` (pure) by COMPOSING existing projections
+// (graph/activity/registry/status) — never a new live vault scan (STATE-1). The renderer (todayView)
+// wires this shape into Design-Lead's CSS/layout; the projection carries no more than Today consumes.
+
+/** Time-of-day greeting + the Principal's name (when known). */
+export interface TodayGreeting {
+  salutation: string; // "Good morning" / "Good afternoon" / "Good evening"
+  name?: string; // the Principal's name when set; the view omits the comma when absent
+}
+
+/** One pipeline-ribbon station ("The Line"): a named stage + its in-flight/queue count + lit state. */
+export interface TodayStation {
+  name: string; // Capture · Archive · Decompose · Connect · Claims · Compose
+  count: number | null; // items at this stage now (null → the "—" rest state)
+  state: 'done' | 'active' | 'idle';
+}
+
+/** One headline stat card with a today-delta. */
+export interface TodayStat {
+  key: 'sources' | 'claims' | 'entities' | 'connections';
+  label: string;
+  value: number;
+  delta: { dir: 'up' | 'flat'; text: string }; // "+6 today" / "stable"
+}
+
+/** One recent-activity feed row (from the curated activity projection). */
+export interface TodayActivityItem {
+  kind: 'composed' | 'connected' | 'extracted' | 'captured' | 'linked' | 'other';
+  text: string; // human summary (the view esc()s it)
+  ref?: string; // a [[wikilink]] / source basename the summary references
+  when: string; // relative age, e.g. "6m"
+}
+
+/** One "Needs you" decision card (open review / surfaced contradiction). */
+export interface TodayDecision {
+  kind: 'contradiction' | 'review';
+  title: string;
+  body: string;
+  action: string; // the CTA label ("Resolve" / "Review")
+  targetView: string; // the view id to navigate to (e.g. "reviews")
+}
+
+/** One health-glance row. */
+export interface TodayHealthRow {
+  key: 'grounding' | 'thin' | 'orphans';
+  label: string;
+  sub: string;
+  value: string; // "100%" / "11" / "0"
+  status: 'ok' | 'warn';
+}
+
+/** The whole Today surface, served as one `Projection<TodayProjection>`. */
+export interface TodayProjection {
+  greeting: TodayGreeting;
+  subtitle: string; // "Your library is quiet and current — 3 things moved while you were away."
+  line: { meta: string; stations: TodayStation[] }; // "2 in flight · last composed 6m ago"
+  stats: TodayStat[]; // exactly the 4 headline cards
+  activity: TodayActivityItem[]; // most-recent first, capped for the panel
+  decisions: TodayDecision[]; // empty → the calm "nothing needs you" rest state
+  health: TodayHealthRow[]; // the 3 glance rows
+}
+
 // --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
 
 /** One open review as the Reviews view needs it (REVIEW-10). */
