@@ -208,6 +208,20 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     expect(audit).toContain('no-vision-model'); // the reason
   });
 
+  it('MEDIA-8: a born-digital PDF extracts LOCALLY (pdfText fast-path) — text body, no model call', async () => {
+    const session = vi.fn();
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'report.pdf', data: new Uint8Array([0x25, 0x50, 0x44, 0x46]) }]);
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, undefined, {
+      pdfText: async () => 'Q3 Report\n\nRevenue grew 12% year over year.', // digital text layer
+      vision: async () => null, // no vision model needed for a digital PDF
+      session,
+    });
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('![[raw.pdf]]'); // binary preserved
+    expect(sourceMd).toContain('Revenue grew 12%'); // the local text-layer body
+    expect(session).not.toHaveBeenCalled(); // never hit the multimodal model
+  });
+
   it('MEDIA: a non-media file (e.g. .zip) is untouched — still the plain embed, no extraction attempted', async () => {
     const session = vi.fn();
     const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'bundle.zip', data: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) }]);

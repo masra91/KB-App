@@ -92,7 +92,17 @@ export interface MediaExtractOptions {
   vision?: () => Promise<VisionLimits | null>;
   /** Injected transcription session; production uses the SDK blob path. Tests inject. */
   session?: MediaVisionSession;
+  /** SPEC-0052 MEDIA-8 fast-path: a deterministic LOCAL text-layer extractor for a born-digital PDF
+   *  (production = pdfjs). Runs BEFORE the multimodal call; returns the page text, or null when the PDF
+   *  has no usable text layer (scanned/image-only → fall through to the vision path). Injected so it is
+   *  unit-tested with no pdfjs load; absent → multimodal-only (the shipped #416 behavior, unchanged). */
+  pdfText?: (data: Uint8Array) => Promise<string | null>;
 }
+
+/** Minimum non-whitespace chars from a PDF text layer to treat it as a BORN-DIGITAL PDF (vs a scanned
+ *  PDF whose text layer is empty/noise). Below this we fall through to the multimodal path so a scanned
+ *  doc still gets OCR'd. A tiny digital PDF (≤ a few words) just takes the multimodal path — harmless. */
+export const MIN_PDF_TEXT_LAYER_CHARS = 16;
 
 /** The outcome of one extraction attempt — a discriminated result (no throw): success carries the text;
  *  every failure carries a typed `reason` + a human cause the caller surfaces (fail-loud, MEDIA-5/6/7). */
@@ -133,6 +143,23 @@ export async function extractMediaText(
   filename: string,
   opts: MediaExtractOptions = {},
 ): Promise<MediaExtractResult> {
+  const mime = mimeType.trim().toLowerCase();
+
+  // MEDIA-8 fast-path: a born-digital PDF carries a real text layer — extract it LOCALLY (deterministic,
+  // no model call, no API cost/latency, and no vision model required at all). A scanned / image-only PDF
+  // has an empty/noise text layer → fall through to the multimodal path below. Best-effort: a pdfjs error
+  // is never fatal — we just fall through (the vision path still handles the doc).
+  if (mime === 'application/pdf' && opts.pdfText) {
+    try {
+      const layer = await opts.pdfText(data);
+      if (layer && layer.replace(/\s+/g, '').length >= MIN_PDF_TEXT_LAYER_CHARS) {
+        return { ok: true, text: layer.trim() };
+      }
+    } catch {
+      /* local text-layer extraction failed → fall through to the multimodal path (never fatal) */
+    }
+  }
+
   const probe = opts.vision ?? liveVisionProbe(opts);
   let limits: VisionLimits | null;
   try {
@@ -143,7 +170,6 @@ export async function extractMediaText(
   if (!limits) {
     return { ok: false, reason: 'no-vision-model', error: 'no vision-capable model is configured — set one up to extract PDFs/images' };
   }
-  const mime = mimeType.trim().toLowerCase();
   if (limits.supportedMediaTypes.length > 0 && !limits.supportedMediaTypes.includes(mime)) {
     return { ok: false, reason: 'unsupported-type', error: `the configured vision model does not support ${mime}` };
   }
@@ -232,6 +258,41 @@ export function liveSdkSession(opts: MediaExtractOptions): MediaVisionSession {
     } finally {
       await client.stop();
       release();
+    }
+  };
+}
+
+/**
+ * The live pdfjs digital-PDF text-layer extractor (SPEC-0052 MEDIA-8 fast-path). `pdfjs-dist`'s legacy
+ * build (Node, no DOM/worker) is dynamically imported so unit tests (which inject `opts.pdfText`) never
+ * load it. Concatenates each page's text-layer items; a scanned / image-only PDF yields ~nothing → null
+ * (the caller then falls through to the multimodal path). Reads only the text layer — no rendering, no
+ * eval, no network — deterministic + cheap. Any error propagates to the caller's best-effort try/catch.
+ */
+export function livePdfText(): NonNullable<MediaExtractOptions['pdfText']> {
+  return async (data) => {
+    const pdfjs = (await import('pdfjs-dist/legacy/build/pdf.mjs')) as unknown as {
+      getDocument(src: { data: Uint8Array; isEvalSupported?: boolean; useSystemFonts?: boolean }): {
+        promise: Promise<{
+          numPages: number;
+          getPage(n: number): Promise<{ getTextContent(): Promise<{ items: Array<{ str?: string }> }> }>;
+          destroy(): Promise<void>;
+        }>;
+      };
+    };
+    const doc = await pdfjs.getDocument({ data, isEvalSupported: false, useSystemFonts: true }).promise;
+    try {
+      const parts: string[] = [];
+      for (let i = 1; i <= doc.numPages; i++) {
+        const page = await doc.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((it) => (typeof it.str === 'string' ? it.str : '')).join(' ').trim();
+        if (pageText.length > 0) parts.push(pageText);
+      }
+      const text = parts.join('\n\n').trim();
+      return text.length > 0 ? text : null;
+    } finally {
+      await doc.destroy();
     }
   };
 }

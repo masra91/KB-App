@@ -15,6 +15,7 @@ import type { WebResearchOptions } from '../kb/researchWebAgent';
 import type { CodeResearchOptions } from '../kb/researchCodeAgent';
 import type { M365ResearchOptions, M365Surface } from '../kb/researchM365Agent';
 import type { M365MailIntakeOptions } from '../kb/m365MailConnector';
+import { livePdfText } from '../kb/mediaExtract';
 import type { MediaExtractOptions } from '../kb/mediaExtract';
 import type { ResearchDepsOptions } from '../kb/researchInline';
 import type { IntakeDepsOptions } from '../kb/intakeScheduler';
@@ -100,7 +101,13 @@ export function researchDepsOptions(log: DevLog): ResearchDepsOptions {
  *  Copilot multimodal path in the packaged app. Vision capability is probed at run-time (`liveVisionProbe`);
  *  absent a vision model the extraction fails loud (needs-setup), never a silent empty body. */
 export function mediaExtractOptions(): MediaExtractOptions {
-  return { cliPath: resolveCopilotCliPath(), model: resolveCopilotModel(undefined, 'archivist') };
+  return {
+    cliPath: resolveCopilotCliPath(),
+    model: resolveCopilotModel(undefined, 'archivist'),
+    // MEDIA-8: born-digital PDFs extract locally via pdfjs (no model call); scanned PDFs/images fall
+    // through to the multimodal path. Deterministic + free for the common case.
+    pdfText: livePdfText(),
+  };
 }
 
 /** The INTAKE scheduler's deps — wires the M365-mail connector's WorkIQ MCP factory so the proactive
