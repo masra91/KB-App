@@ -60,7 +60,7 @@ import { readContradictionDirectives } from '../kb/directives';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { locateSourceRef } from '../kb/sourceOpen';
-import { buildActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
+import { loadActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
 import { buildFeed } from '../kb/activityDigest';
 import { traceLineage } from '../kb/lineage';
 import { resolveExecutable } from './resolvePath';
@@ -566,14 +566,19 @@ export function registerIpc(): void {
   // SPEC-0029 Audit & Activity (read-only). All three read the active `staging` worktree — the full
   // working-zone audit (AUDIT-10), a superset of the evergreen archive. Empty when no KB is active.
 
-  // AUDIT-5: the curated feed. Uses buildActivityIndex (full rebuild → guaranteed-fresh) rather than
-  // the cached load, so a recent recall whose audit landed without a HEAD move still shows (QA
-  // carry-forward). The optional filter narrows within the recent window; `total`/`truncated` are
-  // surfaced so the UI never silently truncates.
+  // AUDIT-5 + SPEC-0058 STATE-4 (slice-0 "stop the bleed"): the curated feed reads the HEAD-keyed
+  // CACHE (`loadActivityIndex`), never a full rebuild on the render path. A large/slow/mid-write vault
+  // could make `buildActivityIndex`'s walk of every `audit.jsonl` exceed the 8s loadGuard → the chronic
+  // "couldn't load" on Activity. `loadActivityIndex` serves the last-known-good cache when HEAD is
+  // unchanged and rebuilds only on a canonical advance (then re-caches). Trade: an uncommitted audit
+  // append (e.g. a just-issued recall in the gitignored ask cache) may lag one HEAD move — acceptable
+  // for slice-0; the incremental Activity projection (slice-2) closes that with honest `stale`/`builtAt`.
+  // The optional filter narrows within the recent window; `total`/`truncated` are surfaced so the UI
+  // never silently truncates.
   ipcMain.handle('kb:activityFeed', async (_e, filter?: ActivityFilter): Promise<ActivityFeedResult> => {
     const root = activeStagingRoot();
     if (!root) return { entries: [], total: 0, truncated: false };
-    const index = await buildActivityIndex(root);
+    const index = await loadActivityIndex(root);
     const events = filter ? filterEvents(index.events, filter) : index.events;
     return { entries: buildFeed(events), total: index.total, truncated: index.truncated };
   });
