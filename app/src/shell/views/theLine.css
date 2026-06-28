@@ -38,6 +38,7 @@
   padding-bottom: 0.6rem;
 }
 .line-title {
+  font-family: var(--viz-font-voice); /* Spectral — the section head speaks in the brand voice (§4) */
   font-size: 1.125rem;
   color: var(--viz-ink-muted);
 }
