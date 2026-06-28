@@ -1,0 +1,167 @@
+# Vellum RELEASE — tag-based, signed + notarized macOS builds (SPEC-0055; composes SPEC-0034 MACOS-8).
+#
+# THE ONLY path that publishes an official build (RELEASE-1): push a semver tag. Nothing else cuts a
+# release. The build runs off the EXACT tagged SHA (RELEASE-3) and publishes signed+notarized artifacts
+# + the electron-updater manifest SPEC-0056 consumes (RELEASE-5).
+#
+# Tag grammar (RELEASE-2): stable `vX.Y.Z` → a normal Release; beta `vX.Y.Z-beta.N` → a PRE-release.
+#
+# ⚠️ CREDS (Principal-provisioned repo secrets — the build SKIPS signing/notarizing + fails the publish
+#    gate until these exist, so an unsigned artifact can NEVER ship; RELEASE-4):
+#      MACOS_CERT_P12_BASE64    — Developer ID Application cert+key, exported .p12, base64
+#      MACOS_CERT_PASSWORD      — the .p12 export password
+#      AC_API_KEY_P8_BASE64     — App Store Connect API key (.p8), base64  (notarization auth)
+#      AC_API_KEY_ID            — the API key id
+#      AC_API_ISSUER            — the API key issuer id
+#      RELEASE_GPG_PUBLIC_KEY   — the Principal's GPG PUBLIC key (ASCII-armored) — CI verifies the tag
+#    (Apple Developer Program membership + Team ID back the cert; Team ID is embedded in the Developer ID.)
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'        # stable  vX.Y.Z
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'  # beta    vX.Y.Z-beta.N
+
+permissions:
+  contents: write   # create the GitHub Release + upload artifacts
+
+defaults:
+  run:
+    working-directory: app
+
+jobs:
+  release-macos:
+    name: release (macOS — sign · notarize · staple · publish)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags + the annotated-tag object for GPG verification
+
+      # RELEASE (Principal decision): the release tag is GPG-signed; CI VERIFIES the signature before
+      # building, so only a tag the Principal actually signed can cut a build. Skips with a loud notice
+      # only until the public key secret is provisioned (so the pipeline is testable pre-creds).
+      - name: Verify the tag's GPG signature (RELEASE-3)
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}" ]; then
+            echo "::warning::RELEASE_GPG_PUBLIC_KEY not set — skipping tag-signature verification (provision it to enforce RELEASE-3)."
+            exit 0
+          fi
+          echo "${{ secrets.RELEASE_GPG_PUBLIC_KEY }}" | gpg --import
+          if ! git verify-tag "${GITHUB_REF_NAME}"; then
+            echo "::error::Tag ${GITHUB_REF_NAME} is not a valid GPG-signed tag from the release key — refusing to build."
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} GPG signature verified."
+
+      # RELEASE-3: build ONLY when the tagged SHA's required CI checks are green. Poll the commit's
+      # check-runs; fail fast if any REQUIRED check isn't success. (Required set mirrors the `main`
+      # ruleset's `typecheck · lint · unit (ubuntu-latest)`; widen as more checks become required.)
+      - name: Gate on green required checks for the tagged SHA (RELEASE-3)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          sha="$(git rev-list -n1 "${GITHUB_REF_NAME}")"
+          echo "Tagged commit: $sha"
+          required="typecheck · lint · unit (ubuntu-latest)"
+          # Wait up to ~20 min for the required check to conclude on this SHA, then assert success.
+          for i in $(seq 1 40); do
+            json="$(gh api "repos/${GITHUB_REPOSITORY}/commits/$sha/check-runs" --paginate 2>/dev/null || echo '{}')"
+            status="$(echo "$json" | jq -r --arg n "$required" '.check_runs[]? | select(.name==$n) | .status' | head -n1)"
+            concl="$(echo "$json" | jq -r --arg n "$required" '.check_runs[]? | select(.name==$n) | .conclusion' | head -n1)"
+            if [ "$status" = "completed" ]; then
+              if [ "$concl" = "success" ]; then echo "Required check green on $sha."; exit 0; fi
+              echo "::error::Required check '$required' concluded '$concl' on $sha — refusing to release."
+              exit 1
+            fi
+            echo "waiting for '$required' on $sha (status=${status:-none})… ($i/40)"; sleep 30
+          done
+          echo "::error::Required check '$required' did not conclude on $sha within the wait window."
+          exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+
+      # Import the Developer ID cert into a temporary keychain (creds-gated). When absent, the make below
+      # runs UNSIGNED and the publish gate refuses to ship it (RELEASE-4) — never a silent unsigned release.
+      - name: Import Developer ID signing certificate
+        if: ${{ secrets.MACOS_CERT_P12_BASE64 != '' }}
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/vellum-signing.keychain-db"
+          KPASS="$(openssl rand -base64 24)"
+          security create-keychain -p "$KPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPASS" "$KEYCHAIN"
+          echo "${{ secrets.MACOS_CERT_P12_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "${{ secrets.MACOS_CERT_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KPASS" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          echo "Imported Developer ID cert into $KEYCHAIN"
+
+      # Decode the App Store Connect API key (.p8) to a file the forge osxNotarize config points at.
+      - name: Stage the notarization API key
+        if: ${{ secrets.AC_API_KEY_P8_BASE64 != '' }}
+        shell: bash
+        run: |
+          echo "${{ secrets.AC_API_KEY_P8_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/ac_api_key.p8"
+          echo "AC_API_KEY_PATH=$RUNNER_TEMP/ac_api_key.p8" >> "$GITHUB_ENV"
+
+      # Build + sign + notarize + staple. The gates (KB_OSX_SIGN / KB_OSX_NOTARIZE) only turn on when the
+      # creds were staged above — so a creds-less dry run still builds (unsigned) for pipeline testing,
+      # and the publish gate below blocks shipping it.
+      - name: Build · sign · notarize (electron-forge make)
+        env:
+          KB_OSX_SIGN: ${{ secrets.MACOS_CERT_P12_BASE64 != '' && '1' || '' }}
+          KB_OSX_NOTARIZE: ${{ secrets.AC_API_KEY_P8_BASE64 != '' && '1' || '' }}
+          AC_API_KEY_ID: ${{ secrets.AC_API_KEY_ID }}
+          AC_API_ISSUER: ${{ secrets.AC_API_ISSUER }}
+        run: npm run make
+
+      # RELEASE-4 verification gate: the signed app must pass codesign --verify --deep --strict AND
+      # Gatekeeper assessment (spctl -a). A creds-less dry run fails here loudly — so an unsigned /
+      # un-notarized artifact can NEVER be published.
+      - name: Verify signature + notarization (RELEASE-4 — never ship unsigned)
+        shell: bash
+        run: |
+          app=$(ls -d out/Vellum-darwin-*/Vellum.app 2>/dev/null | head -n1)
+          if [ -z "$app" ]; then echo "::error::no packaged Vellum.app under out/"; ls -R out || true; exit 1; fi
+          echo "Verifying $app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          # spctl assesses the signature + the stapled notarization ticket offline (the staple step).
+          spctl -a -vvv --type execute "$app"
+          echo "codesign + spctl (Gatekeeper) PASS — artifact is signed + notarized."
+
+      # RELEASE-5: publish the signed installer(s) + the updater manifest SPEC-0056 consumes.
+      # NOTE(coordination, @KB-Developer-3 / SPEC-0056): the updater MANIFEST (`latest-mac.yml`) shape is
+      # confirmed with the 0056 owner before this is armed — see #control. electron-updater's mac feed
+      # needs the .zip + a `latest-mac.yml` (version, files[url,sha512,size], releaseDate). The make above
+      # produces the .zip (MakerZIP) + .dmg (MakerDMG); the manifest is generated by the helper script.
+      - name: Generate the electron-updater manifest (latest-mac.yml) [SPEC-0056 feed]
+        shell: bash
+        run: node scripts/genUpdaterManifest.mjs "${GITHUB_REF_NAME#v}"
+
+      - name: Publish to GitHub Releases (pre-release for -beta.N; RELEASE-2/5)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          prerelease=""
+          case "${GITHUB_REF_NAME}" in *-beta.*) prerelease="--prerelease";; esac
+          # Attach the signed .dmg + .zip + the updater manifest. Notes: prefer a release-notes file the
+          # /release authoring flow (Slice 2) writes; fall back to --generate-notes for now.
+          notes_arg="--generate-notes"
+          [ -f app/RELEASE_NOTES.md ] && notes_arg="--notes-file app/RELEASE_NOTES.md"
+          assets=$(ls app/out/make/**/*.dmg app/out/make/zip/darwin/**/*.zip app/out/latest-mac.yml 2>/dev/null || true)
+          echo "Publishing ${GITHUB_REF_NAME} with assets:"; echo "$assets"
+          gh release create "${GITHUB_REF_NAME}" $prerelease --title "${GITHUB_REF_NAME}" $notes_arg $assets

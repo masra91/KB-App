@@ -18,6 +18,20 @@ import { FuseV1Options, FuseVersion } from '@electron/fuses';
 // `Developer ID Application` for release). Notarization (MACOS-8) is a separate, creds-gated step.
 const SIGN_MACOS = process.env.KB_OSX_SIGN === '1';
 
+// SPEC-0055 RELEASE / SPEC-0034 MACOS-8: notarization is a SEPARATE, creds-gated step layered on top of
+// signing. It runs ONLY when (a) we're signing with a real Developer ID (SIGN_MACOS) AND (b) the release
+// runner opts in (`KB_OSX_NOTARIZE=1`) AND (c) the App Store Connect API-key creds are present — so a
+// signed-but-unnotarized dev build and the default unsigned `npm run package` both stay working, and
+// notarization only fires in the release CI once the Principal's creds are provisioned. The API-key path
+// (issuer + key id + a `.p8` file) is the CI-friendly auth (no Apple-ID/2FA). @electron/notarize staples
+// the ticket on success, so the artifact verifies offline (`spctl -a`). RELEASE-4.
+const NOTARIZE_MACOS =
+  SIGN_MACOS &&
+  process.env.KB_OSX_NOTARIZE === '1' &&
+  !!process.env.AC_API_KEY_PATH &&
+  !!process.env.AC_API_KEY_ID &&
+  !!process.env.AC_API_ISSUER;
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
@@ -53,6 +67,17 @@ const config: ForgeConfig = {
           osxSign: {
             ...(process.env.KB_OSX_SIGN_IDENTITY ? { identity: process.env.KB_OSX_SIGN_IDENTITY } : {}),
             optionsForFile: () => ({ hardenedRuntime: true, entitlements: 'build/entitlements.mac.plist' }),
+          },
+        }
+      : {}),
+    // SPEC-0055 MACOS-8: notarize + staple when armed (creds-gated; see NOTARIZE_MACOS). App Store
+    // Connect API-key auth — @electron/notarize uploads the signed app, waits, and staples the ticket.
+    ...(NOTARIZE_MACOS
+      ? {
+          osxNotarize: {
+            appleApiKey: process.env.AC_API_KEY_PATH as string,
+            appleApiKeyId: process.env.AC_API_KEY_ID as string,
+            appleApiIssuer: process.env.AC_API_ISSUER as string,
           },
         }
       : {}),
