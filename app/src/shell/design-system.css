@@ -151,7 +151,7 @@
    (KB-Developer-5) — pending KB-Design-Lead's design-system gate; he owns the final visual. */
 .viz-stepper { display: inline-flex; align-items: stretch; gap: 2px; }
 .viz-stepper__btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; color: var(--viz-ink); width: 1.5rem; line-height: 1.2; padding: 0.05rem 0; cursor: pointer; text-align: center; }
-/* hover tints EMBER (§6, matches .viz-btn) — no grey fill (KB-Design-Lead visual gate). */
+/* hover tints ACCENT (slate-blue interactive, matches .viz-btn) — no grey fill (KB-Design-Lead visual gate). */
 .viz-stepper__btn:hover:not(:disabled) { border-color: var(--viz-accent); color: var(--viz-accent); }
 .viz-stepper__btn:disabled { opacity: 0.4; cursor: default; }
 /* the value is a NUMBER → mono numeric face (§4: all counts → IBM Plex Mono), not signage. */
@@ -169,8 +169,8 @@
 .viz-confirm[hidden] { display: none; }
 
 /* --- EditableField (§6) — inline value editor; a legible setting at rest that edits in place via a
-   bottom-rule affordance (no boxed input chrome) lighting ember on focus. Steering fields stay neutral
-   --viz-ink (axis-coloring rule, #208) — never a clearance hue. The ember .viz-focusable ring (at the
+   bottom-rule affordance (no boxed input chrome) lighting the accent (slate-blue) on focus. Steering fields
+   stay neutral --viz-ink (axis-coloring rule, #208) — never a clearance hue. The accent .viz-focusable ring (at the
    call site) reinforces the bottom-rule focus, so focus is never rule-only (§6 a11y). */
 .viz-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
 .viz-field__label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
