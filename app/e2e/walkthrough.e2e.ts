@@ -16,12 +16,14 @@
 // inject the attribute via page.evaluate (emulateMedia would do nothing). Run it with:
 //   ALLOW_LOCAL_E2E=1 npm run walkthrough          (from app/, packages first if needed)
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { builtMainEntry } from './packagedApp';
 import { seedWalkthroughVault } from './seededVault';
 import { NAV_VIEWS } from '../src/shell/views';
 
+const APP_ROOT = path.join(__dirname, '..');
 const SHOTS_DIR = path.join(__dirname, 'walkthrough-shots');
 
 function resetShotsDir(): void {
@@ -36,6 +38,35 @@ function rmBestEffort(dir: string): void {
     /* leave it for the OS to reap */
   }
 }
+
+// Stale-bundle guard (DL-2's catch): globalSetup's fresh-guard (#455) stamps the built HEAD to
+// `app/.e2e-built-sha`. If a gater runs against a PRE-#455 globalSetup (or any future regression where the
+// build silently isn't refreshed), the shots would reflect a STALE bundle and a sign would be wrong. So
+// before capturing, assert the build is stamped to the checked-out HEAD — turning a silent stale-gate into
+// a LOUD failure with the fix. Skipped on CI (it packages immediately before e2e — freshness guaranteed)
+// and outside a git repo (can't verify). This is belt-and-suspenders ON TOP of the globalSetup guard.
+test('the packaged build is fresh for the checked-out HEAD (no stale-gate)', () => {
+  if (process.env.CI) return;
+  let head: string;
+  try {
+    head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: APP_ROOT, encoding: 'utf8' }).trim();
+  } catch {
+    return; // not a git repo / git unavailable — nothing to verify against
+  }
+  if (!head) return;
+  let marker: string | null = null;
+  try {
+    marker = fs.readFileSync(path.join(APP_ROOT, '.e2e-built-sha'), 'utf8').trim();
+  } catch {
+    /* absent → almost certainly a pre-#455 globalSetup that never stamps */
+  }
+  expect(
+    marker,
+    `STALE BUILD — the e2e bundle is not stamped to HEAD ${head.slice(0, 8)} (marker: ${marker ? marker.slice(0, 8) : 'absent'}). ` +
+      `globalSetup's fresh-guard should have rebuilt; you may be on a pre-#455 globalSetup or E2E_FRESH didn't reach it. ` +
+      `Fix: (cd app && rm -rf .vite out .e2e-built-sha && E2E_FRESH=1 npm run walkthrough)`,
+  ).toBe(head);
+});
 
 test.describe('LIVE WALKTHROUGH — every view, both themes, on a seeded vault (gate-of-record)', () => {
   let app: ElectronApplication | null = null;
