@@ -32,6 +32,15 @@ import {
   openContradictionsForIdentity,
   contestedContradictionsForIdentity,
   isStatementContested,
+  GUIDANCE_DIRECTIVES_REL,
+  GLOBAL_GUIDANCE_KEY,
+  readGuidanceDirectives,
+  recordGuidanceDirective,
+  activeGuidanceForIdentity,
+  readRevokeDirectives,
+  recordRevokeDirective,
+  isDirectiveRevoked,
+  isClaimSuppressedActive,
 } from './directives';
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
@@ -359,6 +368,93 @@ describe('contradiction lifecycle (SPEC-0036 CONTRA)', () => {
       const map = await readContradictionDirectives(root);
       expect(openContradictionsForIdentity(map, 'person|nobody')).toEqual([]);
       expect(isStatementContested(map, 'person|nobody', A)).toBe(false);
+    });
+  });
+});
+
+describe('guidance directives (SPEC-0050 slice-3)', () => {
+  it('stores the guidance log under the evergreen directives/ tree', () => {
+    expect(GUIDANCE_DIRECTIVES_REL.startsWith(DIRECTIVES_DIR + path.sep)).toBe(true);
+  });
+
+  it('records + reads an entity steer, last-wins on revision', async () => {
+    await withRoot(async (root) => {
+      await recordGuidanceDirective(root, { identityKey: 'person|ada lovelace', guidance: 'Lean into her mathematics.', reviewId: 'r1', decidedAt: '1' });
+      await recordGuidanceDirective(root, { identityKey: 'person|ada lovelace', guidance: 'Orient toward her publications.', reviewId: 'r2', decidedAt: '2' });
+      const map = await readGuidanceDirectives(root);
+      expect(map.get('person|ada lovelace')?.guidance).toBe('Orient toward her publications.'); // last-wins
+    });
+  });
+
+  it('an omitted identityKey records a GLOBAL steer; empty guidance text throws', async () => {
+    await withRoot(async (root) => {
+      await recordGuidanceDirective(root, { guidance: 'Prefer primary sources everywhere.', reviewId: 'r', decidedAt: '1' });
+      expect((await readGuidanceDirectives(root)).get(GLOBAL_GUIDANCE_KEY)?.guidance).toBe('Prefer primary sources everywhere.');
+      await expect(recordGuidanceDirective(root, { guidance: '   ', reviewId: 'r', decidedAt: '1' })).rejects.toThrow(/non-empty guidance/);
+    });
+  });
+});
+
+describe('revoke directives (SPEC-0050 slice-3)', () => {
+  it('isDirectiveRevoked is timestamp-ordered — a revoke cancels, a later re-assertion un-revokes', async () => {
+    await withRoot(async (root) => {
+      // guidance decided at t=2, revoked at t=3 → revoked.
+      await recordRevokeDirective(root, { family: 'guidance', targetKey: 'person|x', reviewId: 'r', decidedAt: '3' });
+      const revokes = await readRevokeDirectives(root);
+      expect(isDirectiveRevoked(revokes, 'guidance', 'person|x', '2')).toBe(true); // revoke (3) ≥ directive (2)
+      // A LATER re-assertion (t=4) of the same directive is NOT cancelled by the older revoke (3).
+      expect(isDirectiveRevoked(revokes, 'guidance', 'person|x', '4')).toBe(false);
+      // An unrelated target is never revoked.
+      expect(isDirectiveRevoked(revokes, 'guidance', 'person|y', '1')).toBe(false);
+      // A directive with no timestamp is conservatively revokable by any revoke.
+      expect(isDirectiveRevoked(revokes, 'guidance', 'person|x', '')).toBe(true);
+    });
+  });
+
+  it('keeps the LATEST revoke per target (re-revoke moves the timestamp forward)', async () => {
+    await withRoot(async (root) => {
+      await recordRevokeDirective(root, { family: 'correction', targetKey: 'person|a::wrong', reviewId: 'r1', decidedAt: '2' });
+      await recordRevokeDirective(root, { family: 'correction', targetKey: 'person|a::wrong', reviewId: 'r2', decidedAt: '5' });
+      const revokes = await readRevokeDirectives(root);
+      expect(isDirectiveRevoked(revokes, 'correction', 'person|a::wrong', '4')).toBe(true); // latest revoke (5) ≥ 4
+    });
+  });
+
+  it('refuses an unknown family / empty target; drops a garbled line on read (ENG-16)', async () => {
+    await withRoot(async (root) => {
+      await expect(recordRevokeDirective(root, { family: 'bogus' as never, targetKey: 'k', reviewId: 'r', decidedAt: '1' })).rejects.toThrow(/unknown family/);
+      await expect(recordRevokeDirective(root, { family: 'guidance', targetKey: '', reviewId: 'r', decidedAt: '1' })).rejects.toThrow(/non-empty targetKey/);
+      // A hand-written garbled line + a bad-family line are dropped; a good one survives.
+      const file = path.join(path.resolve(root), 'directives', 'revokes.jsonl');
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.appendFile(file, 'not json\n' + JSON.stringify({ family: 'nope', targetKey: 'k' }) + '\n' + JSON.stringify({ family: 'guidance', targetKey: 'person|z', reviewId: 'r', decidedAt: '9' }) + '\n', 'utf8');
+      const revokes = await readRevokeDirectives(root);
+      expect(isDirectiveRevoked(revokes, 'guidance', 'person|z', '1')).toBe(true); // the one good line survives
+    });
+  });
+
+  it('activeGuidanceForIdentity hides a revoked steer, surfaces an un-revoked one', async () => {
+    await withRoot(async (root) => {
+      await recordGuidanceDirective(root, { identityKey: 'person|ada lovelace', guidance: 'Steer A.', reviewId: 'r', decidedAt: '2' });
+      await recordGuidanceDirective(root, { identityKey: 'person|charles babbage', guidance: 'Steer B.', reviewId: 'r', decidedAt: '2' });
+      await recordRevokeDirective(root, { family: 'guidance', targetKey: 'person|ada lovelace', reviewId: 'r', decidedAt: '3' });
+      const [g, rv] = [await readGuidanceDirectives(root), await readRevokeDirectives(root)];
+      expect(activeGuidanceForIdentity(g, rv, 'person|ada lovelace')).toBeUndefined(); // revoked
+      expect(activeGuidanceForIdentity(g, rv, 'person|charles babbage')?.guidance).toBe('Steer B.'); // active
+    });
+  });
+
+  it('REVOKE un-suppresses a correction: isClaimSuppressedActive flips false once the retract is revoked', async () => {
+    await withRoot(async (root) => {
+      await recordCorrectionDirective(root, { type: 'retract', identityKey: 'person|a', statement: 'Wrong fact.', reviewId: 'r', decidedAt: '2' });
+      let [corr, rv] = [await readCorrectionDirectives(root), await readRevokeDirectives(root)];
+      expect(isClaimSuppressed(corr, 'person|a', 'Wrong fact.')).toBe(true); // raw: suppressed
+      expect(isClaimSuppressedActive(corr, rv, 'person|a', 'Wrong fact.')).toBe(true); // no revoke yet → still suppressed
+
+      await recordRevokeDirective(root, { family: 'correction', targetKey: correctionClaimKey('person|a', 'Wrong fact.'), reviewId: 'r', decidedAt: '3' });
+      [corr, rv] = [await readCorrectionDirectives(root), await readRevokeDirectives(root)];
+      expect(isClaimSuppressed(corr, 'person|a', 'Wrong fact.')).toBe(true); // raw read is unchanged…
+      expect(isClaimSuppressedActive(corr, rv, 'person|a', 'Wrong fact.')).toBe(false); // …but the revoke un-suppresses it
     });
   });
 });

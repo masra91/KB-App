@@ -25,7 +25,7 @@ import { LINKS_BLOCK_START, LINKS_BLOCK_END } from './connectDoc';
 import { deriveSourceTitle } from './sourceDoc';
 import { parseEntityNode, parseClaimBacklink, findEntityFiles } from './claimsStage';
 import { blockKey } from './connect';
-import { readCorrectionDirectives, isClaimSuppressed } from './directives';
+import { readCorrectionDirectives, readRevokeDirectives, isClaimSuppressedActive, readGuidanceDirectives, activeGuidanceForIdentity, GLOBAL_GUIDANCE_KEY } from './directives';
 import { applyProse, renderProse, hasProse } from './composeDoc';
 import type { CitedClaim } from './compose';
 import { makeComposeDecider, type ComposeDecider, type ComposeInput } from './composeAgent';
@@ -202,6 +202,7 @@ async function readCitedClaims(wt: string, entityMd: string, entityRel: string):
   // just the structured block) — retract OR reattribute (wrong subject); same content key (subject block
   // identity + statement), survives replay.
   const corrections = await readCorrectionDirectives(wt);
+  const revokes = await readRevokeDirectives(wt); // SPEC-0050 slice-3: a REVOKED retract no longer suppresses
   const ref = parseEntityNode(entityMd);
   const identityKey = blockKey(ref.kind, ref.name);
   const titleCache = new Map<string, string>();
@@ -215,7 +216,7 @@ async function readCitedClaims(wt: string, entityMd: string, entityRel: string):
     }
     const link = parseClaimBacklink(claimMd, rel, entityRel);
     if (!link || !link.source || link.statement.length === 0) continue;
-    if (isClaimSuppressed(corrections, identityKey, link.statement)) continue; // retracted/reattributed → omit from prose
+    if (isClaimSuppressedActive(corrections, revokes, identityKey, link.statement)) continue; // retracted/reattributed (unless revoked) → omit from prose
     let title = titleCache.get(link.source);
     if (title === undefined) {
       let sourceMd = '';
@@ -281,12 +282,20 @@ export async function composeOne(
         result = { entityId, ok: true, composed: false, setAside: false };
         return false;
       }
+      // SPEC-0050 slice-3: fold in the entity's ACTIVE guidance steer (revokes applied; an entity steer,
+      // else the global one) — durable, rebirth-proof framing for the page. Absent → no steer line.
+      const [guidanceMap, revokesMap] = await Promise.all([readGuidanceDirectives(wt), readRevokeDirectives(wt)]);
+      const entityIdentity = blockKey(ref.kind, ref.name);
+      const steer =
+        activeGuidanceForIdentity(guidanceMap, revokesMap, entityIdentity) ??
+        activeGuidanceForIdentity(guidanceMap, revokesMap, GLOBAL_GUIDANCE_KEY);
       const input: ComposeInput = {
         entityId,
         kind: ref.kind,
         name: ref.name,
         claims: cited.map((c) => ({ statement: c.statement, title: c.title })),
         links: linkedEntityNames(entityMd),
+        ...(steer ? { guidance: steer.guidance } : {}),
       };
       const decision = await decider(input, { span });
       const model = decision.agent?.model ?? 'default';
