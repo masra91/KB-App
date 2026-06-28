@@ -51,6 +51,7 @@ import { readDisambiguationDirectives, directiveForIdentity } from './directives
 import { deriveSourceTitle } from './sourceDoc';
 import { parseSensitivityFromSourceMd } from './sensitivityRead';
 import { restrictiveness } from './sensitivity';
+import { normalizeEventDates, type EventDate } from './eventDate';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
@@ -854,6 +855,17 @@ export async function connectOne(
       const memberScopes = [...new Set(members.map((m) => sourceProps[m.sourceId]?.scope).filter((s): s is string => !!s))];
       const scope = memberScopes.length === 1 ? memberScopes[0] : priorProps.scope;
 
+      // SPEC-0025 META S2: entity event dates. The agent coins fresh `{label,value}` (normalized →
+      // full-date + inferred precision); folded WHOLE by label across re-resolves/merges (idempotent —
+      // canonical's existing date for a label wins/sticks, fresh adds new labels, losers fill the rest, so
+      // a merge keeps both nodes' dates). Like tags: regenerated each pass, no extra agent call.
+      const freshDates = normalizeEventDates(cluster.dates ?? []);
+      const dateByLabel = new Map<string, EventDate>();
+      for (const d of [...(canonical?.dates ?? []), ...freshDates, ...losers.flatMap((l) => l.dates ?? [])]) {
+        if (!dateByLabel.has(d.label)) dateByLabel.set(d.label, d);
+      }
+      const dates = [...dateByLabel.values()].sort((a, b) => (a.label < b.label ? -1 : a.label > b.label ? 1 : 0));
+
       const node: EntityNode = {
         id,
         kind,
@@ -895,6 +907,7 @@ export async function connectOne(
           ...(scope ? { scope } : {}),
           ...(sensitivity ? { sensitivity } : {}),
         },
+        ...(dates.length > 0 ? { dates } : {}),
         createdAt: canonical?.createdAt || now,
         updatedAt: now,
         agent: decision.agent,

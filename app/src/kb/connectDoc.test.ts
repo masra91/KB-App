@@ -86,6 +86,25 @@ describe('SPEC-0025 META v1 — curated key-value Properties + Obsidian-native d
     expect(parsed.properties).toEqual({ scope: 'work' }); // foreign `mood` is never rendered → never parsed
   });
 
+  it('META S2: renders event dates as `<label>: <date>` + `<label>_precision:` markers, round-trips', () => {
+    const dates = [
+      { label: 'founded', date: '1976-01-01', precision: 'year' as const },
+      { label: 'released', date: '2007-06-29', precision: 'day' as const },
+    ];
+    const md = renderEntityNode(node({ dates }));
+    expect(md).toContain('founded: 1976-01-01');
+    expect(md).toContain('founded_precision: year');
+    expect(md).toContain('released: 2007-06-29');
+    expect(md).toContain('released_precision: day');
+    expect(md.indexOf('founded:')).toBeLessThan(md.indexOf('---', 4)); // identity region (META-4)
+    expect(parseEntityNode(md).dates).toEqual(dates); // round-trips
+  });
+
+  it('META S2: an unpaired date (no `_precision` sibling) is NOT read back as an event date', () => {
+    const raw = '---\nid: 01J\nkind: person\nname: X\nfounded: 1976-01-01\n---\n# X'; // no founded_precision
+    expect(parseEntityNode(raw).dates).toEqual([]); // a bare date Property isn't an event date
+  });
+
   it('parse-side gate: a foreign curated-looking key in raw frontmatter is dropped (QD-2 direct-parse)', () => {
     // A hand-edited / foreign node with a non-curated flat key — parse must keep only curated dynamic
     // Properties (scope/status/sensitivity), never an arbitrary key (defends the curated-only contract

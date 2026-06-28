@@ -48,6 +48,15 @@ export interface ClusterDecision {
    * orchestrator normalizes via `normalizeTag`. No new agent call: it's one extra verdict field.
    */
   tags?: string[];
+  /**
+   * Optional (SPEC-0025 META Slice-2): emergent ENTITY EVENT DATES the agent coins for this node, e.g.
+   * `[{label:'founded', value:'1976'}, {label:'released', value:'2007-06-29'}]`. `value` is an ISO
+   * granularity (`YYYY` | `YYYY-MM` | `YYYY-MM-DD`); Connect normalizes it to a full-date + inferred
+   * precision and writes `<label>: <date>` + `<label>_precision:` Properties (ruling b — enables the
+   * timeline). No new agent call: one extra verdict field, like `tags`. A `precision` hint is accepted but
+   * ignored (the value's granularity is authoritative). Bad/unparseable entries are dropped, never written.
+   */
+  dates?: Array<{ label: string; value: string; precision?: string }>;
 }
 
 /** The whole verdict returned by one disposable Connect session (SPEC-0020 §3.3). */
@@ -158,6 +167,12 @@ function validCluster(v: unknown, i: number): ClusterDecision {
       throw new Error(`connect: clusters[${i}].tags must be an array of non-empty strings when present`);
     }
     if (o.tags.length > 0) cluster.tags = o.tags as string[];
+  }
+  if (o.dates !== undefined) {
+    if (!Array.isArray(o.dates) || !o.dates.every((d) => typeof d === 'object' && d !== null && isNonEmptyString((d as { label?: unknown }).label) && isNonEmptyString((d as { value?: unknown }).value))) {
+      throw new Error(`connect: clusters[${i}].dates must be an array of {label, value} objects when present`);
+    }
+    if (o.dates.length > 0) cluster.dates = (o.dates as Array<{ label: string; value: string; precision?: string }>);
   }
   return cluster;
 }

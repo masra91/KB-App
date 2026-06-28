@@ -135,6 +135,13 @@ export function buildConnectPrompt(set: CandidateSet): string {
     '  - NEVER restate this entity\'s own name or kind as a topic (no "topic/<the name>", no "topic/person");',
     '  - if the entity has no clear thematic domain, omit tags[] — do not force one.',
     '',
+    'EVENT DATES (SPEC-0025 META Slice-2): for each cluster ALSO coin dates[] — the entity\'s notable EVENT',
+    'dates that are STATED in the sources (e.g. born, died, founded, released, joined). Each is',
+    '{"label":"<short kebab event, e.g. founded>","value":"<ISO date>"}, where value is as precise as the',
+    'source supports: a year "1976", a year-month "2007-06", or a full date "2007-06-29" — do NOT invent a',
+    'month or day the source doesn\'t give (just use the year). Only dates ABOUT this entity, grounded in the',
+    'text; if none are stated, omit dates[] — never guess or fabricate a date.',
+    '',
     'Do NOT merge things that are merely similar — when two mentions are genuinely ambiguous',
     '(e.g. "S. Jobs" could be a different person), keep them in SEPARATE clusters and raise a',
     'review instead of guessing. A wrong merge conflates two real things.',
@@ -171,7 +178,7 @@ export function buildConnectPrompt(set: CandidateSet): string {
     'Do NOT create typed links or resolve relationships — only entity resolution here.',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
-    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0,"tags":["topic/..."]}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"pair":["<existingNodeIdA>","<existingNodeIdB>"],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
+    '{"blockKey":"<the key above>","clusters":[{"canonicalName":"...","memberCandidateIds":["..."],"existingNodeId":"...","confidence":0.0,"tags":["topic/..."],"dates":[{"label":"founded","value":"1976"}]}],"reviews":[{"question":"...","detail":"...","candidates":[{"id":"<candidate id>","gloss":"..."}],"pair":["<existingNodeIdA>","<existingNodeIdB>"],"refs":["..."]}],"signals":[{"type":"...","note":"...","refs":["..."]}]}',
   ]
     .filter((l) => l !== '')
     .join('\n');

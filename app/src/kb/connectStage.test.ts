@@ -148,7 +148,7 @@ async function seedSource(root: string, opts: { scope?: string; sensitivity?: st
 /** A decider that puts ALL candidates into one cluster with the given name (+ optional merge/fold). */
 function oneClusterDecider(
   canonicalName: string,
-  opts: { existingNodeId?: string; mergeExistingNodeIds?: string[] } = {},
+  opts: { existingNodeId?: string; mergeExistingNodeIds?: string[]; dates?: Array<{ label: string; value: string }> } = {},
 ): ConnectDecider {
   return async (set: CandidateSet): Promise<ConnectDecision> => ({
     blockKey: set.blockKey,
@@ -159,6 +159,7 @@ function oneClusterDecider(
         confidence: 0.95,
         ...(opts.existingNodeId ? { existingNodeId: opts.existingNodeId } : {}),
         ...(opts.mergeExistingNodeIds ? { mergeExistingNodeIds: opts.mergeExistingNodeIds } : {}),
+        ...(opts.dates ? { dates: opts.dates } : {}),
       },
     ],
     agent: { via: 'copilot', model: 'test' },
@@ -288,6 +289,40 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
       expect(files).toHaveLength(1); // one surviving canonical node
       const md = await fs.readFile(path.join(root, files[0]), 'utf8');
       expect(md).toMatch(/^sensitivity: internal$/m); // ← loser A's `internal` preserved, NOT down-classified
+    });
+  });
+
+  it('META S2: a coined event date lands on the node as a `<label>: <date>` + `<label>_precision:` Property', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      await seedCandidate(root, 'organization', 'Apple', '01S1');
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'organization|apple', oneClusterDecider('Apple', { dates: [{ label: 'Founded', value: '1976' }] }));
+      const md = await fs.readFile(path.join(root, 'entities/organization/Apple.md'), 'utf8');
+      expect(md).toMatch(/^founded: 1976-01-01$/m); // full date (padded) — Bases date-sortable
+      expect(md).toMatch(/^founded_precision: year$/m); // precision honest (year-only "1976")
+    });
+  });
+
+  it('META S2: a MERGE keeps BOTH nodes\' event dates (folded by label, idempotent)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // canonical B has `released`; loser A has `founded`. The merge must carry both.
+      const a = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA']);
+      const b = await seedNode(root, 'person', 'Steven Jobs', ['sources/b/01SB']);
+      // give A a date by re-rendering it with one (seedNode doesn't take dates; write directly via the merge path).
+      await fs.writeFile(path.join(root, a.rel), (await fs.readFile(path.join(root, a.rel), 'utf8')).replace(/^provenance:/m, 'founded: 1976-01-01\nfounded_precision: year\nprovenance:'), 'utf8');
+      await fs.writeFile(path.join(root, b.rel), (await fs.readFile(path.join(root, b.rel), 'utf8')).replace(/^provenance:/m, 'released: 2007-06-29\nreleased_precision: day\nprovenance:'), 'utf8');
+      await seedCandidate(root, 'person', 'Steve Jobs', '01S1');
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs', { existingNodeId: b.id, mergeExistingNodeIds: [a.id] }));
+      const files = await listEntityFiles(root);
+      expect(files).toHaveLength(1);
+      const md = await fs.readFile(path.join(root, files[0]), 'utf8');
+      expect(md).toMatch(/^founded: 1976-01-01$/m); // loser A's date preserved on merge
+      expect(md).toMatch(/^released: 2007-06-29$/m); // canonical B's date kept
     });
   });
 
