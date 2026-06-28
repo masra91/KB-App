@@ -121,6 +121,29 @@ async function seedClaimRelatesTo(root: string, subjectRel: string, statement: s
   return rel;
 }
 
+/** Seed an archived `source.md` carrying curated property values (scope/sensitivity) — META S1b reads
+ *  these off the node's member sources. Returns the source's ULID (a real ULID so `sourceFileRel` maps it). */
+async function seedSource(root: string, opts: { scope?: string; sensitivity?: string } = {}): Promise<string> {
+  const id = ulid();
+  const dest = path.join(root, 'sources', dateShard(id), id, 'source.md');
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const fm = [
+    '---',
+    `id: ${id}`,
+    'class: primary',
+    'kind: text',
+    ...(opts.scope ? [`scope: ${opts.scope}`] : []),
+    ...(opts.sensitivity ? [`sensitivity: ${opts.sensitivity}`] : []),
+    'raw: raw.md',
+    '---',
+    '',
+    '# A source',
+    '',
+  ].join('\n');
+  await fs.writeFile(dest, fm, 'utf8');
+  return id;
+}
+
 /** A decider that puts ALL candidates into one cluster with the given name (+ optional merge/fold). */
 function oneClusterDecider(
   canonicalName: string,
@@ -211,6 +234,53 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
       await commitAll(root, 'seed');
       await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs'));
       expect(await listEntityFiles(root)).toEqual(['entities/person/Steve Jobs.md']);
+    });
+  });
+
+  // SPEC-0025 META S1b — the curated scope/sensitivity property VALUES carried from a node's sources.
+  it('META S1b: carries scope + MOST-RESTRICTIVE sensitivity from the node\'s sources onto its Properties', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, { scope: 'work', sensitivity: 'shareable' });
+      const s2 = await seedSource(root, { scope: 'work', sensitivity: 'internal' });
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await seedCandidate(root, 'person', 'Ada Lovelace', s2);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).toMatch(/^scope: work$/m); // uniform across both sources → carried
+      expect(md).toMatch(/^sensitivity: internal$/m); // internal ≻ shareable (SENSE-3 most-restrictive)
+    });
+  });
+
+  it('META S1b: scope is OMITTED when the node\'s sources disagree (ambiguous), sensitivity still folds', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, { scope: 'work', sensitivity: 'internal' });
+      const s2 = await seedSource(root, { scope: 'personal', sensitivity: 'shareable' });
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await seedCandidate(root, 'person', 'Ada Lovelace', s2);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).not.toMatch(/^scope:/m); // work vs personal → ambiguous → omitted (no thrash)
+      expect(md).toMatch(/^sensitivity: internal$/m); // most-restrictive still applies
+    });
+  });
+
+  it('META S1b: a source with NO scope/sensitivity → no curated values emitted (clean, no empty keys)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, {}); // bare source, no scope/sensitivity frontmatter
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).not.toMatch(/^scope:/m);
+      expect(md).not.toMatch(/^sensitivity:/m);
     });
   });
 });

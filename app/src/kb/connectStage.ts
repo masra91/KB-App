@@ -49,6 +49,8 @@ import { reviewRel, writeReviewFile, readAllReviews } from './reviewStore';
 import { readDisambiguationDecisions, decisionForPair } from './disambiguationDecisions';
 import { readDisambiguationDirectives, directiveForIdentity } from './directives';
 import { deriveSourceTitle } from './sourceDoc';
+import { parseSensitivityFromSourceMd } from './sensitivityRead';
+import { restrictiveness } from './sensitivity';
 import type { Review, ReviewSubjectCandidate } from './reviews';
 import { Mutex } from './stageLock';
 import { epochScopedLines } from './replayEpoch';
@@ -161,6 +163,27 @@ async function resolveCandidateTitle(wt: string, cand: Candidate): Promise<strin
     return deriveSourceTitle(content);
   } catch {
     return cand.name;
+  }
+}
+
+/** SPEC-0025 META S1b: the curated property VALUES a source carries — its `scope` + (SENSE-A) resolved
+ *  `sensitivity:` label — read from its `source.md` in ONE pass (alongside the title). These ride onto the
+ *  entity node's curated `properties` bag at resolve time (META-4: Connect is the authoritative writer).
+ *  A missing/unreadable source → empty card (the caller folds what's present). The RESOLVED scalar is read,
+ *  not the `suggested` (a sub-threshold Review hint isn't the source's label yet). */
+async function readSourceCard(wt: string, cand: Candidate): Promise<{ title: string; scope?: string; sensitivity?: string }> {
+  try {
+    const content = await fs.readFile(path.join(wt, sourceFileRel(cand.sourceId)), 'utf8');
+    const fm = content.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? '';
+    const scope = fm.match(/^scope:[ \t]*(.+)$/m)?.[1].trim();
+    const sensitivity = parseSensitivityFromSourceMd(content)?.sensitivity;
+    return {
+      title: deriveSourceTitle(content),
+      ...(scope ? { scope } : {}),
+      ...(sensitivity ? { sensitivity } : {}),
+    };
+  } catch {
+    return { title: cand.name }; // unreadable source → fall back to the candidate's human name (never a ULID)
   }
 }
 
@@ -653,8 +676,14 @@ export async function connectOne(
     // 01KTJH…"). resolveCandidateTitle never returns a ULID (falls back to the candidate name). Dedupe
     // the read per source so a many-candidate block reads each source.md at most once.
     const sourceTitles: Record<string, string> = {};
+    // SPEC-0025 META S1b: per-source curated property values (scope/sensitivity), read in the SAME pass
+    // as the titles (one source.md read per source) so the node can carry them at resolve time.
+    const sourceProps: Record<string, { scope?: string; sensitivity?: string }> = {};
     for (const c of setCandidates) {
-      if (!(c.sourceId in sourceTitles)) sourceTitles[c.sourceId] = await resolveCandidateTitle(wt, c);
+      if (c.sourceId in sourceTitles) continue;
+      const card = await readSourceCard(wt, c);
+      sourceTitles[c.sourceId] = card.title;
+      sourceProps[c.sourceId] = { ...(card.scope ? { scope: card.scope } : {}), ...(card.sensitivity ? { sensitivity: card.sensitivity } : {}) };
     }
     const set: CandidateSet = {
       blockKey: key,
@@ -803,6 +832,22 @@ export async function connectOne(
       const losers = mergeTargets.filter((n) => !canonical || n.id !== canonical.id);
 
       const id = canonical?.id ?? ulid();
+
+      // SPEC-0025 META S1b: the curated scope/sensitivity property VALUES, carried from the node's member
+      // sources (Connect is the authoritative metadata writer, META-4). Regenerated WHOLE each resolve so
+      // re-pokes/merges converge (idempotent):
+      //  • sensitivity = MOST-RESTRICTIVE across the member sources AND the prior canonical value (SENSE-3
+      //    `restrictiveness`; monotonic → once `internal`/higher it stays, so it converges). Unknown labels
+      //    already resolve most-restrictive in the comparator (unknown ≠ safe).
+      //  • scope = the value shared by ALL member sources when they're uniform; else the prior canonical
+      //    scope (best-effort — an ambiguous mix keeps the settled value rather than thrashing).
+      const priorProps = canonical?.properties ?? {};
+      const memberSensitivities = members.map((m) => sourceProps[m.sourceId]?.sensitivity).filter((s): s is string => !!s);
+      const sensPool = [...memberSensitivities, ...(priorProps.sensitivity ? [priorProps.sensitivity] : [])];
+      const sensitivity = sensPool.length > 0 ? sensPool.reduce((a, b) => (restrictiveness(b) > restrictiveness(a) ? b : a)) : undefined;
+      const memberScopes = [...new Set(members.map((m) => sourceProps[m.sourceId]?.scope).filter((s): s is string => !!s))];
+      const scope = memberScopes.length === 1 ? memberScopes[0] : priorProps.scope;
+
       const node: EntityNode = {
         id,
         kind,
@@ -834,10 +879,16 @@ export async function connectOne(
             [typeTag(kind), ...(cluster.tags ?? []).map(normalizeTag)].filter((t) => t.length > 0),
           ),
         ),
-        // SPEC-0025 META v1: dynamic curated key-value Properties (scope/status/sensitivity). Carried
-        // WHOLE across re-resolves/merges (idempotent) — canonical's win, then any loser's fill a gap.
-        // Empty until the carry-forward sourcing slice (S1b) populates them; the mechanism is here now.
-        properties: { ...losers.reduce((acc, l) => ({ ...l.properties, ...acc }), {}), ...(canonical?.properties ?? {}) },
+        // SPEC-0025 META v1/S1b: dynamic curated key-value Properties (scope/status/sensitivity). Carried
+        // WHOLE across re-resolves/merges (idempotent): loser props fill gaps, canonical's prior wins, then
+        // the freshly source-derived scope/sensitivity (computed above) layer on top. `status` is still
+        // unpopulated (no value source yet) — only ride through if a prior value carried it.
+        properties: {
+          ...losers.reduce((acc, l) => ({ ...l.properties, ...acc }), {}),
+          ...priorProps,
+          ...(scope ? { scope } : {}),
+          ...(sensitivity ? { sensitivity } : {}),
+        },
         createdAt: canonical?.createdAt || now,
         updatedAt: now,
         agent: decision.agent,
