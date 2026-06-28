@@ -12,10 +12,10 @@ function installLocalStorage(): void {
   Object.defineProperty(window, 'localStorage', {
     configurable: true,
     value: {
-      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
-      setItem: (k: string, v: string) => void store.set(k, String(v)),
-      removeItem: (k: string) => void store.delete(k),
-      clear: () => store.clear(),
+      getItem: (k: string): string | null => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string): void => void store.set(k, String(v)),
+      removeItem: (k: string): void => void store.delete(k),
+      clear: (): void => store.clear(),
     },
   });
 }

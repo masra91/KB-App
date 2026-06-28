@@ -66,7 +66,7 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
     const store = new Map<string, string>(); // happy-dom localStorage is partial across versions
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
-      value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() },
+      value: { getItem: (k: string): string | null => store.get(k) ?? null, setItem: (k: string, v: string): void => void store.set(k, v), removeItem: (k: string): void => void store.delete(k), clear: (): void => store.clear() },
     });
     document.documentElement.removeAttribute('data-theme');
     setApi('guarded');
