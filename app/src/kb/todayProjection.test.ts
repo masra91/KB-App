@@ -2,7 +2,11 @@
 // logic: salutation-by-hour, stat deltas (up/flat), the honest line-meta, decision ordering + rest state,
 // health thresholds, compact relative-time, activity cap, and ENG-15/16 coalescing of garbage numerics.
 import { describe, it, expect } from 'vitest';
-import { buildTodayProjection, salutationFor, compactAgo, type TodayInputs } from './todayProjection';
+import { buildTodayProjection, salutationFor, compactAgo, activityKind, todayActivityFromFeed, todayHealthFromProjection, countConnections, assembleTodayProjection, type TodayInputs, type TodaySources } from './todayProjection';
+import type { ActivityFeedEntry } from './activityDigest';
+import type { HealthProjection } from './healthProjection';
+import type { GraphProjection } from './graphProjection';
+import type { PipelineStatusView } from './types';
 
 function inputs(over: Partial<TodayInputs> = {}): TodayInputs {
   return {
@@ -10,9 +14,9 @@ function inputs(over: Partial<TodayInputs> = {}): TodayInputs {
     counts: { sources: 214, claims: 1847, entities: 392, connections: 1204 },
     todayDeltas: { sources: 6, claims: 38, entities: 0, connections: 21 },
     stations: [
-      { name: 'Capture', count: 214, state: 'done' },
-      { name: 'Decompose', count: 2, state: 'active' },
-      { name: 'Claims', count: null, state: 'idle' },
+      { name: 'Capture', stage: 'capture', state: 'idle', glyph: '○', count: 214 },
+      { name: 'Decompose', stage: 'decompose', state: 'running', glyph: '▣', count: 2 },
+      { name: 'Claims', stage: 'claims', state: 'idle', glyph: '○', count: 0 },
     ],
     inFlight: 2,
     lastComposedAgoMs: 6 * 60_000,
@@ -121,5 +125,115 @@ describe('buildTodayProjection', () => {
     expect(dirty.health[0]).toMatchObject({ key: 'dangling', value: '0', status: 'ok' }); // NaN → 0 → ok
     expect(dirty.health[1].value).toBe('1'); // 1.5 orphans → floor 1
     expect(dirty.health[2].value).toBe('0'); // -2 thin → 0
+  });
+});
+
+describe('todayActivityFromFeed (compose upstream → activity items)', () => {
+  const entry = (over: Partial<ActivityFeedEntry>): ActivityFeedEntry =>
+    ({ id: 'r', ts: '2026-06-27T11:54:00.000Z', actor: 'connect', summary: 'Connected 7 claims', eventCount: 1, events: [], ...over }) as ActivityFeedEntry;
+  const NOW = Date.parse('2026-06-27T12:00:00.000Z');
+
+  it('maps the actor → activity kind', () => {
+    expect(activityKind('compose')).toBe('composed');
+    expect(activityKind('connect')).toBe('connected');
+    expect(activityKind('claims')).toBe('extracted');
+    expect(activityKind('archivist')).toBe('captured');
+    expect(activityKind('reflect')).toBe('other'); // unmapped → other (never a thrown/blank glyph)
+  });
+
+  it('maps entries newest-first with kind/text/age, capped', () => {
+    const feed = [
+      entry({ actor: 'compose', summary: 'Composed a page', ts: '2026-06-27T11:54:00.000Z' }), // 6m ago
+      entry({ actor: 'claims', summary: 'Extracted 38 claims', ts: '2026-06-27T11:18:00.000Z' }), // 42m
+    ];
+    const out = todayActivityFromFeed(feed, NOW);
+    expect(out[0]).toMatchObject({ kind: 'composed', text: 'Composed a page', agoMs: 6 * 60_000 });
+    expect(out[1]).toMatchObject({ kind: 'extracted', text: 'Extracted 38 claims' });
+  });
+
+  it('caps the feed + tolerates a malformed ts (no NaN age) and missing fields (ENG-15/16)', () => {
+    const many = Array.from({ length: 9 }, (_v, i) => entry({ id: String(i) }));
+    expect(todayActivityFromFeed(many, NOW, 5)).toHaveLength(5);
+    const bad = todayActivityFromFeed([{ actor: 'connect' } as unknown as ActivityFeedEntry], NOW);
+    expect(bad[0]).toEqual({ kind: 'connected', text: '', agoMs: 0 }); // no ts/summary → 0 age + ''
+  });
+});
+
+describe('todayHealthFromProjection (HealthProjection dimensions → counts)', () => {
+  const health = (counts: { dangling: number; orphans: number; thin: number }): HealthProjection =>
+    ({
+      status: 'ready',
+      overall: 'attention',
+      totalIssues: counts.dangling + counts.orphans + counts.thin,
+      dimensions: [
+        { key: 'dangling', label: 'Dead links', desc: '', severity: counts.dangling ? 'bad' : 'ok', count: counts.dangling, findings: [] },
+        { key: 'orphans', label: 'Orphans', desc: '', severity: counts.orphans ? 'warn' : 'ok', count: counts.orphans, findings: [] },
+        { key: 'thin', label: 'Thin pages', desc: '', severity: counts.thin ? 'warn' : 'ok', count: counts.thin, findings: [] },
+      ],
+    }) as unknown as HealthProjection;
+
+  it('pulls each dimension count by key', () => {
+    expect(todayHealthFromProjection(health({ dangling: 3, orphans: 2, thin: 11 }))).toEqual({ dangling: 3, orphans: 2, thin: 11 });
+  });
+
+  it('null/warming projection or missing dimensions → all 0 (ENG-15/16)', () => {
+    expect(todayHealthFromProjection(null)).toEqual({ dangling: 0, orphans: 0, thin: 0 });
+    expect(todayHealthFromProjection({ status: 'warming', dimensions: [] } as unknown as HealthProjection)).toEqual({ dangling: 0, orphans: 0, thin: 0 });
+  });
+
+  it('round-trips through buildTodayProjection to the same severity DEV-2 bakes', () => {
+    const inputsHealth = todayHealthFromProjection(health({ dangling: 1, orphans: 0, thin: 4 }));
+    const proj = buildTodayProjection(inputs({ health: inputsHealth }), NOON);
+    expect(proj.health[0]).toMatchObject({ key: 'dangling', status: 'bad' }); // dangling → oxide
+    expect(proj.health[2]).toMatchObject({ key: 'thin', status: 'warn' }); // thin → brass
+  });
+});
+
+describe('countConnections (graph backlinks → the Connections stat)', () => {
+  it('sums every precomputed backlink across the graph', () => {
+    const graph = { backlinks: { 'e/a.md': [{ from: 'b', to: 'a' }, { from: 'c', to: 'a' }], 'e/b.md': [{ from: 'c', to: 'b' }] } } as unknown as GraphProjection;
+    expect(countConnections(graph)).toBe(3);
+  });
+
+  it('null/warming graph or malformed backlinks → 0 (ENG-15/16, no live walk)', () => {
+    expect(countConnections(null)).toBe(0);
+    expect(countConnections({} as unknown as GraphProjection)).toBe(0);
+    expect(countConnections({ backlinks: { 'e/a.md': 'bad' as unknown as [] } } as unknown as GraphProjection)).toBe(0);
+  });
+});
+
+describe('assembleTodayProjection (compose maintained reads → the full projection)', () => {
+  const sources = (over: Partial<TodaySources> = {}): TodaySources => ({
+    status: { conversion: { captured: 214, candidates: 30, entities: 392, claims: 1847, promoted: 6 } } as unknown as PipelineStatusView,
+    graph: { backlinks: { a: [{ from: 'x', to: 'a' }], b: [{ from: 'y', to: 'b' }, { from: 'z', to: 'b' }] } } as unknown as GraphProjection,
+    health: { status: 'ready', dimensions: [{ key: 'dangling', count: 0, severity: 'ok' }, { key: 'orphans', count: 0, severity: 'ok' }, { key: 'thin', count: 11, severity: 'warn' }] } as unknown as HealthProjection,
+    activity: [{ id: 'r', ts: '2026-06-27T11:54:00.000Z', actor: 'compose', summary: 'Composed a page', eventCount: 1, events: [] } as ActivityFeedEntry],
+    stations: [{ name: 'Capture', stage: 'capture', state: 'idle', glyph: '○', count: 214 }, { name: 'Compose', stage: 'compose', state: 'idle', glyph: '○', count: 0 }],
+    openReviews: 2,
+    contradictions: 1,
+    inFlight: 2,
+    lastComposedAgoMs: 6 * 60_000,
+    movedRecently: 3,
+    ...over,
+  });
+  const EVENING = Date.parse('2026-06-27T23:48:00');
+
+  it('maps every section from the maintained reads into the locked contract shape', () => {
+    const p = assembleTodayProjection(sources(), EVENING);
+    expect(p.greeting).toEqual({ salutation: 'Good evening' }); // name omitted (v1)
+    expect(p.stats.map((s) => [s.key, s.value])).toEqual([['sources', 214], ['claims', 1847], ['entities', 392], ['connections', 3]]); // connections = 3 backlinks
+    expect(p.health.find((h) => h.key === 'thin')).toMatchObject({ value: '11', status: 'warn' });
+    expect(p.activity[0]).toMatchObject({ kind: 'composed', text: 'Composed a page' });
+    expect(p.decisions.map((d) => d.kind)).toEqual(['contradiction', 'review']); // 1 contradiction + 2 reviews
+    expect(p.line.stations).toHaveLength(2); // injected, passed through
+    expect(p.line.meta).toBe('2 in flight · last composed 6m ago');
+  });
+
+  it('a warming/empty backend (null status/graph/health) assembles a calm, non-crashing projection', () => {
+    const p = assembleTodayProjection(sources({ status: null, graph: null, health: null, activity: [], stations: [], openReviews: 0, contradictions: 0, inFlight: 0, lastComposedAgoMs: null, movedRecently: 0 }), EVENING);
+    expect(p.stats.every((s) => s.value === 0)).toBe(true);
+    expect(p.health.every((h) => h.status === 'ok')).toBe(true);
+    expect(p.decisions).toEqual([]); // calm rest state
+    expect(p.line.meta).toBe('nothing in flight · nothing composed yet');
   });
 });

@@ -15,6 +15,16 @@ import path from 'node:path';
 import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
 import { createProjectionStore, type ProjectionStore, type Projection } from './projectionStore';
 import { computeGraphProjection, type GraphProjection } from '../kb/graphProjection';
+// SPEC-0058 Today: the maintained command-center projection composes the other maintained reads.
+import { makeReadOnlyTools } from '../kb/recallTools'; // for the Today Health walk (buildHealthReport takes RecallTools)
+import { assembleTodayProjection, type TodaySources } from '../kb/todayProjection';
+import type { TodayProjection, TodayStation } from '../kb/types';
+import { buildStations } from '../kb/lineStations'; // "one Line, one truth" — byte-identical Status stations
+import { buildHealthReport } from '../kb/healthPanel';
+import { toHealthProjection } from '../kb/healthProjection';
+import { readContradictionDirectives } from '../kb/directives';
+import { loadActivityIndex } from '../kb/activityIndex';
+import { buildFeed, type ActivityFeedEntry } from '../kb/activityDigest';
 import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
@@ -156,6 +166,7 @@ function startActiveStages(a: ActivePipeline): void {
   statusStore.start(); // OBS-24: maintain the status snapshot off the render path (seed from persisted, then live)
   reviewStore.start(); // SHELL-12: maintain the review-queue projection off the render path
   graphStore.start(); // SPEC-0058 STATE-2: maintain the graph projection (Explore/Health) off the render path
+  todayStore.start(); // SPEC-0058: maintain the Today home projection (composite) off the render path
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -173,6 +184,7 @@ function stopAllStages(a: ActivePipeline): void {
   statusStore.stop(); // OBS-24: halt the background status refresh (retains the in-memory snapshot)
   reviewStore.stop(); // SHELL-12: halt the review-queue projection refresh (retains the in-memory projection)
   graphStore.stop(); // SPEC-0058 STATE-2: halt the graph projection refresh (retains the in-memory projection)
+  todayStore.stop(); // SPEC-0058: halt the Today projection refresh (retains the in-memory projection)
 }
 
 // ── SPEC-0045 QUIESCE — graceful shutdown (drain, don't kill) ───────────────────────────────────
@@ -802,6 +814,102 @@ export function graphProjectionForActive(): Projection<GraphProjection> | null {
  *  STATE-6 layer will also drive this off the canonical advance. Never on the render path. */
 export function refreshGraphProjection(): Promise<void> {
   return graphStore.refreshNow();
+}
+
+// ── SPEC-0058 Today: the maintained command-center HOME projection ─────────────────────────────────
+// "Today" is the v2 home — a calm one-glance state-of-the-library. It is a COMPOSITE of the reads the
+// other surfaces already maintain: the pipeline status (conversion stats + the Line ribbon + in-flight),
+// the graph projection (Connections), the review queue + open contradictions (the needs-you decisions),
+// the activity feed, and Health (dangling/orphans/thin). Like every v2 surface it is a maintained
+// projection (SPEC-0058 STATE-1/7) — the render path reads the INSTANT last-known-good snapshot, never
+// a live vault scan. The expensive parts (the Health walk + the activity-index rebuild) run here on the
+// background cadence; the three already-maintained projections (status/graph/reviews) are read instantly.
+const TODAY_REFRESH_MS = 8000; // a glance surface — a calm backstop cadence (push delivers fresher updates)
+
+/** One Line station → Today's slim ribbon shape (name/stage/state/glyph + a single pending count). The
+ *  station model is byte-identical to the Status view's (shared `buildStations`); Today carries only the
+ *  fields its compact ribbon renders. */
+function toTodayStation(s: ReturnType<typeof buildStations>[number]): TodayStation {
+  return { name: s.name, stage: s.stage, state: s.state, glyph: s.glyph, count: s.queued + s.inProgress };
+}
+
+/** The newest "composed" moment (compose/output actor) in the feed → ms-ago, else null (never composed). */
+function lastComposedAgoFrom(entries: ActivityFeedEntry[], nowMs: number): number | null {
+  const hit = entries.find((e) => e.actor === 'compose' || e.actor === 'output');
+  if (!hit) return null;
+  const ts = Date.parse(hit.ts);
+  return Number.isFinite(ts) ? Math.max(0, nowMs - ts) : null;
+}
+
+/** Gather one source defensively: a scan/read that throws degrades to `fallback` so a single failing
+ *  source can never blank the whole Today projection (it just shows that section as empty/warming). */
+async function gatherSource<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    active?.log.child({ scope: 'today' }).warn('today.source-failed', { source: label, err });
+    return fallback;
+  }
+}
+
+/** The Today compute (background cadence): compose the maintained projections + the two background
+ *  scans (health, activity) into the full Today projection. Reads the EVERGREEN vault root for health
+ *  (STATE-7, like the rest of recall). Null when no KB is open. Every individual source is gathered
+ *  defensively (graceful-degrade) and the pure `assembleTodayProjection` tolerates null/empty sources. */
+async function computeTodayProjection(): Promise<TodayProjection | null> {
+  const a = active;
+  if (!a) return null;
+  const nowMs = Date.now();
+  // Instant maintained reads (no scan) — the snapshots the status/graph/review stores already keep warm.
+  const status = statusStore.current(); // PipelineStatusView | null (instant, envelope already unwrapped)
+  const graph = graphProjectionForActive()?.data ?? null;
+  const openReviews = reviewProjectionForActive()?.data?.length ?? 0;
+  // Background scans (off the render path). DEV-2's Health re-point will later derive these off the graph
+  // projection, retiring the walk here; the composite shape is unchanged when it does.
+  const activity = await gatherSource<ActivityFeedEntry[]>(
+    'activity',
+    async () => buildFeed((await loadActivityIndex(a.stagingWt)).events),
+    [],
+  );
+  const health = await gatherSource(
+    'health',
+    async () => toHealthProjection(await buildHealthReport(makeReadOnlyTools(a.vaultPath)), new Date(nowMs).toISOString()),
+    null,
+  );
+  const contradictions = await gatherSource('contradictions', async () => (await readContradictionDirectives(a.stagingWt)).size, 0);
+  const sources: TodaySources = {
+    status,
+    graph,
+    health,
+    activity,
+    stations: status ? buildStations(status).map(toTodayStation) : ([] as TodayStation[]),
+    openReviews,
+    contradictions,
+    inFlight: status?.inFlight?.length ?? 0,
+    lastComposedAgoMs: lastComposedAgoFrom(activity, nowMs),
+    movedRecently: activity.length, // the curated recent feed IS the "moved through" window (honest v1)
+  };
+  return assembleTodayProjection(sources, nowMs);
+}
+
+/** The maintained Today projection (SPEC-0058). Started/stopped with the stage sweeps. */
+const todayStore: ProjectionStore<TodayProjection> = createProjectionStore<TodayProjection>({
+  compute: computeTodayProjection,
+  intervalMs: TODAY_REFRESH_MS,
+  onError: (err) => active?.log.child({ scope: 'today' }).warn('today.projection-refresh-failed', { err }),
+});
+
+/** The render-path Today read (SPEC-0058): the background-maintained last-known-good projection, INSTANT
+ *  — no git/fs/compute, so a Today read can never block on the backend. Null until the first snapshot is
+ *  computed (the IPC layer maps that to a calm warming state). */
+export function todayProjectionForActive(): Projection<TodayProjection> | null {
+  return active ? todayStore.current() : null; // no active KB → null (don't serve a closed vault's home)
+}
+
+/** Post-mutation refresh seam (mirrors `refreshGraphProjection`): re-read Today + push. Never on the
+ *  render path. */
+export function refreshTodayProjection(): Promise<void> {
+  return todayStore.refreshNow();
 }
 
 /**

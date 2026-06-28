@@ -13,6 +13,11 @@ import type {
   TodayActivityItem,
   TodayStation,
 } from './types';
+import type { ActivityFeedEntry } from './activityDigest';
+import type { HealthProjection, HealthDimensionKey } from './healthProjection';
+import type { AuditActor } from './audit';
+import type { GraphProjection } from './graphProjection';
+import type { PipelineStatusView } from './types';
 
 /** The precise upstream fields Today needs — mapped from existing projections by the main-side wiring. */
 export interface TodayInputs {
@@ -41,6 +46,49 @@ export interface TodayInputs {
 }
 
 const MAX_ACTIVITY = 5;
+
+/** The maintained-projection reads the main-side `computeTodayProjection` gathers (off the render path)
+ *  + feeds to {@link assembleTodayProjection}. `stations` is pre-built by the caller (reusing the Status
+ *  view's station logic keeps both Lines identical) so this stays decoupled from where that logic lives. */
+export interface TodaySources {
+  status: PipelineStatusView | null; // conversion (sources/claims/entities) + inFlight
+  graph: GraphProjection | null; // → Connections (countConnections)
+  health: HealthProjection | null; // → dangling/orphans/thin
+  activity: ActivityFeedEntry[]; // curated feed (newest-first)
+  stations: TodayStation[]; // pre-built Line ribbon (injected)
+  openReviews: number;
+  contradictions: number;
+  inFlight: number; // total items in flight
+  lastComposedAgoMs: number | null;
+  movedRecently: number; // recent completions (drives the subtitle)
+  todayDeltas?: { sources: number; claims: number; entities: number; connections: number }; // "+N today"; v1 defers to 0
+}
+
+/** Compose the maintained-projection reads → the full Today projection (STATE-7: one read, exact shape).
+ *  PURE: maps each source through the typed helpers (no live vault scan — every source is already a
+ *  maintained projection / cached read). `nowMs` injected. The main-side wiring gathers `sources` from
+ *  the maintained stores (`statusStore`/`graphProjectionForActive`/`reviewStore`/…) and calls this. */
+export function assembleTodayProjection(sources: TodaySources, nowMs: number): TodayProjection {
+  const conv = sources.status?.conversion;
+  const inputs: TodayInputs = {
+    counts: {
+      sources: safeCount(conv?.captured),
+      claims: safeCount(conv?.claims),
+      entities: safeCount(conv?.entities),
+      connections: countConnections(sources.graph),
+    },
+    todayDeltas: sources.todayDeltas ?? { sources: 0, claims: 0, entities: 0, connections: 0 },
+    stations: sources.stations,
+    inFlight: safeCount(sources.inFlight),
+    lastComposedAgoMs: sources.lastComposedAgoMs,
+    activity: todayActivityFromFeed(sources.activity, nowMs),
+    openReviews: safeCount(sources.openReviews),
+    contradictions: safeCount(sources.contradictions),
+    health: todayHealthFromProjection(sources.health),
+    movedRecently: safeCount(sources.movedRecently),
+  };
+  return buildTodayProjection(inputs, nowMs);
+}
 
 /** Build the Today projection from composed inputs at `nowMs` (injected so it's clock-free/testable). */
 export function buildTodayProjection(inputs: TodayInputs, nowMs: number): TodayProjection {
@@ -147,4 +195,61 @@ export function compactAgo(ms: number): string {
 
 function isNonEmpty(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+// ── Composition helpers (map upstream projection reads → TodayInputs fields) ──────────────────────────
+// These are the genuinely-new slice-2 mapping logic; the main-side wiring calls them + assembles the rest
+// (conversion/connections/stations/reviews/contradictions) into `TodayInputs` before `buildTodayProjection`.
+
+/** Map an audit actor → the Today activity kind (drives the feed-row glyph; DL-1's CSS maps kind→glyph). */
+export function activityKind(actor: AuditActor | string): TodayActivityItem['kind'] {
+  switch (actor) {
+    case 'compose':
+    case 'output':
+      return 'composed';
+    case 'connect':
+      return 'connected';
+    case 'claims':
+      return 'extracted';
+    case 'archivist':
+    case 'archive':
+      return 'captured';
+    default:
+      return 'other';
+  }
+}
+
+/** Map the curated activity feed → `TodayInputs.activity` (newest-first, capped). The entry `summary` is
+ *  the human one-liner (already names its subject), so `ref` is left for the view; kind drives the glyph;
+ *  `agoMs` is the entry's representative-event age. Malformed `ts` → 0 age (ENG-15/16, no NaN). */
+export function todayActivityFromFeed(
+  entries: ActivityFeedEntry[],
+  nowMs: number,
+  cap = MAX_ACTIVITY,
+): TodayInputs['activity'] {
+  return (entries ?? []).slice(0, cap).map((e) => {
+    const t = Date.parse(e?.ts ?? '');
+    return { kind: activityKind(e?.actor), text: typeof e?.summary === 'string' ? e.summary : '', agoMs: Number.isFinite(t) ? Math.max(0, nowMs - t) : 0 };
+  });
+}
+
+/** The "Connections" stat = the total number of links across the graph (every precomputed incoming
+ *  backlink is one edge). Read off the maintained graph projection (`graphProjectionForActive()!.data`);
+ *  null/absent graph (warming) → 0. No live walk — the projection already precomputed the backlinks. */
+export function countConnections(graph: GraphProjection | null | undefined): number {
+  const backlinks = graph?.backlinks;
+  if (!backlinks || typeof backlinks !== 'object') return 0;
+  let n = 0;
+  for (const hits of Object.values(backlinks)) n += Array.isArray(hits) ? hits.length : 0;
+  return n;
+}
+
+/** Map the Health projection's dimensions → `TodayInputs.health` counts (the glance reads the SAME
+ *  dangling/orphans/thin DEV-2 computes; `buildTodayProjection` re-derives the identical severity). */
+export function todayHealthFromProjection(health: HealthProjection | null | undefined): TodayInputs['health'] {
+  const count = (key: HealthDimensionKey): number => {
+    const dim = health?.dimensions?.find((d) => d.key === key);
+    return safeCount(dim?.count);
+  };
+  return { dangling: count('dangling'), orphans: count('orphans'), thin: count('thin') };
 }

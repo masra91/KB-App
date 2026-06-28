@@ -232,11 +232,17 @@ export interface TodayGreeting {
   name?: string; // the Principal's name when set; the view omits the comma when absent
 }
 
-/** One pipeline-ribbon station ("The Line"): a named stage + its in-flight/queue count + lit state. */
+/** One pipeline-ribbon station ("The Line"). A slim subset of the Status view's `StationModel`, built
+ *  from the SAME lifted `buildStations` (SPEC-0058 "one Line, one truth", DL-1) — so Today's ribbon is
+ *  byte-identical to Status's. `state` is the native stage liveness (NOT a remapped done/active/idle;
+ *  an already-passed station reads `idle`). The view renders the same station-state language as Status
+ *  (running=sprout/breathe · blocked=brass · error=oxide · idle=neutral; state never colour-alone, #184). */
 export interface TodayStation {
-  name: string; // Capture · Archive · Decompose · Connect · Claims · Compose
-  count: number | null; // items at this stage now (null → the "—" rest state)
-  state: 'done' | 'active' | 'idle';
+  name: string; // human stage label (stageDisplayName) — Capture · Archiving · Decompose · Connect · …
+  stage: string; // canonical stage id (the lowercase routing id; display uses `name`)
+  state: 'idle' | 'running' | 'blocked' | 'error';
+  glyph: string; // the state glyph (○ idle · ▣ running · ◐ blocked · ✕ error)
+  count: number; // items at this station now = queued + inProgress
 }
 
 /** One headline stat card with a today-delta. */
@@ -284,6 +290,18 @@ export interface TodayProjection {
   activity: TodayActivityItem[]; // most-recent first, capped for the panel
   decisions: TodayDecision[]; // empty → the calm "nothing needs you" rest state
   health: TodayHealthRow[]; // the 3 glance rows
+}
+
+/** The `kb:getTodayProjection` envelope (SPEC-0058 STATE-9/10), mirroring `ExploreProjection`. `status`
+ *  is FIRST-CLASS — the Today view switches on it directly: a calm `warming` while the composite is still
+ *  building its first snapshot (never the alarming error face), `ready` once built. `data` is null while
+ *  `warming`; `builtAt`/`stale` carry the freshness envelope ("as of / updating…"). The live date/time
+ *  clock is view-rendered (it ticks), not in `data`. `error` is reserved for the CORE's STATE-12 status. */
+export interface TodayProjectionView {
+  status: 'warming' | 'ready' | 'error';
+  data: TodayProjection | null;
+  builtAt: string | null;
+  stale: boolean;
 }
 
 // --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
@@ -840,6 +858,9 @@ export interface KbApi {
   // SPEC-0035 HEALTH + SPEC-0058 STATE-3: the maintained Health PROJECTION (DL-2's render contract) — the
   // structural-lint glance (orphans / dead links / thin stubs) the view draws from one read, severity baked in.
   healthReport(): Promise<HealthProjection>;
+  // SPEC-0058 Today: the single home read — {status, data, builtAt, stale} from the maintained Today
+  // projection (warming|ready; the view switches on status, no live scan). The live clock is view-rendered.
+  getTodayProjection(): Promise<TodayProjectionView>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT
