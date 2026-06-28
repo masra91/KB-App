@@ -3,7 +3,7 @@
 // can be null/undefined on legacy/partial records. A raw `.replace` on such a value threw inside a
 // `.map` and blanked an ENTIRE list ("Loading… forever") — so esc MUST tolerate null/undefined/non-string.
 import { describe, it, expect } from 'vitest';
-import { esc, baseName } from './html';
+import { esc, baseName, emptyState } from './html';
 
 describe('esc — null-safe interpolation (ENG-16)', () => {
   it('returns "" for null / undefined (never throws — the title:null crash class)', () => {
@@ -30,5 +30,40 @@ describe('baseName', () => {
   it('returns the last path segment, friendly fallback when empty', () => {
     expect(baseName('/Users/me/My Vault')).toBe('My Vault');
     expect(baseName('')).toBe('My KB');
+  });
+});
+
+describe('emptyState — branded empty primitive (#406)', () => {
+  it('renders the .viz-empty primitive with a Spectral-voice title', () => {
+    const h = emptyState({ title: 'Nothing needs you right now.' });
+    expect(h).toContain('class="viz-empty"');
+    expect(h).toContain('class="viz-empty__title viz-voice"');
+    expect(h).toContain('Nothing needs you right now.');
+  });
+
+  it('defaults to the crystalline mark (aria-hidden), and omits it on null/empty', () => {
+    expect(emptyState({ title: 'x' })).toContain('class="viz-empty__mark" aria-hidden="true">◇<');
+    expect(emptyState({ title: 'x', glyph: '🎉' })).toContain('aria-hidden="true">🎉<');
+    expect(emptyState({ title: 'x', glyph: null })).not.toContain('viz-empty__mark');
+    expect(emptyState({ title: 'x', glyph: '' })).not.toContain('viz-empty__mark');
+  });
+
+  it('renders body only when present', () => {
+    expect(emptyState({ title: 'x', body: 'Reviews land here.' })).toContain('class="viz-empty__body">Reviews land here.');
+    expect(emptyState({ title: 'x' })).not.toContain('viz-empty__body');
+  });
+
+  it('wraps a caller-built action when present, omits it otherwise', () => {
+    const h = emptyState({ title: 'x', action: '<button class="viz-btn">Add a feed</button>' });
+    expect(h).toContain('class="viz-empty__action"><button class="viz-btn">Add a feed</button>');
+    expect(emptyState({ title: 'x' })).not.toContain('viz-empty__action');
+  });
+
+  it('escapes title/body/glyph (ENG-16) but passes action html through (trusted)', () => {
+    const h = emptyState({ title: '<x>', body: `a & "b"`, glyph: '<g>', action: '<button>ok</button>' });
+    expect(h).toContain('&lt;x&gt;');
+    expect(h).toContain('a &amp; &quot;b&quot;');
+    expect(h).toContain('aria-hidden="true">&lt;g&gt;<');
+    expect(h).toContain('<button>ok</button>'); // action is trusted, not escaped
   });
 });

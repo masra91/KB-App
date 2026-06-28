@@ -186,6 +186,18 @@
 /* disabled — dims to 0.5 (§6); mirrors .viz-btn:disabled. */
 .viz-field__input:disabled { opacity: 0.5; cursor: default; }
 
+/* --- EmptyState (#406 / SPEC-0057) — the ONE branded "nothing here yet" primitive every view composes
+   instead of ad-hoc `.muted` lines. Empty is a CALM, settled idle state: a rationed crystalline mark
+   (--viz-idle, NEVER ember/brass/accent — those are decision/caution/interactive), a Spectral-voice title,
+   an Inter body line of what-will-fill-it, + an optional CTA (a .viz-btn at the call site). For empty
+   BY DESIGN only — a load FAILURE uses the renderLoadError / "Recheck" path (#160), never this primitive,
+   so we never read "nothing here" when data actually failed to load. No motion (reduced-motion safe). */
+.viz-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.4rem; padding: 2.5rem 1rem; color: var(--viz-ink-muted); }
+.viz-empty__mark { font-size: 1.5rem; line-height: 1; color: var(--viz-idle); opacity: 0.7; } /* rationed crystalline-lattice nod; decorative → aria-hidden at the call site */
+.viz-empty__title { font-family: var(--viz-font-voice); font-size: 1.05rem; color: var(--viz-ink); margin: 0; } /* Spectral voice; sentence case (copy) */
+.viz-empty__body { font-family: var(--viz-font-body); font-size: 0.85rem; color: var(--viz-ink-muted); margin: 0; max-width: 42ch; line-height: 1.5; }
+.viz-empty__action { margin-top: 0.6rem; } /* optional resolving action — a .viz-btn at the call site */
+
 /* ============================================================================================== */
 
 /* Motion: the ambient breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their

@@ -14,7 +14,7 @@
 // Reachability: dev-only, mounted by renderer.ts on a `?showcase` / `#showcase` flag — never in the user
 // nav, no IPC. Theme capture is the snapshot's job (Playwright `emulateMedia` forces dark/light), so the
 // page renders once and the e2e screenshots it under each scheme.
-import { esc } from '../html';
+import { esc, emptyState } from '../html';
 
 /** A captioned cell: the live primitive + a mono caption naming variant/state, so a diff is legible. */
 function cell(caption: string, body: string): string {
@@ -135,6 +135,16 @@ function editableFieldSection(): string {
   return section('EditableField', '_design-system §6', cells);
 }
 
+function emptyStateSection(): string {
+  const cells: string[] = [];
+  cells.push(cell('default (mark + voice title + body)', emptyState({ title: 'Nothing needs you right now.', body: 'Reviews land here when a librarian needs your call.' })));
+  cells.push(cell('with resolving CTA', emptyState({ title: 'No feeds yet.', body: 'Add one to start bringing sources in.', action: '<button type="button" class="viz-btn viz-btn--primary">Add a feed</button>' })));
+  cells.push(cell('title only', emptyState({ title: 'No claims recorded for this entity yet.' })));
+  cells.push(cell('custom glyph', emptyState({ title: 'All caught up.', glyph: '✓' })));
+  cells.push(cell('no mark (glyph:null)', emptyState({ title: 'Nothing on the line right now.', glyph: null })));
+  return section('EmptyState', '#406', cells);
+}
+
 /** Mount the static showcase gallery (no IPC / pipeline / active dependency). */
 export function mountShowcase(container: HTMLElement): void {
   document.body.classList.add('shell-active'); // reuse the full-bleed layout (not the centered setup card)
@@ -148,5 +158,6 @@ export function mountShowcase(container: HTMLElement): void {
       ${segmentedSection()}
       ${confirmSection()}
       ${editableFieldSection()}
+      ${emptyStateSection()}
     </div>`;
 }

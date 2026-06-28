@@ -15,9 +15,9 @@ beforeEach(() => {
 });
 
 describe('Showcase — structure + no live dependency', () => {
-  it('mounts statically: 4 primitive sections, on .viz-surface, with zero IPC and no native <select>', () => {
+  it('mounts statically: 5 primitive sections, on .viz-surface, with zero IPC and no native <select>', () => {
     expect(root.querySelector('.showcase.viz-surface')).not.toBeNull();
-    expect(root.querySelectorAll('.showcase-section')).toHaveLength(4);
+    expect(root.querySelectorAll('.showcase-section')).toHaveLength(5);
     expect(root.querySelector('.showcase-title')?.textContent).toContain('Design-System Showcase');
     expect(root.querySelectorAll('select')).toHaveLength(0); // instrument language — never a native dropdown
   });
