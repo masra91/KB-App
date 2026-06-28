@@ -656,6 +656,8 @@ export interface SetModelResult {
 
 /** The API surface exposed to the renderer via contextBridge (preload). */
 export interface KbApi {
+  /** SPEC-0055 RELEASE-6: the running app version (matches the release tag), for the About panel. */
+  getAppVersion(): Promise<string>;
   getState(): Promise<AppState>;
   pickFolder(): Promise<string | null>;
   inspect(path: string): Promise<PathInspection>;
