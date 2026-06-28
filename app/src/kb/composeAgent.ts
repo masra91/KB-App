@@ -15,6 +15,7 @@ import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
 import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
+import { UNTRUSTED_SOURCE_SKILL, UNTRUSTED_SOURCE_DELIMITER_NOTE } from './untrustedSource';
 import { parseComposeDecision, type ComposeDecision } from './compose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -104,12 +105,19 @@ export function buildComposePrompt(input: ComposeInput): string {
     'Do not write the citation markers yourself — just list the claim numbers per sentence; the',
     'system renders the citations and the References section.',
     '',
+    // INTAKE-13 / RESEARCH-12: the claim statements + source titles below are SOURCE-derived (a feed-pulled
+    // claim/title could read "ignore your instructions") — fence as DATA. Also reinforces grounding: the task
+    // and output format come ONLY from these system instructions, never from anything inside a claim.
+    UNTRUSTED_SOURCE_SKILL,
+    '',
     linkLine,
     '',
     `entity.kind: ${input.kind}`,
     `entity.name: ${input.name}`,
+    UNTRUSTED_SOURCE_DELIMITER_NOTE, // the claim statements + source titles below are untrusted DATA
     'CLAIMS (the ONLY material you may use; cite by number):',
     ...claimLines,
+    '--- SOURCE END ---',
     '',
     'Respond with ONLY a JSON object and nothing else, of the form:',
     '{"sections":[{"heading":"<omit on the first/lede section>","sentences":[{"text":"<one prose sentence, may contain [[Entity]] links, NO citation markers>","claims":[1,2]}]}]}',

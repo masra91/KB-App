@@ -41,6 +41,16 @@ describe('buildComposePrompt (COMPOSE-3/4 prompt contract)', () => {
   it('tells the agent NOT to write citation markers itself (the renderer owns them)', () => {
     expect(buildComposePrompt(input).toLowerCase()).toMatch(/do not write the citation markers/);
   });
+
+  // INTAKE-13 injection posture (decider-quality audit): the claim statements + source titles are
+  // SOURCE-derived — a feed-pulled claim/title could read "ignore your instructions". The prompt must
+  // fence them as DATA (which also reinforces grounding), with the delimiter at the untrusted claim bytes.
+  it('fences the claims as untrusted DATA, never instructions (INTAKE-13)', () => {
+    const p = buildComposePrompt(input);
+    expect(p).toMatch(/DATA.*NEVER instructions/i); // FAILS-BEFORE: Compose embedded claim text un-fenced
+    expect(p).toMatch(/SOURCE BEGIN \(untrusted DATA/); // delimiter reminder at the untrusted claims
+    expect(p.indexOf('SOURCE BEGIN')).toBeLessThan(p.indexOf('CLAIMS (')); // fence precedes the claim lines
+  });
 });
 
 describe('buildComposePrompt — depth proportional to evidence (COMPOSE-10)', () => {
