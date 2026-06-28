@@ -13,6 +13,7 @@ import {
   VIEW_STATUS,
   VIEW_ASK,
   VIEW_EXPLORE,
+  VIEW_HEALTH,
   VIEW_JOBS,
   VIEW_AGENTS,
   VIEW_RESEARCHERS,
@@ -28,6 +29,7 @@ import { mountActivity } from './views/activityView';
 import { mountStatus } from './views/statusView';
 import { mountAsk } from './views/askView';
 import { mountExplore } from './views/exploreView';
+import { mountHealth } from './views/healthView';
 import { mountJobs } from './views/jobsView';
 import { mountAgents } from './views/agentsView';
 import { mountResearchers } from './views/researchersView';
@@ -66,6 +68,7 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
     [VIEW_STATUS]: mountStatus,
     [VIEW_ASK]: mountAsk,
     [VIEW_EXPLORE]: mountExplore,
+    [VIEW_HEALTH]: mountHealth,
     [VIEW_JOBS]: mountJobs,
     [VIEW_AGENTS]: mountAgents,
     [VIEW_RESEARCHERS]: mountResearchers,
