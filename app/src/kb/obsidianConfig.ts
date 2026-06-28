@@ -15,10 +15,14 @@ import path from 'node:path';
 /** `.obsidian/` is the Obsidian config dir at the vault root. */
 export const OBSIDIAN_DIR = '.obsidian';
 
-/** Vellum brand hues (brand/BRAND-GUIDELINES.md) for the entity-kind graph color groups. */
+// Vellum brand hues (brand/BRAND-GUIDELINES.md) for the entity-kind graph color groups. These are
+// CATEGORICAL graph colors in the user's Obsidian view — a different context from the Vellum app UI,
+// so the app's gold-rationing / ember-is-decision-only rules don't apply here (DL-2 #436 confirmed).
+// Chosen to stay legible on Obsidian's DEFAULT DARK graph canvas: `place` is a LIGHTENED deep-blue
+// (the brand #1e3557 reads dark-on-dark — DL-2 #436 note 2), the rest are already mid/light hues.
 const KIND_COLORS: Record<string, string> = {
   person: '#2f6b5b', // viridian
-  place: '#1e3557', // deep blue
+  place: '#5a82bf', // lightened deep-blue (legible on dark graphs)
   organization: '#c9a35a', // gilded gold
   concept: '#bfd7e6', // mist
   work: '#3e9e82', // sprout
