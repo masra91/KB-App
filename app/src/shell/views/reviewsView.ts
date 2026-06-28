@@ -20,7 +20,7 @@ import { withTimeout, renderLoadError } from '../loadGuard';
 // = Spectral (no 🔍), data = mono, copy = Inter sentence case.
 const V2 = 'reviews-v2 viz-surface';
 const V2_HEAD = `<h1 class="reviews-title viz-voice">Reviews</h1>`;
-import type { ReviewSummary } from '../../kb/types';
+import type { ReviewSummary, Projection } from '../../kb/types';
 import type { ReviewSubjectCandidate } from '../../kb/reviews';
 
 /** Poll cadence — matches the rail badge (shell.ts) so the list and the count never drift. */
@@ -61,9 +61,26 @@ export async function mountReviews(container: HTMLElement): Promise<void> {
   answeredIds = new Set();
   failedIds = new Map();
   lastList = [];
-  container.innerHTML = `<div class="${V2}">${V2_HEAD}<p class="viz-body">Loading…</p></div>`;
+  paintSkeleton(container); // SPEC-0060 VUX-13: a calm warming skeleton — never a 2s blank / wrong-empty.
   await refresh(container);
   startPoll(container);
+}
+
+/**
+ * The warming skeleton (SPEC-0060 VUX-13). On a cold launch the review projection is still building
+ * (`reviewProjection()` → null) for a beat; the OLD view read `listReviews()`, which collapses that
+ * warming-null to `[]`, so it flashed the "Nothing needs you right now" empty state — wrong-empty, the
+ * 2s blank. This paints placeholder card shapes in the same v2 material so the surface reads "preparing"
+ * (not "empty", not a spinner) with no layout jump when the real list lands. aria-busy for AT.
+ */
+function paintSkeleton(container: HTMLElement): void {
+  const row = `<li class="rev-skeleton-card" aria-hidden="true"><span class="rev-skeleton rev-skeleton-line"></span><span class="rev-skeleton rev-skeleton-line rev-skeleton-line--short"></span></li>`;
+  container.innerHTML = `
+    <div class="${V2}" aria-busy="true">
+      ${V2_HEAD}
+      <p class="viz-body reviews-sub rev-skeleton-sub" aria-hidden="true"><span class="rev-skeleton rev-skeleton-line rev-skeleton-line--sub"></span></p>
+      <ul class="review-list rev-skeleton-list">${row}${row}</ul>
+    </div>`;
 }
 
 /** Keep the list in sync with the live badge: re-fetch while visible; skip when hidden or mid-note. */
@@ -98,11 +115,13 @@ function hasDirtyNote(container: HTMLElement): boolean {
  * path surfaces a load error.
  */
 async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean } = {}): Promise<void> {
-  let reviews: ReviewSummary[];
+  let projection: Projection<ReviewSummary[]> | null;
   try {
-    // #145: bound the wait so a hung `listReviews` can't leave an infinite spinner; a hang then
-    // surfaces as a normal rejection this catch handles.
-    reviews = await withTimeout(window.kbApi.listReviews());
+    // #145: bound the wait so a hung IPC can't leave an infinite spinner; a hang then surfaces as a
+    // normal rejection this catch handles. SPEC-0060 VUX-13: read the freshness ENVELOPE, not the
+    // flattened `listReviews()` — so warming (projection still building → null) is distinguishable
+    // from genuinely-empty (built, zero open reviews), instead of both reading as "empty".
+    projection = await withTimeout(window.kbApi.reviewProjection());
   } catch {
     if (!opts.onlyIfChanged) {
       // Initial/forced load failed → a retryable error (the poll keeps trying too).
@@ -110,7 +129,13 @@ async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean }
     }
     return; // poll error → keep the last good list
   }
-  const list = Array.isArray(reviews) ? reviews : [];
+  if (projection === null) {
+    // Still warming (or no active vault): hold the calm skeleton on the initial/forced path; on the
+    // poll path keep whatever's painted. Never collapse warming to the "Nothing needs you" empty state.
+    if (!opts.onlyIfChanged) paintSkeleton(container);
+    return;
+  }
+  const list = Array.isArray(projection.data) ? projection.data : [];
   lastList = list;
   // REVIEW-20: prune the optimistic-answered set — once the backend stops returning an id, the answer
   // landed for real; drop it so the set can't grow unbounded across a session.
