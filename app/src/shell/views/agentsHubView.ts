@@ -19,7 +19,7 @@ export async function mountAgentsHub(container: HTMLElement): Promise<void> {
       <p class="agents-hub-sub viz-body">Everything that works on your knowledge — grouped by where it reaches.</p>
 
       <section class="agents-group" aria-labelledby="agents-grp-librarians">
-        <h2 id="agents-grp-librarians" class="agents-group-head viz-signage">Librarians</h2>
+        <h2 id="agents-grp-librarians" class="agents-group-head viz-signage"><span class="agents-group-glyph" aria-hidden="true">↻</span> Librarians</h2>
         <p class="agents-group-why viz-body">Work <strong>inside</strong> your KB — the pipeline workers that read, connect, and maintain your knowledge. Built in; you can pause them, not remove them.</p>
         <div class="agents-section" data-section="librarians"></div>
         <div class="agents-subgroup">
@@ -30,7 +30,7 @@ export async function mountAgentsHub(container: HTMLElement): Promise<void> {
       </section>
 
       <section class="agents-group" aria-labelledby="agents-grp-researchers">
-        <h2 id="agents-grp-researchers" class="agents-group-head viz-signage">Researchers</h2>
+        <h2 id="agents-grp-researchers" class="agents-group-head viz-signage"><span class="agents-group-glyph" aria-hidden="true">→</span> Researchers</h2>
         <p class="agents-group-why viz-body">Reach <strong>outside</strong> your KB — egress-gated agents that fetch external corroboration. You add and remove these.</p>
         <div class="agents-section" data-section="researchers"></div>
       </section>
@@ -38,11 +38,17 @@ export async function mountAgentsHub(container: HTMLElement): Promise<void> {
 
   const sec = (name: string): HTMLElement => container.querySelector<HTMLElement>(`.agents-section[data-section="${name}"]`)!;
   // Mount each existing view into its group sub-container (Schedules nested under Librarians). Each owns
-  // its own load/poll/teardown; a section that throws on load is isolated to its sub-container so the
-  // others still render (honest per-section degrade, never a blank hub).
+  // its own load/poll/teardown + #145/#160 guards, so normal load failures degrade in place. This outer
+  // catch is the catastrophic backstop: if a sub-view ever threw PAST its own guard it'd otherwise leave
+  // a stuck "Loading…" — instead we paint a calm per-section fallback (DL-2 hardening), isolated to that
+  // section so the others (and the hub framing) still render.
+  const mountSection = (name: string, mount: (c: HTMLElement) => Promise<void>): Promise<void> =>
+    mount(sec(name)).catch(() => {
+      sec(name).innerHTML = `<p class="agents-section-error viz-body">Couldn’t load this section — reopen Agents to retry.</p>`;
+    });
   await Promise.all([
-    mountAgents(sec('librarians')).catch(() => {}),
-    mountJobs(sec('schedules')).catch(() => {}),
-    mountResearchers(sec('researchers')).catch(() => {}),
+    mountSection('librarians', mountAgents),
+    mountSection('schedules', mountJobs),
+    mountSection('researchers', mountResearchers),
   ]);
 }
