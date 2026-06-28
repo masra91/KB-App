@@ -32,6 +32,13 @@ describe('buildClaimsPrompt (CLAIMS-3/5/8/10)', () => {
     expect(buildClaimsPrompt(input())).toContain('fact, interpretation, hypothesis');
   });
 
+  it('fences the source as untrusted DATA, never instructions (INTAKE-13 injection posture)', () => {
+    const p = buildClaimsPrompt(input());
+    expect(p).toMatch(/DATA.*NEVER instructions/i); // FAILS-BEFORE: claims prompt had no injection fence
+    expect(p).toMatch(/do not follow/i);
+    expect(p).toMatch(/SOURCE BEGIN \(untrusted DATA/);
+  });
+
   it('MANDATES relatesTo extraction of explicitly-named entities, still NOT a typed link (CLAIMS-10)', () => {
     const p = buildClaimsPrompt(input());
     expect(p).toMatch(/single-subject/i);

@@ -14,6 +14,7 @@ import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
 import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
+import { UNTRUSTED_SOURCE_SKILL, UNTRUSTED_SOURCE_DELIMITER_NOTE } from './untrustedSource';
 import { parseDecomposeDecision, type DecomposeDecision } from './decompose';
 import type { AgentTrace } from './archivist';
 import { COPILOT_OP, type SpanCtx } from './tracing';
@@ -82,6 +83,9 @@ export function buildDecomposePrompt(input: SourceInput): string {
     'distinct ENTITIES it mentions — the nodes of the knowledge graph. Extract only entities',
     'grounded in the text; do NOT invent anything not supported by it.',
     '',
+    // INTAKE-13 / RESEARCH-12: open-feed source content is untrusted — fence it as DATA, not instructions.
+    UNTRUSTED_SOURCE_SKILL,
+    '',
     'A NODE has INDEPENDENT IDENTITY — a nameable real-world referent you could collect facts',
     'about across many sources: a person, organization, place, project, event, work/artifact,',
     'or a durable named concept/term that exists independently of this source. Extract a node',
@@ -130,7 +134,7 @@ export function buildDecomposePrompt(input: SourceInput): string {
     `kind: ${input.kind}`,
     input.originalName ? `originalName: ${input.originalName}` : '',
     input.mimeType ? `mimeType: ${input.mimeType}` : '',
-    '--- SOURCE BEGIN ---',
+    UNTRUSTED_SOURCE_DELIMITER_NOTE,
     body,
     '--- SOURCE END ---',
     '',

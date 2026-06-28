@@ -33,6 +33,13 @@ describe('buildDecomposePrompt (DECOMP-7, DECOMP-3)', () => {
   it('tells the agent not to resolve identity across sources (deferred to Connect; DECOMP-14)', () => {
     expect(buildDecomposePrompt(input())).toMatch(/do not resolve identity across sources/i);
   });
+
+  it('fences the source as untrusted DATA, never instructions (INTAKE-13 injection posture)', () => {
+    const p = buildDecomposePrompt(input());
+    expect(p).toMatch(/DATA.*NEVER instructions/i); // the fence is present (FAILS-BEFORE: no such framing)
+    expect(p).toMatch(/do not follow/i);
+    expect(p).toMatch(/SOURCE BEGIN \(untrusted DATA/); // delimiter reminder at the untrusted bytes
+  });
 });
 
 describe('node-vs-attribute granularity policy (DECOMP-17)', () => {

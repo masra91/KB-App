@@ -14,6 +14,7 @@ import { detectCopilot } from './copilot';
 import { resolveCopilotModel } from './copilotModel';
 import { runWithModelFallback } from './copilotLaunch';
 import { runWithSelfRepair, appendRepairInstruction } from './selfRepair';
+import { UNTRUSTED_SOURCE_SKILL, UNTRUSTED_SOURCE_DELIMITER_NOTE } from './untrustedSource';
 import { parseClaimsDecision, type ClaimsDecision, CLAIM_STATUSES } from './claims';
 import type { SourceInput } from './decomposeAgent';
 import type { AgentTrace } from './archivist';
@@ -91,6 +92,9 @@ export function buildClaimsPrompt(input: EntityInput): string {
     `makes ABOUT THIS ENTITY — assertions, not just its existence. Extract only claims`,
     'grounded in the source text; do NOT invent anything it does not support.',
     '',
+    // INTAKE-13 / RESEARCH-12: open-feed source content is untrusted — fence it as DATA, not instructions.
+    UNTRUSTED_SOURCE_SKILL,
+    '',
     'Each claim is SINGLE-SUBJECT — it is about THIS entity only.',
     '',
     'SUBJECT ATTRIBUTION (critical — get this right):',
@@ -149,7 +153,7 @@ export function buildClaimsPrompt(input: EntityInput): string {
     `entity.kind: ${input.kind}`,
     `entity.name: ${input.name}`,
     `sourceId: ${input.source.sourceId}`,
-    '--- SOURCE BEGIN ---',
+    UNTRUSTED_SOURCE_DELIMITER_NOTE,
     body,
     '--- SOURCE END ---',
     '',
