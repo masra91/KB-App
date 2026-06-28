@@ -7,6 +7,8 @@
 // deep-equals the live-tools assembly. A second test proves the O(N²) backlink scan is done ONCE at
 // compute time (precomputed), not on the render path.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { buildRecallVault, type RecallVault } from '../../test/recallVault';
 import { rmTempDir } from '../../test/tempVault';
 import { makeReadOnlyTools } from './recallTools';
@@ -22,7 +24,7 @@ describe('graph projection — projection-backed reads equal the live vault walk
   beforeAll(async () => {
     v = await buildRecallVault(); // Ada Lovelace ↔ Analytical Engine, one grounded claim, one source
     live = makeReadOnlyTools(v.root);
-    const graph = await computeGraphProjection(live, () => '2026-06-28T00:00:00.000Z');
+    const graph = await computeGraphProjection(v.root, () => '2026-06-28T00:00:00.000Z');
     proj = makeProjectionTools(graph);
   });
   afterAll(async () => {
@@ -60,7 +62,7 @@ describe('graph projection — the O(N²) backlink scan is PRECOMPUTED, not on t
   it('computeGraphProjection inverts links into per-entity backlinks (the live per-mount scan, done once)', async () => {
     const v = await buildRecallVault();
     try {
-      const graph = await computeGraphProjection(makeReadOnlyTools(v.root), () => 'T');
+      const graph = await computeGraphProjection(v.root, () => 'T');
       // Engine links to Ada → Ada has an incoming backlink FROM the engine, precomputed in the snapshot.
       expect(graph.backlinks[v.adaRel].map((l) => l.from)).toContain(v.engineRel);
       // Ada links to Engine → Engine has an incoming backlink FROM Ada.
@@ -71,6 +73,57 @@ describe('graph projection — the O(N²) backlink scan is PRECOMPUTED, not on t
       expect(incoming.map((l) => l.from)).toContain(v.engineRel);
     } finally {
       await rmTempDir(v.root);
+    }
+  });
+});
+
+// QD-2 fast-follow on #468 — backlink-SOURCE fidelity. The live `linkTraversal.incoming` walks EVERY `.md`
+// under entities/+claims/ as a backlink source, including files that don't parse as a valid entity/claim. A
+// `[[validEntity]]` inside a MALFORMED entity or an ORPHAN claim (subject merged away) is a backlink live
+// counts — the projection must match (more likely on a large/merged vault, the real target). NOTE the
+// CONSUMERS (`buildNeighborhood` filters incoming to valid entities; `buildHealthReport` doesn't use
+// linkTraversal) already drop non-entity sources — so #468's RENDERED output was correct; this keeps the raw
+// `linkTraversal` adapter faithful (the right invariant for a drop-in tool surface).
+describe('graph projection — backlink-source fidelity vs live, incl. malformed/orphan files (QD #468 fast-follow)', () => {
+  async function seedWithStragglers(): Promise<{ root: string; engineRel: string }> {
+    const v = await buildRecallVault();
+    // A MALFORMED entity (no frontmatter → entityLookup skips it) that links to a valid entity.
+    await fs.mkdir(path.join(v.root, 'entities', 'concept'), { recursive: true });
+    await fs.writeFile(path.join(v.root, 'entities', 'concept', 'broken.md'), 'garbage, no frontmatter — but mentions [[entities/concept/analytical-engine.md]]\n', 'utf8');
+    // An ORPHAN claim (subject = a merged-away entity that no longer exists → claimsForEntity never returns it).
+    await fs.mkdir(path.join(v.root, 'claims', 'ghost'), { recursive: true });
+    await fs.writeFile(
+      path.join(v.root, 'claims', 'ghost', 'orphan.md'),
+      '---\nid: 01ORPHAN\nsubject: entities/ghost/merged-away.md\nstatus: fact\nconfidence: 0.5\n---\nA fact mentioning [[entities/concept/analytical-engine.md]].\n',
+      'utf8',
+    );
+    return { root: v.root, engineRel: v.engineRel };
+  }
+
+  it('the raw linkTraversal.incoming matches live exactly — counts the malformed entity + orphan claim as backlink sources', async () => {
+    const { root, engineRel } = await seedWithStragglers();
+    try {
+      const live = makeReadOnlyTools(root);
+      const proj = makeProjectionTools(await computeGraphProjection(root, () => 'T'));
+      const liveIn = (await live.linkTraversal({ entity: engineRel })).incoming.map((l) => l.from).sort();
+      const projIn = (await proj.linkTraversal({ entity: engineRel })).incoming.map((l) => l.from).sort();
+      expect(projIn).toEqual(liveIn); // FAILS-BEFORE: projection missed the malformed/orphan sources
+      expect(liveIn).toContain('entities/concept/broken.md'); // the live superset really includes them
+      expect(liveIn).toContain('claims/ghost/orphan.md');
+    } finally {
+      await rmTempDir(root);
+    }
+  });
+
+  it('buildNeighborhood + buildHealthReport stay byte-identical to live (the consumers filter non-entity sources — #468 output was always correct)', async () => {
+    const { root } = await seedWithStragglers();
+    try {
+      const live = makeReadOnlyTools(root);
+      const proj = makeProjectionTools(await computeGraphProjection(root, () => 'T'));
+      expect(await buildNeighborhood(proj, 'Analytical Engine')).toEqual(await buildNeighborhood(live, 'Analytical Engine'));
+      expect(await buildHealthReport(proj)).toEqual(await buildHealthReport(live));
+    } finally {
+      await rmTempDir(root);
     }
   });
 });
