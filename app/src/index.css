@@ -514,7 +514,7 @@ button:disabled {
 .explore-filter-chip { appearance: none; cursor: pointer; font: inherit; font-size: 0.64rem; letter-spacing: 0.03em; color: var(--viz-ink-muted); border: 1px solid var(--viz-rule); border-radius: 999px; padding: 0.1rem 0.5rem; background: transparent; }
 .explore-filter-chip:hover, .explore-filter-chip:focus-visible { color: var(--viz-ink); border-color: var(--viz-ember); }
 .explore-filter-chip.is-on { color: var(--viz-ink); border-color: var(--viz-ember); background: var(--viz-rule); box-shadow: inset 2px 0 0 var(--viz-ember); }
-.explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-ember); }
+.explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-accent); } /* persistent interactive text button → accent (#184/#415); transient explore hovers reserved for #404 */
 .explore-filter-clear:hover, .explore-filter-clear:focus-visible { text-decoration: underline; }
 .explore-filter-none { margin: 0.3rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
 /* Neighbor row = expand toggle + the re-center button; the toggle is a slim fixed gutter. */
