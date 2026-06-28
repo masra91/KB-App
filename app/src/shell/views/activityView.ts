@@ -12,8 +12,10 @@
 // derived from the loaded data, not imported from AUDIT_ACTORS (a runtime value).
 import { esc } from '../html';
 import { withTimeout } from '../loadGuard';
-import { formatTimestamp } from '../formatTime';
+import { formatTimestamp, relativeCompact } from '../formatTime';
 import { stageDisplayName } from '../stageLabels';
+import { glyphFor } from './activityGlyph';
+import { navIcon } from '../icons';
 import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor, SourceSensitivity } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
@@ -40,8 +42,8 @@ export function mountActivity(container: HTMLElement): void {
   loading = true;
   errorMsg = '';
   container.innerHTML = `
-    <div class="card activity-view">
-      <h1>📜 Activity</h1>
+    <div class="activity-view viz-card viz-grain">
+      <h1 class="activity-title viz-voice">Activity</h1>
       <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
       <div class="activity-body" id="activityBody"></div>
@@ -225,7 +227,7 @@ function safeEntryHtml(e: ActivityFeedEntry, open: boolean): string {
   try {
     return entryHtml(e, open);
   } catch {
-    return `<li class="activity-entry activity-entry--skeleton"><div class="activity-entry-row"><span class="activity-summary activity-note">An activity entry couldn’t be shown.</span></div></li>`;
+    return `<li class="activity-entry activity-entry--skeleton"><div class="activity-entry-row"><span class="activity-ft activity-note">(unknown activity) — this entry couldn’t be shown.</span></div></li>`;
   }
 }
 
@@ -235,22 +237,35 @@ function traceableSubject(e: ActivityFeedEntry): string | null {
   return s.entityId ?? s.sourceId ?? s.claimId ?? null;
 }
 
+/** Split a digest summary into a lead verb + the remaining body (presentation only; a one-word
+ *  summary is all verb). NULL-SAFE (ENG-15/16): a missing summary yields empty parts, not a throw. */
+export function splitSummary(summary: string | undefined): { verb: string; body: string } {
+  const s = (summary ?? '').trim();
+  const i = s.indexOf(' ');
+  return i === -1 ? { verb: s, body: '' } : { verb: s.slice(0, i), body: s.slice(i + 1) };
+}
+
 export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const trace = traceableSubject(e);
   const traceBtn = trace ? `<button class="activity-trace viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="lineage" data-id="${esc(trace)}" aria-label="Trace the origin of: ${esc(e.summary)}">trace origin</button>` : '';
   const raw = open
     ? `<div class="activity-raw">${(e.events ?? []).map(rawEventHtml).join('')}</div>`
     : '';
-  // The expand toggle and the (optional) trace-origin action share one centered header row — trace can't
-  // nest inside the head <button>, so the row aligns them as flex siblings (head fills, trace trails).
+  // UX v2 row (DL-2 contract): glyph-TILE (hue typed by event kind, #184; oxide on a failed event;
+  // never ember) · TEXT (`.ft` flex:1 min-width:0 + overflow-wrap → a long id wraps, never overflows
+  // into the timestamp — the structural fix for the QD-2 overlap bug) · compact relative TIMESTAMP
+  // (`.fw` flex:none nowrap → structurally immune). The trace action keeps its OWN flex:none slot.
+  const g = glyphFor(e.actor, e.events?.[0]?.eventType);
+  const { verb, body } = splitSummary(e.summary);
   return `
     <li class="activity-entry${open ? ' open' : ''}">
       <div class="activity-entry-row">
         <button class="activity-entry-head viz-focusable" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-          <span class="activity-actor-badge viz-chip" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span>
-          <span class="activity-summary">${esc(e.summary)}</span>
-          <span class="activity-ts">${esc(formatTimestamp(e.ts))}</span>
-          ${e.eventCount > 1 ? `<span class="activity-evcount">${e.eventCount} events</span>` : ''}
+          <span class="activity-gl gl ${g.cls}" title="${esc(stageDisplayName(e.actor))}" aria-hidden="true">${navIcon(g.icon)}</span>
+          <span class="activity-ft ft">
+            <span class="activity-verb">${esc(verb)}</span>${body ? ` <span class="activity-detail">${esc(body)}</span>` : ''}${e.eventCount > 1 ? ` <span class="activity-evcount">${e.eventCount} events</span>` : ''}
+          </span>
+          <span class="activity-fw fw" title="${esc(formatTimestamp(e.ts))}">${esc(relativeCompact(e.ts))}</span>
         </button>
         ${traceBtn}
       </div>

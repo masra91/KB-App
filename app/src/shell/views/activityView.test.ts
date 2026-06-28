@@ -65,9 +65,59 @@ describe('Activity feed (AUDIT-5)', () => {
     const c = await mount();
     const items = c.querySelectorAll('.activity-entry');
     expect(items).toHaveLength(2);
-    expect(c.querySelector('.activity-summary')?.textContent).toContain('Claims derived 2 claims about E1');
+    // UX v2 row: the summary is the `.activity-ft` text block (verb + detail), not the old `.activity-summary`.
+    expect(c.querySelector('.activity-ft')?.textContent).toContain('Claims derived 2 claims about E1');
     expect(c.textContent).toContain('2 events'); // the multi-event run shows its count
     expect(c.querySelector('.activity-count')?.textContent).toContain('3 events'); // total, not entry count
+  });
+
+  // UX v2 Activity render contract (DL-2) — the gateable substance: glyph-tile hue typing, the
+  // structural overlap fix, compact relative timestamps, oxide-on-failure / no-ember.
+  describe('UX v2 row (DL-2 render contract)', () => {
+    it('leads each row with a glyph-tile typed by event kind (#184 hue-on-tile)', async () => {
+      const c = await mount();
+      const heads = c.querySelectorAll('.activity-entry-head');
+      // C1 = claims → gl--claim; A1 = archivist → gl--capture. Hue rides the tile; tile is aria-hidden.
+      expect(heads[0].querySelector('.activity-gl')?.classList.contains('gl--claim')).toBe(true);
+      expect(heads[1].querySelector('.activity-gl')?.classList.contains('gl--capture')).toBe(true);
+      expect(c.querySelector('.activity-gl')?.getAttribute('aria-hidden')).toBe('true');
+      // the tile renders the shared icons.ts line-icon SVG (navIcon), not an emoji/char
+      expect(c.querySelector('.activity-gl svg')).not.toBeNull();
+    });
+
+    it('structurally prevents the id↔timestamp overlap: .activity-ft shrinks, .activity-fw is its own fixed slot', async () => {
+      // A hostile long ULID in the summary must not be able to reach the timestamp (the QD-2 bug).
+      activityFeed = vi.fn(async () =>
+        feed([{ id: 'L1', ts: '2026-01-01T00:00:00.000Z', actor: 'enrich', summary: 'Enrich noted a signal on 01KW6CW289ZZZZZZZZZZZZZZZZ', eventCount: 1, events: [{ ts: '2026-01-01T00:00:00.000Z', actor: 'enrich', eventType: 'research-request', subjects: { entityId: '01KW6CW289ZZZZZZZZZZZZZZZZ' }, payload: {}, provenance: { file: '.kb/audit.jsonl', line: 0 } }] }]),
+      );
+      setApi();
+      const c = await mount();
+      const ft = c.querySelector('.activity-ft')!;
+      const fw = c.querySelector('.activity-fw')!;
+      expect(ft.className).toContain('activity-ft'); // the min-width:0 + overflow-wrap carrier (CSS)
+      expect(fw.className).toContain('activity-fw'); // the flex:none + nowrap carrier — structurally immune
+      // the long id lives inside .ft (can wrap), never as a bare sibling of the timestamp
+      expect(ft.textContent).toContain('01KW6CW289ZZZZZZZZZZZZZZZZ');
+      expect(fw.textContent).not.toContain('01KW6CW289');
+    });
+
+    it('renders a compact relative timestamp (not the verbose "min ago" form)', async () => {
+      const justNow = new Date('2026-01-01T00:00:00.000Z').toISOString();
+      activityFeed = vi.fn(async () => feed([{ id: 'T1', ts: justNow, actor: 'connect', summary: 'Connect merged 2', eventCount: 1, events: [{ ts: justNow, actor: 'connect', eventType: 'resolved', subjects: { entityId: 'E9' }, payload: {}, provenance: { file: 'x', line: 0 } }] }]));
+      setApi();
+      const c = await mount();
+      const fw = c.querySelector('.activity-fw')?.textContent ?? '';
+      expect(fw).not.toMatch(/ago|min|hr/); // compact form: "just now" / "6m" / "3h" / "2d", never "5 min ago"
+    });
+
+    it('tints a FAILED event oxide (honest failure) — and never ember anywhere on the feed', async () => {
+      activityFeed = vi.fn(async () => feed([{ id: 'F1', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', summary: 'Claims set aside an item', eventCount: 1, events: [{ ts: '2026-01-01T00:00:00.000Z', actor: 'claims', eventType: 'claims:setaside', subjects: { entityId: 'E1' }, payload: {}, provenance: { file: 'x', line: 0 } }] }]));
+      setApi();
+      const c = await mount();
+      expect(c.querySelector('.activity-gl')?.classList.contains('gl--failed')).toBe(true);
+      // no ember class anywhere in the feed (Activity logs the past — nothing needs a decision)
+      expect(c.querySelector('[class*="ember"]')).toBeNull();
+    });
   });
 
   it('surfaces truncation (never silently) when the window capped older events', async () => {

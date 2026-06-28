@@ -34,3 +34,24 @@ export function formatTimestamp(iso: string | null | undefined, nowMs: number = 
 function shortDate(t: number): string {
   return new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
+
+const WEEK = 7 * DAY;
+
+/**
+ * COMPACT relative time for dense log rows (Vellum UX v2 Activity contract, DL-2): "just now" /
+ * "6m" / "22m" / "3h" / "2d" / "3w"; older than ~4 weeks falls back to the short absolute date.
+ * Same null/unparseable/future tolerance as {@link formatTimestamp}. Pure; `nowMs` injectable.
+ */
+export function relativeCompact(iso: string | null | undefined, nowMs: number = Date.now()): string {
+  if (iso === null || iso === undefined || iso === '') return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const diff = nowMs - t;
+  if (diff < 0) return shortDate(t);
+  if (diff < MIN) return 'just now';
+  if (diff < HOUR) return `${Math.floor(diff / MIN)}m`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)}h`;
+  if (diff < WEEK) return `${Math.floor(diff / DAY)}d`;
+  if (diff < 4 * WEEK) return `${Math.floor(diff / WEEK)}w`;
+  return shortDate(t);
+}
