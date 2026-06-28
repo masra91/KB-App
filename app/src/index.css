@@ -656,6 +656,75 @@ button:disabled {
 .explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
 .explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }
 
+/* === UX v2 Explore — the radial knowledge graph (vellum-ux-v2-language; SPEC-0058 STATE-13). Full-bleed
+   graph on a radial cream ground, a STATIC crystalline center node (Principal: no breathing ring), typed
+   neighbor nodes on gold edges (weight = confidence), hover-life, + a right rail with the focused entity's
+   detail. Reads the maintained projection (no live walk). ============================================ */
+.explore-v2 { display: flex; height: 100%; min-height: 32rem; gap: 0; }
+.exp-graph {
+  flex: 1 1 auto; min-width: 0; position: relative; overflow: hidden; border-radius: var(--viz-r-card); isolation: isolate;
+  background: radial-gradient(120% 100% at 50% 0%, var(--viz-panel) 0%, var(--viz-field) 70%);
+}
+/* ambient node-field — a faint signature-gradient wash drifting slowly behind the graph (brand §6); the
+   .viz-grain ::after adds the paper tooth. Reduced-motion freezes it (global .viz-surface reset + below). */
+.exp-graph::before {
+  content: ""; position: absolute; inset: -6%; z-index: 0; pointer-events: none;
+  background: var(--viz-field-gradient); background-size: 200% 200%; opacity: 0.05;
+  animation: viz-drift var(--viz-dur-field) linear infinite;
+}
+.exp-svg { width: 100%; height: 100%; display: block; position: relative; z-index: 1; }
+/* floating controls over the graph (.viz-float = translucent linen + blur + depth, design-system.css) */
+.exp-bar { position: absolute; top: 0.9rem; left: 0.9rem; right: 0.9rem; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.exp-search { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.6rem; min-width: 16rem; }
+.exp-search-label { color: var(--viz-brass); font-size: 1rem; line-height: 1; }
+.exp-search .explore-focus { border: 0; background: transparent; color: var(--viz-ink); font: inherit; font-size: 0.85rem; outline: none; flex: 1 1 auto; min-width: 0; }
+.exp-legend { position: absolute; bottom: 0.9rem; left: 50%; transform: translateX(-50%); z-index: 3; display: flex; gap: 0.9rem; padding: 0.4rem 0.9rem; font-size: 0.68rem; color: var(--viz-ink-muted); border-radius: var(--viz-r-pill); }
+.exp-legend .exp-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; vertical-align: middle; }
+.exp-legend-more { color: var(--viz-ink-muted); font-family: var(--viz-font-numeric); }
+/* edges: slate at rest; gold + brighter on the node's hover (lit incident edge) */
+.exp-edge { stroke: var(--viz-accent); opacity: 0.34; fill: none; transition: stroke var(--viz-dur-quick) var(--viz-ease-out), opacity var(--viz-dur-quick) var(--viz-ease-out); }
+.exp-edge--spec { stroke-dasharray: 3 3; opacity: 0.24; }
+/* incident edge lit gold when its node is hovered/focused (§3 hover-life; wired in exploreView). */
+.exp-edge--hot { stroke: var(--viz-brass); opacity: 0.9; stroke-width: 2.4; }
+@media (prefers-reduced-motion: reduce) { .exp-graph::before { animation: none; } }
+/* nodes: typed disc + gold ring, label/conf below; spring-grow on hover/focus */
+.exp-node { cursor: pointer; }
+.exp-node:focus-visible { outline: none; }
+.exp-node-dot { fill: var(--viz-idle); stroke: var(--viz-brass); stroke-width: 1.5; transition: r 0.25s var(--viz-ease-spring), filter 0.2s; }
+.exp-node-label { font-family: var(--viz-font-body); font-size: 11px; fill: var(--viz-ink); }
+.exp-node-conf { font-family: var(--viz-font-numeric); font-size: 9px; fill: var(--viz-ink-muted); }
+.exp-node:hover .exp-node-dot, .exp-node:focus-visible .exp-node-dot { r: 14; filter: drop-shadow(0 3px 8px rgba(20, 40, 55, 0.3)); }
+.exp-node:focus-visible .exp-node-dot { stroke-width: 2.5; }
+.exp-node--spec .exp-node-dot { opacity: 0.6; }
+/* node-type colors (addendum/mockup): person=deep · concept=viridian · org=slate · claim=gold */
+.exp-node-dot[data-kind='person'], .exp-dot[data-kind='person'] { fill: var(--viz-deep); background: var(--viz-deep); }
+.exp-node-dot[data-kind='concept'], .exp-dot[data-kind='concept'] { fill: var(--viz-patina); background: var(--viz-patina); }
+.exp-node-dot[data-kind='organization'], .exp-dot[data-kind='organization'] { fill: var(--viz-accent); background: var(--viz-accent); }
+.exp-node-dot[data-kind='claim'], .exp-dot[data-kind='claim'] { fill: var(--viz-brass); background: var(--viz-brass); }
+/* static crystalline center core (no animation, per Principal) */
+.exp-center-glow { fill: var(--viz-panel); opacity: 0.4; }
+.exp-center-disc { fill: #23553f; stroke: var(--viz-brass); stroke-width: 2; }
+:root[data-theme='dark'] .exp-center-disc { fill: #1e4a39; }
+.exp-center-lattice { fill: none; stroke: #e6ce86; stroke-width: 1.4; stroke-linejoin: round; }
+.exp-center-dot { fill: var(--viz-panel); }
+.exp-center-name { font-family: var(--viz-font-voice); font-size: 15px; fill: var(--viz-ink); }
+.exp-graph-empty { font-family: var(--viz-font-body); font-size: 12px; fill: var(--viz-ink-muted); }
+/* right rail — the focused entity's detail */
+.exp-rail { flex: 0 0 19rem; overflow-y: auto; padding: 1.1rem 1.2rem; background: linear-gradient(var(--viz-panel), var(--viz-field)); border-left: 0.5px solid var(--viz-rule); }
+.rail-head { display: flex; align-items: flex-start; gap: 0.7rem; margin-bottom: 0.6rem; }
+.rail-mark { color: var(--viz-brass); font-size: 1.5rem; line-height: 1; }
+.rail-name { font-size: 1.3rem; margin: 0; color: var(--viz-ink); }
+.rail-kind { font-size: 0.78rem; color: var(--viz-ink-muted); margin-top: 0.1rem; }
+.rail-sec { font-size: 0.95rem; color: var(--viz-ink); margin: 1rem 0 0.5rem; }
+.exp-rail .explore-open { margin: 0.4rem 0 0.6rem; }
+/* Narrow widths: the rail STACKS below the graph (never display:none — the entity detail is the
+   "leads back to reading" substance; hiding it loses it). Fluid reflow per the v2 layout rubric. */
+@media (max-width: 60rem) {
+  .explore-v2 { flex-direction: column; }
+  .exp-graph { min-height: 22rem; }
+  .exp-rail { flex: 0 0 auto; border-left: 0; border-top: 0.5px solid var(--viz-rule); }
+}
+
 /* --- Health view: structural-lint instrument panel (SPEC-0035 HEALTH; DL-2 anatomy) ---
    Three gauge groups hung off the shared spine; severity = hue on a graphic (tick + count chip),
    never on the entity-name text (#184): brass = attention (issues), patina = settled (clean). */

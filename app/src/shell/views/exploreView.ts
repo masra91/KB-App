@@ -13,13 +13,10 @@
 // uses a CSS animation that degrades to instant under prefers-reduced-motion (EXPLORE-13), the same
 // reduced-motion discipline as the rest of The Line.
 import { esc, emptyState } from '../html';
-import { withTimeout, renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure, isWarming } from '../loadGuard';
-import type { ExploreClaim, ExploreContradiction, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
+import { renderLoadError, renderWarming, reportLoadFailure } from '../loadGuard';
+import type { ExploreClaim, ExploreContradiction, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood, ExploreProjection } from '../../kb/explorePanel';
 
 const HEADER = `<h1 class="explore-title viz-signage">Explore</h1><p class="explore-sub viz-body">Walk your knowledge graph — start at an entity and follow its relationships. Read-only.</p>`;
-
-/** How many neighbors to render in a neighbor's expand-in-place peek (EXPLORE-7) — kept small + bounded. */
-const EXPAND_PEEK = 8;
 
 /** The active neighborhood filters (EXPLORE-9). Empty sets = no constraint on that axis. */
 interface ExploreFilters {
@@ -35,15 +32,15 @@ interface ExploreState {
   trail: { rel: string; name: string }[];
   filters: ExploreFilters;
   expanded: Set<string>; // neighbor rels currently expanded-in-place
-  cache?: { nb: ExploreNeighborhood; entities: readonly ExploreEntityRef[] };
+  cache?: { nb: ExploreNeighborhood; entities: readonly ExploreEntityRef[]; stale?: boolean };
   subCache: Map<string, ExploreNeighborhood>; // neighbor rel → its fetched neighborhood (for expand)
+  warmTimer?: number; // re-poll handle while the projection is warming (cleared on ready/unmount)
 }
 
 function freshFilters(): ExploreFilters {
   return { kinds: new Set(), edges: new Set(), hideSpeculative: false };
 }
 
-const DIRECTION_GLYPH: Record<ExploreNeighbor['direction'], string> = { out: '→', in: '←', both: '↔' };
 const DIRECTION_LABEL: Record<ExploreNeighbor['direction'], string> = { out: 'links to', in: 'linked from', both: 'mutual link' };
 const UNKINDED = 'untyped'; // display label for a neighbor with no kind (legacy/partial data)
 
@@ -65,57 +62,169 @@ export async function mountExplore(container: HTMLElement): Promise<void> {
   await load(container, state);
 }
 
-/** Fetch the focused neighborhood + entity list (bounded + error-guarded), cache it, then paint. */
+/** Read the maintained graph projection (SPEC-0058 STATE-2) and paint. ONE read serves the whole view —
+ *  the precomputed neighborhood, no live O(N²) walk. `status` is FIRST-CLASS: warming → a calm "warming
+ *  the graph" face (NOT the alarming error face, retiring slice-0's timeout-inference), and we re-poll
+ *  until it's built; error / a thrown IPC → honest degrade (#160). */
 async function load(container: HTMLElement, state: ExploreState): Promise<void> {
-  let nb: ExploreNeighborhood;
-  let entities: ExploreEntityRef[];
+  let env: ExploreProjection;
   try {
-    // SPEC-0058 slice-0: bound the whole live graph walk, but show a calm WARMING face (not a frozen
-    // spinner) once it's slow — and a generous bound so a cold/large-vault scan actually completes
-    // instead of false-tripping the old 8s deadline into an error face (the packaged Explore P0).
-    [nb, entities] = await loadGraphWithWarming(
-      () => Promise.all([window.kbApi.exploreNeighborhood(state.focus), window.kbApi.exploreEntities()]),
-      () => renderWarming(container, HEADER, () => void load(container, state)),
-    );
+    env = await window.kbApi.exploreProjection(state.focus);
   } catch (err) {
-    // Un-swallow to the app-log (was a bare `catch {}` — nobody could see if it was the timeout or a
-    // throw), then route honestly: a timeout = still WARMING (calm), any real throw = error face.
-    reportLoadFailure('explore', err);
-    if (isWarming(err)) renderWarming(container, HEADER, () => void load(container, state));
-    else renderLoadError(container, HEADER, () => void load(container, state));
+    reportLoadFailure('explore', err); // un-swallow to the app-log, then honest error face
+    renderLoadError(container, HEADER, () => void load(container, state));
     return;
   }
-  state.cache = { nb, entities };
+  if (env.status === 'error') {
+    // A genuine compute failure (STATE-9/10) — honest error face + Recheck, never a stuck spinner (#160).
+    renderLoadError(container, HEADER, () => void load(container, state));
+    return;
+  }
+  if (env.status === 'warming' || env.data === null) {
+    // Still building (cold/large vault) — calm warming face + auto-recheck, never the alarming "broken" face.
+    // (`data === null` on a non-error status is also warming — the projection hasn't produced data yet.)
+    renderWarming(container, HEADER, () => void load(container, state));
+    clearTimeout(state.warmTimer);
+    state.warmTimer = setTimeout(() => {
+      if (container.isConnected) void load(container, state);
+    }, 2000) as unknown as number;
+    return;
+  }
+  clearTimeout(state.warmTimer);
+  state.cache = { nb: env.data.neighborhood, entities: env.data.entities, stale: env.stale };
   paint(container, state);
 }
 
-/** Render the current cached neighborhood through the current filter/expand state (no IPC). */
+/** Render the current cached neighborhood as the UX v2 surface: a full-bleed radial graph (center +
+ *  1-hop neighbors) on a drifting field, with a right rail carrying the focused entity's detail. No IPC. */
 function paint(container: HTMLElement, state: ExploreState): void {
   const cache = state.cache;
   if (!cache) return;
   const { nb, entities } = cache;
-  const inner = !nb.found
-    ? emptyState({
-        title: 'No entities yet.',
-        body: 'As you capture and the pipeline connects them, your knowledge graph appears here to explore.',
-      })
-    : `${searchBar(entities)}${trailBar(state)}${centerCard(nb)}${neighborsBlock(nb, state)}`;
-  container.innerHTML = `<div class="explore viz-surface">${HEADER}${inner}</div>`;
+  if (!nb.found) {
+    container.innerHTML = `<div class="explore viz-surface">${emptyState({
+      title: 'No entities yet.',
+      body: 'As you capture and the pipeline connects them, your knowledge graph appears here to explore.',
+    })}</div>`;
+    wire(container, state);
+    return;
+  }
+  container.innerHTML = `<div class="explore explore-v2 viz-surface">
+    <section class="exp-graph viz-grain">
+      ${graphBar(entities, nb, state)}
+      ${graphSvg(nb, state)}
+      ${graphLegend(nb)}
+    </section>
+    <aside class="exp-rail">${railContent(nb)}</aside>
+  </div>`;
   wire(container, state);
 }
 
-/** Search-to-focus (EXPLORE-6): an entity-name input with a datalist of all entities for autocomplete. */
-function searchBar(entities: readonly ExploreEntityRef[]): string {
+/** The floating control bar over the graph (UX v2): focus search + the filter chips, on `.viz-float`. */
+function graphBar(entities: readonly ExploreEntityRef[], nb: ExploreNeighborhood, state: ExploreState): string {
   const opts = entities.map((e) => `<option value="${esc(e.name)}"></option>`).join('');
-  return `
-    <div class="explore-search">
-      <label class="explore-search-label viz-field__label viz-signage" for="exploreFocus">Focus</label>
-      <input id="exploreFocus" class="explore-focus viz-field__input viz-focusable" type="text" list="exploreEntities" placeholder="Find an entity by name…" autocomplete="off" />
+  return `<div class="exp-bar">
+    <div class="exp-search viz-float">
+      <label class="exp-search-label" for="exploreFocus" aria-label="Focus an entity">⌕</label>
+      <input id="exploreFocus" class="explore-focus" type="text" list="exploreEntities" placeholder="Focus an entity…" autocomplete="off" />
       <datalist id="exploreEntities">${opts}</datalist>
-    </div>`;
+    </div>
+    ${trailBar(state)}
+    ${filterBar(nb.neighbors, state.filters)}
+  </div>`;
 }
 
-/** Breadcrumb of the path walked (EXPLORE-6: retrace). Each prior focus is a clickable signage crumb. */
+/** Radial graph layout (UX v2, SPEC-0039 EXPLORE-2): the focused entity is a STATIC center crystalline
+ *  node (Principal: no breathing ring); its filtered 1-hop neighbors ring it, each a typed node on a
+ *  gold edge whose weight reads confidence. Hover grows a node + lights its edge gold (CSS). Click =
+ *  re-center. A DOM `<title>` per node keeps it keyboard-/SR-reachable (the node carries data-rel/name). */
+function graphSvg(nb: ExploreNeighborhood, state: ExploreState): string {
+  const all = applyFilters(nb.neighbors, state.filters);
+  const shown = all.slice(0, 12); // bound the radial ring (DEFAULT_TOP_K) — never a hairball; "+N more" carries the rest
+  const W = 760;
+  const H = 560;
+  const cx = W / 2;
+  const cy = H / 2;
+  const R = Math.min(W, H) * 0.34;
+  const c = nb.center!;
+  const edges: string[] = [];
+  const nodes: string[] = [];
+  shown.forEach((n, i) => {
+    const ang = (i / shown.length) * 2 * Math.PI - Math.PI / 2;
+    const x = +(cx + R * Math.cos(ang)).toFixed(1);
+    const y = +(cy + R * Math.sin(ang)).toFixed(1);
+    const spec = n.speculative;
+    const w = (0.8 + n.confidence * 2.6).toFixed(1);
+    edges.push(
+      `<path class="exp-edge${spec ? ' exp-edge--spec' : ''}" data-rel="${esc(n.rel)}" d="M${cx} ${cy} L${x} ${y}" stroke-width="${w}" />`,
+    );
+    const kind = n.kind && n.kind.trim() ? n.kind : 'untyped';
+    const label = n.name.length > 18 ? n.name.slice(0, 17) + '…' : n.name;
+    const conf = `${spec ? '~' : ''}${n.confidence.toFixed(2)}`;
+    nodes.push(
+      `<g class="exp-node${spec ? ' exp-node--spec' : ''}" data-rel="${esc(n.rel)}" data-name="${esc(n.name)}" role="button" tabindex="0" aria-label="${esc(n.name)} — ${esc(kind)}, explore">
+        <title>${esc(n.name)} (${esc(kind)})</title>
+        <circle class="exp-node-dot" data-kind="${esc(kind)}" cx="${x}" cy="${y}" r="11" />
+        <text class="exp-node-label" x="${x}" y="${(y + 26).toFixed(1)}" text-anchor="middle">${esc(label)}</text>
+        <text class="exp-node-conf" x="${x}" y="${(y + 39).toFixed(1)}" text-anchor="middle">${esc(conf)}</text>
+      </g>`,
+    );
+  });
+  // Center node — static crystalline core (glow ring + gold ring + deep disc + lattice), no animation.
+  const center = `<g class="exp-center" aria-label="${esc(c.name)} (focused)">
+      <circle class="exp-center-glow" cx="${cx}" cy="${cy}" r="40" />
+      <circle class="exp-center-disc" cx="${cx}" cy="${cy}" r="32" />
+      <path class="exp-center-lattice" transform="translate(${cx} ${cy})" d="M0 -20 L20 0 L0 20 L-20 0 Z M0 -10 L10 0 L0 10 L-10 0 Z" />
+      <circle class="exp-center-dot" cx="${cx}" cy="${cy}" r="3" />
+      <text class="exp-center-name" x="${cx}" y="${(cy + 56).toFixed(1)}" text-anchor="middle">${esc(c.name)}</text>
+    </g>`;
+  const empty =
+    shown.length === 0
+      ? `<text class="exp-graph-empty" x="${cx}" y="${(cy + 92).toFixed(1)}" text-anchor="middle">No promoted relationships yet — Connect adds them as it finds them.</text>`
+      : '';
+  return `<svg class="exp-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Knowledge graph centered on ${esc(c.name)}">
+    <g class="exp-edges">${edges.join('')}</g>
+    <g class="exp-nodes">${nodes.join('')}${center}${empty}</g>
+  </svg>`;
+}
+
+/** The graph legend (node-type key) + an overflow note, on a floating pill. */
+function graphLegend(nb: ExploreNeighborhood): string {
+  const more = nb.total > nb.shown ? `<span class="exp-legend-more">+${nb.total - nb.shown} more</span>` : '';
+  return `<div class="exp-legend viz-float">
+    <span><i class="exp-dot" data-kind="person"></i>Person</span>
+    <span><i class="exp-dot" data-kind="concept"></i>Concept</span>
+    <span><i class="exp-dot" data-kind="organization"></i>Org</span>
+    <span><i class="exp-dot" data-kind="claim"></i>Claim</span>
+    ${more}
+  </div>`;
+}
+
+/** The right rail (UX v2): the focused entity's identity, tags, claims (with confidence bars), and the
+ *  contested banner — Spectral voice head, the "leads back to reading" detail beside the graph. */
+function railContent(nb: ExploreNeighborhood): string {
+  const c = nb.center!;
+  const tags = c.tags.length ? `<div class="explore-tags">${c.tags.map((t) => `<span class="explore-tag viz-chip">${esc(t)}</span>`).join('')}</div>` : '';
+  const claims = nb.claims.length
+    ? `<div class="rail-sec viz-voice">Claims</div><ul class="explore-claims">${nb.claims.map(renderClaim).join('')}</ul>`
+    : `<p class="explore-noclaims viz-body">No claims recorded for this entity yet.</p>`;
+  return `
+    <div class="rail-head" data-rel="${esc(c.rel)}">
+      <span class="rail-mark" aria-hidden="true">◈</span>
+      <div>
+        <h2 class="rail-name viz-voice">${esc(c.name)}</h2>
+        <div class="rail-kind">${esc(c.kind)} · <span class="explore-conf viz-numeric">${c.confidence.toFixed(2)}</span></div>
+      </div>
+      ${contestedFlag(nb.contradictions)}
+    </div>
+    ${tags}
+    <button type="button" class="explore-open viz-btn viz-btn--ghost viz-focusable" title="Open this entity's note in Obsidian">Open in Obsidian ↗</button>
+    ${contestedBanner(nb.contradictions)}
+    ${claims}
+    <p class="explore-cite-note viz-body" role="status" aria-live="polite"></p>`;
+}
+
+/** Search-to-focus (EXPLORE-6): an entity-name input with a datalist of all entities for autocomplete. */
 function trailBar(state: ExploreState): string {
   if (state.trail.length === 0) return '';
   const crumbs = state.trail
@@ -125,35 +234,6 @@ function trailBar(state: ExploreState): string {
 }
 
 /** A node's kind as a tag-colored chip + its confidence (numeric). Shared by the center + neighbors. */
-function identity(kind: string, confidence: number): string {
-  return `<span class="explore-kind viz-chip">${esc(kind)}</span><span class="explore-conf viz-numeric" title="confidence">${confidence.toFixed(2)}</span>`;
-}
-
-/** The focused entity (EXPLORE-4): identity + tags + an open-in-Obsidian affordance + its claims inline.
- *  A contested entity also wears a calm "contested" flag (SPEC-0036 CONTRA-7) above its claims. */
-function centerCard(nb: ExploreNeighborhood): string {
-  const c = nb.center!;
-  const tags = c.tags.length ? `<div class="explore-tags">${c.tags.map((t) => `<span class="explore-tag viz-chip">${esc(t)}</span>`).join('')}</div>` : '';
-  const claims = nb.claims.length
-    ? `<ul class="explore-claims">${nb.claims.map(renderClaim).join('')}</ul>`
-    : `<p class="explore-noclaims viz-body">No claims recorded for this entity yet.</p>`;
-  return `
-    <div class="explore-center viz-no-chrome viz-spine" data-rel="${esc(c.rel)}">
-      <div class="explore-center-head">
-        <span class="explore-center-name viz-signage">${esc(c.name)}</span>
-        ${identity(c.kind, c.confidence)}
-        ${contestedFlag(nb.contradictions)}
-        <button type="button" class="explore-open viz-btn viz-btn--ghost viz-focusable" title="Open this entity's note in Obsidian">Open in Obsidian ↗</button>
-      </div>
-      ${tags}
-      ${contestedBanner(nb.contradictions)}
-      ${claims}
-      <p class="explore-cite-note viz-body" role="status" aria-live="polite"></p>
-    </div>`;
-}
-
-/** SPEC-0036 CONTRA-7 — a compact "contested" chip on the center head when the entity has open
- *  contradictions (the durable flag). Count in the chip; the conflicting pairs ride in the tooltip. */
 function contestedFlag(contradictions: readonly ExploreContradiction[]): string {
   if (contradictions.length === 0) return '';
   const n = contradictions.length;
@@ -274,105 +354,12 @@ function filterBar(neighbors: readonly ExploreNeighbor[], f: ExploreFilters): st
 
 /** One neighbor row (EXPLORE-5/7): direction glyph + relationship label, name, kind chip, confidence
  *  (speculative-aware), an expand-in-place toggle, and — when expanded — its own links nested inline. */
-function neighborRow(n: ExploreNeighbor, state: ExploreState): string {
-  const dirLabel = DIRECTION_LABEL[n.direction];
-  // The edge label: a Connect predicate ("funds", "owns") when present; otherwise the glyph alone
-  // conveys direction (its descriptor stays in the title/aria), keeping the common no-predicate case clean.
-  const relLabel = n.predicate ? `<span class="explore-rel viz-numeric" title="relationship">${esc(n.predicate)}</span>` : '';
-  // Confidence: `~`-prefixed + brass when speculative — a non-color signal alongside the fade (a11y).
-  const confTitle = n.speculative ? 'link confidence — speculative (low)' : 'link confidence';
-  const conf = `<span class="explore-conf viz-numeric" title="${confTitle}">${n.speculative ? '~' : ''}${n.confidence.toFixed(2)}</span>`;
-  const specClass = n.speculative ? ' explore-neighbor--speculative' : '';
-  const recenterTitle = `Explore around ${n.name}${n.speculative ? ' (speculative link)' : ''}`;
-  const isOpen = state.expanded.has(n.rel);
-  const expandBtn = `<button type="button" class="explore-expand viz-focusable${isOpen ? ' is-open' : ''}" data-rel="${esc(n.rel)}" data-name="${esc(n.name)}" aria-expanded="${isOpen}" title="${isOpen ? 'Collapse' : 'Expand'} ${esc(n.name)}'s links in place"><span aria-hidden="true">${isOpen ? '▾' : '▸'}</span></button>`;
-  const sub = isOpen ? expandPeek(n, state) : '';
-  return `
-      <li class="explore-neighbor${specClass}">
-        <div class="explore-neighbor-row">
-          ${expandBtn}
-          <button type="button" class="explore-recenter viz-no-chrome viz-focusable" data-rel="${esc(n.rel)}" data-name="${esc(n.name)}" title="${esc(recenterTitle)}">
-            <span class="explore-edge viz-numeric" title="${esc(dirLabel)}" aria-label="${esc(dirLabel)}">${DIRECTION_GLYPH[n.direction]}</span>
-            ${relLabel}
-            <span class="explore-neighbor-name viz-body">${esc(n.name)}</span>
-            <span class="explore-kind viz-chip">${esc(n.kind)}</span>
-            ${conf}
-          </button>
-        </div>
-        ${sub}
-      </li>`;
-}
-
-/**
- * Expand-in-place (EXPLORE-7): a neighbor's own 1-hop links, revealed inline without changing focus.
- * The neighbor's neighborhood is lazily fetched (cached in `state.subCache`); until it arrives the row
- * shows a brief loading line. Each sub-neighbor is itself click-to-re-center. The reveal animates via a
- * CSS animation that degrades to instant under prefers-reduced-motion (EXPLORE-13).
- */
-function expandPeek(n: ExploreNeighbor, state: ExploreState): string {
-  const sub = state.subCache.get(n.rel);
-  if (!sub) return `<div class="explore-subneighbors viz-body"><span class="explore-sub-loading">Loading ${esc(n.name)}'s links…</span></div>`;
-  const subs = sub.neighbors.filter((s) => s.rel !== n.rel).slice(0, EXPAND_PEEK);
-  if (subs.length === 0) {
-    return `<div class="explore-subneighbors viz-body"><span class="explore-sub-empty">No further links from ${esc(n.name)} yet.</span></div>`;
-  }
-  const rows = subs
-    .map((s) => {
-      const label = s.predicate ? ` <span class="explore-rel viz-numeric">${esc(s.predicate)}</span>` : '';
-      const spec = s.speculative ? ' explore-neighbor--speculative' : '';
-      return `<li class="explore-subneighbor${spec}"><button type="button" class="explore-recenter viz-no-chrome viz-focusable" data-rel="${esc(s.rel)}" data-name="${esc(s.name)}" title="Explore around ${esc(s.name)}"><span class="explore-edge viz-numeric" title="${esc(DIRECTION_LABEL[s.direction])}" aria-label="${esc(DIRECTION_LABEL[s.direction])}">${DIRECTION_GLYPH[s.direction]}</span>${label}<span class="explore-neighbor-name viz-body">${esc(s.name)}</span><span class="explore-kind viz-chip">${esc(s.kind)}</span></button></li>`;
-    })
-    .join('');
-  const more = sub.total > subs.length ? `<li class="explore-sub-more viz-body">+${sub.total - subs.length} more — open ${esc(n.name)} to see all</li>` : '';
-  return `<div class="explore-subneighbors"><ul class="explore-subneighbor-list">${rows}${more}</ul></div>`;
-}
-
-/** The 1-hop neighborhood (EXPLORE-2/5/7/8/9): filter bar + filtered, expandable, click-to-re-center
- *  rows; bounded to the loaded top-K with a "+N more" overflow note when the hub is large. */
-function neighborsBlock(nb: ExploreNeighborhood, state: ExploreState): string {
-  if (nb.neighbors.length === 0) {
-    // The sparse state (EXPLORE-11): a focused entity with no promoted links renders cleanly, with why.
-    return `<div class="explore-neighbors-empty viz-body"><span class="viz-signage explore-neighbors-head">Relationships</span><p>No relationships promoted yet — this entity isn't linked to others in the graph. Connect adds links as it finds them; this view gets richer as that happens.</p></div>`;
-  }
-  const filtered = applyFilters(nb.neighbors, state.filters);
-  const filtersActive = state.filters.kinds.size > 0 || state.filters.edges.size > 0 || state.filters.hideSpeculative;
-  const bar = filterBar(nb.neighbors, state.filters);
-
-  // Filters can empty the loaded set — say so plainly, with a clear affordance (never a blank list).
-  if (filtered.length === 0) {
-    return `
-    <div class="explore-neighbors">
-      <span class="explore-neighbors-head viz-signage">Relationships</span>
-      ${bar}
-      <p class="explore-filter-none viz-body">No relationships match these filters. <button type="button" class="explore-filter-clear viz-focusable">Clear filters</button></p>
-    </div>`;
-  }
-
-  const rows = filtered.map((n) => neighborRow(n, state)).join('');
-  // "+N more": unfiltered, the loaded top-K vs the full distinct total (EXPLORE-8). Filtered, the note
-  // reflects what the filters hid from the loaded neighborhood instead.
-  const overflow = filtersActive
-    ? `<p class="explore-more viz-body">Showing ${filtered.length} of ${nb.neighbors.length} loaded${nb.total > nb.neighbors.length ? ` (of ${nb.total} total)` : ''}.</p>`
-    : nb.total > nb.shown
-      ? `<p class="explore-more viz-body">+${nb.total - nb.shown} more — narrow with a more specific focus.</p>`
-      : '';
-  const count = filtersActive ? `${filtered.length}/${nb.neighbors.length}` : `${nb.shown}${nb.total > nb.shown ? `/${nb.total}` : ''}`;
-  return `
-    <div class="explore-neighbors">
-      <span class="explore-neighbors-head viz-signage">Relationships <span class="viz-numeric">${count}</span></span>
-      ${bar}
-      <ul class="explore-neighbor-list">${rows}</ul>
-      ${overflow}
-    </div>`;
-}
-
 function wire(container: HTMLElement, state: ExploreState): void {
   const focusTo = (rel: string | undefined, name: string): void => {
-    // Record the current center on the trail before moving (retrace, EXPLORE-6), then re-center. A new
-    // focus resets the per-neighborhood view state (filters + expansions don't carry across centers).
-    const centerEl = container.querySelector<HTMLElement>('.explore-center');
-    const curRel = centerEl?.dataset.rel;
-    const curName = container.querySelector('.explore-center-name')?.textContent ?? '';
+    // Record the current center on the trail before moving (retrace, EXPLORE-6), then re-center.
+    const headEl = container.querySelector<HTMLElement>('.rail-head');
+    const curRel = headEl?.dataset.rel;
+    const curName = container.querySelector('.rail-name')?.textContent ?? '';
     if (curRel && curName) state.trail.push({ rel: curRel, name: curName });
     state.focus = rel ?? name;
     resetViewState(state);
@@ -395,14 +382,27 @@ function wire(container: HTMLElement, state: ExploreState): void {
   });
   search?.addEventListener('change', submitSearch); // datalist selection fires change
 
-  // Re-center on a clicked neighbor / sub-neighbor (EXPLORE-6 navigate).
-  for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.explore-recenter'))) {
-    btn.addEventListener('click', () => focusTo(btn.dataset.rel, btn.dataset.name ?? ''));
-  }
-
-  // Expand-in-place a neighbor's links without changing focus (EXPLORE-7).
-  for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.explore-expand'))) {
-    btn.addEventListener('click', () => void toggleExpand(container, state, btn.dataset.rel ?? ''));
+  // Re-center on a clicked graph node (EXPLORE-6 navigate) — keyboard-reachable (Enter/Space).
+  // Hover/focus a node → light ITS incident edge gold (§3 hover-life signature): the edge shares the
+  // node's data-rel, so we toggle `.exp-edge--hot` on the matching edge (they live in separate <g>s).
+  for (const node of Array.from(container.querySelectorAll<SVGGElement>('.exp-node'))) {
+    const rel = node.dataset.rel ?? '';
+    const go = (): void => focusTo(node.dataset.rel, node.dataset.name ?? '');
+    const edge = container.querySelector<SVGPathElement>(`.exp-edge[data-rel="${CSS.escape(rel)}"]`);
+    const gild = (on: boolean): void => {
+      edge?.classList.toggle('exp-edge--hot', on);
+    };
+    node.addEventListener('click', go);
+    node.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        go();
+      }
+    });
+    node.addEventListener('mouseenter', () => gild(true));
+    node.addEventListener('mouseleave', () => gild(false));
+    node.addEventListener('focus', () => gild(true));
+    node.addEventListener('blur', () => gild(false));
   }
 
   // Filter chips (EXPLORE-9): toggle a value in its group, repaint from cache (no IPC round-trip).
@@ -434,7 +434,7 @@ function wire(container: HTMLElement, state: ExploreState): void {
 
   // Open the focused entity's note in Obsidian (EXPLORE-4 click-through; reuses ASK-14 openCitation).
   const openBtn = container.querySelector<HTMLButtonElement>('.explore-open');
-  const centerRel = container.querySelector<HTMLElement>('.explore-center')?.dataset.rel;
+  const centerRel = container.querySelector<HTMLElement>('.rail-head')?.dataset.rel;
   openBtn?.addEventListener('click', () => {
     if (centerRel) void window.kbApi.openCitation(centerRel);
   });
@@ -475,28 +475,6 @@ function toggleFilter(state: ExploreState, group: string, value: string): void {
  * Toggle a neighbor's expand-in-place (EXPLORE-7). Opening lazily fetches its neighborhood once (cached)
  * — a failed fetch degrades to an "unavailable" cache entry rather than throwing (the row stays usable).
  */
-async function toggleExpand(container: HTMLElement, state: ExploreState, rel: string): Promise<void> {
-  if (!rel) return;
-  if (state.expanded.has(rel)) {
-    state.expanded.delete(rel);
-    paint(container, state);
-    return;
-  }
-  state.expanded.add(rel);
-  if (!state.subCache.has(rel)) {
-    paint(container, state); // show the loading line immediately
-    let sub: ExploreNeighborhood;
-    try {
-      sub = await withTimeout(window.kbApi.exploreNeighborhood(rel));
-    } catch {
-      sub = { found: false, claims: [], neighbors: [], shown: 0, total: 0, contradictions: [] }; // degrade to "no further links"
-    }
-    state.subCache.set(rel, sub);
-  }
-  paint(container, state);
-}
-
-/** Inline messages for a non-`opened` source open (working-zone-aware — REVIEW-17): never a dead link. */
 const CITE_STATUS: Record<string, string> = {
   staging: 'That source is still processing — it’ll be in your vault shortly.',
   missing: 'That source isn’t in your vault (it may have been removed).',
