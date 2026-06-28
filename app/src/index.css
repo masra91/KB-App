@@ -504,6 +504,10 @@ button:disabled {
 .ask-title { margin: 0 0 0.3rem; } /* Spectral via .viz-voice */
 .ask-form { display: flex; gap: 0.5rem; margin: 0.9rem 0 0; }
 .ask-input { flex: 1; }
+/* Primary CTA — FILLED accent + sentence-case (the .viz-btn base is outlined+uppercase; DL-2 #473
+   polish, matches Capture's filled CTA). The one emphasized action on the view. */
+.ask-submit.viz-btn { background: var(--viz-accent); color: #fff; border-color: var(--viz-accent); text-transform: none; letter-spacing: 0.01em; font-weight: 600; }
+.ask-submit.viz-btn:hover, .ask-submit.viz-btn:focus-visible { background: var(--viz-ink); border-color: var(--viz-ink); color: #fff; }
 .ask-view .ask-transcript { list-style: none; padding: 0; margin: 1.1rem 0 0; display: flex; flex-direction: column; gap: 0; }
 /* Flat, ruled turns (not chat bubbles, DL-2) — a top rule separates each Q/A, like the Activity feed. */
 .ask-turn { border: 0; border-top: 1px solid var(--viz-rule); padding: 0.9rem 0; }
