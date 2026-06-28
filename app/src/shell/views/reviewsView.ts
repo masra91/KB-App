@@ -10,8 +10,16 @@
 // on. Fix: a visibility-aware refresh poll, same cadence as the badge, so the list always reflects
 // the same `listReviews()` the badge counts. It re-renders only when the open-review *set* changes
 // and never while a note is being written (so it can't clobber in-progress input).
-import { esc } from '../html';
+import { esc, emptyState } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
+
+// UX v2 (SPEC-0058): the Reviews "needs you" queue, lifted off the legacy `.card`/`--border` chrome onto
+// the v2 material. `reviews-v2` scopes every override to this surface. Reviews is the ONE peripheral screen
+// where EMBER is correct (DL-2 contract / language §4): an open review IS a "needs your decision" cue — each
+// item wears an ember spine. The empty state stays calm (no ember, no 🎉 — a quiet v2 `.viz-empty`). Heads
+// = Spectral (no 🔍), data = mono, copy = Inter sentence case.
+const V2 = 'reviews-v2 viz-surface';
+const V2_HEAD = `<h1 class="reviews-title viz-voice">Reviews</h1>`;
 import type { ReviewSummary } from '../../kb/types';
 import type { ReviewSubjectCandidate } from '../../kb/reviews';
 
@@ -53,7 +61,7 @@ export async function mountReviews(container: HTMLElement): Promise<void> {
   answeredIds = new Set();
   failedIds = new Map();
   lastList = [];
-  container.innerHTML = `<div class="card"><h1>🔍 Reviews</h1><p class="muted">Loading…</p></div>`;
+  container.innerHTML = `<div class="${V2}">${V2_HEAD}<p class="viz-body">Loading…</p></div>`;
   await refresh(container);
   startPoll(container);
 }
@@ -98,7 +106,7 @@ async function refresh(container: HTMLElement, opts: { onlyIfChanged?: boolean }
   } catch {
     if (!opts.onlyIfChanged) {
       // Initial/forced load failed → a retryable error (the poll keeps trying too).
-      renderLoadError(container, '<h1>🔍 Reviews</h1>', () => void refresh(container));
+      renderLoadError(container, V2_HEAD, () => void refresh(container));
     }
     return; // poll error → keep the last good list
   }
@@ -131,12 +139,16 @@ function sigFor(list: ReviewSummary[]): string {
 /** The empty state — extracted so the optimistic-remove path can show it the instant the last item
  *  is answered (REVIEW-20), without waiting on a refetch. */
 function paintEmpty(container: HTMLElement): void {
-  container.innerHTML = `<div class="card"><h1>🔍 Reviews</h1><p class="muted">Nothing needs you right now. 🎉</p></div>`;
+  // Calm by design (no ember, no 🎉) — the queue is quiet; ember is reserved for an actual open review.
+  container.innerHTML = `<div class="${V2}">${V2_HEAD}${emptyState({
+    title: 'Nothing needs you right now.',
+    body: 'When the pipeline hits a judgment call it can’t make on its own, it’ll ask you here.',
+  })}</div>`;
 }
 
 /** Render the review list (or the empty state) and wire the per-item Confirm/Reject buttons. */
 function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
-  const header = `<h1>🔍 Reviews</h1>`;
+  const header = V2_HEAD;
   if (reviews.length === 0) {
     paintEmpty(container);
     return;
@@ -157,9 +169,9 @@ function paint(container: HTMLElement, reviews: ReviewSummary[]): void {
     .join('');
 
   container.innerHTML = `
-    <div class="card">
+    <div class="${V2}">
       ${header}
-      <p class="muted">${reviews.length} question${reviews.length === 1 ? '' : 's'} for you. Each is a quick yes/no.</p>
+      <p class="viz-body reviews-sub">${reviews.length} question${reviews.length === 1 ? '' : 's'} for you. Each is a quick yes/no.</p>
       <ul class="review-list">${items}</ul>
     </div>`;
 
