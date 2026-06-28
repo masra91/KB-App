@@ -17,7 +17,13 @@ export default defineConfig({
       // Externalize it so the lazy require resolves at runtime from node_modules; the native is then
       // loaded from outside the asar by plugin-auto-unpack-natives (app.asar.unpacked). Externalizing
       // ONLY this native (not the pure-JS deps above) keeps the rest bundled into app.asar as before.
-      external: ['fsevents'],
+      //
+      // `canvas` + `path2d` are OPTIONAL deps of `pdfjs-dist` (SPEC-0052 MEDIA-8 digital-PDF text layer).
+      // pdfjs's legacy build statically `import`s them for its RENDERING path — which we never use (we
+      // only call `getTextContent`). They're native/optional, so they aren't installed on CI/Linux and
+      // Rollup died with `failed to resolve import "canvas" from pdfjs-dist/.../pdf.mjs`. Externalize them
+      // so Rollup leaves the (never-executed) rendering import alone; text extraction needs neither.
+      external: ['fsevents', 'canvas', 'path2d'],
     },
   },
 });
