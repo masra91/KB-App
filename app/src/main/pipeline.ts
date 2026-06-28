@@ -17,6 +17,7 @@ import { createProjectionStore, type ProjectionStore, type Projection } from './
 import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
+import { makeSensitivityClassifier } from '../kb/sensitivityClassifier';
 import { DecomposeStage, readDecomposeQueue } from '../kb/decomposeStage';
 import { makeDecomposeDecider } from '../kb/decomposeAgent';
 import { ClaimsStage, readClaimsQueue, listSetAsideItems, retryClaimsItem, dismissClaimsItem } from '../kb/claimsStage';
@@ -364,7 +365,13 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   const promoteEvergreen = async (): Promise<void> => {
     promoter.request();
   };
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, stageCaps.archive, log, tracer);
+  // SENSE-4 Slice 2: classify each source's sensitivity at the ingest boundary so a confidently-public source
+  // lands `shareable` and public-web research egress lights up (SENSE-9). Wired with the deterministic,
+  // provenance-driven classifier (the safe default — no per-source egress, can't parse-fail, matching the
+  // enrich-trigger robustness ethos); the Copilot-backed classifier is built behind the same seam and enabled
+  // by passing a `run` to makeSensitivityClassifier.
+  const classify = makeSensitivityClassifier();
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, stageCaps.archive, log, tracer, classify);
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen

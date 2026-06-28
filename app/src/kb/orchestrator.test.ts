@@ -13,6 +13,8 @@ import { makeCopilotDecider } from './copilotAgent';
 import { DEFAULT_COPILOT_MODEL } from './copilotModel';
 import { dateShard } from './ulid';
 import { setSensitivityOverride } from './sensitivityOverride';
+import { makeSensitivityClassifier, type SensitivityClassifier } from './sensitivityClassifier';
+import { sensitivityAllowsOrientRead } from './sensitivity';
 import { makeTempDir, rmTempDir, pathExists } from '../../test/tempVault';
 
 function gitInstalledSync(): boolean {
@@ -110,6 +112,58 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     const audit = await fs.readFile(path.join(vault, destRel, 'audit.jsonl'), 'utf8');
     const archived = audit.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.action === 'archived');
     expect(archived.decision.sensitivityBy).toBe('principal');
+  });
+
+  it('SENSE-4 Slice 2 (real path): a confident classifier verdict lands `shareable` (by: classifier + confidence) → public-web egress unblocked', async () => {
+    // A source the classifier confidently calls public: the label becomes `shareable`, provenance `by: classifier`
+    // with a recorded confidence, and — the whole point — it now passes the public-web orient gate (SENSE-9).
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'A public press release about a product launch.' }]);
+    const classify: SensitivityClassifier = async () => ({ label: 'shareable', confidence: 0.9, rationale: 'public press release' });
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, classify);
+
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: shareable');
+    expect(sourceMd).toContain('  by: classifier');
+    expect(sourceMd).toContain('  confidence: 0.9');
+
+    const archived = (await fs.readFile(path.join(vault, destRel, 'audit.jsonl'), 'utf8')).trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.action === 'archived');
+    expect(archived.decision).toMatchObject({ sensitivity: 'shareable', sensitivityBy: 'classifier', sensitivityConfidence: 0.9 });
+    // The egress unblock: a public-web researcher could read NONE of the old `internal` default, but can read this.
+    expect(sensitivityAllowsOrientRead('public-web', 'internal')).toBe(false);
+    expect(sensitivityAllowsOrientRead('public-web', 'shareable')).toBe(true);
+  });
+
+  it('SENSE-4: a sub-threshold verdict stays at the conservative `internal` default + records a `suggested` label (→Review)', async () => {
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'text', text: 'might be public, might not' }]);
+    const classify: SensitivityClassifier = async () => ({ label: 'shareable', confidence: 0.5 }); // below threshold
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, classify);
+
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: internal'); // unchanged — conservative
+    expect(sourceMd).toContain('  by: default');
+    expect(sourceMd).toContain('  suggested: shareable'); // the uncertain case routes to Review (data persisted)
+    expect(sourceMd).not.toContain('  confidence:'); // no confidence on a non-classifier label
+  });
+
+  it('SENSE-4 priority: the classifier NEVER overwrites a connector signal (a confidential feed stays confidential)', async () => {
+    const { ids } = await captureToInbox(vault, 'intake:work-mail', [{ kind: 'text', text: 'deal terms' }], Date.now(), { origin: 'external', sensitivity: 'confidential' });
+    // Even an over-eager classifier that screams "shareable!" must lose to the connector default (SENSE-5 > classifier).
+    const classify: SensitivityClassifier = async () => ({ label: 'shareable', confidence: 0.99 });
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, classify);
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: confidential');
+    expect(sourceMd).toContain('  by: connector');
+    expect(sourceMd).not.toContain('shareable');
+  });
+
+  it('SENSE-4: the wired deterministic classifier auto-classifies a research finding (secondary origin) as shareable', async () => {
+    // The production default classifier (deterministic, provenance-driven): a `secondary` source — a researcher's
+    // external web finding — is already public, so it lands `shareable` with no injected verdict.
+    const { ids } = await captureToInbox(vault, 'researcher:web-1', [{ kind: 'text', text: 'Findings synthesized from public sources.' }], Date.now(), { origin: 'secondary' });
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, makeSensitivityClassifier());
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('sensitivity: shareable');
+    expect(sourceMd).toContain('  by: classifier');
   });
 
   it('archives a dropped file: embeds raw in source.md, keeps bytes verbatim', async () => {
