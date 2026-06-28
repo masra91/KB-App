@@ -598,53 +598,136 @@ button:disabled {
   cursor: default;
 }
 
-/* Ask view (SPEC-0026) — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §5): repointed off the
-   legacy palette/accent (--border/--accent/#d66) onto --viz-* tokens; secondary text on
-   --viz-ink-muted (was legacy .muted); the Ask + Save buttons compose the blessed .viz-btn primitive
-   (design-system.css). No new tokens/components (DESIGN-7). */
-/* ── UX v2 Ask (DL-2 contract): material card · Spectral answer prose · accent citation chips ─────── */
-.ask-view { padding: 1.75rem 2rem; } /* the view is a .viz-card + grain now (was the flat legacy .card) */
-.ask-title { margin: 0 0 0.3rem; } /* Spectral via .viz-voice */
-.ask-form { display: flex; gap: 0.5rem; margin: 0.9rem 0 0; }
-.ask-input { flex: 1; }
-/* Primary CTA — FILLED accent + sentence-case (the .viz-btn base is outlined+uppercase; DL-2 #473
-   polish, matches Capture's filled CTA). The one emphasized action on the view. */
-.ask-submit.viz-btn { background: var(--viz-accent); color: #fff; border-color: var(--viz-accent); text-transform: none; letter-spacing: 0.01em; font-weight: 600; }
-.ask-submit.viz-btn:hover, .ask-submit.viz-btn:focus-visible { background: var(--viz-ink); border-color: var(--viz-ink); color: #fff; }
-.ask-view .ask-transcript { list-style: none; padding: 0; margin: 1.1rem 0 0; display: flex; flex-direction: column; gap: 0; }
-/* Flat, ruled turns (not chat bubbles, DL-2) — a top rule separates each Q/A, like the Activity feed. */
-.ask-turn { border: 0; border-top: 1px solid var(--viz-rule); padding: 0.9rem 0; }
-.ask-turn:first-child { border-top: 0; }
-.ask-empty { padding: 1.2rem 0 0.2rem; }
-.ask-q { font-weight: 600; margin-bottom: 0.45rem; }
-.ask-who { color: var(--viz-ink-muted); font-size: 0.7rem; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 0.4rem; }
-/* The synthesis answer reads as scholarly prose (Spectral / .viz-voice) — generous line-height, a
-   comfortable reading measure. Long unbroken tokens still wrap (the render path sanitizes upstream). */
-.ask-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
-.ask-answer.viz-voice { line-height: 1.6; max-width: 64ch; color: var(--viz-ink); }
-.ask-searching { font-style: italic; } /* calm "Searching your library…" (ink-muted via .ask-note) */
-.ask-answer.ask-error, .ask-answer.error { color: var(--viz-oxide); font-style: normal; } /* oxide only on a genuine no-result */
-/* Secondary/helper text. */
-.ask-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
-/* References — material rows beneath the answer: a small signage label + each source as a clickable row. */
-.ask-citations { margin-top: 0.9rem; }
-.ask-ref-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
-.ask-citations ul { margin: 0.3rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
-.ask-citations li { font-size: 0.9em; }
-.ask-flags { margin-top: 0.5rem; font-size: 0.85em; color: var(--viz-ink-muted); }
-/* Citation deep-links (ASK-14/WS-A). Interactive → --viz-accent (slate-blue, AA on cream; #415). The
-   inline marker reads as a small Plex-Mono chip; the References entry is a row with a mono [n] + name. */
-.cite-link { color: var(--viz-accent); text-decoration: none; cursor: pointer; font-family: var(--viz-font-numeric, ui-monospace, monospace); font-size: 0.82em; vertical-align: super; line-height: 0; padding: 0 0.15em; }
-.cite-link:hover, .cite-link:focus-visible { text-decoration: underline; }
-.cite-ref { color: var(--viz-ink); text-decoration: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 0.4rem; }
-.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-accent); }
-.cite-ref:hover .cite-name, .cite-ref:focus-visible .cite-name { text-decoration: underline; }
-.cite-ref .cite-num { color: var(--viz-accent); font-family: var(--viz-font-numeric, ui-monospace, monospace); font-size: 0.85em; }
-.cite-ref .cite-kind { color: var(--viz-ink-muted); font-size: 0.78em; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.04em; }
-.ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--viz-oxide); }
-/* Save-as-Output (ASK-6) — the action composes .viz-btn--sm (design-system.css). */
-.ask-save-row { margin-top: 0.6rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
-.ask-save-status.error { color: var(--viz-oxide); }
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Ask view — VELLUM v3 (SPEC-0060 VUX-11). The grounded-recall CONVERSATION surface: a full-pane chat
+   on the v3 warm-vellum token system (retires --viz-*, VUX-1), reclaiming the full column (no 34rem
+   clamp, VUX-2). Header (title · meta · actions) + a scrolling conversation column (you-bubble + a
+   grounded answer carrying seal · scholarly prose · honest foot-stat · references) + a floating ask
+   bar with the Quick/Considered effort toggle — the "recall settings live on Ask" IA-lock (VUX-19).
+   Colour discipline: viridian = the answer/recall identity · slate = interactive (cites, focus) ·
+   gold = highlight · oxide ONLY on a true answer error · NO ember (Ask is read, not a decision).
+   Light is the fixed default; v3 dark is deferred (SPEC-0060 §2). Plex-Mono for all ids/refs/times. */
+.ask-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+
+/* ── Header: the conversation's identity + actions ─────────────────────────────────────────────── */
+.ask-head { display: flex; align-items: flex-start; gap: 1rem; padding: 0.2rem 0 0.9rem; border-bottom: 1px solid var(--hair); }
+.ask-head-id { min-width: 0; flex: 1; }
+.ask-head-id h1 { font-family: var(--voice); font-weight: 600; font-size: 1.5rem; line-height: 1.25; margin: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.25rem; font-family: var(--ui); font-size: 0.78rem; color: var(--stone); }
+.ask-sub .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+.ask-actions { display: flex; align-items: center; gap: 0.4rem; flex: none; }
+.ask-act { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--ui); font-size: 0.8rem; font-weight: 500; color: var(--ink-2); background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.4rem 0.7rem; cursor: pointer; transition: background var(--t), border-color var(--t); }
+.ask-act:hover { background: var(--hover); }
+.ask-act .ask-act-i { font-size: 0.9em; color: var(--stone); }
+.ask-act.is-quiet { background: transparent; color: var(--stone); border-color: transparent; }
+.ask-act.is-quiet:hover { background: var(--hover); }
+.ask-act:disabled { opacity: 0.45; cursor: not-allowed; }
+.ask-act:disabled:hover { background: transparent; }
+
+/* ── Scrolling conversation column (reclaims full width; reading measure on .ask-col) ──────────── */
+.ask-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 1.2rem 0 9rem; }
+.ask-col { max-width: 760px; margin: 0 auto; padding: 0 1rem; }
+.ask-turn { margin-bottom: 2.1rem; }
+
+/* The question — a right-aligned warm bubble (Spectral, the asker's voice). */
+.ask-you { display: flex; justify-content: flex-end; margin-bottom: 1rem; }
+.ask-you-col { display: flex; flex-direction: column; align-items: flex-end; max-width: 80%; }
+.ask-you .bubble { font-family: var(--voice); font-size: 1rem; line-height: 1.5; color: var(--ink); background: var(--parchment); border: 1px solid var(--hair); border-radius: 16px 16px 5px 16px; padding: 0.6rem 0.9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-meta-you { font-family: var(--mono); font-size: 0.68rem; color: var(--faint); margin-top: 0.3rem; }
+
+/* The answer — the recall identity. A viridian seal + a left gradient spine mark it as grounded synthesis. */
+.ask-ans { position: relative; padding-left: 2.4rem; }
+.ask-ans::before { content: ''; position: absolute; left: 0.9rem; top: 2.2rem; bottom: 0.2rem; width: 2px; border-radius: 2px; background: linear-gradient(180deg, var(--viridian-2), transparent); opacity: 0.5; }
+.seal { position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--viridian); color: var(--linen); font-size: 0.85rem; box-shadow: var(--shadow-card); }
+.seal.is-error { background: var(--oxide); }
+.ask-ans.is-thinking .seal { animation: askSealPulse 1.5s ease-in-out infinite; }
+@keyframes askSealPulse { 0%, 100% { opacity: 0.55; transform: scale(0.9); } 50% { opacity: 1; transform: scale(1.05); } }
+
+/* The synthesis reads as scholarly prose (Spectral) — generous measure; long tokens still wrap. */
+.ask-prose { font-family: var(--voice); font-size: 1.06rem; line-height: 1.65; color: var(--ink); overflow-wrap: anywhere; }
+.ask-prose > :first-child { margin-top: 0; }
+.ask-prose > :last-child { margin-bottom: 0; }
+.ask-prose .ask-hl { background: linear-gradient(transparent 60%, rgba(201, 163, 90, 0.32) 0); } /* gold highlight rides the text, label stays ink (AA, #184) */
+.ask-prose.ask-error { color: var(--oxide); } /* oxide ONLY on a genuine no-answer error */
+
+/* Inline citation markers (ASK-14) — a slate superscript chip, interactive (#415). */
+.ask-cite { color: var(--slate); text-decoration: none; cursor: pointer; font-family: var(--mono); font-size: 0.72em; vertical-align: super; line-height: 0; padding: 0 0.12em; }
+.ask-cite:hover, .ask-cite:focus-visible { text-decoration: underline; }
+
+/* Foot — honest provenance only (NO faked confidence; AskResult carries none). grounded · stat. */
+.ask-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--hair); font-family: var(--ui); font-size: 0.74rem; }
+.ask-ground { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 600; }
+.ask-ground.is-grounded { color: var(--viridian); }
+.ask-ground.is-ungrounded, .ask-ground.is-warn { color: var(--gold-deep); } /* caution, not error (#184) */
+.ask-stat { display: inline-flex; align-items: center; gap: 0.45rem; margin-left: auto; color: var(--stone); font-family: var(--mono); font-size: 0.72rem; }
+.ask-stat .smode { color: var(--ink-2); font-family: var(--ui); font-weight: 600; }
+.ask-stat .sdot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+
+/* References (ASK-13/14) — numbered cards matching the inline markers; each a deep-link to Obsidian. */
+.ask-refs { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.35rem; }
+.ask-refs-h { display: flex; align-items: center; gap: 0.6rem; font-family: var(--ui); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 0.15rem; }
+.ask-refs-h .line { flex: 1; height: 1px; background: var(--hair); }
+.ask-ref { display: flex; align-items: center; gap: 0.6rem; width: 100%; text-align: left; background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.5rem 0.7rem; cursor: pointer; transition: background var(--t), border-color var(--t); font: inherit; }
+.ask-ref:hover, .ask-ref:focus-visible { background: var(--hover); border-color: var(--slate); }
+.ask-ref .num { font-family: var(--mono); font-size: 0.78rem; color: var(--slate); flex: none; }
+.ask-ref .rbody { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1; }
+.ask-ref .rtitle { font-family: var(--ui); font-size: 0.85rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-ref .rkind { font-family: var(--ui); font-size: 0.62rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--stone); }
+.ask-ref .rkind.k-entity { color: var(--slate); }
+.ask-ref .rkind.k-claim { color: var(--viridian); }
+.ask-ref .rgo { color: var(--faint); flex: none; transition: transform var(--t), color var(--t); }
+.ask-ref:hover .rgo, .ask-ref:focus-visible .rgo { color: var(--slate); transform: translateX(2px); }
+.ask-cite-status.error { margin-top: 0.5rem; font-size: 0.78rem; color: var(--oxide); }
+
+/* Save-to-KB (ASK-6) — a quiet per-answer action; the saved state confirms in viridian (not ember). */
+.ask-save-row { margin-top: 0.9rem; display: flex; align-items: center; gap: 0.5rem; font-family: var(--ui); font-size: 0.78rem; }
+.ask-save { display: inline-flex; align-items: center; gap: 0.35rem; font: inherit; font-weight: 500; color: var(--ink-2); background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.35rem 0.65rem; cursor: pointer; transition: background var(--t), border-color var(--t); }
+.ask-save:hover { background: var(--hover); border-color: var(--slate); }
+.ask-save:disabled { opacity: 0.55; cursor: default; }
+.ask-save-row.is-saved { color: var(--viridian); }
+.ask-save-row.is-saved code { font-family: var(--mono); font-size: 0.9em; color: var(--stone); }
+.ask-save-status.error { color: var(--oxide); }
+
+/* Calm in-flight state (never a blank async gap, VUX) — a status line + a shimmer skeleton. */
+.ask-status { font-family: var(--ui); font-size: 0.85rem; color: var(--stone); }
+.ask-skel { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.7rem; }
+.ask-skel .ln { height: 0.7rem; border-radius: 5px; background: linear-gradient(90deg, var(--parchment) 25%, var(--hair) 37%, var(--parchment) 63%); background-size: 400% 100%; animation: askShimmer 1.4s ease-in-out infinite; }
+.ask-skel .w1 { width: 92%; } .ask-skel .w2 { width: 78%; } .ask-skel .w3 { width: 86%; }
+@keyframes askShimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+
+/* Empty state — calm invitation, never a void. */
+.ask-empty { max-width: 480px; margin: 3.5rem auto 0; text-align: center; }
+.ask-empty-seal { display: inline-flex; align-items: center; justify-content: center; width: 3rem; height: 3rem; border-radius: 50%; background: var(--parchment); color: var(--viridian); font-size: 1.2rem; box-shadow: var(--shadow-card); }
+.ask-empty-h { font-family: var(--voice); font-size: 1.25rem; color: var(--ink); margin: 0.9rem 0 0.35rem; }
+.ask-empty-sub { font-family: var(--ui); font-size: 0.9rem; line-height: 1.55; color: var(--stone); margin: 0; }
+
+/* ── The floating ask bar — the recall console (VUX-11). Effort toggle lives here (IA-lock VUX-19). ── */
+.ask-dock { position: sticky; bottom: 0; padding: 0.8rem 0 1rem; background: linear-gradient(180deg, transparent, var(--vellum) 28%); }
+.ask-bar { max-width: 760px; margin: 0 auto; background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 0.7rem 0.8rem 0.6rem; transition: border-color var(--t), box-shadow var(--t); }
+.ask-bar:focus-within { border-color: var(--viridian); box-shadow: var(--ring); }
+.ask-input { width: 100%; border: 0; background: transparent; resize: none; font-family: var(--voice); font-size: 1.02rem; line-height: 1.5; color: var(--ink); outline: none; max-height: 160px; }
+.ask-input::placeholder { color: var(--faint); }
+.ask-bar-row { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; }
+
+/* Quick/Considered effort toggle — a segmented radio (the on-state lifts on linen). */
+.ask-modes { display: inline-flex; gap: 0.2rem; background: var(--parchment); border: 1px solid var(--hair); border-radius: var(--r-pill); padding: 0.18rem; }
+.ask-mode { display: inline-flex; align-items: baseline; gap: 0.3rem; font: inherit; font-family: var(--ui); font-size: 0.78rem; font-weight: 600; color: var(--stone); background: transparent; border: 0; border-radius: var(--r-pill); padding: 0.3rem 0.7rem; cursor: pointer; transition: background var(--t), color var(--t), box-shadow var(--t); }
+.ask-mode small { font-weight: 400; font-size: 0.86em; color: var(--faint); }
+.ask-mode.is-on { color: var(--ink); background: var(--linen); box-shadow: var(--shadow-card); }
+.ask-mode.is-on small { color: var(--stone); }
+.ask-mode:not(.is-on):hover { color: var(--ink-2); }
+
+/* Send — the recall identity colour (viridian), the one emphasized action. */
+.ask-send { margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--ui); font-size: 0.86rem; font-weight: 600; color: var(--linen); background: linear-gradient(180deg, var(--viridian-2), var(--viridian)); border: 1px solid var(--viridian); border-radius: var(--r-pill); padding: 0.45rem 1rem; cursor: pointer; transition: filter var(--t), opacity var(--t); }
+.ask-send:hover { filter: brightness(1.06); }
+.ask-send:disabled { opacity: 0.55; cursor: default; }
+.ask-send .ask-send-i { font-weight: 700; }
+.ask-hint { font-family: var(--mono); font-size: 0.66rem; color: var(--faint); margin-top: 0.45rem; }
+
+/* Reduced-motion: the seal pulse + skeleton shimmer collapse to calm static (state reads via colour). */
+@media (prefers-reduced-motion: reduce) {
+  .ask-ans.is-thinking .seal, .ask-skel .ln { animation: none !important; }
+}
 
 /* --- Explore view (SPEC-0039 EXPLORE) — the read-only entity-neighborhood graph, in "The Line"
    instrument language: flat ruled structure (no card chrome), composing the design-system primitives
