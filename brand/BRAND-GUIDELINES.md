@@ -42,7 +42,10 @@ Rules:
 - Gold is rationed — lines, nodes, hairlines, one highlight per view. Never gold fills or gold body text.
 - Ember is reserved — only "needs your decision." Its presence alone signals a waiting choice.
 - Sprout means motion — in-progress only; idle/pending stay neutral.
-- The app skin is fixed-light. Surfaces don't invert; the cream study is the product.
+- Light is the **default brand face** (icon, marketing, first-run) — the cream study is the identity.
+  A supported **dark "night study" variant** exists (see `DARK-MODE-ADDENDUM.md`) — *not* an inversion,
+  but the icon's blue-green world expanded, with cream becoming the ink. Dark is the night variant,
+  never the identity.
 
 ## 4. Typography
 - Voice — Spectral (warm old-style serif): names, idea titles, section heads, grounded quotes.
