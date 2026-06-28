@@ -6,7 +6,8 @@
 // is node-tested in reviewBadge.test.ts; this covers the shell's DOM wiring + graceful degradation.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountShell } from './shell';
-import { VIEW_REVIEWS } from './views';
+import { VIEW_REVIEWS, VIEW_CAPTURE, VIEW_CONNECTORS } from './views';
+import { setTopbarContext } from './nav';
 import type { KbApi, ReviewSummary } from '../kb/types';
 
 const review = (id: string): ReviewSummary => ({ id, question: 'q', detail: 'd', stage: 'claims', refs: [], createdAt: 't' });
@@ -141,5 +142,73 @@ describe('shell UX v2 nav line-icons', () => {
     expect(icon!.textContent?.trim()).toBe(''); // no emoji character left in the icon slot
     // currentColor stroke → the glyph gilds gold with the nav item on hover/active (no hardcoded fill)
     expect(icon!.querySelector('svg')?.getAttribute('stroke')).toBe('currentColor');
+  });
+});
+
+describe('v3 shell chrome (SPEC-0060 — top bar, brand-diamond motion, "you" card, IA)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    setApi(vi.fn(async () => []));
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('renders the top bar: global ⌘K search, the contextual filter slot, and Quick-add', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    expect(root.querySelector('.bar')).not.toBeNull();
+    const search = root.querySelector('#globalSearch');
+    expect(search).not.toBeNull();
+    expect(search!.querySelector('.kbd')?.textContent).toBe('⌘K');
+    expect(root.querySelector('#topctx')).not.toBeNull(); // the per-view contextual slot exists (VUX-3)
+    expect(root.querySelector('.quickadd')).not.toBeNull();
+  });
+
+  it('Quick-add navigates to Capture', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    root.querySelector<HTMLButtonElement>('.quickadd')!.click();
+    await tick();
+    expect(root.querySelector(`.nav-item[data-view="${VIEW_CAPTURE}"]`)?.getAttribute('aria-current')).toBe('page');
+  });
+
+  it('renders the brand-diamond motion mark (looms by default) and the "you" identity card', async () => {
+    mountShell(root, '/vault-folder/Atlas', 'KB');
+    await tick();
+    const dmk = root.querySelector('.brand-mark.dmk');
+    expect(dmk).not.toBeNull();
+    expect(dmk!.classList.contains('is-working')).toBe(true); // the "always working" loom signature
+    const user = root.querySelector('.user');
+    expect(user).not.toBeNull();
+    expect(user!.querySelector('.user-id b')?.textContent).toBe('You');
+    expect(user!.querySelector('.user-id span')?.textContent).toBe('Atlas'); // vault basename
+  });
+
+  it('the contextual filter slot is filled by setTopbarContext and cleared on view change (VUX-3)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    setTopbarContext('<span class="topchip">All activity</span>');
+    expect(root.querySelector('#topctx')?.textContent).toContain('All activity');
+    // a view change clears the slot (the newly-activated view re-fills its own)
+    document.dispatchEvent(new CustomEvent('kb:navigate', { detail: { view: VIEW_REVIEWS } }));
+    await tick();
+    expect(root.querySelector('#topctx')?.textContent).toBe('');
+  });
+
+  it('IA: Connectors replaces Sources in the rail; Status is fully dissolved (no rail entry, not navigable)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    // Sources → Connectors (the rail entry renamed).
+    expect(root.querySelector(`.nav-item[data-view="${VIEW_CONNECTORS}"]`)).not.toBeNull();
+    expect(root.querySelector('.nav-item[data-view="sources"]')).toBeNull();
+    // Status dissolved: gone from the rail AND navigating to it is a no-op (stays on the launch home).
+    expect(root.querySelector('.nav-item[data-view="status"]')).toBeNull();
+    document.dispatchEvent(new CustomEvent('kb:navigate', { detail: { view: 'status' } }));
+    await tick();
+    expect(root.querySelector('.view[data-view="status"]')).toBeNull(); // never mounts — dissolved
   });
 });

@@ -7,7 +7,7 @@
 // All static, trusted strings — safe to inject without escaping (no user data).
 const ICON_PATHS: Record<string, string> = {
   // home
-  today: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="4" rx="1.5"/><rect x="13" y="10" width="7" height="10" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/>', // layout-dashboard (the command-center home)
+  today: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/>', // sun (v3 — the command-center home, SPEC-0060)
   // do
   capture: '<path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><path d="M8 11l4 4 4-4"/><path d="M12 4v11"/>', // tray + down-arrow (inbox/capture)
   ask: '<path d="M21 11.5a8.38 8.38 0 0 1-9 8.3 8.5 8.5 0 0 1-3.4-.7L3 21l1.9-5.1A8.38 8.38 0 0 1 4 11.5a8.5 8.5 0 0 1 17 0z"/>', // speech bubble
@@ -21,6 +21,8 @@ const ICON_PATHS: Record<string, string> = {
   sources: '<rect x="4" y="3" width="11" height="14" rx="2"/><path d="M8 20h9a2 2 0 0 0 2-2V8"/>', // files
   settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M5.8 5.8l1.4 1.4M16.8 16.8l1.4 1.4M18.2 5.8l-1.4 1.4M7.2 16.8l-1.4 1.4"/>', // gear
   status: '<path d="M5 19V11M12 19V5M19 19V14"/><path d="M4 20h16"/>', // chart-bar
+  connectors: '<path d="M9 2v6M15 2v6"/><path d="M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16v6"/>', // plug (v3 Connectors — connect-a-source, SPEC-0060)
+  person: '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>', // the "you" identity (v3 rail user card, SPEC-0060)
 
   // Activity feed event-kind glyphs (DL-2's table; consumed by activityView via the tile, hue per kind).
   // `capture` (above) is reused for the capture event. Same line idiom → they gild with the tile color.
