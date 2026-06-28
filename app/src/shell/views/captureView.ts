@@ -37,7 +37,9 @@ function renderStagedFiles(container: HTMLElement): void {
   // RICHIN-6: per-item manifest — name · size, with a soft "large" flag (RICHIN-11), removable.
   el.innerHTML = stagedFiles
     .map((f, i) => {
-      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="capture-flag">⚠️ large</span>' : '';
+      // RICHIN-11 caution: monochrome brass ◆ mark (aria-hidden) + ink label — unifies the caution
+      // glyph language with `.model-stale` (a11y audit fast-follow; drops the multicolor ⚠️ emoji).
+      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="capture-flag"><span class="capture-flag-mark" aria-hidden="true">◆</span>large</span>' : '';
       return `<li>${esc(f.name)} <span class="capture-size">· ${humanSize(f.data.byteLength)}</span>${big} <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-rm="${i}" aria-label="Remove ${esc(f.name)}">remove</button></li>`;
     })
     .join('');
