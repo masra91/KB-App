@@ -9,10 +9,21 @@
 //   - Health   → an ok + warn + bad spread: healthy linked entities ("ok") plus a deliberate orphan,
 //                a dangling link, and a stub (the three structural-lint finding kinds).
 //   - Activity → a real audit feed (seeded JSONL events + a resolvable git HEAD).
+//   - Agents  → a registered Reflect JOB on a daily schedule + a web RESEARCHER, so the hub's Schedules
+//                and Researchers sections render POPULATED rows (not just the always-present catalog at
+//                its default 'off', and not the empty-researchers dock).
+//   - Reviews → one OPEN disambiguation review, so the "needs you" queue renders a real ember card
+//                (not the calm "Nothing needs you" empty state).
+//
+// All of the above are committed to `main`; the app branches `staging` off main's HEAD on open
+// (ensureStagingBranch), so the jobs/researchers registries + the review ride into the staging worktree
+// where listJobsForActive / listResearchersForActive / findOpenReviews read them. (SPEC-0060 QA-infra:
+// populated live states so the walkthrough gate can judge ready states, not only warming/empty.)
 //
 // It is built with the PRODUCTION renderers (renderEntityNode/renderClaimMd + the generated
 // link/claims blocks, same as app/test/recallVault.ts) so the views parse exactly what Connect/Claims
-// actually write — no hand-rolled frontmatter that can silently drift from the scanners.
+// actually write — no hand-rolled frontmatter that can silently drift from the scanners. The
+// jobs/researcher/review records are type-annotated against the production interfaces (tsc catches drift).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,7 +31,10 @@ import path from 'node:path';
 import { renderEntityNode, applyLinksBlock, type EntityNode } from '../src/kb/connectDoc';
 import { renderClaimMd, applyClaimsBlock, type ClaimBacklink } from '../src/kb/claimDoc';
 import type { ClaimDecision } from '../src/kb/claims';
-import { ulid } from '../src/kb/ulid';
+import { ulid, dateShard } from '../src/kb/ulid';
+import type { JobConfig } from '../src/kb/jobs';
+import type { ResearcherConfig } from '../src/kb/researchers';
+import type { Review } from '../src/kb/reviews';
 
 export interface SeededVault {
   /** Absolute path to the seeded vault root (a git repo). */
@@ -75,7 +89,29 @@ export function seedWalkthroughVault(): SeededVault {
     '.kb/config.json',
     JSON.stringify({ schemaVersion: 1, id: 'e2e-walkthrough-kb', name: 'Walkthrough KB', createdAt: TS }, null, 2),
   );
-  writeFile(vault, '.kb/jobs/registry.json', JSON.stringify([], null, 2));
+  // --- Agents: a scheduled Reflect job + a web researcher (so the hub renders POPULATED sections) ----
+  // Reflect on a DAILY cadence → the hub's "Schedules" group shows a real scheduled job (the catalog
+  // rows alone default to 'off'). `type: 'reflect'` matches JOB_CATALOG (asserted in the test).
+  const seedJobs: JobConfig[] = [
+    { id: 'reflect', type: 'reflect', schedule: 'daily', enabled: true, posture: 'guarded', facing: 'internal' },
+  ];
+  writeFile(vault, '.kb/jobs/registry.json', JSON.stringify(seedJobs, null, 2));
+  // One web researcher → the hub's "Researchers" section renders a real row (not the empty add-dock).
+  const seedResearchers: ResearcherConfig[] = [
+    {
+      id: 'web-scout',
+      template: 'web',
+      label: 'Web Scout',
+      prompt: 'Track public developments relevant to Project Atlas and the Finance Team, and surface anything that affects the Q3 Budget.',
+      egressTier: 'public-web',
+      scope: 'global',
+      budget: { maxToolCalls: 8, maxDepth: 2 },
+      schedule: 'daily',
+      posture: 'guarded',
+      enabled: true,
+    },
+  ];
+  writeFile(vault, '.kb/researchers/registry.json', JSON.stringify(seedResearchers, null, 2));
 
   // --- Source (immutable ground truth) ----------------------------------------------------------
   writeFile(
@@ -196,6 +232,36 @@ export function seedWalkthroughVault(): SeededVault {
     '.kb/audit.jsonl',
     audit('panel', 'recall', {}, { question: 'What is Project Atlas?' }, '2026-06-01T12:05:00.000Z') + '\n',
   );
+
+  // --- Reviews: one OPEN disambiguation review (so the "needs you" queue renders a real ember card) --
+  // A CONNECT-15-shape review with two candidates → the richest Reviews card (per-candidate rows +
+  // Confirm/Reject). Committed to `main`, it rides into staging (where findOpenReviews reads). The id is
+  // a ULID so its `reviews/<dateShard>/<id>/` path matches the production layout exactly.
+  const reviewId = ulid();
+  const review: Review = {
+    id: reviewId,
+    status: 'open',
+    question: 'Is the “Ada” named in the kickoff brief the same person as the “Ada Lovelace” node leading Project Atlas?',
+    detail: 'Two sources mention “Ada” in the Project Atlas context — confirm they are the same person so Connect can link them into one node.',
+    raisedBy: {
+      stage: 'connect',
+      runId: 'walkthrough-seed',
+      item: { kind: 'entity', ref: adaRel },
+      auditRel: `${SOURCE_DIR}/audit.jsonl`,
+      markerKey: { entityId: 'ada-lovelace' },
+    },
+    subject: {
+      refs: [adaRel],
+      sources: [SOURCE_DIR],
+      candidates: [
+        { name: 'Ada', gloss: 'the lead named only as “Ada” in the kickoff brief', title: 'Project Atlas kickoff brief', sourceRel: `${SOURCE_DIR}/source.md` },
+        { name: 'Ada Lovelace', gloss: 'the existing person node already leading the initiative', title: 'Ada Lovelace', sourceRel: adaRel },
+      ],
+    },
+    createdAt: TS,
+  };
+  const reviewDir = path.join('reviews', dateShard(reviewId), reviewId);
+  writeFile(vault, path.join(reviewDir, 'review.json'), JSON.stringify(review, null, 2) + '\n');
 
   // --- Make it a real git repo (Activity reads git HEAD; SETUP-3 = git from the start) ----------
   const git = (...args: string[]): void => {
