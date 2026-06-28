@@ -71,6 +71,14 @@ describe('bodyFor', () => {
   it('text with no content yields an empty body', () => {
     expect(bodyFor(textMeta, null)).toBe('');
   });
+  // SPEC-0052 MEDIA: a file source with extracted text keeps the raw embed (MEDIA-4) AND weaves the
+  // extracted text in below it, so decompose/claims see real content instead of the dead `![[raw]]`.
+  it('file WITH extracted media text → embed + the extracted text below it (MEDIA-1/4)', () => {
+    expect(bodyFor(fileMeta, 'Invoice #42\nTotal: $99')).toBe('![[raw.png]]\n\nInvoice #42\nTotal: $99');
+  });
+  it('file with blank/whitespace extraction → embed-only (no empty clutter, unchanged behavior)', () => {
+    expect(bodyFor(fileMeta, '   ')).toBe('![[raw.png]]');
+  });
 });
 
 describe('renderSourceMd (SPEC-0013 §3)', () => {

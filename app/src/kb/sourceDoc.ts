@@ -79,9 +79,19 @@ export function archivedByLabel(agent?: AgentTrace): string {
   return 'deterministic';
 }
 
-/** The Markdown body: text sources carry their content; files embed the raw payload. */
+/**
+ * The Markdown body: text sources carry their content; file sources embed the raw payload — and, when
+ * media extraction produced a text body (SPEC-0052 MEDIA), weave that extracted text in BELOW the embed.
+ * The raw embed is ALWAYS kept for a file source (MEDIA-4: the original binary stays viewable + replay-
+ * safe); the extracted text is purely additive so decompose/claims see real content (a PDF/image is no
+ * longer a dead `![[raw.pdf]]`). No extracted text (plain file, or extraction failed/absent) → embed-only,
+ * the unchanged behavior.
+ */
 export function bodyFor(meta: CapturedMeta, textContent: string | null): string {
-  return meta.kind === 'text' ? (textContent ?? '') : `![[${meta.raw}]]`;
+  if (meta.kind === 'text') return textContent ?? '';
+  const embed = `![[${meta.raw}]]`;
+  const extracted = textContent?.trim();
+  return extracted ? `${embed}\n\n${extracted}` : embed;
 }
 
 /**
