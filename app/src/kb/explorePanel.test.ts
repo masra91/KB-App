@@ -4,6 +4,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildNeighborhood, listExploreEntities, DEFAULT_TOP_K, EDGE_ASSERTED_AT } from './explorePanel';
 import type { RecallTools, EntityHit } from './recall';
+import { blockKey } from './connect';
+import { contradictionClaimKey, type ContradictionDirective, type ContradictionState } from './directives';
 
 function hit(over: Partial<EntityHit> & Pick<EntityHit, 'rel' | 'name'>): EntityHit {
   return { id: over.rel, kind: 'concept', aliases: [], confidence: 0.8, tags: [`type/${over.kind ?? 'concept'}`], derivedFrom: [], ...over };
@@ -79,7 +81,53 @@ describe('explorePanel — buildNeighborhood', () => {
     const byName = Object.fromEntries(nb.neighbors.map((x) => [x.name, x.direction]));
     expect(byName).toEqual({ 'Finance Team': 'out', 'Steve Park': 'in' });
     // the center's claims ride along (the read-only "leads back to reading" affordance)
-    expect(nb.claims).toEqual([{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [] }]);
+    expect(nb.claims).toEqual([{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [], contested: false }]);
+  });
+
+  // SPEC-0036 CONTRA-6/7 — the contradiction flag surfaces in the read view, keyed on the center's STABLE
+  // block identity. A small helper builds the durable-store map the IPC handler would pre-read.
+  const contraMap = (state: ContradictionState): Map<string, ContradictionDirective> => {
+    const identity = blockKey('project', 'Project Atlas');
+    const key = contradictionClaimKey(identity, 'Funded for Q3', 'Cut from the Q3 budget.');
+    return new Map([
+      [key, { contradictionKey: key, identityKey: identity, statements: ['Cut from the Q3 budget.', 'Funded for Q3'], state, reviewId: 'r', decidedAt: '1' }],
+    ]);
+  };
+  const atlasWithClaims = (): RecallTools =>
+    fakeTools({
+      entities: [ATLAS, FINANCE],
+      claims: {
+        'entities/project/atlas.md': [
+          { statement: 'Funded for Q3', status: 'fact', confidence: 0.8 },
+          { statement: 'Led by Ada', status: 'fact', confidence: 0.7 },
+        ],
+      },
+    });
+
+  it('CONTRA: an OPEN contradiction flags the center + marks the participating claim disputed (not its siblings)', async () => {
+    const nb = await buildNeighborhood(atlasWithClaims(), 'Project Atlas', undefined, contraMap('needs-you'));
+    // The center carries the open-contradiction flag with both conflicting statements (never one asserted).
+    expect(nb.contradictions).toHaveLength(1);
+    expect(nb.contradictions[0].statements).toEqual(['Cut from the Q3 budget.', 'Funded for Q3']);
+    // The claim in the contradiction is contested; the unrelated claim is not.
+    expect(nb.claims.find((c) => c.statement === 'Funded for Q3')?.contested).toBe(true);
+    expect(nb.claims.find((c) => c.statement === 'Led by Ada')?.contested).toBe(false);
+  });
+
+  it('CONTRA: a RESOLVED contradiction clears the flag (no contest); ACCEPTED stays contested (CONTRA-6)', async () => {
+    const resolved = await buildNeighborhood(atlasWithClaims(), 'Project Atlas', undefined, contraMap('resolved'));
+    expect(resolved.contradictions).toHaveLength(0); // flag cleared
+    expect(resolved.claims.find((c) => c.statement === 'Funded for Q3')?.contested).toBe(false);
+
+    const accepted = await buildNeighborhood(atlasWithClaims(), 'Project Atlas', undefined, contraMap('accepted'));
+    expect(accepted.contradictions).toHaveLength(0); // accepted leaves the needs-you flag, but…
+    expect(accepted.claims.find((c) => c.statement === 'Funded for Q3')?.contested).toBe(true); // …still contested at recall
+  });
+
+  it('CONTRA: no contradictions map (default) → nothing contested, fully backward-compatible', async () => {
+    const nb = await buildNeighborhood(atlasWithClaims(), 'Project Atlas');
+    expect(nb.contradictions).toEqual([]);
+    expect(nb.claims.every((c) => c.contested === false)).toBe(true);
   });
 
   it('folds a mutual link to direction "both" and never lists the focus as its own neighbor', async () => {

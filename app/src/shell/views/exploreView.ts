@@ -14,7 +14,7 @@
 // reduced-motion discipline as the rest of The Line.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
-import type { ExploreClaim, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
+import type { ExploreClaim, ExploreContradiction, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
 
 const HEADER = `<h1 class="explore-title viz-signage">Explore</h1><p class="explore-sub viz-body">Walk your knowledge graph — start at an entity and follow its relationships. Read-only.</p>`;
 
@@ -118,7 +118,8 @@ function identity(kind: string, confidence: number): string {
   return `<span class="explore-kind viz-chip">${esc(kind)}</span><span class="explore-conf viz-numeric" title="confidence">${confidence.toFixed(2)}</span>`;
 }
 
-/** The focused entity (EXPLORE-4): identity + tags + an open-in-Obsidian affordance + its claims inline. */
+/** The focused entity (EXPLORE-4): identity + tags + an open-in-Obsidian affordance + its claims inline.
+ *  A contested entity also wears a calm "contested" flag (SPEC-0036 CONTRA-7) above its claims. */
 function centerCard(nb: ExploreNeighborhood): string {
   const c = nb.center!;
   const tags = c.tags.length ? `<div class="explore-tags">${c.tags.map((t) => `<span class="explore-tag viz-chip">${esc(t)}</span>`).join('')}</div>` : '';
@@ -130,11 +131,40 @@ function centerCard(nb: ExploreNeighborhood): string {
       <div class="explore-center-head">
         <span class="explore-center-name viz-signage">${esc(c.name)}</span>
         ${identity(c.kind, c.confidence)}
+        ${contestedFlag(nb.contradictions)}
         <button type="button" class="explore-open viz-btn viz-btn--ghost viz-focusable" title="Open this entity's note in Obsidian">Open in Obsidian ↗</button>
       </div>
       ${tags}
+      ${contestedBanner(nb.contradictions)}
       ${claims}
       <p class="explore-cite-note viz-body" role="status" aria-live="polite"></p>
+    </div>`;
+}
+
+/** SPEC-0036 CONTRA-7 — a compact "contested" chip on the center head when the entity has open
+ *  contradictions (the durable flag). Count in the chip; the conflicting pairs ride in the tooltip. */
+function contestedFlag(contradictions: readonly ExploreContradiction[]): string {
+  if (contradictions.length === 0) return '';
+  const n = contradictions.length;
+  const tip = `Unresolved disagreement${n > 1 ? 's' : ''} on this entity — pending your review`;
+  return `<span class="explore-contested-flag viz-chip" title="${esc(tip)}" aria-label="${esc(tip)}"><span class="explore-contested-mark" aria-hidden="true">⚠</span> contested${n > 1 ? ` <span class="viz-numeric">${n}</span>` : ''}</span>`;
+}
+
+/** SPEC-0036 CONTRA-6/7 — the conflicting statement pairs, shown plainly above the claims so the reader
+ *  sees BOTH sides (never one asserted). Read-only; resolution happens in the needs-you queue. */
+function contestedBanner(contradictions: readonly ExploreContradiction[]): string {
+  if (contradictions.length === 0) return '';
+  const rows = contradictions
+    .map(
+      (x) =>
+        `<li class="explore-contested-item viz-body"><span class="explore-contested-side">${esc(x.statements[0])}</span><span class="explore-contested-vs" aria-hidden="true">⟷</span><span class="explore-contested-side">${esc(x.statements[1])}</span></li>`,
+    )
+    .join('');
+  return `
+    <div class="explore-contested" role="note" aria-label="Contested facts">
+      <span class="explore-contested-head viz-signage"><span class="explore-contested-mark" aria-hidden="true">⚠</span> Sources disagree</span>
+      <ul class="explore-contested-list">${rows}</ul>
+      <p class="explore-contested-note viz-body">Both are kept and attributed until you resolve this in your review queue.</p>
     </div>`;
 }
 
@@ -159,7 +189,12 @@ function renderClaim(cl: ExploreClaim): string {
         })
         .join('')}</span>`
     : '';
-  return `<li class="explore-claim viz-body"><span class="explore-claim-status viz-chip" data-status="${esc(cl.status)}">${esc(cl.status)}</span> ${linkifyStatement(cl.statement)} <span class="explore-conf viz-numeric">${cl.confidence.toFixed(2)}</span>${citesHtml}</li>`;
+  // SPEC-0036 CONTRA-6: a claim in an open/accepted contradiction wears a "disputed" badge — a non-color
+  // signal (the ⚠ glyph + label) so recall never silently asserts a contested fact.
+  const disputed = cl.contested
+    ? ` <span class="explore-claim-disputed viz-chip" title="This claim is contested — sources disagree" aria-label="disputed — sources disagree"><span class="explore-contested-mark" aria-hidden="true">⚠</span> disputed</span>`
+    : '';
+  return `<li class="explore-claim viz-body${cl.contested ? ' explore-claim--disputed' : ''}"><span class="explore-claim-status viz-chip" data-status="${esc(cl.status)}">${esc(cl.status)}</span> ${linkifyStatement(cl.statement)} <span class="explore-conf viz-numeric">${cl.confidence.toFixed(2)}</span>${disputed}${citesHtml}</li>`;
 }
 
 /**
@@ -443,7 +478,7 @@ async function toggleExpand(container: HTMLElement, state: ExploreState, rel: st
     try {
       sub = await withTimeout(window.kbApi.exploreNeighborhood(rel));
     } catch {
-      sub = { found: false, claims: [], neighbors: [], shown: 0, total: 0 }; // degrade to "no further links"
+      sub = { found: false, claims: [], neighbors: [], shown: 0, total: 0, contradictions: [] }; // degrade to "no further links"
     }
     state.subCache.set(rel, sub);
   }

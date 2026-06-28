@@ -15,6 +15,8 @@
 // confidence as the v1 proxy; persisted per-link confidence + incoming-edge predicates are v2.
 import type { RecallTools, EntityHit, ClaimHit } from './recall';
 import { deriveSourceTitle } from './sourceDoc';
+import { blockKey } from './connect';
+import { openContradictionsForIdentity, isStatementContested, type ContradictionDirective } from './directives';
 
 /** A lightweight entity reference for the search-to-focus picker (EXPLORE-6). */
 export interface ExploreEntityRef {
@@ -48,6 +50,16 @@ export interface ExploreClaim {
   status: string; // fact | interpretation | hypothesis | …
   confidence: number;
   citations: ExploreCitation[]; // the claim's cited sources, clickable (WS-A) — possibly empty
+  contested: boolean; // SPEC-0036 CONTRA-6: this statement is in an OPEN or ACCEPTED contradiction — rendered "disputed"
+}
+
+/**
+ * An OPEN contradiction flagging the center entity (SPEC-0036 CONTRA-7) — the durable, rebirth-proof flag
+ * that persists until the Principal resolves it. `statements` are the two conflicting claims; the view
+ * renders a calm "contested" badge (never asserts one side). Read from the evergreen contradiction store.
+ */
+export interface ExploreContradiction {
+  statements: [string, string];
 }
 
 /** The focused entity + its bounded 1-hop neighborhood (EXPLORE-2/3/8). */
@@ -58,6 +70,7 @@ export interface ExploreNeighborhood {
   neighbors: ExploreNeighbor[]; // bounded to topK, ranked by confidence
   shown: number; // neighbors returned (== neighbors.length)
   total: number; // total distinct 1-hop neighbors (for the "+N more" overflow, EXPLORE-8)
+  contradictions: ExploreContradiction[]; // SPEC-0036 CONTRA-7: open contradictions flagging the center (the entity flag)
 }
 
 /** Default neighborhood bound (EXPLORE-8): focus + top-K neighbors, "+N more" beyond. */
@@ -122,7 +135,11 @@ function sourceRefOf(dir: string): string {
  * read once per distinct source (deduped cache) and bounded by the small claim cap. ENG-16: a source
  * whose `source.md` can't be read still surfaces by a neutral generic title — never crashes the load.
  */
-async function withCitations(tools: RecallTools, claimsRaw: readonly ClaimHit[]): Promise<ExploreClaim[]> {
+async function withCitations(
+  tools: RecallTools,
+  claimsRaw: readonly ClaimHit[],
+  isContested: (statement: string) => boolean,
+): Promise<ExploreClaim[]> {
   // Distinct source dirs across all claims → resolve each title once (bounded fan-out).
   const dirs = new Set<string>();
   for (const c of claimsRaw) for (const d of c.derivedFrom ?? []) if (typeof d === 'string' && d.trim()) dirs.add(d);
@@ -146,7 +163,7 @@ async function withCitations(tools: RecallTools, claimsRaw: readonly ClaimHit[])
       seen.add(dir);
       citations.push({ ref: sourceRefOf(dir), title: titleByDir.get(dir) ?? deriveSourceTitle('') });
     }
-    return { statement: c.statement, status: c.status, confidence: c.confidence, citations };
+    return { statement: c.statement, status: c.status, confidence: c.confidence, citations, contested: isContested(c.statement) };
   });
 }
 
@@ -156,9 +173,16 @@ async function withCitations(tools: RecallTools, claimsRaw: readonly ClaimHit[])
  * always lands on *something*. Bounded to `topK` neighbors with a `total` for the overflow affordance.
  * Returns `found: false` only when the graph has no entities at all.
  */
-export async function buildNeighborhood(tools: RecallTools, focus?: string, topK = DEFAULT_TOP_K): Promise<ExploreNeighborhood> {
+export async function buildNeighborhood(
+  tools: RecallTools,
+  focus?: string,
+  topK = DEFAULT_TOP_K,
+  // SPEC-0036 CONTRA-6/7: the durable contradiction store, pre-read by the IPC handler (so this stays a
+  // pure RecallTools function — testable with an injected map). Defaults to none → no contested surfacing.
+  contradictions: Map<string, ContradictionDirective> = new Map(),
+): Promise<ExploreNeighborhood> {
   const all = await tools.entityLookup({ query: '', limit: ENTITY_SCAN_LIMIT });
-  if (all.length === 0) return { found: false, claims: [], neighbors: [], shown: 0, total: 0 };
+  if (all.length === 0) return { found: false, claims: [], neighbors: [], shown: 0, total: 0, contradictions: [] };
 
   // Resolve the center: exact rel/id/name match → name substring → highest-confidence fallback.
   const needle = focus?.trim().toLowerCase() ?? '';
@@ -225,8 +249,15 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
   }
   neighbors.sort(byConfidence);
 
+  // SPEC-0036 CONTRA-6/7: the center's contradiction flag, keyed on its STABLE block identity (the same
+  // content-derived key the contradiction was recorded under — survives rebirth). Open contradictions flag
+  // the entity; each claim whose statement participates in an open/accepted contradiction renders disputed.
+  const centerIdentity = blockKey(center.kind, center.name);
+  const openContra = openContradictionsForIdentity(contradictions, centerIdentity);
+  const isContested = (statement: string): boolean => isStatementContested(contradictions, centerIdentity, statement);
+
   const claimsRaw = await tools.claimsForEntity({ entity: center.rel, limit: CENTER_CLAIM_CAP });
-  const claims = await withCitations(tools, claimsRaw);
+  const claims = await withCitations(tools, claimsRaw, isContested);
 
   const shown = neighbors.slice(0, topK);
   return {
@@ -236,5 +267,6 @@ export async function buildNeighborhood(tools: RecallTools, focus?: string, topK
     neighbors: shown,
     shown: shown.length,
     total: neighbors.length,
+    contradictions: openContra.map((c) => ({ statements: c.statements })),
   };
 }

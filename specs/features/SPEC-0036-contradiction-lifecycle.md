@@ -103,12 +103,15 @@ entity, and the flag persists until resolved.* Built on the SPEC-0050 directive 
   terminal state **clears the open flag**; `accepted` stays *contested* for recall, `resolved` does not.
 - **Durability — ✅.** Replay-survival test (flag intact on staging AND republished on `main` across a Full
   Replay) + an e2e through the real engine (detect → Review + flag → resolve → flag clears).
-- **Recall + entity-view surfacing (CONTRA-6/7) — ▢ fast-follow.** The read seam is shipped
-  (`openContradictionsForIdentity` = the entity flag, `contestedContradictionsForIdentity` /
-  `isStatementContested` = the recall-contested set). Wiring the entity-view "contested" badge lands in
-  `explorePanel`/`exploreView` — **coordinated with the concurrent Explore-v1 owner** to avoid a collision;
-  the recall "sources disagree, cite both" prose ties to the SPEC-0026 ASK path + the §6 open question on
-  rendering *accepted* vs *open*. Open contradictions already surface in the needs-you queue today.
+- **Entity-view surfacing (CONTRA-6/7) — ✅ (Explore read view).** The Explore neighborhood surfaces the
+  center's open-contradiction **flag** (a "contested" chip + a "sources disagree" banner showing **both**
+  statements, never asserting one) and a per-claim **"disputed"** badge, read from the durable store via the
+  shipped seam (`openContradictionsForIdentity` / `isStatementContested`), keyed on the center's stable
+  block identity. `resolved` clears it; `accepted` stays contested at recall. Built on the merged Explore v1
+  (`explorePanel`/`exploreView`). Open contradictions also surface in the needs-you queue (the raised Review).
+- **Recall (ASK) prose surfacing — ▢ follow-up.** The read seam is reused; the ASK "sources disagree, cite
+  both" answer-prose path (SPEC-0026) + the §6 open question on rendering *accepted* vs *open* in a generated
+  answer remain a documented follow-up.
 
 ## 5. Out of scope (for now)
 
@@ -130,6 +133,9 @@ entity, and the flag persists until resolved.* Built on the SPEC-0050 directive 
 
 ## 7. Changelog
 
+- 2026-06-28 — **CONTRA-6/7 surfacing shipped (Explore read view).** Center contested-flag + "sources
+  disagree" both-sides banner + per-claim "disputed" badge, read from the durable store via the shipped seam;
+  resolved clears, accepted stays contested. ASK answer-prose remains a follow-up.
 - 2026-06-27 — **v1 shipped (CONTRA core).** Durable contradiction-lifecycle object + entity flag on the
   SPEC-0050 directive machinery (`directives/contradictions.jsonl`, block-identity-keyed → rebirth-proof):
   REFLECT `contradiction` finding → Review + needs-you flag (atomic), `answerReview` transitions

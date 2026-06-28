@@ -55,6 +55,7 @@ import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
 import { buildHealthReport, type HealthReport } from '../kb/healthPanel';
+import { readContradictionDirectives } from '../kb/directives';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { locateSourceRef } from '../kb/sourceOpen';
@@ -519,9 +520,14 @@ export function registerIpc(): void {
 
   ipcMain.handle('kb:exploreNeighborhood', async (_e, focus?: unknown): Promise<ExploreNeighborhood> => {
     const cfg = await readAppConfig();
-    if (!cfg.activeVaultPath) return { found: false, claims: [], neighbors: [], shown: 0, total: 0 };
+    if (!cfg.activeVaultPath) return { found: false, claims: [], neighbors: [], shown: 0, total: 0, contradictions: [] };
+    const root = path.resolve(cfg.activeVaultPath);
     const f = typeof focus === 'string' && focus.length > 0 ? focus : undefined;
-    return buildNeighborhood(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)), f);
+    // SPEC-0036 CONTRA-6/7: pre-read the durable contradiction store (evergreen, read at the canonical
+    // root like the rest of Explore) so the center's open-contradiction flag + per-claim "disputed" badge
+    // surface in the read view. The store is small + read-tolerant (a missing file → no flags).
+    const contradictions = await readContradictionDirectives(root);
+    return buildNeighborhood(makeReadOnlyTools(root), f, undefined, contradictions);
   });
 
   // SPEC-0035 HEALTH: deterministic, read-only structural-lint scan (orphans / dangling links / thin

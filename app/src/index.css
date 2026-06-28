@@ -487,6 +487,24 @@ button:disabled {
 .explore-cite-note { margin: 0.45rem 0 0; min-height: 1em; font-size: 0.78rem; color: var(--viz-ink); border-left: 3px solid var(--viz-brass); padding-left: 0.5rem; }
 .explore-cite-note:empty { margin: 0; min-height: 0; border-left: 0; padding-left: 0; }
 
+/* Contested entity (SPEC-0036 CONTRA-6/7) — a contradiction is a CAUTION, not an error, so it speaks in
+   the same brass "uncertain/waiting" token as a speculative edge (NOT oxide/red). The ⚠ glyph + the
+   "contested"/"disputed" word are the non-color signals so the state survives mono / high-contrast (a11y). */
+.explore-contested-flag { color: var(--viz-brass); border: 1px solid var(--viz-brass); border-radius: 2px; padding: 0 0.3rem; font-size: 0.6rem; letter-spacing: 0.04em; }
+.explore-contested-mark { font-weight: 600; }
+/* The "sources disagree" note above the claims — a brass-ruled card showing BOTH statements, never one. */
+.explore-contested { margin: 0.7rem 0 0.2rem; padding: 0.5rem 0.7rem; border-left: 2px solid var(--viz-brass); background: color-mix(in srgb, var(--viz-brass) 7%, transparent); }
+.explore-contested-head { display: block; font-size: 0.68rem; color: var(--viz-brass); letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+.explore-contested-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.explore-contested-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem; font-size: 0.82rem; color: var(--viz-ink); }
+.explore-contested-side { flex: 1 1 auto; }
+.explore-contested-vs { color: var(--viz-brass); font-size: 0.8rem; flex: 0 0 auto; }
+.explore-contested-note { margin: 0.45rem 0 0; font-size: 0.74rem; color: var(--viz-ink-muted); }
+/* A disputed claim row — the per-claim badge + a faint brass spine so the contested claim stands out
+   among its siblings without shouting. */
+.explore-claim--disputed { border-left: 2px solid var(--viz-brass); padding-left: 0.5rem; margin-left: -0.5rem; }
+.explore-claim-disputed { color: var(--viz-brass); border: 1px solid var(--viz-brass); border-radius: 2px; padding: 0 0.25rem; font-size: 0.56rem; letter-spacing: 0.03em; margin-left: 0.2rem; }
+
 /* The 1-hop neighborhood */
 .explore-neighbors-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
 .explore-neighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
