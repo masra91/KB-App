@@ -1,15 +1,19 @@
 // @vitest-environment happy-dom
 //
-// SPEC-0035 HEALTH — the Health view, component tier (happy-dom; IPC mocked). Asserts the gauge-group
-// instrument anatomy (DL-2): the top summary strip, three always-present groups with per-group healthy
-// lines, the specific defect text per class, severity-as-graphic (#184: hue on the tick/count, not the
-// name), click-through (openCitation), "+N more", ENG-15/16 partial-data safety, and load resilience.
+// SPEC-0035 HEALTH + SPEC-0058 STATE-3/13 — the Health view, component tier (happy-dom; IPC mocked).
+// Asserts the projection-backed "health glance" (DL-2's render contract): the summary line, three
+// always-present dimension rows (`.hrow`), the severity tile (#184: hue on `.hi`/`.hn`, not the label),
+// the specific defect text per class, click-through (openCitation), "+N more", ENG-15/16 partial-data
+// safety, the status-driven warming/unavailable faces, and load resilience. The mock returns the REAL
+// `HealthProjection` (built via `toHealthProjection`) so the view + transform are exercised together.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountHealth } from './healthView';
 import { TimeoutError } from '../loadGuard';
 import type { KbApi } from '../../kb/types';
 import type { HealthReport } from '../../kb/healthPanel';
+import { toHealthProjection, warmingHealthProjection, unavailableHealthProjection, type HealthProjection } from '../../kb/healthProjection';
 
+const ISO = '2026-06-28T00:00:00.000Z';
 function report(over: Partial<HealthReport> = {}): HealthReport {
   return {
     scanned: 10,
@@ -20,6 +24,7 @@ function report(over: Partial<HealthReport> = {}): HealthReport {
     ...over,
   };
 }
+const proj = (over: Partial<HealthReport> = {}): HealthProjection => toHealthProjection(report(over), ISO);
 
 let healthReport: ReturnType<typeof vi.fn>;
 let openCitation: ReturnType<typeof vi.fn>;
@@ -35,7 +40,7 @@ function setApi(): void {
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
-  healthReport = vi.fn(async () => report());
+  healthReport = vi.fn(async () => proj());
   openCitation = vi.fn(async () => ({ ok: true as const }));
   reportRendererError = vi.fn(async () => {});
   setApi();
@@ -52,8 +57,11 @@ async function mount(): Promise<HTMLElement> {
   return c;
 }
 
-describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
-  it('renders the top summary strip with the total + scanned count', async () => {
+const dimByLabel = (c: HTMLElement, label: string): Element =>
+  Array.from(c.querySelectorAll('.health-dimension')).find((g) => g.querySelector('.hrow .ht b')?.textContent === label)!;
+
+describe('Health view — projection-backed glance (HEALTH-8, SPEC-0058 STATE-13, DL-2 contract)', () => {
+  it('renders the summary line with the total + scanned count (single projection read)', async () => {
     const c = await mount();
     const sum = c.querySelector('.health-summary')?.textContent ?? '';
     expect(sum).toMatch(/3 structural issues/);
@@ -61,11 +69,16 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
     expect(sum).toMatch(/10 entities/);
   });
 
-  it('always renders the three gauge groups (never a blank panel), each with its label + count', async () => {
+  it('the glance container is a material card (STATE-13 / #453 depth), not flat chrome', async () => {
     const c = await mount();
-    const groups = Array.from(c.querySelectorAll('.health-group'));
-    expect(groups).toHaveLength(3);
-    expect(Array.from(c.querySelectorAll('.health-group-label')).map((l) => l.textContent)).toEqual(['Dead links', 'Orphans', 'Thin pages']);
+    expect(c.querySelector('.health-glance')?.classList.contains('viz-card')).toBe(true);
+  });
+
+  it('always renders the three dimension rows (never a blank panel), in order with their labels', async () => {
+    const c = await mount();
+    const dims = Array.from(c.querySelectorAll('.health-dimension'));
+    expect(dims).toHaveLength(3);
+    expect(Array.from(c.querySelectorAll('.hrow .ht b')).map((l) => l.textContent)).toEqual(['Dead links', 'Orphans', 'Thin pages']);
   });
 
   it('renders the specific defect text per issue class', async () => {
@@ -76,23 +89,25 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
     expect(defects).toContain('stub · 42 chars'); // thin (uses the panel's char count)
   });
 
-  it('severity is hue on the graphic, not the name (#184): tick/count carry the state class, name does not', async () => {
+  it('severity is hue on the TILE only, not the label or count (#184): the tile carries the class, label/count stay ink', async () => {
     const c = await mount();
-    const orphanGroup = Array.from(c.querySelectorAll('.health-group')).find((g) => g.querySelector('.health-group-label')?.textContent === 'Orphans')!;
-    expect(orphanGroup.querySelector('.health-count')?.classList.contains('viz-state-blocked')).toBe(true); // issues → brass
-    const name = orphanGroup.querySelector('.health-finding-name')!;
-    expect(name.classList.contains('viz-state-blocked')).toBe(false);
-    expect(name.classList.contains('viz-state-settled')).toBe(false); // name stays plain ink
+    const orphans = dimByLabel(c, 'Orphans');
+    expect(orphans.querySelector('.hi')?.classList.contains('warn')).toBe(true); // orphans hit → warn tile (.hi.warn)
+    const dead = dimByLabel(c, 'Dead links');
+    expect(dead.querySelector('.hi')?.classList.contains('bad')).toBe(true); // dead links → bad tile (.hi.bad)
+    // #184: the label `.ht b` and the count `.hn` never carry the severity class — the hue lives on the tile.
+    expect(orphans.querySelector('.ht b')?.classList.contains('warn')).toBe(false);
+    expect(orphans.querySelector('.hn')?.classList.contains('warn')).toBe(false);
   });
 
-  it('a clean group shows a patina healthy line, not a blank section', async () => {
-    healthReport = vi.fn(async () => report({ dangling: [], counts: { orphans: 1, thin: 1, dangling: 0 } }));
+  it('a clean dimension shows the ok tile + desc, no issue list (never a blank/odd section)', async () => {
+    healthReport = vi.fn(async () => proj({ dangling: [], counts: { orphans: 1, thin: 1, dangling: 0 } }));
     setApi();
     const c = await mount();
-    const deadGroup = Array.from(c.querySelectorAll('.health-group')).find((g) => g.querySelector('.health-group-label')?.textContent === 'Dead links')!;
-    const healthy = deadGroup.querySelector('.health-healthy')!;
-    expect(healthy.textContent).toMatch(/no dead links/i);
-    expect(healthy.classList.contains('viz-state-settled')).toBe(true); // patina = settled/ok
+    const dead = dimByLabel(c, 'Dead links');
+    expect(dead.querySelector('.hi')?.classList.contains('ok')).toBe(true); // clean → ok tile (.hi.ok)
+    expect(dead.querySelector('.hn')?.textContent).toBe('0');
+    expect(dead.querySelector('.health-row-list')).toBeNull(); // no rows when clean
   });
 
   it('clicking a finding opens the node via openCitation (leads back to reading)', async () => {
@@ -101,27 +116,25 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
     expect(openCitation).toHaveBeenCalledWith('entities/x/lonely.md');
   });
 
-  it('shows a "+N more" note when a category exceeds the shown list', async () => {
-    healthReport = vi.fn(async () =>
-      report({ orphans: [{ rel: 'entities/x/a.md', id: 'a', name: 'A', kind: 'concept' }], counts: { orphans: 9, thin: 0, dangling: 0 }, thin: [], dangling: [] }),
-    );
+  it('shows a "+N more" note when a dimension exceeds the shown findings', async () => {
+    healthReport = vi.fn(async () => proj({ orphans: [{ rel: 'entities/x/a.md', id: 'a', name: 'A', kind: 'concept' }], counts: { orphans: 9, thin: 0, dangling: 0 }, thin: [], dangling: [] }));
     setApi();
     const c = await mount();
     expect(c.querySelector('.health-more')?.textContent).toContain('+8 more');
   });
 
-  it('the all-clear state: summary reads clear + every group shows its healthy line (no issue rows)', async () => {
-    healthReport = vi.fn(async () => report({ orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }));
+  it('the all-clear state: summary reads "structurally sound", every dimension shows an ok tile, no rows', async () => {
+    healthReport = vi.fn(async () => proj({ orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }));
     setApi();
     const c = await mount();
-    expect(c.querySelector('.health-summary')?.textContent).toMatch(/all clear/i);
-    expect(c.querySelectorAll('.health-healthy')).toHaveLength(3);
+    expect(c.querySelector('.health-summary')?.textContent).toMatch(/structurally sound/i);
+    expect(c.querySelectorAll('.hi.ok')).toHaveLength(3);
     expect(c.querySelectorAll('.health-row')).toHaveLength(0);
   });
 
   it('partial data: a finding missing a name renders an "(untitled)" fallback without breaking siblings (ENG-15/16)', async () => {
     healthReport = vi.fn(async () =>
-      report({
+      proj({
         orphans: [
           { rel: 'entities/x/partial.md', id: 'p', name: '', kind: '' }, // legacy/partial row
           { rel: 'entities/x/lonely.md', id: 'l', name: 'Lonely', kind: 'concept' },
@@ -135,6 +148,21 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
     const c = await mount();
     expect(c.querySelectorAll('.health-row')).toHaveLength(2); // both render, no crash
     expect(c.querySelector('.health-open[data-rel="entities/x/partial.md"] .health-untitled')?.textContent).toBe('(untitled)');
+  });
+
+  it('STATE-9: a `warming` projection renders the calm warming face, never the error face', async () => {
+    healthReport = vi.fn(async () => warmingHealthProjection());
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-warming')).not.toBeNull();
+    expect(c.querySelector('.load-error, .error')).toBeNull();
+  });
+
+  it('STATE-10: an `unavailable` projection renders the retryable error face', async () => {
+    healthReport = vi.fn(async () => unavailableHealthProjection());
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-error, .error')).not.toBeNull();
   });
 
   it('degrades to a retryable error when the scan IPC throws a real error (no endless spinner)', async () => {
@@ -151,12 +179,12 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
   // "Couldn't load" error face (the packaged Health P0: a cold/large-vault scan flipped straight to error).
   it('shows the calm WARMING face (not the error face) when the scan times out', async () => {
     healthReport = vi.fn(async () => {
-      throw new TimeoutError(30000); // the generous graph bound tripped → still warming
+      throw new TimeoutError(30000);
     });
     setApi();
     const c = await mount();
-    expect(c.querySelector('.load-warming')).not.toBeNull(); // PASSES-AFTER
-    expect(c.querySelector('.load-error, .error')).toBeNull(); // FAILS-BEFORE: timeout went to the error face
+    expect(c.querySelector('.load-warming')).not.toBeNull();
+    expect(c.querySelector('.load-error, .error')).toBeNull();
     expect(c.textContent).not.toContain('Couldn’t load');
   });
 
@@ -170,7 +198,7 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
       });
       setApi();
       await mount();
-      expect(reportRendererError).toHaveBeenCalledTimes(1); // FAILS-BEFORE: swallowed, never logged
+      expect(reportRendererError).toHaveBeenCalledTimes(1);
       expect((reportRendererError.mock.calls[0][0] as { message: string }).message).toMatch(/\[health\] load failed/);
       document.body.innerHTML = '';
     }

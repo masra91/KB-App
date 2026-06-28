@@ -669,11 +669,13 @@ describe('SPEC-0058 slice-0 — Explore + Health evergreen-graph read path (REAL
     expect(nb.neighbors.map((n) => n.name)).toContain('Steve'); // the [[steve]] wikilink resolved to a real edge
   });
 
-  it('kb:healthReport scans the real vault and reports a structural readout (no throw on the read path)', async () => {
+  it('kb:healthReport scans the real vault and returns the Health PROJECTION (SPEC-0058 STATE-3; no throw on the read path)', async () => {
     await seedGraphVault();
-    const report = await invoke<{ scanned: number; counts: { orphans: number; thin: number; dangling: number } }>('kb:healthReport');
-    expect(report.scanned).toBe(2); // both entities were really walked + parsed
-    expect(report.counts).toMatchObject({ orphans: expect.any(Number), thin: expect.any(Number), dangling: expect.any(Number) });
+    const proj = await invoke<{ status: string; scanned: number; dimensions: { key: string }[]; overall: string }>('kb:healthReport');
+    expect(proj.status).toBe('ready');
+    expect(proj.scanned).toBe(2); // both entities were really walked + parsed
+    expect(proj.dimensions.map((d) => d.key)).toEqual(['dangling', 'orphans', 'thin']); // the contract shape
+    expect(['ok', 'attention']).toContain(proj.overall);
   });
 
   it('all three handlers degrade to safe empty results when no vault is active (never throw)', async () => {
