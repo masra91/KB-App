@@ -1,0 +1,63 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vellum app icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#173B4E"/>
+      <stop offset="52%" stop-color="#1E3557"/>
+      <stop offset="100%" stop-color="#2C6354"/>
+    </linearGradient>
+    <radialGradient id="gloss" cx="34%" cy="20%" r="62%">
+      <stop offset="0%" stop-color="#CFE4DA" stop-opacity="0.26"/>
+      <stop offset="60%" stop-color="#CFE4DA" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#EBD193"/>
+      <stop offset="50%" stop-color="#C9A35A"/>
+      <stop offset="100%" stop-color="#A8823C"/>
+    </linearGradient>
+    <radialGradient id="core" cx="50%" cy="42%" r="60%">
+      <stop offset="0%" stop-color="#FBF7EC"/>
+      <stop offset="48%" stop-color="#EBD193"/>
+      <stop offset="100%" stop-color="#C9A35A"/>
+    </radialGradient>
+    <clipPath id="sq"><rect x="0" y="0" width="1024" height="1024" rx="229" ry="229"/></clipPath>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229" fill="url(#bg)"/>
+
+  <g clip-path="url(#sq)">
+    <!-- ambient fractal field (drops away visually at small sizes) -->
+    <g stroke="#C9A35A" stroke-width="1.4" fill="none" opacity="0.16">
+      <path d="M120 160 L210 250 L150 360 M210 250 L330 210 M820 180 L900 270 M900 270 L990 220 M140 760 L240 830 M780 860 L880 800 M512 70 L512 140 M512 884 L512 954 M70 512 L150 512 M874 512 L954 512"/>
+    </g>
+    <g fill="#C9A35A" opacity="0.22">
+      <circle cx="120" cy="160" r="5"/><circle cx="210" cy="250" r="5"/><circle cx="150" cy="360" r="4"/><circle cx="330" cy="210" r="4"/>
+      <circle cx="820" cy="180" r="5"/><circle cx="900" cy="270" r="5"/><circle cx="990" cy="220" r="4"/>
+      <circle cx="140" cy="760" r="5"/><circle cx="240" cy="830" r="4"/><circle cx="780" cy="860" r="5"/><circle cx="880" cy="800" r="4"/>
+    </g>
+    <!-- mirror shards -->
+    <polygon points="700,300 770,400 700,470 660,390" fill="#BFD7E6" opacity="0.10"/>
+    <polygon points="300,560 360,650 300,720 268,640" fill="#BFD7E6" opacity="0.08"/>
+
+    <!-- nested self-similar lattice -->
+    <g transform="translate(512,512)">
+      <!-- tessellation square through outer edge midpoints -->
+      <polygon points="150,-150 150,150 -150,150 -150,-150" fill="none" stroke="url(#gold)" stroke-width="2.5" opacity="0.40"/>
+      <!-- axis cross (diamond diagonals) -->
+      <line x1="-300" y1="0" x2="300" y2="0" stroke="url(#gold)" stroke-width="4" opacity="0.65" stroke-linecap="round"/>
+      <line x1="0" y1="-300" x2="0" y2="300" stroke="url(#gold)" stroke-width="4" opacity="0.65" stroke-linecap="round"/>
+      <!-- diamonds at R=300,150,75 -->
+      <polygon points="0,-300 300,0 0,300 -300,0" fill="none" stroke="url(#gold)" stroke-width="8" opacity="0.95" stroke-linejoin="round"/>
+      <polygon points="0,-150 150,0 0,150 -150,0" fill="none" stroke="url(#gold)" stroke-width="5.5" opacity="0.9" stroke-linejoin="round"/>
+      <polygon points="0,-75 75,0 0,75 -75,0" fill="none" stroke="url(#gold)" stroke-width="4" opacity="0.85" stroke-linejoin="round"/>
+      <!-- nodes -->
+      <g fill="url(#gold)">
+        <circle cx="0" cy="-300" r="16"/><circle cx="300" cy="0" r="16"/><circle cx="0" cy="300" r="16"/><circle cx="-300" cy="0" r="16"/>
+        <circle cx="0" cy="-150" r="11"/><circle cx="150" cy="0" r="11"/><circle cx="0" cy="150" r="11"/><circle cx="-150" cy="0" r="11"/>
+        <circle cx="150" cy="-150" r="8"/><circle cx="150" cy="150" r="8"/><circle cx="-150" cy="150" r="8"/><circle cx="-150" cy="-150" r="8"/>
+      </g>
+      <!-- luminous center node -->
+      <circle r="36" fill="url(#core)"/>
+      <circle r="36" fill="none" stroke="#A8823C" stroke-width="2" opacity="0.55"/>
+    </g>
+  </g>
+</svg>

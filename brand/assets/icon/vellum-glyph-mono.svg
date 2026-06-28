@@ -1,0 +1,9 @@
+<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vellum">
+  <g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round">
+    <polygon points="12,2 22,12 12,22 2,12" stroke-width="1.5"/>
+    <polygon points="12,7 17,12 12,17 7,12" stroke-width="1.2"/>
+    <line x1="2" y1="12" x2="22" y2="12" stroke-width="0.9" opacity="0.85"/>
+    <line x1="12" y1="2" x2="12" y2="22" stroke-width="0.9" opacity="0.85"/>
+  </g>
+  <circle cx="12" cy="12" r="1.9" fill="currentColor"/>
+</svg>

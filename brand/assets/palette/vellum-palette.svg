@@ -1,0 +1,56 @@
+<svg width="680" height="300" viewBox="0 0 680 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vellum color palette">
+  <rect x="0.5" y="0.5" width="679" height="299" rx="14" fill="#F4EFE3" stroke="#E0D6BE" stroke-width="0.5"/>
+  <text x="28" y="40" font-family="Spectral, Georgia, serif" font-size="20" fill="#2B2F36">Vellum · palette</text>
+  <g font-family="'IBM Plex Mono', ui-monospace, monospace">
+    <!-- row helper via individual swatches -->
+    <g>
+      <rect x="28" y="64" width="146" height="92" rx="10" fill="#F4EFE3" stroke="#E0D6BE" stroke-width="0.5"/>
+      <text x="40" y="148" font-size="11" fill="#2B2F36">#F4EFE3</text>
+      <text x="40" y="84" font-family="Inter, sans-serif" font-size="13" fill="#2B2F36">Vellum</text>
+      <text x="40" y="100" font-family="Inter, sans-serif" font-size="10.5" fill="#6A6456">canvas</text>
+    </g>
+    <g>
+      <rect x="190" y="64" width="146" height="92" rx="10" fill="#2F6B5B"/>
+      <text x="202" y="148" font-size="11" fill="#EAF3EE">#2F6B5B</text>
+      <text x="202" y="84" font-family="Inter, sans-serif" font-size="13" fill="#EAF3EE">Viridian</text>
+      <text x="202" y="100" font-family="Inter, sans-serif" font-size="10.5" fill="#BFD8CC">primary brand</text>
+    </g>
+    <g>
+      <rect x="352" y="64" width="146" height="92" rx="10" fill="#1E3557"/>
+      <text x="364" y="148" font-size="11" fill="#CFE0F0">#1E3557</text>
+      <text x="364" y="84" font-family="Inter, sans-serif" font-size="13" fill="#E6EEF8">Deep Blue</text>
+      <text x="364" y="100" font-family="Inter, sans-serif" font-size="10.5" fill="#9FB7D2">depth</text>
+    </g>
+    <g>
+      <rect x="514" y="64" width="138" height="92" rx="10" fill="#C9A35A"/>
+      <text x="526" y="148" font-size="11" fill="#3A2E12">#C9A35A</text>
+      <text x="526" y="84" font-family="Inter, sans-serif" font-size="13" fill="#3A2E12">Gilded Gold</text>
+      <text x="526" y="100" font-family="Inter, sans-serif" font-size="10.5" fill="#6B5526">accent</text>
+    </g>
+
+    <g>
+      <rect x="28" y="170" width="146" height="92" rx="10" fill="#3E9E82"/>
+      <text x="40" y="254" font-size="11" fill="#08362A">#3E9E82</text>
+      <text x="40" y="190" font-family="Inter, sans-serif" font-size="13" fill="#08362A">Sprout</text>
+      <text x="40" y="206" font-family="Inter, sans-serif" font-size="10.5" fill="#0C4636">in progress</text>
+    </g>
+    <g>
+      <rect x="190" y="170" width="146" height="92" rx="10" fill="#BFD7E6"/>
+      <text x="202" y="254" font-size="11" fill="#1E3557">#BFD7E6</text>
+      <text x="202" y="190" font-family="Inter, sans-serif" font-size="13" fill="#1E3557">Mist Blue</text>
+      <text x="202" y="206" font-family="Inter, sans-serif" font-size="10.5" fill="#3A6E88">gradient light</text>
+    </g>
+    <g>
+      <rect x="352" y="170" width="146" height="92" rx="10" fill="#C8743C"/>
+      <text x="364" y="254" font-size="11" fill="#FBEFE6">#C8743C</text>
+      <text x="364" y="190" font-family="Inter, sans-serif" font-size="13" fill="#FBEFE6">Ember</text>
+      <text x="364" y="206" font-family="Inter, sans-serif" font-size="10.5" fill="#F3D2BC">needs you</text>
+    </g>
+    <g>
+      <rect x="514" y="170" width="138" height="92" rx="10" fill="#2B2F36"/>
+      <text x="526" y="254" font-size="11" fill="#D7D2C5">#2B2F36</text>
+      <text x="526" y="190" font-family="Inter, sans-serif" font-size="13" fill="#F1ECE0">Slate Ink</text>
+      <text x="526" y="206" font-family="Inter, sans-serif" font-size="10.5" fill="#A7A294">text</text>
+    </g>
+  </g>
+</svg>

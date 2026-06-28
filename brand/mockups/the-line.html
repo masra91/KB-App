@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vellum — The Line</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --vellum:#F4EFE3; --parchment:#ECE4D2; --linen:#FBF7EC;
+    --viridian:#2F6B5B; --sprout:#3E9E82; --deep:#1E3557; --slate:#3A6E88; --mist:#BFD7E6;
+    --gold:#C9A35A; --gold-deep:#A8823C; --ember:#C8743C; --ink:#2B2F36; --stone:#6A6456; --hair:#E0D6BE;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#DfD7c4;background:radial-gradient(130% 120% at 25% -10%,#F7F2E6,#E5DAC2);font-family:Inter,system-ui,sans-serif;color:var(--ink);padding:28px;min-height:100vh}
+  .win{max-width:1180px;margin:0 auto;background:var(--vellum);border-radius:16px;overflow:hidden;border:0.5px solid #CFC4A6;
+       box-shadow:0 30px 70px -24px rgba(20,40,55,.5), 0 2px 0 rgba(255,255,255,.6) inset}
+  .bar{height:44px;display:flex;align-items:center;gap:14px;padding:0 16px;background:linear-gradient(var(--linen),#EFE6D1);border-bottom:0.5px solid var(--hair)}
+  .lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block}
+  .l1{background:#ED6A5E}.l2{background:#F4BF4F}.l3{background:#61C554}
+  .bar .nav{display:flex;gap:6px;color:#A79E86}.bar .nav i{font-size:18px}
+  .bar h1{font-family:Spectral,serif;font-weight:500;font-size:15px;margin:0;color:var(--ink)}
+  .tools{margin-left:auto;display:flex;align-items:center;gap:18px;color:var(--stone);font-size:13px}
+  .tools .t{display:flex;align-items:center;gap:6px;cursor:default}.tools i{font-size:16px;color:var(--gold-deep)}
+  .search{display:flex;align-items:center;gap:8px;background:var(--linen);border:0.5px solid var(--hair);border-radius:8px;padding:5px 10px;color:#9A927E;width:210px}
+  .search .kbd{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#B6AD96}
+  .ava{width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 40% 35%,#3E9E82,#1E3557);border:1px solid var(--gold)}
+  .body{display:flex}
+  .side{width:188px;flex:0 0 188px;background:linear-gradient(#EFE6D1,#E8DDC4);border-right:0.5px solid var(--hair);padding:18px 14px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+  .brand{display:flex;align-items:center;gap:10px;margin-bottom:22px;padding-left:4px}
+  .brand .wm{font-family:Spectral,serif;font-size:24px;color:var(--viridian);line-height:1}
+  .navlist{display:flex;flex-direction:column;gap:3px}
+  .navlist a{display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:9px;color:var(--stone);text-decoration:none;font-size:13.5px}
+  .navlist a i{font-size:18px}
+  .navlist a.on{background:linear-gradient(#FBF6EA,#F2EAD7);color:var(--ink);box-shadow:0 1px 0 rgba(255,255,255,.7) inset;border:0.5px solid var(--hair)}
+  .navlist a.on i{color:var(--gold-deep)}
+  .badge{margin-left:auto;background:var(--ember);color:#fff;font-size:11px;border-radius:10px;padding:1px 7px;font-family:'IBM Plex Mono',monospace}
+  .user{margin-top:auto;display:flex;align-items:center;gap:9px;padding:8px;border-radius:10px;border:0.5px solid var(--hair);background:#FBF6EA}
+  .user .ini{width:30px;height:30px;border-radius:50%;background:var(--viridian);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
+  .user b{font-size:12.5px;font-weight:500}.user span{font-size:10.5px;color:var(--stone)}
+  .wmark{position:absolute;left:-30px;bottom:54px;opacity:.10;pointer-events:none}
+  .main{flex:1;padding:22px 26px 24px;position:relative;overflow:hidden}
+  .field{position:absolute;inset:-30px;opacity:.06;pointer-events:none}
+  .head{display:flex;align-items:flex-start;gap:26px;position:relative;margin-bottom:26px}
+  .head h2{font-family:Spectral,serif;font-weight:500;font-size:34px;margin:0 0 2px;color:var(--ink)}
+  .head .sub{font-size:13px;color:var(--stone)}
+  .stats{margin-left:auto;display:flex;gap:24px}
+  .stat .k{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--stone)}.stat .k i{font-size:14px;color:var(--gold-deep)}
+  .stat .v{font-family:Spectral,serif;font-size:24px;color:var(--ink);line-height:1.1;margin-top:3px}
+  .stat .u{font-size:10.5px;color:#9A927E}
+  .line{position:relative;margin-bottom:22px}
+  .thread{position:absolute;top:30px;left:40px;right:40px;height:2px;background:linear-gradient(90deg,var(--gold),#E6CE86,var(--gold));z-index:0}
+  .stations{position:relative;z-index:1;display:flex;justify-content:space-between;gap:10px}
+  .st{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center;position:relative}
+  .node{width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--gold);
+        box-shadow:0 4px 12px -4px rgba(20,40,55,.4), 0 1px 0 rgba(255,255,255,.5) inset;position:relative;z-index:2}
+  .node i{font-size:24px}
+  .st h3{font-family:Spectral,serif;font-weight:500;font-size:15px;margin:11px 0 2px;color:var(--ink)}
+  .count{font-family:'IBM Plex Mono',monospace;font-size:22px;color:var(--ink);line-height:1}
+  .card{width:100%;margin-top:10px;background:var(--linen);border:0.5px solid var(--hair);border-radius:11px;padding:9px 11px}
+  .meter{font-size:10.5px;color:var(--stone);display:flex;justify-content:space-between;margin-bottom:3px}
+  .meter b{font-family:'IBM Plex Mono',monospace;color:var(--ink);font-weight:500}
+  .barp{height:4px;border-radius:3px;background:#E4DAC2;overflow:hidden;margin-bottom:7px}
+  .barp > i{display:block;height:100%;border-radius:3px;background:#C3B894}
+  .barg{height:4px;border-radius:3px;background:#DCEBE2;overflow:hidden}
+  .barg > i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#2C8A6C,#5BC09C,#2C8A6C);background-size:200% 100%;animation:sh 2.6s linear infinite}
+  .decide{display:flex;align-items:center;gap:16px;border:0.5px solid #E3CBB6;background:linear-gradient(#FBF2E9,#F6E7D7);border-radius:12px;padding:14px 18px;margin-bottom:20px;position:relative}
+  .decide .emblem{width:46px;height:46px;border-radius:50%;border:1.5px solid var(--ember);display:flex;align-items:center;justify-content:center;color:var(--ember);background:#FBF1E7}
+  .decide .emblem i{font-size:22px}
+  .decide .lbl{font-family:Spectral,serif;font-size:14px;color:#9A4E22;margin-right:6px}
+  .ditem{display:flex;align-items:center;gap:12px;padding:0 16px;border-left:0.5px solid #E3CBB6}
+  .ditem .txt b{font-size:13px;font-weight:500;color:var(--ink);display:block}
+  .ditem .txt span{font-size:11.5px;color:var(--stone)}
+  .review{font-size:12px;color:var(--ink);border:0.5px solid var(--hair);background:#FBF6EA;border-radius:7px;padding:5px 14px;cursor:default;white-space:nowrap}
+  .viewall{margin-left:auto;font-size:12px;color:var(--viridian);display:flex;align-items:center;gap:4px;white-space:nowrap}
+  .detail{display:flex;gap:0;border:0.5px solid var(--hair);border-radius:12px;background:#FBF6EA;overflow:hidden}
+  .detail .pane{padding:16px 18px}
+  .detail .left{flex:1.3;border-right:0.5px solid var(--hair)}
+  .detail .right{flex:1}
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;background:#DCEBE2;color:#1E5A45;border-radius:20px;padding:2px 9px;font-weight:500}
+  .detail h4{font-family:Spectral,serif;font-weight:500;font-size:17px;margin:0 0 4px;color:var(--ink);display:flex;align-items:center;gap:9px}
+  .detail p{font-size:12px;color:var(--stone);margin:0 0 12px;max-width:330px}
+  .nums{display:flex;gap:26px;margin-bottom:14px}
+  .nums .n .v{font-family:Spectral,serif;font-size:21px;color:var(--ink)}.nums .n .k{font-size:10.5px;color:var(--stone)}
+  .prog{height:5px;border-radius:3px;background:#E4DAC2;overflow:hidden}.prog>i{display:block;height:100%;width:73%;background:linear-gradient(90deg,var(--gold),#E6CE86);}
+  .progrow{display:flex;justify-content:space-between;font-size:11px;color:var(--stone);margin-top:6px;font-family:'IBM Plex Mono',monospace}
+  .quote{font-family:Spectral,serif;font-style:italic;font-size:13.5px;color:var(--ink);line-height:1.5;margin:0 0 10px}
+  .cites{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .cite{font-size:11px;color:var(--slate);background:#EAF1F6;border:0.5px solid #CFE0EC;border-radius:7px;padding:3px 9px}
+  .conf{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--stone)}
+  .stars{color:var(--gold);letter-spacing:1px}
+  @keyframes sh{0%{background-position:0 0}100%{background-position:200% 0}}
+  @media (prefers-reduced-motion: reduce){.barg>i{animation:none}}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="bar">
+    <div class="lights"><i class="l1"></i><i class="l2"></i><i class="l3"></i></div>
+    <div class="nav"><i class="ti ti-chevron-left"></i><i class="ti ti-chevron-right"></i></div>
+    <h1>The Line</h1>
+    <div class="tools">
+      <span class="t"><i class="ti ti-bolt"></i> New capture</span>
+      <span class="t"><i class="ti ti-plus"></i> Quick add</span>
+      <span class="search"><i class="ti ti-search" style="font-size:14px;color:#B6AD96"></i> Search notes <span class="kbd">⌘K</span></span>
+      <span class="ava"></span>
+    </div>
+  </div>
+  <div class="body">
+    <aside class="side">
+      <div class="brand">
+        <svg width="30" height="30" viewBox="0 0 24 24"><g fill="none" stroke="#C9A35A" stroke-linejoin="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.4"/><polygon points="12,7 17,12 12,17 7,12" stroke-width="1.1"/></g><circle cx="12" cy="12" r="1.8" fill="#C9A35A"/></svg>
+        <span class="wm">Vellum</span>
+      </div>
+      <nav class="navlist">
+        <a class="on" href="#"><i class="ti ti-timeline-event"></i> The Line</a>
+        <a href="#"><i class="ti ti-affiliate"></i> Explore</a>
+        <a href="#"><i class="ti ti-files"></i> Sources</a>
+        <a href="#"><i class="ti ti-arrows-split-2"></i> Decisions <span class="badge">2</span></a>
+        <a href="#"><i class="ti ti-settings"></i> Settings</a>
+      </nav>
+      <div class="wmark">
+        <svg width="220" height="220" viewBox="0 0 24 24"><g fill="none" stroke="#A8823C" stroke-linejoin="round" stroke-width="0.6"><polygon points="12,2 22,12 12,22 2,12"/><polygon points="12,7 17,12 12,17 7,12"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></g></svg>
+      </div>
+      <div class="user">
+        <span class="ini">AM</span>
+        <div><b>Alex Mercer</b><br><span>Pro plan</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <svg class="field" viewBox="0 0 600 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        <g stroke="#2F6B5B" stroke-width="0.7" fill="none"><path d="M40 70 L130 130 L80 220 M130 130 L240 100 M240 100 L340 170 M340 170 L300 280 M340 170 L450 130 M450 130 L530 220 M530 220 L580 170"/></g>
+        <g fill="#A8823C"><circle cx="40" cy="70" r="3"/><circle cx="130" cy="130" r="3"/><circle cx="240" cy="100" r="3"/><circle cx="340" cy="170" r="3"/><circle cx="450" cy="130" r="3"/><circle cx="530" cy="220" r="3"/></g>
+      </svg>
+
+      <div class="head">
+        <div>
+          <h2>The Line</h2>
+          <div class="sub">From fragments to clarity — your vault becoming structure.</div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="k"><i class="ti ti-chart-bar"></i> Today's throughput</div><div class="v">1,248</div><div class="u">notes processed</div></div>
+          <div class="stat"><div class="k"><i class="ti ti-grain"></i> Active agents</div><div class="v">6</div><div class="u">working quietly</div></div>
+          <div class="stat"><div class="k"><i class="ti ti-quote"></i> Accuracy</div><div class="v">94%</div><div class="u">citation-backed</div></div>
+        </div>
+      </div>
+
+      <div class="line">
+        <div class="thread"></div>
+        <div class="stations" id="stations"></div>
+      </div>
+
+      <div class="decide">
+        <div class="emblem"><i class="ti ti-arrows-split-2"></i></div>
+        <div class="lbl">Needs your decision</div>
+        <div class="ditem"><div class="txt"><b>Ambiguous claim in “AI alignment”</b><span>Conflicting interpretations across 3 sources.</span></div><span class="review">Review</span></div>
+        <div class="ditem"><div class="txt"><b>Possible duplicate entity</b><span>“Spaced repetition” may merge with 2 notes.</span></div><span class="review">Review</span></div>
+        <span class="viewall">View all decisions <i class="ti ti-chevron-right"></i></span>
+      </div>
+
+      <div class="detail">
+        <div class="pane left">
+          <h4>Decompose <span class="pill"><i class="ti ti-loader-2"></i> In progress</span></h4>
+          <p>Breaking captured notes into atomic ideas, each tagged with provenance back to its source.</p>
+          <div class="nums">
+            <div class="n"><div class="v">892</div><div class="k">notes in</div></div>
+            <div class="n"><div class="v">2,731</div><div class="k">ideas extracted</div></div>
+            <div class="n"><div class="v">87%</div><div class="k">avg confidence</div></div>
+          </div>
+          <div class="prog"><i></i></div>
+          <div class="progrow"><span>processing note 653 of 892</span><span>73%</span></div>
+        </div>
+        <div class="pane right">
+          <h4 style="font-size:14px">Output preview</h4>
+          <p class="quote">“Attention lets a model weigh relationships between tokens, improving performance on long-context tasks.”</p>
+          <div class="cites"><span class="cite">Vaswani et al., 2017</span><span class="cite">Devlin et al., 2018</span></div>
+          <div class="conf">Confidence <span class="stars">★★★★</span><span style="color:#B9B09A">★</span> <span style="color:var(--viridian);font-weight:500">High</span></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script>
+  const ramp=[
+    ["ti-bolt","Capture","342","#E7D6A6","#7A6326",216,0.10],
+    ["ti-archive","Archive","1,104","#A9C4A2","#234A1F",412,0.55],
+    ["ti-puzzle","Decompose","892","#5E9E84","#0C3A2A",233,0.72],
+    ["ti-affiliate","Connect","764","#2F6B5B","#EAF3EE",188,0.62],
+    ["ti-blockquote","Claims","418","#2A5A6E","#E6F0F5",97,0.42],
+    ["ti-sparkles","Compose","153","#1E3557","#E6EEF8",34,0.30]
+  ];
+  document.getElementById('stations').innerHTML=ramp.map(([ic,name,count,ring,icol,pend,prog])=>`
+    <div class="st">
+      <div class="node" style="background:linear-gradient(160deg,#FBF7EC, ${ring});border-color:${ring==='#E7D6A6'?'#D8B569':'#C9A35A'}">
+        <i class="ti ${ic}" style="color:${icol}"></i>
+      </div>
+      <h3>${name}</h3>
+      <div class="count">${count}</div>
+      <div class="card">
+        <div class="meter">Pending <b>${pend}</b></div>
+        <div class="barp"><i style="width:${Math.min(pend/12,100)}%"></i></div>
+        <div class="meter">In progress</div>
+        <div class="barg"><i style="width:${Math.round(prog*100)}%"></i></div>
+      </div>
+    </div>`).join('');
+</script>
+
+<script>
+(function(){
+  const FILLED=new Set(['bolt','grain','sparkles']);
+  const I={
+   'chevron-left':'<path d="M15 6l-6 6 6 6"/>',
+   'chevron-right':'<path d="M9 6l6 6-6 6"/>',
+   'chevron-down':'<path d="M6 9l6 6 6-6"/>',
+   'bolt':'<path d="M13 2L4 14h6l-1 8 9-12h-6z"/>',
+   'plus':'<path d="M12 5v14M5 12h14"/>',
+   'search':'<circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/>',
+   'grain':'<circle cx="7" cy="7" r="1.5"/><circle cx="14" cy="6" r="1.5"/><circle cx="19" cy="11" r="1.5"/><circle cx="6" cy="14" r="1.5"/><circle cx="12" cy="13" r="1.5"/><circle cx="17" cy="18" r="1.5"/>',
+   'timeline-event':'<path d="M3 18h18"/><circle cx="12" cy="8" r="3"/><path d="M12 11v4"/>',
+   'affiliate':'<circle cx="6" cy="6" r="2.1"/><circle cx="18" cy="6" r="2.1"/><circle cx="12" cy="18" r="2.1"/><path d="M7.6 7.4L11 15.6M16.4 7.4L13 15.6M8 6h8"/>',
+   'files':'<rect x="4" y="3" width="11" height="14" rx="2"/><path d="M8 20h9a2 2 0 002-2V8"/>',
+   'arrows-split-2':'<circle cx="7" cy="5" r="1.9"/><circle cx="17" cy="5" r="1.9"/><circle cx="12" cy="19" r="1.9"/><path d="M7 7v3c0 2 2 3 5 4M17 7v3c0 2-2 3-5 4"/>',
+   'settings':'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.5M12 18v2.5M3.5 12h2.5M18 12h2.5M5.8 5.8l1.8 1.8M16.4 16.4l1.8 1.8M18.2 5.8l-1.8 1.8M7.6 16.4l-1.8 1.8"/>',
+   'chart-bar':'<path d="M5 19V11M12 19V5M19 19V14"/><path d="M4 20h16"/>',
+   'quote':'<path d="M6 5v14"/><path d="M10 8h9M10 12h9M10 16h6"/>',
+   'blockquote':'<path d="M6 5v14"/><path d="M10 8h9M10 12h9M10 16h6"/>',
+   'loader-2':'<path d="M12 4a8 8 0 018 8"/><path d="M4 12a8 8 0 008 8" opacity="0.35"/>',
+   'archive':'<rect x="4" y="5" width="16" height="4" rx="1"/><path d="M5 9v9a1 1 0 001 1h12a1 1 0 001-1V9M10 13h4"/>',
+   'puzzle':'<path d="M9 4.5a1.6 1.6 0 013.2 0V6h2.8v2.8a1.6 1.6 0 010 3.2V15h-2.8v.4a1.6 1.6 0 01-3.2 0V15H6v-2.8a1.6 1.6 0 010-3.2V6h3z"/>',
+   'sparkles':'<path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/><path d="M18.5 15l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/>',
+   'user':'<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3-6 7-6s7 2.4 7 6"/>',
+   'file-text':'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>',
+   'scale':'<path d="M5 6a2 2 0 012-2h10a2 2 0 012 2v7a2 2 0 01-2 2H10l-4 4v-4H7a2 2 0 01-2-2z"/>',
+   'book':'<path d="M12 6c-2-1.4-5-1.4-7 0v12c2-1.4 5-1.4 7 0M12 6c2-1.4 5-1.4 7 0v12c-2-1.4-5-1.4-7 0M12 6v12"/>',
+   'pencil':'<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
+   'books':'<rect x="5" y="4" width="4" height="16" rx="1"/><rect x="10" y="4" width="4" height="16" rx="1"/><path d="M16 5l3.8 1-3 14-3.8-1z"/>',
+   'maximize':'<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+   'category':'<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+   'filter':'<path d="M4 5h16l-6 8v6l-4-2v-4z"/>'
+  };
+  function svg(name){
+    const inner=I[name]; if(!inner) return null;
+    const f=FILLED.has(name);
+    return '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="'+(f?'currentColor':'none')+'" stroke="'+(f?'none':'currentColor')+'" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:-0.14em">'+inner+'</svg>';
+  }
+  document.querySelectorAll('i.ti').forEach(function(el){
+    const cls=[].slice.call(el.classList).find(function(c){return c.indexOf('ti-')===0;});
+    if(!cls) return; const name=cls.slice(3); const s=svg(name); if(!s) return;
+    const span=document.createElement('span');
+    const st=el.getAttribute('style'); if(st) span.setAttribute('style',st);
+    span.style.fontSize=getComputedStyle(el).fontSize;
+    span.style.lineHeight='0';
+    span.innerHTML=s; el.replaceWith(span);
+  });
+})();
+</script>
+
+</body>
+</html>
