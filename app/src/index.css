@@ -441,10 +441,18 @@ button:disabled {
 /* --- Explore view (SPEC-0039 EXPLORE) — the read-only entity-neighborhood graph, in "The Line"
    instrument language: flat ruled structure (no card chrome), composing the design-system primitives
    (viz-chip / viz-btn / viz-field__input / viz-numeric). Distinct from Obsidian's generic graph. --- */
-.explore { padding: 0.25rem 0; }
+/* Ambient crystalline field (SPEC-0057 / brand §6) — a faint signature-gradient wash drifting slowly
+   behind the view, echoing the Explore mockup's node-field. Very low opacity so it never fights content;
+   pointer-events:none; seated behind via a local stacking context. Reduced-motion freezes it (@media below). */
+.explore { padding: 0.25rem 0; position: relative; isolation: isolate; }
+.explore::before {
+  content: ''; position: absolute; inset: -8% -4%; z-index: -1; pointer-events: none;
+  background: var(--viz-field-gradient); background-size: 200% 200%; opacity: 0.045;
+  animation: viz-drift var(--viz-dur-drift) linear infinite;
+}
 .explore-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
 .explore-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 60ch; }
-.explore-empty { color: var(--viz-ink-muted); padding: 1.2rem 0; max-width: 56ch; }
+/* Full-view empty (no entities) now renders via the shared `.viz-empty` hero (emptyState()) — see exploreView.ts. */
 
 /* Search-to-focus */
 .explore-search { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.8rem; }
@@ -453,12 +461,14 @@ button:disabled {
 /* Breadcrumb trail */
 .explore-trail { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-bottom: 0.7rem; font-size: 0.7rem; }
 .explore-crumb { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; color: var(--viz-ink-muted); font-size: 0.7rem; letter-spacing: 0.06em; }
-.explore-crumb[data-rel]:hover { color: var(--viz-ember); }
+.explore-crumb[data-rel]:hover { color: var(--viz-accent); } /* interactive breadcrumb → accent (#415 state-language; was ember) */
 .explore-crumb--current { color: var(--viz-ink); cursor: default; }
 .explore-crumb-sep { color: var(--viz-idle); }
 
-/* The focused entity — a flat instrument card on the spine, lit ember (the focus) */
-.explore-center { padding: 0.6rem 0 0.8rem 0.9rem; border-left: 2px solid var(--viz-ember); margin-bottom: 1.1rem; }
+/* The focused entity — a flat instrument card on the spine, lit by the interactive accent (the focal
+   point you're exploring around). #415: focus = `--viz-accent` (slate-blue emphasis), not ember
+   (reserved for "needs your decision") and not sprout (active work) — focus is "where you are". */
+.explore-center { padding: 0.6rem 0 0.8rem 0.9rem; border-left: 2px solid var(--viz-accent); margin-bottom: 1.1rem; }
 .explore-center-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.55rem; }
 .explore-center-name { font-size: 1.1rem; color: var(--viz-ink); letter-spacing: 0.02em; }
 .explore-kind { color: var(--viz-ink-muted); }
@@ -509,13 +519,13 @@ button:disabled {
 .explore-neighbors-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
 .explore-neighbor-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
 .explore-recenter { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
-.explore-recenter:hover { border-left-color: var(--viz-ember); background: var(--viz-rule); }
+.explore-recenter:hover { border-left-color: var(--viz-accent); background: var(--viz-rule); } /* interactive re-center → accent (#415) */
 .explore-edge { color: var(--viz-idle); font-size: 0.9rem; width: 1.1rem; text-align: center; flex: 0 0 auto; }
 /* The relationship label (EXPLORE-5) — a typed predicate ("funds", "owns") reads as an edge annotation:
    small, lowercase, italic, set off in muted ink so the entity name stays the row's anchor. */
 .explore-rel { color: var(--viz-ink-muted); font-size: 0.66rem; font-style: italic; letter-spacing: 0.03em; text-transform: lowercase; flex: 0 0 auto; }
 .explore-neighbor-name { color: var(--viz-ink); }
-.explore-recenter:hover .explore-neighbor-name { color: var(--viz-ember); }
+.explore-recenter:hover .explore-neighbor-name { color: var(--viz-accent); } /* interactive → accent (#415) */
 /* Speculative / low-confidence edge (EXPLORE-5, DATA-8) — visually distinct, NOT asserted as fact:
    faded row + a dashed (un-solid) edge in brass (the "waiting/uncertain" token). The `~`-prefixed
    confidence is the non-color signal so the distinction survives high-contrast / mono displays (a11y). */
@@ -525,13 +535,15 @@ button:disabled {
 .explore-neighbor--speculative .explore-conf { color: var(--viz-brass); }
 .explore-neighbor--speculative .explore-recenter:hover { opacity: 1; }
 /* Filter bar (EXPLORE-9) — chips in The Line's instrument language (no native <select>, EXPLORE-10):
-   a pressed chip reads "engaged" via the ember spine + ink, an unpressed one stays muted/outlined. */
+   a pressed chip reads "engaged" via the accent spine + ink, an unpressed one stays muted/outlined.
+   #415: the interactive hover + the selected (`.is-on`) state both ride `--viz-accent` (not ember); the
+   chip label stays `--viz-ink` (AA) and the hue rides the border + inset spine (≥3:1 graphic, #184). */
 .explore-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; margin: 0 0 0.6rem; }
 .explore-filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
 .explore-filter-label { font-size: 0.62rem; color: var(--viz-ink-muted); margin-right: 0.1rem; }
 .explore-filter-chip { appearance: none; cursor: pointer; font: inherit; font-size: 0.64rem; letter-spacing: 0.03em; color: var(--viz-ink-muted); border: 1px solid var(--viz-rule); border-radius: 999px; padding: 0.1rem 0.5rem; background: transparent; }
-.explore-filter-chip:hover, .explore-filter-chip:focus-visible { color: var(--viz-ink); border-color: var(--viz-ember); }
-.explore-filter-chip.is-on { color: var(--viz-ink); border-color: var(--viz-ember); background: var(--viz-rule); box-shadow: inset 2px 0 0 var(--viz-ember); }
+.explore-filter-chip:hover, .explore-filter-chip:focus-visible { color: var(--viz-ink); border-color: var(--viz-accent); }
+.explore-filter-chip.is-on { color: var(--viz-ink); border-color: var(--viz-accent); background: var(--viz-rule); box-shadow: inset 2px 0 0 var(--viz-accent); }
 .explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-accent); } /* persistent interactive text button → accent (#184/#415); transient explore hovers reserved for #404 */
 .explore-filter-clear:hover, .explore-filter-clear:focus-visible { text-decoration: underline; }
 .explore-filter-none { margin: 0.3rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
@@ -539,7 +551,7 @@ button:disabled {
 .explore-neighbor-row { display: flex; align-items: stretch; gap: 0.15rem; }
 .explore-neighbor-row .explore-recenter { flex: 1 1 auto; width: auto; }
 .explore-expand { appearance: none; background: transparent; border: 0; cursor: pointer; color: var(--viz-idle); font-size: 0.75rem; width: 1.2rem; flex: 0 0 auto; padding: 0; line-height: 1; }
-.explore-expand:hover, .explore-expand:focus-visible, .explore-expand.is-open { color: var(--viz-ember); }
+.explore-expand:hover, .explore-expand:focus-visible, .explore-expand.is-open { color: var(--viz-accent); } /* interactive expand → accent (#415) */
 /* Expand-in-place peek (EXPLORE-7) — a neighbor's own links, indented under it, revealed with a brief
    fade that degrades to instant under reduced-motion (EXPLORE-13, the @media below). */
 .explore-subneighbors { margin: 0.1rem 0 0.3rem 1.5rem; padding-left: 0.6rem; border-left: 1px dashed var(--viz-rule); animation: explore-reveal var(--viz-dur-state, 240ms) ease-out; }
@@ -548,7 +560,7 @@ button:disabled {
 .explore-sub-loading, .explore-sub-empty { font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
 .explore-sub-more { font-size: 0.72rem; color: var(--viz-ink-muted); font-style: italic; padding: 0.15rem 0.3rem; }
 @keyframes explore-reveal { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .explore-subneighbors { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .explore-subneighbors, .explore::before { animation: none; } }
 .explore-more { margin: 0.55rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
 .explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
 .explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }
