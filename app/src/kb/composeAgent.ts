@@ -38,6 +38,10 @@ export interface ComposeInput {
   name: string;
   claims: ComposeClaimInput[];
   links: string[];
+  /** SPEC-0050 slice-3: a durable human GUIDANCE steer for this entity (or global), folded into the
+   *  prompt as an editorial orientation — NOT a fact (grounding stays absolute; it only shapes emphasis
+   *  /framing over the SAME claims). Absent when there's no active steer. */
+  guidance?: string;
 }
 
 /** A decider maps a ComposeInput to a validated, grounded ComposeDecision. May throw (COMPOSE-7). */
@@ -112,6 +116,11 @@ export function buildComposePrompt(input: ComposeInput): string {
     '',
     linkLine,
     '',
+    // SPEC-0050 slice-3: a durable human steer shapes EMPHASIS/FRAMING only — grounding stays absolute
+    // (still ONLY the numbered claims; the steer never licenses an un-grounded fact).
+    ...(input.guidance && input.guidance.trim().length > 0
+      ? [`EDITORIAL GUIDANCE (the user's standing steer for this entity — shape emphasis/framing, NEVER add ungrounded facts): ${input.guidance.trim()}`, '']
+      : []),
     `entity.kind: ${input.kind}`,
     `entity.name: ${input.name}`,
     UNTRUSTED_SOURCE_DELIMITER_NOTE, // the claim statements + source titles below are untrusted DATA

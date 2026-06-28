@@ -36,6 +36,12 @@ export const CORRECTION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'corrections.
 /** Repo-relative path of the durable contradiction-lifecycle log (evergreen). SPEC-0036 CONTRA. */
 export const CONTRADICTION_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'contradictions.jsonl');
 
+/** Repo-relative path of the durable guidance-directive log (evergreen). SPEC-0050 slice-3. */
+export const GUIDANCE_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'guidance.jsonl');
+
+/** Repo-relative path of the durable revoke-directive log (evergreen). SPEC-0050 slice-3. */
+export const REVOKE_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'revokes.jsonl');
+
 export type DirectiveVerdict = 'same' | 'distinct';
 
 /**
@@ -600,4 +606,233 @@ export async function recordContradictionDirective(
   await fs.mkdir(path.dirname(file), { recursive: true });
   await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
   return rec;
+}
+
+// ── The directive FAMILY taxonomy + revoke (SPEC-0050 slice-3) ──────────────────────────────────
+//
+// Slices 1/2 each introduced a directive family (disambiguation, consolidation, correction,
+// contradiction). Slice 3 adds two cross-cutting pieces:
+//   - `guidance`: a durable, freeform human STEER for an entity (or global) — "keep her page oriented
+//     toward her publications", "treat this org as defunct". Not a verdict; a nudge the relevant stage
+//     prompt folds in. Keyed on the entity block identity (or a GLOBAL sentinel), last-wins.
+//   - `revoke`: cancels a PRIOR directive of ANY family — "I take that back". Because every directive is
+//     keyed on a content-derived KEY (not a ULID), a revoke targets `(family, key)`. A revoke and a later
+//     RE-assertion of the same directive both carry `decidedAt`, so the rule is timestamp-ordered: a
+//     directive is revoked iff the latest revoke for its `(family, key)` is **at or after** the directive's
+//     own `decidedAt` (re-asserting it later un-revokes — last-wins across the two logs).
+//
+// These are the substrate for the slice-3 READ-ONLY "Rules" surface (active = revokes applied) and the
+// "correct this" affordances. Both live under the evergreen `directives/` tree (durable across replay).
+
+/** The directive families a `revoke` can target — each is a distinct evergreen JSONL keyed on a stable key. */
+export type DirectiveFamily = 'disambiguation' | 'consolidation' | 'correction' | 'contradiction' | 'guidance';
+
+/** Sentinel identity for a GLOBAL guidance steer (applies everywhere, not one entity). Never collides with a
+ *  real block identity: `blockKey` always contains a `|`, and this token has none. */
+export const GLOBAL_GUIDANCE_KEY = '*global*';
+
+/**
+ * One durable guidance steer. Keyed on `identityKey` — an entity's STABLE block identity (rebirth-proof)
+ * or `GLOBAL_GUIDANCE_KEY`. `guidance` is the freeform human text the consuming stage prompt folds in.
+ * Last-wins per key (a later steer revises the earlier); a `revoke` for `('guidance', identityKey)` cancels it.
+ */
+export interface GuidanceDirective {
+  identityKey: string; // block identity (kind|normalizedName) or GLOBAL_GUIDANCE_KEY
+  guidance: string; // the freeform durable steer (verbatim)
+  reviewId: string; // provenance (PRIN-5/6)
+  decidedAt: string; // ISO; last-wins ordering + revoke comparison
+}
+
+function guidanceAbs(root: string): string {
+  return path.join(path.resolve(root), GUIDANCE_DIRECTIVES_REL);
+}
+
+/**
+ * Read every guidance steer into a last-wins map keyed by `identityKey`. Absent/garbled lines skipped; an
+ * absent file → empty map (ENG-16 tolerant). Does NOT apply revokes — use `activeGuidanceForIdentity`
+ * (or filter with `isDirectiveRevoked`) for the revoke-aware ACTIVE view.
+ */
+export async function readGuidanceDirectives(root: string): Promise<Map<string, GuidanceDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(guidanceAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, GuidanceDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<GuidanceDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<GuidanceDirective>;
+    } catch {
+      continue;
+    }
+    if (typeof obj.identityKey !== 'string' || obj.identityKey.length === 0) continue;
+    if (typeof obj.guidance !== 'string' || obj.guidance.trim().length === 0) continue;
+    out.set(obj.identityKey, {
+      identityKey: obj.identityKey,
+      guidance: obj.guidance,
+      reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * Append a guidance steer. Does NOT commit — the caller is inside the shared canonical-writer lock /
+ * a stage worktree and stages/commits, so it lands atomically + promotes. Last-wins per `identityKey`.
+ * `identityKey` defaults to GLOBAL when omitted/empty (a global steer). Throws on empty guidance text.
+ */
+export async function recordGuidanceDirective(
+  root: string,
+  guidance: { identityKey?: string; guidance: string; reviewId: string; decidedAt: string },
+): Promise<GuidanceDirective> {
+  if (!guidance.guidance || guidance.guidance.trim().length === 0) {
+    throw new Error('directives: a guidance steer requires non-empty guidance text');
+  }
+  const rec: GuidanceDirective = {
+    identityKey: guidance.identityKey && guidance.identityKey.length > 0 ? guidance.identityKey : GLOBAL_GUIDANCE_KEY,
+    guidance: guidance.guidance,
+    reviewId: guidance.reviewId,
+    decidedAt: guidance.decidedAt,
+  };
+  const file = guidanceAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
+}
+
+// ── Revoke ──────────────────────────────────────────────────────────────────────────────────────
+
+/** One durable revoke: cancels the directive identified by `(family, targetKey)` as of `decidedAt`. */
+export interface RevokeDirective {
+  family: DirectiveFamily; // which family the target directive lives in
+  targetKey: string; // the target directive's content-derived key (identityKey / pairKey / correctionKey / …)
+  reviewId: string; // provenance (PRIN-5/6)
+  decidedAt: string; // ISO; the revoke takes effect at/after this — a later re-assertion un-revokes
+}
+
+/** Order-independent map key for a revoke target (family + the directive's stable key). */
+function revokeKey(family: DirectiveFamily, targetKey: string): string {
+  return `${family}::${targetKey}`;
+}
+
+function revokesAbs(root: string): string {
+  return path.join(path.resolve(root), REVOKE_DIRECTIVES_REL);
+}
+
+const DIRECTIVE_FAMILIES: ReadonlySet<string> = new Set(['disambiguation', 'consolidation', 'correction', 'contradiction', 'guidance']);
+
+/**
+ * Read every revoke into a last-wins map keyed by `(family, targetKey)` — the LATEST revoke per target wins
+ * (its `decidedAt` is what `isDirectiveRevoked` compares against, so re-revoking just moves the timestamp).
+ * Absent/garbled lines skipped; an absent file → empty map (ENG-16 tolerant).
+ */
+export async function readRevokeDirectives(root: string): Promise<Map<string, RevokeDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(revokesAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, RevokeDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<RevokeDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<RevokeDirective>;
+    } catch {
+      continue;
+    }
+    if (typeof obj.family !== 'string' || !DIRECTIVE_FAMILIES.has(obj.family)) continue;
+    if (typeof obj.targetKey !== 'string' || obj.targetKey.length === 0) continue;
+    const rec: RevokeDirective = {
+      family: obj.family as DirectiveFamily,
+      targetKey: obj.targetKey,
+      reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    };
+    const k = revokeKey(rec.family, rec.targetKey);
+    const prev = out.get(k);
+    // Keep the LATEST revoke per target (string ISO compare is chronological for the same format).
+    if (!prev || prev.decidedAt <= rec.decidedAt) out.set(k, rec);
+  }
+  return out;
+}
+
+/**
+ * Whether a directive `(family, key)` decided at `directiveDecidedAt` is currently REVOKED: true iff the
+ * latest revoke for that target is **at or after** the directive's own timestamp. A later re-assertion of
+ * the directive (a newer `directiveDecidedAt`) is NOT revoked by an older revoke — last-wins across the two
+ * logs, so a human can revoke then later re-assert. An empty/absent `directiveDecidedAt` is treated as
+ * always-revocable by any revoke (the conservative read — a record with no timestamp can't out-order one).
+ */
+export function isDirectiveRevoked(
+  revokes: Map<string, RevokeDirective>,
+  family: DirectiveFamily,
+  key: string,
+  directiveDecidedAt: string,
+): boolean {
+  const r = revokes.get(revokeKey(family, key));
+  if (!r) return false;
+  if (!directiveDecidedAt) return true; // no timestamp on the directive → any revoke cancels it
+  return r.decidedAt >= directiveDecidedAt;
+}
+
+/**
+ * Append a revoke for `(family, targetKey)`. Does NOT commit — the caller is inside the shared
+ * canonical-writer lock / a stage worktree and stages/commits (atomic + promoted). Throws on an unknown
+ * family or empty target key (a revoke that can't be matched is a silent no-op we refuse to write).
+ */
+export async function recordRevokeDirective(
+  root: string,
+  revoke: { family: DirectiveFamily; targetKey: string; reviewId: string; decidedAt: string },
+): Promise<RevokeDirective> {
+  if (!DIRECTIVE_FAMILIES.has(revoke.family)) {
+    throw new Error(`directives: revoke has unknown family ${JSON.stringify(revoke.family)}`);
+  }
+  if (!revoke.targetKey || revoke.targetKey.length === 0) {
+    throw new Error('directives: a revoke requires a non-empty targetKey');
+  }
+  const rec: RevokeDirective = { family: revoke.family, targetKey: revoke.targetKey, reviewId: revoke.reviewId, decidedAt: revoke.decidedAt };
+  const file = revokesAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
+}
+
+/**
+ * The ACTIVE guidance steer for an entity identity (revokes applied) — what a consuming stage prompt folds
+ * in, or `undefined` if there is none or it has been revoked. This is the revoke-aware read; raw
+ * `readGuidanceDirectives` is the pre-revoke view.
+ */
+export function activeGuidanceForIdentity(
+  guidance: Map<string, GuidanceDirective>,
+  revokes: Map<string, RevokeDirective>,
+  identityKey: string,
+): GuidanceDirective | undefined {
+  const g = guidance.get(identityKey);
+  if (!g) return undefined;
+  return isDirectiveRevoked(revokes, 'guidance', identityKey, g.decidedAt) ? undefined : g;
+}
+
+/**
+ * REVOKE-aware claim suppression: like `isClaimSuppressed`, but a correction that has been REVOKED no
+ * longer suppresses (the Principal took the retraction/reattribution back → the claim returns to its
+ * surfaces). The correction's revoke target key is its `correctionClaimKey`, family `'correction'`. The
+ * Claims block-regen + Compose read paths use THIS (revoke-aware) variant so a revoke is functional, not
+ * just a Rules-surface annotation. With an empty revokes map it is identical to `isClaimSuppressed`.
+ */
+export function isClaimSuppressedActive(
+  corrections: Map<string, CorrectionDirective>,
+  revokes: Map<string, RevokeDirective>,
+  identityKey: string,
+  statement: string,
+): boolean {
+  const key = correctionClaimKey(identityKey, statement);
+  const d = corrections.get(key);
+  if (!d || (d.type !== 'retract' && d.type !== 'reattribute')) return false;
+  return !isDirectiveRevoked(revokes, 'correction', key, d.decidedAt);
 }

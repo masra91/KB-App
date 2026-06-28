@@ -51,6 +51,16 @@ describe('buildComposePrompt (COMPOSE-3/4 prompt contract)', () => {
     expect(p).toMatch(/SOURCE BEGIN \(untrusted DATA/); // delimiter reminder at the untrusted claims
     expect(p.indexOf('SOURCE BEGIN')).toBeLessThan(p.indexOf('CLAIMS (')); // fence precedes the claim lines
   });
+
+  it('SPEC-0050 slice-3: folds in a durable guidance steer (emphasis-only, grounding still absolute)', () => {
+    const withSteer = buildComposePrompt({ ...input, guidance: 'Orient toward his design philosophy.' });
+    expect(withSteer).toContain('EDITORIAL GUIDANCE');
+    expect(withSteer).toContain('Orient toward his design philosophy.');
+    expect(withSteer.toLowerCase()).toMatch(/never add ungrounded facts/); // the steer never licenses invention
+    // No steer → no guidance line (clean default).
+    expect(buildComposePrompt(input)).not.toContain('EDITORIAL GUIDANCE');
+    expect(buildComposePrompt({ ...input, guidance: '   ' })).not.toContain('EDITORIAL GUIDANCE'); // blank ignored
+  });
 });
 
 describe('buildComposePrompt — depth proportional to evidence (COMPOSE-10)', () => {

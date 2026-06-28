@@ -24,7 +24,7 @@ import { ulid, dateShard } from './ulid';
 import { readCapturedMeta } from './ingest';
 import { renderClaimMd, applyClaimsBlock, oneLine, CLAIMS_BLOCK_START, CLAIMS_BLOCK_END, type ClaimBacklink } from './claimDoc';
 import { blockKey } from './connect';
-import { readCorrectionDirectives, isClaimSuppressed } from './directives';
+import { readCorrectionDirectives, readRevokeDirectives, isClaimSuppressedActive } from './directives';
 import type { ClaimStatus } from './claims';
 import { makeClaimsDecider, type ClaimsDecider, type EntityInput, type AnsweredReview } from './claimsAgent';
 import type { SourceInput } from './decomposeAgent';
@@ -304,6 +304,7 @@ async function entityBacklinks(wt: string, entityMd: string, newClaimRels: strin
   // (it's on the wrong subject). Survives re-derive/replay (the correction outlives the claim file's
   // reborn ULID). Read once; identity from the node's own frontmatter.
   const corrections = await readCorrectionDirectives(wt);
+  const revokes = await readRevokeDirectives(wt); // SPEC-0050 slice-3: a REVOKED correction no longer suppresses
   const ref = parseEntityNode(entityMd);
   const identityKey = blockKey(ref.kind, ref.name);
   const out: ClaimBacklink[] = [];
@@ -315,7 +316,7 @@ async function entityBacklinks(wt: string, entityMd: string, newClaimRels: strin
       continue; // referenced file no longer exists (e.g. collapsed by CLAIMS-19 dedup) — skip
     }
     const link = parseClaimBacklink(md, rel, entityRel);
-    if (link && !isClaimSuppressed(corrections, identityKey, link.statement)) out.push(link);
+    if (link && !isClaimSuppressedActive(corrections, revokes, identityKey, link.statement)) out.push(link);
   }
   return out.sort((a, b) => (path.basename(a.claimPath) < path.basename(b.claimPath) ? -1 : 1));
 }
