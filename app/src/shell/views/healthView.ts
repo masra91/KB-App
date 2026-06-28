@@ -15,7 +15,7 @@ import { renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure
 import { isDanglingFinding, type HealthProjection, type HealthDimension, type HealthDimensionFinding, type HealthSeverity } from '../../kb/healthProjection';
 import type { HealthFinding, DanglingLink } from '../../kb/healthPanel';
 
-const HEADER = `<h1 class="health-title viz-signage">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Read-only; scanned without AI.</p>`;
+const HEADER = `<h1 class="health-title viz-voice">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Read-only; scanned without AI.</p>`;
 
 export async function mountHealth(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="health viz-surface">${HEADER}<p class="health-scanning viz-body">Scanning…</p></div>`;
