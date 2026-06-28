@@ -64,7 +64,7 @@ async function seedCandidate(root: string, kind: string, name: string, sourceId:
 
 /** Seed an existing canonical entity node; returns { id, rel }. `aliases` are added alongside the
  *  self-id alias (real nodes carry both) — used to test alias-based link resolution (COHERE-1). */
-async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = [], tags: string[] = []): Promise<{ id: string; rel: string }> {
+async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = [], tags: string[] = [], properties: Record<string, string> = {}): Promise<{ id: string; rel: string }> {
   const id = ulid();
   const rel = entityFileRel(kind, name, id); // COMPOSE-6: human leaf (real case + spaces), kind dir lowercase
   const dest = path.join(root, rel);
@@ -80,6 +80,7 @@ async function seedNode(root: string, kind: string, name: string, derivedFrom: s
       derivedFrom,
       resolvedFrom: [],
       tags,
+      ...(Object.keys(properties).length > 0 ? { properties } : {}),
       createdAt: '2026-05-30T00:00:00Z',
       updatedAt: '2026-05-30T00:00:00Z',
     }),
@@ -119,6 +120,29 @@ async function seedClaimRelatesTo(root: string, subjectRel: string, statement: s
   ].join('\n');
   await fs.writeFile(dest, fm, 'utf8');
   return rel;
+}
+
+/** Seed an archived `source.md` carrying curated property values (scope/sensitivity) — META S1b reads
+ *  these off the node's member sources. Returns the source's ULID (a real ULID so `sourceFileRel` maps it). */
+async function seedSource(root: string, opts: { scope?: string; sensitivity?: string } = {}): Promise<string> {
+  const id = ulid();
+  const dest = path.join(root, 'sources', dateShard(id), id, 'source.md');
+  await fs.mkdir(path.dirname(dest), { recursive: true });
+  const fm = [
+    '---',
+    `id: ${id}`,
+    'class: primary',
+    'kind: text',
+    ...(opts.scope ? [`scope: ${opts.scope}`] : []),
+    ...(opts.sensitivity ? [`sensitivity: ${opts.sensitivity}`] : []),
+    'raw: raw.md',
+    '---',
+    '',
+    '# A source',
+    '',
+  ].join('\n');
+  await fs.writeFile(dest, fm, 'utf8');
+  return id;
 }
 
 /** A decider that puts ALL candidates into one cluster with the given name (+ optional merge/fold). */
@@ -211,6 +235,73 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
       await commitAll(root, 'seed');
       await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs'));
       expect(await listEntityFiles(root)).toEqual(['entities/person/Steve Jobs.md']);
+    });
+  });
+
+  // SPEC-0025 META S1b — the curated scope/sensitivity property VALUES carried from a node's sources.
+  it('META S1b: carries scope + MOST-RESTRICTIVE sensitivity from the node\'s sources onto its Properties', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, { scope: 'work', sensitivity: 'shareable' });
+      const s2 = await seedSource(root, { scope: 'work', sensitivity: 'internal' });
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await seedCandidate(root, 'person', 'Ada Lovelace', s2);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).toMatch(/^scope: work$/m); // uniform across both sources → carried
+      expect(md).toMatch(/^sensitivity: internal$/m); // internal ≻ shareable (SENSE-3 most-restrictive)
+    });
+  });
+
+  it('META S1b: scope is OMITTED when the node\'s sources disagree (ambiguous), sensitivity still folds', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, { scope: 'work', sensitivity: 'internal' });
+      const s2 = await seedSource(root, { scope: 'personal', sensitivity: 'shareable' });
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await seedCandidate(root, 'person', 'Ada Lovelace', s2);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).not.toMatch(/^scope:/m); // work vs personal → ambiguous → omitted (no thrash)
+      expect(md).toMatch(/^sensitivity: internal$/m); // most-restrictive still applies
+    });
+  });
+
+  it('META S1b: a MERGE keeps the LOSER\'s most-restrictive sensitivity — never down-classifies (CONNECT-10, security/QD-2)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // canonical B is `shareable`; the loser A carries `internal`. Merging A into B must NOT down-classify
+      // the result to `shareable` (which would over-share A's internal-sourced material on the egress facet).
+      const a = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA'], [], [], { sensitivity: 'internal' });
+      const b = await seedNode(root, 'person', 'Steven Jobs', ['sources/b/01SB'], [], [], { sensitivity: 'shareable' });
+      const s1 = await seedSource(root, { sensitivity: 'shareable' });
+      await seedCandidate(root, 'person', 'Steve Jobs', s1);
+      await commitAll(root, 'seed');
+
+      // canonical = B (shareable), merge the loser A (internal). (Block key normalizes both to 'steve jobs'.)
+      await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs', { existingNodeId: b.id, mergeExistingNodeIds: [a.id] }));
+      const files = await listEntityFiles(root);
+      expect(files).toHaveLength(1); // one surviving canonical node
+      const md = await fs.readFile(path.join(root, files[0]), 'utf8');
+      expect(md).toMatch(/^sensitivity: internal$/m); // ← loser A's `internal` preserved, NOT down-classified
+    });
+  });
+
+  it('META S1b: a source with NO scope/sensitivity → no curated values emitted (clean, no empty keys)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      const s1 = await seedSource(root, {}); // bare source, no scope/sensitivity frontmatter
+      await seedCandidate(root, 'person', 'Ada Lovelace', s1);
+      await commitAll(root, 'seed');
+
+      await connectOne(root, 'person|ada lovelace', oneClusterDecider('Ada Lovelace'));
+      const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
+      expect(md).not.toMatch(/^scope:/m);
+      expect(md).not.toMatch(/^sensitivity:/m);
     });
   });
 });
