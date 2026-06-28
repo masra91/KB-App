@@ -3,10 +3,10 @@ design: DESIGN-LEGACY-VIEWS
 implements: SPEC-0033
 title: Legacy never-gated views — WS3 migration design spec (Activity · Settings · Agents · Ask · Capture)
 type: design
-status: draft   # WS3 Principal deep-pass (UI consistency + a11y); HYBRID gate, KB-Lead classifies
+status: implemented   # all 5 view targets + the a11y sweep shipped on main (see §10); HYBRID gate, KB-Lead classifies
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-08
-updated: 2026-06-08
+updated: 2026-06-27
 related: [SPEC-0033, SPEC-0027, SPEC-0029, SPEC-0028]
 design-system: ../../app/src/shell/design-system.css   # "The Line" — the blessed WS2 primitives/tokens
 gates:
@@ -157,6 +157,15 @@ input-heavy surfaces).
   the highest-severity gaps (Capture); they ship with the view's migration PR.
 
 ## 10. Changelog
+- 2026-06-27 — **status → implemented (record-squaring).** On reconciliation against the committed tree, every
+  target in §§2–7 is already on `main` (shipped across the WS3 wave #261/#262/#274/#285): Settings
+  selects→`.viz-seg` + `.viz-confirm`/`.viz-btn--danger`; Agents `status-*`→`--viz-state-*` tokens (hex gone);
+  Ask `.viz-btn--primary` + citation `role="link"`/`aria-label`/keyboard + `.ask-answer{overflow-wrap:anywhere}`;
+  Capture `.viz-field` textarea label + dropzone `role`/`aria-label`/`tabindex` + `.viz-btn--primary`; Activity
+  styled-select actor filter (spec-acceptable for the data-derived set) + centered trace (#261) + trace-by-id
+  lookup (#386). The §7 a11y sweep items are all present. No further migration PR needed; the `gates:` block
+  is left for KB-Lead's HYBRID classify (rubber-stamp). File:lines in §§2–6 are the 06-08 snapshot and have
+  since drifted (Settings grew Scale/Recall cards) — read them as intent, not current line numbers.
 - 2026-06-08 — created (draft). WS3 Principal deep-pass: migration target for the 5 legacy never-gated views
   onto the blessed WS2 primitives + an a11y sweep, so future migration is gated against a written spec.
   Defects + file:lines self-sourced from the tree; will fold in KB-Lead's full WS3 evidence when it lands.
