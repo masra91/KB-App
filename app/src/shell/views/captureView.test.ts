@@ -186,6 +186,12 @@ describe('captureView — RICHIN rich ingestion (SPEC-0040)', () => {
     drop(root.querySelector('#dropzone') as HTMLElement, [big]);
     await flush();
     expect(root.querySelector('#staged')!.textContent).toContain('large');
+    // a11y caution-glyph unify: the flag rides a monochrome brass ◆ mark (aria-hidden), label reads
+    // AA in ink — fails-before this fix (was a multicolor ⚠️ emoji as the carrier).
+    const mark = root.querySelector('.capture-flag .capture-flag-mark')!;
+    expect(mark).toBeTruthy();
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(root.querySelector('.capture-flag')!.textContent).not.toContain('⚠️');
 
     root.querySelector<HTMLButtonElement>('#capture')!.click();
     await flush();

@@ -151,6 +151,7 @@ ul.checks li {
 /* Large-capture caution (RICHIN-11) — #184 a11y: the label reads AA in `--viz-ink`; the caution hue
    rides the inline `⚠️` glyph already in the markup (DL-1's glyph variant — it's inline, not a block). */
 .capture-flag { color: var(--viz-ink); }
+.capture-flag-mark { color: var(--viz-brass); margin-right: 0.3rem; } /* monochrome brass caution mark (mirrors .model-stale-mark) — hue rides the glyph, label reads AA */
 
 .dropzone {
   margin-top: 0.75rem;
