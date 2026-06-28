@@ -928,43 +928,46 @@ button:disabled {
 /* --- Health view: structural-lint instrument panel (SPEC-0035 HEALTH; DL-2 anatomy) ---
    Three gauge groups hung off the shared spine; severity = hue on a graphic (tick + count chip),
    never on the entity-name text (#184): brass = attention (issues), patina = settled (clean). */
+/* SPEC-0060 VUX-1 — Health migrated to the v3 warm-vellum token system (retires --viz-*; consumes the
+   merged design-system.css set: --ink/--stone/--hair/--linen/--slate/--sprout/--gold-deep/--oxide/--mono).
+   Shared `.viz-*` utility CLASSES (card/surface/voice/body/numeric) stay — only the tokens migrate. */
 .health { padding: 0.25rem 0; }
-.health-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
-.health-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 64ch; }
-.health-scanning { color: var(--viz-ink-muted); }
-/* SPEC-0058 STATE-13 — the "health glance" (DL-2's render contract, tokenized from the UX v2 prototype).
+.health-title { font-size: 1.4rem; margin: 0; color: var(--ink); }
+.health-sub { color: var(--stone); margin: 0.25rem 0 1rem; max-width: 64ch; }
+.health-scanning { color: var(--stone); }
+/* SPEC-0058 STATE-13 — the "health glance" (DL-2's render contract, tokenized from the v3 prototype).
    The glance is a material card (depth/grain from #453's `.viz-card`); each dimension is an `.hrow`. */
 .health-glance { margin: 0 0 1rem; padding: 0.2rem 0; }
 /* Summary line: the total reading + scanned count + build stamp. Calm when sound (settled), count when not. */
-.health-summary { padding: 0.7rem 1.1rem 0.6rem; color: var(--viz-ink); display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; border-bottom: 0.5px solid var(--viz-rule); }
-.health-scanned { color: var(--viz-ink-muted); font-size: 0.8rem; }
-.health-asof { color: var(--viz-ink-muted); font-size: 0.74rem; }
+.health-summary { padding: 0.7rem 1.1rem 0.6rem; color: var(--ink); display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; border-bottom: 0.5px solid var(--hair); }
+.health-scanned { color: var(--stone); font-size: 0.8rem; }
+.health-asof { color: var(--stone); font-size: 0.74rem; }
 .health-count { font-size: 0.95rem; font-weight: 600; }
 /* A dimension = an `.hrow` glance row (tile + title/desc + count) over its findings. */
 .health-dimension { margin: 0; }
-.hrow { display: flex; align-items: center; gap: 12px; padding: 0.75rem 1.1rem; border-bottom: 0.5px solid var(--viz-rule); transition: background 0.18s ease; }
+.hrow { display: flex; align-items: center; gap: 12px; padding: 0.75rem 1.1rem; border-bottom: 0.5px solid var(--hair); transition: background var(--t); }
 .health-dimension:last-child .hrow { border-bottom: none; }
-.hrow:hover { background: var(--viz-rule); }
-/* #184: the severity hue lives ONLY on the tile (bg + icon, sprout/brass/oxide tokens, color-mix so it
-   adapts light/dark). The title `.ht b`, the desc `.ht span`, and the count `.hn` never carry the hue. */
-.hrow .hi { width: 30px; height: 30px; flex: 0 0 30px; border-radius: var(--r-chip, 9px); display: flex; align-items: center; justify-content: center; font-size: 15px; }
-.hrow .hi.ok { background: color-mix(in srgb, var(--viz-sprout) 14%, transparent); color: var(--viz-sprout); }
-.hrow .hi.warn { background: color-mix(in srgb, var(--viz-brass) 16%, transparent); color: var(--viz-brass); }
-.hrow .hi.bad { background: color-mix(in srgb, var(--viz-oxide) 14%, transparent); color: var(--viz-oxide); }
+.hrow:hover { background: var(--hover); }
+/* #184: the severity hue lives ONLY on the tile (bg + icon, sprout/gold/oxide tokens, color-mix so it
+   adapts). The title `.ht b`, the desc `.ht span`, and the count `.hn` never carry the hue. */
+.hrow .hi { width: 30px; height: 30px; flex: 0 0 30px; border-radius: var(--r-chip); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.hrow .hi.ok { background: color-mix(in srgb, var(--sprout) 14%, transparent); color: var(--sprout); }
+.hrow .hi.warn { background: color-mix(in srgb, var(--gold-deep) 16%, transparent); color: var(--gold-deep); }
+.hrow .hi.bad { background: color-mix(in srgb, var(--oxide) 14%, transparent); color: var(--oxide); }
 .hrow .ht { flex: 1; min-width: 0; }
-.hrow .ht b { display: block; font-size: 0.8rem; font-weight: 500; color: var(--viz-ink); }
-.hrow .ht span { font-size: 0.74rem; color: var(--viz-ink-muted); }
-.hrow .hn { font-family: var(--viz-font-mono, var(--font-mono)); font-size: 0.95rem; color: var(--viz-ink); }
+.hrow .ht b { display: block; font-size: 0.8rem; font-weight: 500; color: var(--ink); }
+.hrow .ht span { font-size: 0.74rem; color: var(--stone); }
+.hrow .hn { font-family: var(--mono); font-size: 0.95rem; color: var(--ink); }
 .health-row-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .health-open { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
-.health-open:hover { border-left-color: var(--viz-accent); background: var(--viz-rule); } /* interactive hover → --viz-accent (SPEC-0057 ember migration; ember reserved for "decide") */
-.health-finding-name { color: var(--viz-ink); } /* name stays ink — never the severity hue (#184) */
-.health-open:hover .health-finding-name { color: var(--viz-accent); }
-.health-untitled { color: var(--viz-ink-muted); font-style: italic; }
-.health-kind { color: var(--viz-ink-muted); }
-.health-defect { color: var(--viz-ink-muted); font-size: 0.74rem; margin-left: auto; } /* the specific defect, muted */
-.health-more { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
-.health-footnote { margin: 0.8rem 0 0; font-size: 0.76rem; color: var(--viz-ink-muted); font-style: italic; max-width: 64ch; }
+.health-open:hover { border-left-color: var(--slate); background: var(--hover); } /* interactive hover → --slate (ember reserved for "decide") */
+.health-finding-name { color: var(--ink); } /* name stays ink — never the severity hue (#184) */
+.health-open:hover .health-finding-name { color: var(--slate); }
+.health-untitled { color: var(--stone); font-style: italic; }
+.health-kind { color: var(--stone); }
+.health-defect { color: var(--stone); font-size: 0.74rem; margin-left: auto; } /* the specific defect, muted */
+.health-more { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--stone); font-style: italic; }
+.health-footnote { margin: 0.8rem 0 0; font-size: 0.76rem; color: var(--stone); font-style: italic; max-width: 64ch; }
 
 /* --- Agents hub: direction-framed Manage IA (SPEC-0053 WS-E) ---
    One "Agents" surface; two groups framed inward (Librarians + their Schedules) vs outward (Researchers).
