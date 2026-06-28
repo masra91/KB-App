@@ -10,19 +10,32 @@
    renderer.ts — pinned, OFL, no CDN). The §4 shape-matched fallback stacks below mean a load miss
    degrades gracefully without collapsing the identity. */
 
-/* 1. Color tokens (§3) — role-named, dark default + light ("draughting paper") override. State hues
-   color fills / glyphs / borders / large+display text ONLY (all ≥3:1); small body text stays --viz-ink
-   (14:1). In particular oxide (3.96:1) MUST NOT color normal-size text. */
+/* 1. Color tokens (§3) — Vellum brand palette (SPEC-0057 / brand/BRAND-GUIDELINES.md). The app skin is
+   FIXED-LIGHT: the cream study IS the product; surfaces don't invert (no dark default, no
+   prefers-color-scheme override — brand §3). Role-named so the whole system re-themes by token with zero
+   call-site churn. State hues color fills / glyphs / borders / large+display text ONLY (all ≥3:1 on cream);
+   small body text stays --viz-ink (~11:1). oxide/ember/gold (<4.5:1) MUST NOT color normal-size text.
+   SEMANTIC MIGRATION (deferred to the screen rethemes #403-406, not this slice): brand reserves --viz-ember
+   for "needs your decision" and uses --viz-sprout (green) for active/in-progress. Today --viz-ember carries
+   "active work" (25 sites); this slice re-colors the existing roles to brand + ADDS --viz-sprout for the
+   rethemes to migrate active→sprout / waiting→ember onto. So no call-site churn here. */
 :root {
-  --viz-field: #15171a;     /* warm graphite — the ground */
-  --viz-rule: #2b2f35;      /* spine, ticks, registration marks */
-  --viz-idle: #6b7178;      /* at-rest */
-  --viz-ember: #e8743b;     /* the signature heat — active work */
-  --viz-patina: #5fa38c;    /* settled / promoted */
-  --viz-brass: #c7a24a;     /* blocked / waiting */
-  --viz-oxide: #d2452f;     /* error / set-aside (fill/glyph/border/display only) */
-  --viz-ink: #e6e3dc;       /* labels, body */
-  --viz-ink-muted: #9298a0; /* secondary, units */
+  --viz-field: #f4efe3;     /* Vellum cream — the canvas/ground (fixed-light: the study) */
+  --viz-panel: #fbf7ec;     /* Linen — a raised panel over the canvas (rethemes adopt) */
+  --viz-rule: #e0d6be;      /* Hairline — spine, ticks, registration marks */
+  --viz-idle: #6a6456;      /* Stone — at-rest / neutral */
+  --viz-ember: #c8743c;     /* Ember — RESERVED "needs your decision" cue (brand §3); the one attention hue */
+  --viz-sprout: #3e9e82;    /* Sprout — active / in-progress / motion ONLY (brand: idle/pending stay neutral) */
+  --viz-patina: #2f6b5b;    /* Viridian — settled / promoted / primary brand green */
+  --viz-brass: #c9a35a;     /* Gilded Gold — rationed accent: lines, nodes, one highlight (brand §3) */
+  --viz-oxide: #a8432a;     /* deep brick — error / set-aside. Derived: brand reserves Ember for decisions
+                               (not errors), so danger keeps a distinct red. fill/glyph/border/display only */
+  --viz-ink: #2b2f36;       /* Slate Ink — labels, body */
+  --viz-ink-muted: #6a6456; /* Stone — secondary, units */
+  --viz-deep: #1e3557;      /* Deep Blue — depth / secondary; the graph/hero field + gradient anchor */
+  --viz-mist: #bfd7e6;      /* Mist Blue — gradient light end */
+  /* Signature field gradient (brand §3): deep blue → slate → viridian → sprout, behind graphs/heroes. */
+  --viz-field-gradient: linear-gradient(135deg, #1e3557 0%, #3a6e88 38%, #2f6b5b 72%, #3e9e82 100%);
 
   /* 2. Type roles (§4) — bundled faces + shape-matched fallbacks (identity-preserving on a load miss). */
   --viz-font-signage: 'Saira Condensed', 'Arial Narrow', sans-serif;
@@ -37,12 +50,8 @@
   --viz-ease-index: cubic-bezier(0.2, 0.8, 0.2, 1); /* ease-out w/ a hint of stepper-seat overshoot */
   --viz-ease-state: ease-in-out;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --viz-field: #f4f1ea; --viz-rule: #cfc9bc; --viz-idle: #8a8473; --viz-ember: #c2541f;
-    --viz-patina: #3e7d67; --viz-brass: #9a7b2e; --viz-oxide: #b02a18; --viz-ink: #1c1b18; --viz-ink-muted: #6a6557;
-  }
-}
+/* No prefers-color-scheme override: the Vellum skin is fixed-light (brand §3 — "surfaces don't invert;
+   the cream study is the product"). The single :root above is the whole palette. */
 
 /* Type-role utilities (apply the §4 roles without re-stating the stack). */
 .viz-signage { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; }
