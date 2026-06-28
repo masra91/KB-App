@@ -15,6 +15,7 @@ import type { WebResearchOptions } from '../kb/researchWebAgent';
 import type { CodeResearchOptions } from '../kb/researchCodeAgent';
 import type { M365ResearchOptions, M365Surface } from '../kb/researchM365Agent';
 import type { M365MailIntakeOptions } from '../kb/m365MailConnector';
+import type { MediaExtractOptions } from '../kb/mediaExtract';
 import type { ResearchDepsOptions } from '../kb/researchInline';
 import type { IntakeDepsOptions } from '../kb/intakeScheduler';
 import type { WorkIqStatus, InstallWorkIqResult } from '../kb/types';
@@ -92,6 +93,14 @@ export function m365MailIntakeOptions(): M365MailIntakeOptions {
  */
 export function researchDepsOptions(log: DevLog): ResearchDepsOptions {
   return { web: webResearchOptions(log), code: codeResearchOptions(log), m365: m365ResearchOptions() };
+}
+
+/** SPEC-0052 MEDIA: the archive-stage media-extraction options — the resolved copilot cliPath + pinned
+ *  model (the archivist's), so the orchestrator can extract a text body from a dropped PDF/image via the
+ *  Copilot multimodal path in the packaged app. Vision capability is probed at run-time (`liveVisionProbe`);
+ *  absent a vision model the extraction fails loud (needs-setup), never a silent empty body. */
+export function mediaExtractOptions(): MediaExtractOptions {
+  return { cliPath: resolveCopilotCliPath(), model: resolveCopilotModel(undefined, 'archivist') };
 }
 
 /** The INTAKE scheduler's deps — wires the M365-mail connector's WorkIQ MCP factory so the proactive

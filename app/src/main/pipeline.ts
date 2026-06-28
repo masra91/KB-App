@@ -30,7 +30,7 @@ import { Mutex } from '../kb/stageLock';
 import { createVaultDevLog, readRecentDevLogEntries, type DevLog } from '../kb/devlog';
 import { breadcrumbObserver } from '../kb/activityBreadcrumb';
 import { telemetryHealth } from './telemetry';
-import { researchDepsOptions, intakeDepsOptions } from './researchWiring';
+import { researchDepsOptions, intakeDepsOptions, mediaExtractOptions } from './researchWiring';
 import { selectResearchFn } from '../kb/researchInline';
 import { createVaultTracer } from '../kb/tracing';
 import { loadPerfIndex } from '../kb/perfIndex';
@@ -371,7 +371,9 @@ export async function startPipeline(vaultPath: string): Promise<Orchestrator> {
   // enrich-trigger robustness ethos); the Copilot-backed classifier is built behind the same seam and enabled
   // by passing a `run` to makeSensitivityClassifier.
   const classify = makeSensitivityClassifier();
-  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, stageCaps.archive, log, tracer, classify);
+  // SPEC-0052 MEDIA: extract a text body from dropped PDFs/images at the archive boundary (Copilot
+  // multimodal), so a dropped PDF actually enters the KB instead of a dead `![[raw.pdf]]` embed.
+  const orch = new Orchestrator(stagingWt, makeCopilotDecider({ vaultPath: stagingWt }), lock, promoteEvergreen, stageCaps.archive, log, tracer, classify, mediaExtractOptions());
   // The four stages run on the staging worktree (root-agnostic) and serialize their canonical
   // advances through the one shared lock (§5). Pipeline order is Decompose→Connect→Claims
   // (SPEC-0020 reorder): Decompose emits candidates, Connect resolves them into evergreen

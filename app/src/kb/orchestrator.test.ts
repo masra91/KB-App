@@ -175,6 +175,47 @@ describe.skipIf(!gitAvailable)('Orchestration engine (SPEC-0014)', () => {
     expect(await fs.readFile(path.join(dest, 'source.md'), 'utf8')).toContain('![[raw.png]]');
   });
 
+  // SPEC-0052 MEDIA — a dropped PDF/image now gets a real TEXT body (was a dead `![[raw.pdf]]` embed).
+  const mediaOk = {
+    vision: async () => ({ supportedMediaTypes: ['application/pdf', 'image/png'], maxImageBytes: 5_000_000 }),
+    session: async () => ({ text: 'Invoice #42\nTotal: $99' }),
+  };
+
+  it('MEDIA-1/4: a dropped PDF gets an extracted text body woven below the preserved embed', async () => {
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'invoice.pdf', data: new Uint8Array([0x25, 0x50, 0x44, 0x46]) }]);
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, undefined, mediaOk);
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('![[raw.pdf]]'); // the original binary is still embedded + preserved (MEDIA-4)
+    expect(sourceMd).toContain('Invoice #42'); // ← the fix: extracted text in the body (MEDIA-1)
+    expect(sourceMd).toContain('Total: $99');
+  });
+
+  it('MEDIA fails-before: WITHOUT extraction a PDF is the dead opaque embed only (the bug this fixes)', async () => {
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'invoice.pdf', data: new Uint8Array([0x25, 0x50, 0x44, 0x46]) }]);
+    const destRel = await archiveOne(vault, ids[0]); // no mediaExtract wired → the old behavior
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('![[raw.pdf]]');
+    expect(sourceMd).not.toContain('Invoice'); // no text body — the dead end MEDIA removes
+  });
+
+  it('MEDIA-5/7 fail-loud: extraction failure → embed-only body + the cause recorded on the source audit', async () => {
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'scan.png', data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) }]);
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, undefined, { vision: async () => null }); // no vision model
+    const sourceMd = await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8');
+    expect(sourceMd).toContain('![[raw.png]]'); // binary preserved, drain continued — not lost
+    const audit = await fs.readFile(path.join(vault, destRel, 'audit.jsonl'), 'utf8');
+    expect(audit).toContain('"ok":false'); // the media outcome is recorded — surfaced, never silent
+    expect(audit).toContain('no-vision-model'); // the reason
+  });
+
+  it('MEDIA: a non-media file (e.g. .zip) is untouched — still the plain embed, no extraction attempted', async () => {
+    const session = vi.fn();
+    const { ids } = await captureToInbox(vault, 'in-app-panel', [{ kind: 'file', name: 'bundle.zip', data: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) }]);
+    const destRel = await archiveOne(vault, ids[0], undefined, undefined, undefined, undefined, { vision: async () => ({ supportedMediaTypes: ['application/pdf'], maxImageBytes: 1_000 }), session });
+    expect(await fs.readFile(path.join(vault, destRel, 'source.md'), 'utf8')).toContain('![[raw.zip]]');
+    expect(session).not.toHaveBeenCalled(); // not extractable → no model call
+  });
+
   it('ORCH-4: a full poke() drain empties the inbox into sources/ and writes status', async () => {
     await captureToInbox(vault, 'in-app-panel', [
       { kind: 'text', text: 'one' },
