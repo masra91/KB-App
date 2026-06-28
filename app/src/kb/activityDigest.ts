@@ -162,3 +162,24 @@ export function buildFeed(events: readonly AuditEvent[]): ActivityFeedEntry[] {
   entries.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
   return entries;
 }
+
+/** Lowercased searchable text for a feed entry — the VISIBLE summary FIRST (SPEC-0060 VUX-14: a
+ *  search hits the curated line the user actually reads, e.g. "obsidian"), plus the raw events behind
+ *  it (so a subject id / payload value visible in the drill-down stays findable). NULL-SAFE. */
+function feedHaystack(entry: ActivityFeedEntry): string {
+  const raw = (entry.events ?? [])
+    .map((e) => [e.actor, e.eventType, Object.values(e.subjects ?? {}).join(' '), JSON.stringify(e.payload ?? {})].join(' '))
+    .join(' ');
+  return `${entry.summary ?? ''} ${raw}`.toLowerCase();
+}
+
+/**
+ * Filter a built feed by free text against each entry's VISIBLE SUMMARY (+ its raw events) — VUX-14.
+ * This is why the search runs on the FEED, not the raw event stream: the user searches what they SEE.
+ * Pure; preserves order; empty/whitespace text returns every entry.
+ */
+export function filterFeedByText(entries: readonly ActivityFeedEntry[], text: string): ActivityFeedEntry[] {
+  const q = text.trim().toLowerCase();
+  if (q.length === 0) return [...entries];
+  return entries.filter((e) => feedHaystack(e).includes(q));
+}

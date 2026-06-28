@@ -4,7 +4,7 @@
 // stays default). The IPC is mocked (`window.kbApi.activityFeed/activityLineage`); we assert the
 // rendered DOM, the drill-down, the filter→re-query, lineage, and read-only/escaping behavior.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mountActivity, lineageHtml, entryHtml, rawEventHtml } from './activityView';
+import { mountActivity, lineageHtml, entryHtml, rawEventHtml, SEARCH_DEBOUNCE_MS } from './activityView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { ActivityFeedResult, Lineage, KbApi } from '../../kb/types';
 
@@ -190,13 +190,22 @@ describe('Drill-down to raw events (AUDIT-5)', () => {
 });
 
 describe('Filter / search (AUDIT-7)', () => {
-  it('re-queries the feed with a text filter as the Principal types', async () => {
+  it('debounces the text filter — no query on the keystroke, one query after the pause (VUX-14)', async () => {
     const c = await mount();
+    const callsAfterMount = activityFeed.mock.calls.length;
     const search = c.querySelector<HTMLInputElement>('#activitySearch')!;
-    search.value = 'atlas';
-    search.dispatchEvent(new Event('input', { bubbles: true }));
+    // The Principal types fast: three keystrokes in quick succession.
+    for (const v of ['a', 'at', 'atlas']) {
+      search.value = v;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     await flush();
+    // Fails-before: the un-debounced view re-queried on every keystroke. Debounced, none fire yet.
+    expect(activityFeed.mock.calls.length).toBe(callsAfterMount);
+    // After the debounce window, exactly one query lands — with the final text.
+    await new Promise((r) => setTimeout(r, SEARCH_DEBOUNCE_MS + 50));
     expect(activityFeed).toHaveBeenLastCalledWith({ text: 'atlas' });
+    expect(activityFeed.mock.calls.length).toBe(callsAfterMount + 1);
   });
 
   it('re-queries with an actor filter; the dropdown is seeded from the loaded actors', async () => {

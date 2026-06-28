@@ -64,7 +64,7 @@ import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { locateSourceRef } from '../kb/sourceOpen';
 import { loadActivityIndex, readEvents, filterEvents } from '../kb/activityIndex';
-import { buildFeed } from '../kb/activityDigest';
+import { buildFeed, filterFeedByText } from '../kb/activityDigest';
 import { traceLineage } from '../kb/lineage';
 import { resolveExecutable } from './resolvePath';
 import type { CapturePayload } from '../kb/ingest';
@@ -621,8 +621,13 @@ export function registerIpc(): void {
     const root = activeStagingRoot();
     if (!root) return { entries: [], total: 0, truncated: false };
     const index = await loadActivityIndex(root);
-    const events = filter ? filterEvents(index.events, filter) : index.events;
-    return { entries: buildFeed(events), total: index.total, truncated: index.truncated };
+    // SPEC-0060 VUX-14: the free-text search matches the VISIBLE SUMMARY, so it runs on the built FEED
+    // (where the curated summary lives), not the raw event stream. Actor/type/time filters stay
+    // event-level. (The `kb:activityEvents` raw-drill surface keeps its full-haystack text match.)
+    const eventFilter: ActivityFilter | undefined = filter ? { ...filter, text: undefined } : filter;
+    const events = eventFilter ? filterEvents(index.events, eventFilter) : index.events;
+    const entries = filter?.text ? filterFeedByText(buildFeed(events), filter.text) : buildFeed(events);
+    return { entries, total: index.total, truncated: index.truncated };
   });
 
   // AUDIT-5/7: raw events for drill-down + filter/search across the FULL audit (not the capped feed).
