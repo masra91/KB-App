@@ -843,7 +843,13 @@ export async function connectOne(
       //    scope (best-effort — an ambiguous mix keeps the settled value rather than thrashing).
       const priorProps = canonical?.properties ?? {};
       const memberSensitivities = members.map((m) => sourceProps[m.sourceId]?.sensitivity).filter((s): s is string => !!s);
-      const sensPool = [...memberSensitivities, ...(priorProps.sensitivity ? [priorProps.sensitivity] : [])];
+      // SECURITY (QD-2): include the LOSERS' sensitivity in the most-restrictive pool. A merge folds the
+      // loser nodes into the canonical (their sources land in `resolvedFrom`), so a loser's `internal` must
+      // survive — else merging an internal entity into a shareable one would DOWN-classify the result and
+      // over-share internal-sourced material on the egress facet. Monotonic-converges holds along the
+      // canonical's lineage; this closes the cross-merge gap where the restrictive value sits on a loser.
+      const loserSensitivities = losers.map((l) => l.properties?.sensitivity).filter((s): s is string => !!s);
+      const sensPool = [...memberSensitivities, ...loserSensitivities, ...(priorProps.sensitivity ? [priorProps.sensitivity] : [])];
       const sensitivity = sensPool.length > 0 ? sensPool.reduce((a, b) => (restrictiveness(b) > restrictiveness(a) ? b : a)) : undefined;
       const memberScopes = [...new Set(members.map((m) => sourceProps[m.sourceId]?.scope).filter((s): s is string => !!s))];
       const scope = memberScopes.length === 1 ? memberScopes[0] : priorProps.scope;

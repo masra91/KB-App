@@ -64,7 +64,7 @@ async function seedCandidate(root: string, kind: string, name: string, sourceId:
 
 /** Seed an existing canonical entity node; returns { id, rel }. `aliases` are added alongside the
  *  self-id alias (real nodes carry both) — used to test alias-based link resolution (COHERE-1). */
-async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = [], tags: string[] = []): Promise<{ id: string; rel: string }> {
+async function seedNode(root: string, kind: string, name: string, derivedFrom: string[], aliases: string[] = [], tags: string[] = [], properties: Record<string, string> = {}): Promise<{ id: string; rel: string }> {
   const id = ulid();
   const rel = entityFileRel(kind, name, id); // COMPOSE-6: human leaf (real case + spaces), kind dir lowercase
   const dest = path.join(root, rel);
@@ -80,6 +80,7 @@ async function seedNode(root: string, kind: string, name: string, derivedFrom: s
       derivedFrom,
       resolvedFrom: [],
       tags,
+      ...(Object.keys(properties).length > 0 ? { properties } : {}),
       createdAt: '2026-05-30T00:00:00Z',
       updatedAt: '2026-05-30T00:00:00Z',
     }),
@@ -267,6 +268,26 @@ describe.skipIf(!gitAvailable)('connectOne — born-resolved nodes (CONNECT-1/3/
       const md = await fs.readFile(path.join(root, 'entities/person/Ada Lovelace.md'), 'utf8');
       expect(md).not.toMatch(/^scope:/m); // work vs personal → ambiguous → omitted (no thrash)
       expect(md).toMatch(/^sensitivity: internal$/m); // most-restrictive still applies
+    });
+  });
+
+  it('META S1b: a MERGE keeps the LOSER\'s most-restrictive sensitivity — never down-classifies (CONNECT-10, security/QD-2)', async () => {
+    await withTempVault(async (root) => {
+      await createKb({ path: root, initGitIfNeeded: true });
+      // canonical B is `shareable`; the loser A carries `internal`. Merging A into B must NOT down-classify
+      // the result to `shareable` (which would over-share A's internal-sourced material on the egress facet).
+      const a = await seedNode(root, 'person', 'Steve Jobs', ['sources/a/01SA'], [], [], { sensitivity: 'internal' });
+      const b = await seedNode(root, 'person', 'Steven Jobs', ['sources/b/01SB'], [], [], { sensitivity: 'shareable' });
+      const s1 = await seedSource(root, { sensitivity: 'shareable' });
+      await seedCandidate(root, 'person', 'Steve Jobs', s1);
+      await commitAll(root, 'seed');
+
+      // canonical = B (shareable), merge the loser A (internal). (Block key normalizes both to 'steve jobs'.)
+      await connectOne(root, 'person|steve jobs', oneClusterDecider('Steve Jobs', { existingNodeId: b.id, mergeExistingNodeIds: [a.id] }));
+      const files = await listEntityFiles(root);
+      expect(files).toHaveLength(1); // one surviving canonical node
+      const md = await fs.readFile(path.join(root, files[0]), 'utf8');
+      expect(md).toMatch(/^sensitivity: internal$/m); // ← loser A's `internal` preserved, NOT down-classified
     });
   });
 
