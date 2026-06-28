@@ -142,11 +142,14 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
       await tick();
       const note = root.querySelector<HTMLElement>('.model-stale')!;
       expect(note).toBeTruthy();
-      // `.model-stale` is the needs-you/BRASS surface (design-system.css `color: var(--viz-brass)`),
-      // never oxide — the brass-intent coverage lives at the class that now carries it (per QD-2).
       expect(note.classList.contains('model-stale')).toBe(true);
       expect(note.getAttribute('role')).toBe('status');
       expect(note.textContent).toContain('claude-opus-4'); // names the unavailable id
+      // #184 a11y audit: the needs-you brass hue rides an aria-hidden ◆ mark (the label text reads AA
+      // in --viz-ink); fails-before this fix (no mark span — brass was on the text, sub-AA on cream).
+      const mark = note.querySelector('.model-stale-mark')!;
+      expect(mark).toBeTruthy();
+      expect(mark.getAttribute('aria-hidden')).toBe('true'); // glyph carries hue, not announced
     });
 
     it('persists a pick via setModel on change and updates the runs-as caption in place', async () => {
