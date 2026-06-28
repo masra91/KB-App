@@ -11,7 +11,9 @@
 import { esc } from './html';
 
 const WORDMARK = 'Vellum';
-const TAGLINE = 'Your AI-native second brain — it reads, files, links, and recalls your knowledge, so you don’t have to.';
+// Brand §7 voice = outcome-first (avoid AI-forward hype + marketing tics). DL-1 (hero-identity owner)
+// authorized this line; AI-Detector gate-1 endorsed the direction.
+const TAGLINE = 'A calm second brain — it turns scattered fragments into grounded, connected, citation-backed recall.';
 const CREDITS = 'Built on an Obsidian-compatible markdown vault · GitHub Copilot · Electron · OFL faces (Inter · Spectral · IBM Plex Mono).';
 
 // The crystalline lattice mark (brand/assets/icon/vellum-glyph-mono.svg) — strokes use currentColor so it
