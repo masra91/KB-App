@@ -183,7 +183,7 @@ ul.checks li {
 }
 
 .dropzone.over {
-  border-color: var(--viz-ember);
+  border-color: var(--viz-accent); /* interactive drag-over highlight → --viz-accent (ember reserved for "decide") */
   color: var(--viz-ink);
 }
 
@@ -340,12 +340,13 @@ dl.settings dd {
    if one ever lands, is what gets brass. */
 .scale-hint { border-left: 2px solid var(--viz-rule); padding-left: 0.6rem; }
 /* SCALE-7/8 throttled indicator — ink-muted "effective N of M" caption (NOT brass: transient
-   self-healing, informational, VIZ-10 cry-wolf rule). The ember-breathe dot marks active backing-off;
+   self-healing, informational, VIZ-10 cry-wolf rule). The sprout-breathe dot marks active backing-off;
    the global reduced-motion reset (design-system.css) makes it static. display:flex overrides the UA
    [hidden], so restore display:none when hidden. */
 .scale-throttle { display: flex; align-items: center; gap: 0.4rem; color: var(--viz-ink-muted); }
 .scale-throttle[hidden] { display: none; }
-.scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-ember); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
+/* active/in-progress backing-off → --viz-sprout (was ember; ember is "needs your decision" only). */
+.scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
 
 /* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
 ul.review-list {
@@ -504,7 +505,7 @@ button:disabled {
 .explore-noclaims { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
 
 /* WS-A (SPEC-0046) clickable wiki-citations: a claim's cited sources + woven [[Name]] links.
-   Muted at rest, ember on hover/focus — the established cite affordance language (mirrors .cite-ref). */
+   Muted at rest, accent on hover/focus — the established cite affordance language (mirrors .cite-ref). */
 .explore-cites { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; margin-left: 0.25rem; vertical-align: baseline; }
 .explore-cite { appearance: none; background: transparent; border: 0; padding: 0 0.15rem; cursor: pointer; font: inherit; font-size: 0.68rem; color: var(--viz-ink-muted); }
 .explore-cite .cite-mark { color: var(--viz-accent); font-weight: 600; } /* interactive citation link → accent (#184/#415, same class as ASK cites) */
@@ -699,9 +700,16 @@ button:disabled {
 .agent-status.status-blocked { color: var(--viz-state-blocked); border-color: currentColor; }
 .agent-status.status-error { border-color: var(--viz-state-error); }
 .agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
-.agent-meta { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.6rem; font-size: 0.82rem; }
+.agent-meta { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.15rem 0.6rem; font-size: 0.82rem; align-items: start; }
 .agent-meta dt { color: var(--viz-ink-muted); }
-.agent-meta dd { margin: 0; }
+/* min-width:0 lets the 1fr value cell shrink below the <select>'s intrinsic width instead of overflowing
+   into (and colliding with) the row's selection highlight. */
+.agent-meta dd { margin: 0; min-width: 0; }
+/* Per-agent Model cell — the <select> and its "runs as:" caption STACK: the select is capped to its
+   column and the caption is a block on its own line below it. Without this the inline caption sat beside
+   the select and wrapped/overlapped it (and the row highlight) at narrow widths (P1 chip-overlap fix). */
+.agent-meta dd .agent-model-select, .agent-meta dd .agent-model-text { max-width: 100%; }
+.agent-model-runs { display: block; margin: 0.2rem 0 0; }
 
 /* SPEC-0048 — the global "Default model" picker control (Design-Lead visual). */
 .model-control { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.3rem 0 0.9rem; }
@@ -766,7 +774,7 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-strip { padding: 0.5rem 0 0.75rem 0.9rem; border-left: 2px solid var(--viz-idle); }
 .rdesk-strip[data-armed='true'][data-clearance='local-only'] { border-left-color: var(--viz-patina); }
 .rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] { border-left-color: var(--viz-brass); }
-.rdesk-strip[data-armed='true'][data-clearance='public-web'] { border-left-color: var(--viz-ember); }
+.rdesk-strip[data-armed='true'][data-clearance='public-web'] { border-left-color: var(--viz-ember); } /* KEEP-ember: public-web egress "exposure" temp = conscious-egress cue (mirrors .viz-seg-opt--clearance); revisit in researchers retheme */
 
 .rdesk-strip-head { display: flex; align-items: baseline; gap: 0.6rem; }
 .rdesk-id { font-size: 0.95rem; color: var(--viz-ink); letter-spacing: 0.02em; }
@@ -774,7 +782,7 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-strip[data-armed='true'] .rdesk-arm { color: var(--viz-ink); border-color: currentColor; }
 .rdesk-strip[data-armed='true'][data-clearance='local-only'] .rdesk-arm { color: var(--viz-patina); }
 .rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] .rdesk-arm { color: var(--viz-brass); }
-.rdesk-strip[data-armed='true'][data-clearance='public-web'] .rdesk-arm { color: var(--viz-ember); }
+.rdesk-strip[data-armed='true'][data-clearance='public-web'] .rdesk-arm { color: var(--viz-ember); } /* KEEP-ember: clearance egress cue (matches the strip border above) */
 
 .rdesk-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; margin-top: 0.35rem; }
 .rdesk-kind { font-size: 0.8rem; color: var(--viz-ink); }
@@ -813,9 +821,9 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-report[data-state='found'] .rdesk-report-flag { color: var(--viz-patina); }
 .rdesk-report[data-state='failed'] .rdesk-report-flag { color: var(--viz-oxide); }
 .rdesk-report[data-state='paused'] .rdesk-report-flag { color: var(--viz-brass); }
-/* Escalation deep-link — actionable "open review →" (brass = needs-your-review, ember on hover/focus). */
+/* Escalation deep-link — actionable "open review →" (brass = needs-your-review, accent on hover = interactive). */
 .rdesk-review-link { background: transparent; border: 0; padding: 0 0 0 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--viz-brass); cursor: pointer; text-transform: none; }
-.rdesk-review-link:hover { color: var(--viz-ember); text-decoration: underline; }
+.rdesk-review-link:hover { color: var(--viz-accent); text-decoration: underline; } /* interactive hover → --viz-accent (ember reserved for "decide") */
 .rdesk-run { margin-left: auto; }
 /* The dispatching/busy state now lives on the Button primitive (.viz-btn--busy, toggled in JS). */
 
@@ -827,13 +835,13 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-eligibility { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); }
 .rdesk-eligibility[data-will-run='false'] { font-style: italic; }
 
-/* Add-dock — named template tiles (glyph + label), not a <select>; the chosen tile lights ember. */
+/* Add-dock — named template tiles (glyph + label), not a <select>; the chosen tile lights accent (selected = interactive). */
 .rdesk-add { margin-top: 1.4rem; padding-top: 0.9rem; border-top: 1px solid var(--viz-rule); }
 .rdesk-add-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
 .rdesk-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .rdesk-tile { display: inline-flex; align-items: center; gap: 0.4rem; background: transparent; border: 1px solid var(--viz-rule); padding: 0.4rem 0.7rem; cursor: pointer; color: var(--viz-ink); }
 .rdesk-tile:hover { border-color: var(--viz-ink-muted); }
-.rdesk-tile[aria-pressed='true'] { border-color: var(--viz-ember); color: var(--viz-ember); }
+.rdesk-tile[aria-pressed='true'] { border-color: var(--viz-accent); color: var(--viz-accent); } /* selected/interactive → --viz-accent (ember reserved for "decide") */
 .rdesk-tile-glyph { font-size: 1rem; }
 .rdesk-tile-label { font-size: 0.7rem; }
 .rdesk-add-id { display: block; margin-top: 0.6rem; background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.35rem 0.5rem; min-width: 28ch; }
@@ -845,7 +853,7 @@ option { background: var(--card); color: var(--fg); }
    Recheck action · a quiet detail line. The state hue rides the DOT (a graphic ≥3:1) so the small status
    text can stay --viz-ink for AA — the #184 rule, same as .rdesk-report. brass = not-installed (a needs-you
    state, NOT a fault, VIZ-10 cry-wolf) · oxide = a real install/detect failure · patina = installed ·
-   ember (breathe) = installing/checking transients. */
+   sprout (breathe) = installing/checking transients (active work). */
 .rdesk-workiq { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.7rem; margin: 0.5rem 0 0; }
 .rdesk-workiq-label { align-self: center; }
 .rdesk-workiq-status { display: inline-flex; align-items: center; gap: 0.45rem; font-size: 0.8rem; color: var(--viz-ink); }
@@ -855,7 +863,7 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-workiq-status[data-tone='wait'] .rdesk-workiq-dot { background: var(--viz-brass); }
 .rdesk-workiq-status[data-tone='error'] .rdesk-workiq-dot { background: var(--viz-oxide); }
 .rdesk-workiq-status[data-tone='busy'] .rdesk-workiq-dot,
-.rdesk-workiq-status[data-tone='idle'] .rdesk-workiq-dot { background: var(--viz-ember); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
+.rdesk-workiq-status[data-tone='idle'] .rdesk-workiq-dot { background: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; } /* active install/check transient → --viz-sprout (was ember) */
 /* idle (Checking…) is the calmer transient — ember dot but a muted text, distinct from active install. */
 .rdesk-workiq-status[data-tone='idle'] .rdesk-workiq-dot { background: var(--viz-idle); }
 .rdesk-workiq-detail { font-size: 0.72rem; color: var(--viz-ink-muted); }
@@ -870,7 +878,7 @@ option { background: var(--card); color: var(--fg); }
 /* 5. Activity feed — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §2). Repointed off the legacy
    palette (--bg/--card/--fg/--muted/--accent/--border) onto the WS2 --viz-* tokens so the view reads as
    one surface with the rest of the system: flat-ruled entries (no card radius/fill), --viz-field raw-JSON
-   surface, --viz-ink-muted secondary text, ember focus. Markup carries the blessed primitives
+   surface, --viz-ink-muted secondary text, accent focus. Markup carries the blessed primitives
    (.viz-field/.viz-btn--ghost/.viz-chip); these view-local rules supply only layout + the token color. */
 .activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
 /* Secondary/helper text — the WS2 muted token (was the legacy global .muted → var(--muted)). */
@@ -908,8 +916,9 @@ option { background: var(--card); color: var(--fg); }
 /* Trailing trace-origin action — inset to the entry's right edge (matching the head's 0.7rem padding),
    centered with the toggle. .viz-btn--ghost zeroes its side padding, so re-inset here. */
 .activity-entry-row .activity-trace { flex: none; padding: 0 0.7rem; white-space: nowrap; }
-/* Clipped row → keep the ember focus ring inset (the viz-focusable outward offset would be clipped). */
-.activity-entry-head:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: -2px; }
+/* Clipped row → keep the accent focus ring inset (the viz-focusable outward offset would be clipped);
+   matches the global --viz-accent .viz-focusable ring (interactive, not ember). */
+.activity-entry-head:focus-visible { outline: 2px solid var(--viz-accent); outline-offset: -2px; }
 .activity-actor-badge { flex: none; } /* shape/color from .viz-chip; row just keeps it from stretching */
 .activity-summary { flex: 1; }
 .activity-ts, .activity-evcount { color: var(--viz-ink-muted); font-size: 0.78rem; flex: none; }

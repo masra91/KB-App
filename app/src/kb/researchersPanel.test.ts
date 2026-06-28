@@ -273,7 +273,7 @@ describe('workIqCardPresentation (WORKIQ-UI — m365 connector install/status ca
     expect(workIqCardPresentation({ state: 'checking' })).toMatchObject({ tone: 'idle', label: 'Checking…', action: null, live: true });
   });
 
-  it('installing → ember (busy), live, with a busy (disabled-feel) action button', () => {
+  it('installing → sprout (busy), live, with a busy (disabled-feel) action button', () => {
     expect(workIqCardPresentation({ state: 'installing' })).toMatchObject({ tone: 'busy', label: 'Installing…', action: { label: 'Install', busy: true }, live: true });
   });
 

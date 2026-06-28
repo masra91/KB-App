@@ -126,7 +126,7 @@ function editableFieldSection(): string {
   cells.push(cell('multiline/resting', field('standing orders', `<textarea class="viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="2">What should this researcher look for?</textarea>`)));
   cells.push(cell('duration/resting (numeric+unit)', field('timeout', `<span class="showcase-inline"><input type="text" inputmode="numeric" class="viz-field__input viz-field__input--numeric viz-focusable" value="15" /> <span class="viz-field__label">min</span></span>`)));
   // states
-  cells.push(cell('text/focus (ember rule)', field('scope', `<input type="text" class="viz-field__input viz-focusable is-focus" value="global" />`)));
+  cells.push(cell('text/focus (accent rule)', field('scope', `<input type="text" class="viz-field__input viz-focusable is-focus" value="global" />`)));
   cells.push(cell('numeric/dirty (save shown)', `<span class="showcase-inline">${field('reads / pass', `<input type="text" inputmode="numeric" class="viz-field__input viz-field__input--numeric viz-focusable" value="20" />`)} <button type="button" class="viz-btn viz-btn--primary viz-btn--sm">Save</button></span>`));
   cells.push(cell('numeric/invalid (oxide rule, ink text)', field('reads / pass', `<input type="text" inputmode="numeric" class="viz-field__input viz-field__input--numeric viz-field__input--invalid viz-focusable" value="0" aria-invalid="true" />`)));
   cells.push(cell('multiline/invalid', field('standing orders', `<textarea class="viz-field__input viz-field__input--multiline viz-field__input--invalid viz-body viz-focusable" rows="2">…</textarea>`)));

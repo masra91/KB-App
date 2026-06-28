@@ -1,6 +1,7 @@
 /* SPEC-0038 QCAP — "the intake slot" (DESIGN-QCAP). A flat-ink instrument panel, NOT a card: the
    frameless window IS the slot. Built on the _design-system viz tokens. Flat edge = a 1px --viz-rule
-   border + a 2px --viz-ember "live" hairline on top (the instrument is powered) — no drop shadow. */
+   border + a 2px --viz-sprout "live" hairline on top (the instrument is powered/active) — no drop shadow.
+   (sprout = in-progress/active; ember is reserved for "needs your decision" only — Vellum UX v2 §4.) */
 /* QCAP-12: head / field / command-bar as a grid `auto 1fr auto` — the action row is its own fixed
    band that NEVER scrolls off; only the middle field row gives. (KB-Lead's steer: the grid is the
    clearest "the command bar is its own band".) */
@@ -12,7 +13,7 @@
   box-sizing: border-box;
   height: 100vh;
   border: 1px solid var(--viz-rule);
-  border-top: 2px solid var(--viz-ember); /* the live line — capture is powered + listening */
+  border-top: 2px solid var(--viz-sprout); /* the live line — capture is powered + listening (active → sprout) */
 }
 
 .qcap-head {
@@ -40,7 +41,7 @@
 }
 
 /* QCAP-13 §3b: the screenshot icon-button cluster — spare ghost glyphs at the head's trailing edge,
-   secondary to the field (muted --viz-ink-muted at rest, ember on hover/focus). Never a toolbar. */
+   secondary to the field (muted --viz-ink-muted at rest, accent on hover/focus = interactive). Never a toolbar. */
 .qcap-shots {
   display: flex;
   align-items: center;
@@ -59,7 +60,7 @@
 }
 .qcap-shot:hover,
 .qcap-shot:focus-visible {
-  color: var(--viz-ember);
+  color: var(--viz-accent); /* interactive hover/focus → --viz-accent (ember reserved for "decide") */
 }
 
 /* QCAP-9 steer-to-Settings affordance: a quiet text button, never a loud blocking banner — a denied
@@ -105,17 +106,18 @@
   border-left: 2px solid var(--viz-rule);
 }
 
-/* Save acknowledge — the rule takes the signature ember heat (the billet entered the line). */
+/* Save acknowledge — the rule takes the signature sprout heat as the billet enters the line (active
+   commit motion → sprout; ember reserved for "decide"). Pairs with the --viz-patina `preserved` tick. */
 .qcap-field.is-saving .qcap-input {
-  border-color: var(--viz-ember);
-  animation: qcap-ember-sweep var(--viz-dur-index, 220ms) ease-out 1;
+  border-color: var(--viz-sprout);
+  animation: qcap-save-sweep var(--viz-dur-index, 220ms) ease-out 1;
 }
-@keyframes qcap-ember-sweep {
+@keyframes qcap-save-sweep {
   from {
-    box-shadow: inset 2px 0 0 var(--viz-ember);
+    box-shadow: inset 2px 0 0 var(--viz-sprout);
   }
   to {
-    box-shadow: inset 100% 0 0 -2px var(--viz-ember);
+    box-shadow: inset 100% 0 0 -2px var(--viz-sprout);
   }
 }
 
@@ -125,7 +127,7 @@
 }
 
 /* QCAP-12: the pinned command-bar footer. A 1px --viz-rule hairline along its TOP (the footer rail of
-   the instrument — mirrors the §2 top ember hairline at the head), flat (no shadow); the 8px grid gap
+   the instrument — mirrors the §2 top sprout "live" hairline at the head), flat (no shadow); the 8px grid gap
    sits above it, 8px padding below the rule. `flex: none`-equivalent: as the grid's last `auto` row it
    never grows, so Save/Cancel stay on-screen even when the field scrolls under it. */
 .qcap-row {
@@ -151,7 +153,7 @@
   font-size: 0.62rem;
 }
 
-/* Reduced-motion parity (§5): the save reads via the static ember rule + the `preserved` word — the
+/* Reduced-motion parity (§5): the save reads via the static sprout rule + the `preserved` word — the
    sweep animation is dropped, nothing lost. */
 @media (prefers-reduced-motion: reduce) {
   .qcap-field.is-saving .qcap-input {

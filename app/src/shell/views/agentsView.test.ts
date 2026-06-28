@@ -216,6 +216,28 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
       expect(setAgentModel).toHaveBeenCalledWith('connect', 'claude-sonnet-4.5');
       expect(root.querySelector('.agent[data-key="connect"] .agent-model-runs .path')?.textContent).toBe('claude-sonnet-4.5');
     });
+
+    // P1 chip-overlap fix: the per-agent picker + its "runs as:" caption must STACK inside one <dd> so
+    // the caption never wraps beside / overlaps the select (or the row highlight) at narrow widths. The
+    // CSS stack hangs off this DOM contract — the select and `.agent-model-runs` are siblings in the
+    // Model cell, select FIRST (the caption is the block beneath it). Guards markup drift that would
+    // re-orphan the caption next to the control.
+    it('stacks the per-agent picker above its "runs as:" caption in one Model cell (select then caption)', async () => {
+      const agents: AgentView[] = [{ key: 'connect', label: 'Connect', role: 'r', model: 'claude-sonnet-4.5', configuredModel: 'claude-sonnet-4.5', instructions: 'kb/connectAgent.ts', status: 'idle' }];
+      setApi(vi.fn(async () => agents), vi.fn(async () => CATALOG), vi.fn(), vi.fn());
+      await mountAgents(root);
+      await tick();
+      const select = root.querySelector<HTMLElement>('.agent[data-key="connect"] .agent-model-select')!;
+      const runs = root.querySelector<HTMLElement>('.agent[data-key="connect"] .agent-model-runs')!;
+      expect(select).toBeTruthy();
+      expect(runs).toBeTruthy();
+      const cell = select.parentElement!; // the <dd> Model cell
+      expect(cell.tagName).toBe('DD');
+      expect(runs.parentElement).toBe(cell); // caption is a sibling in the SAME cell, not nested in the select
+      // select precedes the caption (caption stacks beneath via the .agent-model-runs block rule)
+      expect(cell.compareDocumentPosition(runs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(select.compareDocumentPosition(runs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
   });
 
   it('pauses the status poll while its view is hidden, resumes when shown (efficiency — PANEL-9)', async () => {
