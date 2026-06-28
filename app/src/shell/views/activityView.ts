@@ -42,7 +42,7 @@ export function mountActivity(container: HTMLElement): void {
   errorMsg = '';
   container.innerHTML = `
     <div class="card activity-view">
-      <h1>📜 Activity</h1>
+      <h1 class="activity-title viz-voice">Activity</h1>
       <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
       <div class="activity-body" id="activityBody"></div>

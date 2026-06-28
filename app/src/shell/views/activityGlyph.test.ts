@@ -12,6 +12,7 @@ describe('glyphFor — kind/hue typing (#184 hue-on-tile)', () => {
     expect(glyphFor('compose').cls).toBe('gl--compose');
     expect(glyphFor('archivist').cls).toBe('gl--capture');
     expect(glyphFor('output').cls).toBe('gl--promote');
+    expect(glyphFor('decompose').cls).toBe('gl--decompose'); // neutral (ink-muted) per DL-2's table, not accent
   });
 
   it('a FAILED event-type wins → oxide tile, overriding the actor kind (honest failure)', () => {

@@ -13,6 +13,7 @@
 /** The categorical kinds DL-2's contract colors (plus neutral families for the remaining actors). */
 export type ActivityKind =
   | 'capture'
+  | 'decompose'
   | 'connect'
   | 'claim'
   | 'enrich'
@@ -40,7 +41,7 @@ const ACTOR_KIND: Record<string, ActivityKind> = {
   archive: 'capture',
   intake: 'capture',
   watch: 'capture',
-  decompose: 'capture', // pre-Connect extraction — same "material entering" family (accent/slate)
+  decompose: 'decompose', // pre-Connect extraction — neutral (ink-muted) per DL-2's table, not accent
   connect: 'connect',
   claims: 'claim',
   enrich: 'enrich',
@@ -57,6 +58,7 @@ const ACTOR_KIND: Record<string, ActivityKind> = {
 
 const GLYPH: Record<ActivityKind, string> = {
   capture: '⤓',
+  decompose: '⑂',
   connect: '◇',
   claim: '·',
   enrich: '✦',

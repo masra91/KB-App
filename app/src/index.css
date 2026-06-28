@@ -1028,7 +1028,7 @@ option { background: var(--card); color: var(--fg); }
 .gl--promote  { border-color: var(--viz-brass);  color: var(--viz-brass); }
 .gl--compose  { border-color: var(--viz-deep, var(--viz-accent)); color: var(--viz-deep, var(--viz-accent)); }
 .gl--failed   { border-color: var(--viz-oxide);  color: var(--viz-oxide); } /* honest failure, still rationed */
-.gl--reflect, .gl--recall, .gl--config, .gl--replay, .gl--event { color: var(--viz-ink-muted); }
+.gl--decompose, .gl--reflect, .gl--recall, .gl--config, .gl--replay, .gl--event { color: var(--viz-ink-muted); } /* neutral kinds */
 /* TEXT — flex:1 + min-width:0 + overflow-wrap so a long unbreakable id (ULID) shrinks/wraps and can
    NEVER overflow into the timestamp/trace action (root-cause fix for the QD-2 overlap bug). */
 .activity-ft { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
