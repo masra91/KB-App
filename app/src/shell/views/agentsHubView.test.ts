@@ -46,12 +46,19 @@ describe('Agents hub — direction-framed IA (SPEC-0053 WS-E)', () => {
   it('renders one Agents surface with Librarians + Researchers groups and inward/outward descriptors', async () => {
     const c = await mount();
     expect(c.querySelector('.agents-hub-title')?.textContent).toBe('Agents');
-    const heads = Array.from(c.querySelectorAll('.agents-group-head')).map((h) => h.textContent);
-    expect(heads).toEqual(['Librarians', 'Researchers']);
+    const heads = Array.from(c.querySelectorAll('.agents-group-head')).map((h) => (h.textContent ?? '').replace(/[↻→]/g, '').trim());
+    expect(heads).toEqual(['Librarians', 'Researchers']); // (aria-hidden direction glyph stripped)
     const whys = Array.from(c.querySelectorAll('.agents-group-why')).map((p) => p.textContent ?? '');
     expect(whys[0]).toMatch(/inside/i); // Librarians = inward
     expect(whys[1]).toMatch(/outside/i); // Researchers = outward
     expect(c.querySelectorAll('select')).toHaveLength(0); // hub itself composes no native control
+  });
+
+  it('marks the in/out axis with an aria-hidden direction glyph per group head (words still carry it)', async () => {
+    const c = await mount();
+    const glyphs = Array.from(c.querySelectorAll('.agents-group-glyph'));
+    expect(glyphs.map((g) => g.textContent)).toEqual(['↻', '→']); // inward (Librarians) / outward (Researchers)
+    for (const g of glyphs) expect(g.getAttribute('aria-hidden')).toBe('true'); // never glyph-alone — labels carry meaning
   });
 
   it('nests Schedules (formerly Jobs) under the Librarians group', async () => {
@@ -82,7 +89,7 @@ describe('Agents hub — direction-framed IA (SPEC-0053 WS-E)', () => {
     setApi();
     const c = await mount();
     // hub framing intact
-    expect(Array.from(c.querySelectorAll('.agents-group-head')).map((h) => h.textContent)).toEqual(['Librarians', 'Researchers']);
+    expect(Array.from(c.querySelectorAll('.agents-group-head')).map((h) => (h.textContent ?? '').replace(/[↻→]/g, '').trim())).toEqual(['Librarians', 'Researchers']);
     // the healthy sections still rendered
     expect(c.querySelector('.agents-section[data-section="librarians"]')!.innerHTML.length).toBeGreaterThan(0);
     expect(c.querySelector('.agents-section[data-section="schedules"]')!.innerHTML.length).toBeGreaterThan(0);
