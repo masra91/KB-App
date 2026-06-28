@@ -32,7 +32,9 @@ supersedes: null
 
 - **Name:** **Vellum.** Tone: calm, scholarly — *a quiet, gilded study*; warm, not clinical.
 - **Direction:** crystalline / fractal — knowledge as pattern & symmetry, *rendered as math, not
-  foliage*; **fixed-light** "cream study" (surfaces don't invert).
+  foliage*. Light is the **default** "cream study" identity; a supported **dark "night study" variant**
+  (the icon's blue-green world expanded, cream → ink — *not* an inversion) ships as the night mode. See
+  [`brand/DARK-MODE-ADDENDUM.md`](../../brand/DARK-MODE-ADDENDUM.md). Light stays the brand face.
 - **Mark:** a self-similar **fractal lattice** — nested diamonds climbing to one luminous center node
   (the fragment that linked itself into structure). Detailed render at large sizes; **mono glyph
   ≤32px**. Same DNA at all sizes (icon = graph node = whole graph).
