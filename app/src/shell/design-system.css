@@ -18,7 +18,7 @@
    SEMANTIC MIGRATION (deferred to the screen rethemes #403-406, not this slice): brand reserves --viz-ember
    for "needs your decision" and uses --viz-sprout (green) for active/in-progress. Today --viz-ember carries
    "active work" (25 sites); this slice re-colors the existing roles to brand + ADDS --viz-sprout for the
-   rethemes to migrate active→sprout / waiting→ember onto. So no call-site churn here. */
+   rethemes to migrate active→sprout / interactive→accent onto (ember stays decision-only). So no call-site churn here. */
 :root {
   --viz-field: #f4efe3;     /* Vellum cream — the canvas/ground (fixed-light: the study) */
   --viz-panel: #fbf7ec;     /* Linen — a raised panel over the canvas (rethemes adopt) */
@@ -66,7 +66,7 @@
 .viz-numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* fixed-width so rolling counts never reflow */
 .viz-body { font-family: var(--viz-font-body); }
 
-/* Flat-ink instrument primitives (§6 guardrails) — ruled structure, NO card chrome, ember focus. */
+/* Flat-ink instrument primitives (§6 guardrails) — ruled structure, NO card chrome, accent focus. */
 .viz-surface { background: var(--viz-field); color: var(--viz-ink); font-family: var(--viz-font-body); }
 .viz-ruled { border: 0; border-top: 1px solid var(--viz-rule); }   /* a structural rule, not a card edge */
 .viz-spine { border-left: 2px solid var(--viz-rule); }             /* the spine stations/strips hang off */
@@ -77,7 +77,7 @@
 .viz-focusable:focus-visible, .viz-focusable.is-focus { outline: 2px solid var(--viz-accent); outline-offset: 1px; } /* never the framework indigo */
 
 /* Select primitive (SPEC-0048) — a native <select> in the viz idiom for a DYNAMIC many-option list
-   (the model catalog); .viz-seg stays for small bounded enums. Flat, ruled, mono, custom caret, ember
+   (the model catalog); .viz-seg stays for small bounded enums. Flat, ruled, mono, custom caret, accent
    focus — never the default OS chrome (the "generic AI app" tell §6 guards against). */
 .viz-select {
   appearance: none; font: inherit; font-family: var(--viz-font-numeric);
@@ -121,11 +121,11 @@
 /* danger — destructive: oxide BORDER, label stays --viz-ink (contract §2: oxide never colors normal text). */
 .viz-btn--danger { border-color: var(--viz-oxide); }
 .viz-btn--danger:hover, .viz-btn--danger.is-hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
-/* ghost — low-emphasis / inline (was button.link): muted label, no border, ember on hover. */
+/* ghost — low-emphasis / inline (was button.link): muted label, no border, accent on hover. */
 .viz-btn--ghost { border-color: transparent; padding-left: 0; padding-right: 0; color: var(--viz-ink-muted); }
 .viz-btn--ghost:hover, .viz-btn--ghost.is-hover { color: var(--viz-accent); }
-/* busy / dispatching — opacity-only ember breathe (§3 states; VIZ-9). Reduced-motion zeroes it (below),
-   and busy still reads via the ember hue + a static label, so nothing is lost. */
+/* busy / dispatching — opacity-only sprout breathe (§3 states; VIZ-9). Reduced-motion zeroes it (below),
+   and busy still reads via the sprout hue + a static label, so nothing is lost. */
 .viz-btn--busy { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-sprout); border-color: var(--viz-sprout); }
 
 /* --- SegmentedControl (§4) — a spatial exposure/choice scale; a role=radiogroup of ghosted segments,
@@ -177,7 +177,7 @@
 .viz-field__input { background: var(--viz-field); color: var(--viz-ink); border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0; padding: 0.2rem 0.1rem; font: inherit; }
 .viz-field__input:focus-visible, .viz-field__input.is-focus { border-bottom-color: var(--viz-accent); }
 .viz-field__input--numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* tabular figures (EFFORT, #208) */
-/* multiline (the standing-orders box) — full ruled border + vertical resize, ember border on focus. */
+/* multiline (the standing-orders box) — full ruled border + vertical resize, accent border on focus. */
 .viz-field__input--multiline { display: block; width: 100%; border: 1px solid var(--viz-rule); padding: 0.5rem 0.6rem; resize: vertical; }
 .viz-field__input--multiline:focus-visible, .viz-field__input--multiline.is-focus { border-color: var(--viz-accent); }
 /* invalid — oxide BOTTOM-RULE/border (≥3:1 graphic); the message + value text stay --viz-ink (§2). */
@@ -187,7 +187,7 @@
 
 /* ============================================================================================== */
 
-/* Motion: the single ambient ember breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
+/* Motion: the single ambient breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
    own active element (e.g. .viz-breathe .viz-cell-current). */
 @keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 
