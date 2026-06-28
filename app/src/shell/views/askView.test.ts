@@ -124,7 +124,7 @@ describe('Ask view (SPEC-0026 ASK-1/2/8 · v3)', () => {
     submit(root);
     await tick();
 
-    expect(ask).toHaveBeenCalledWith({ question: 'Who was Ada Lovelace?', history: [] });
+    expect(ask).toHaveBeenCalledWith({ question: 'Who was Ada Lovelace?', history: [], effort: 'considered' });
     const col = root.querySelector('.ask-col')!;
     expect(col.textContent).toContain('Who was Ada Lovelace?');
     expect(col.textContent).toContain('first computer programmer');
@@ -146,8 +146,25 @@ describe('Ask view (SPEC-0026 ASK-1/2/8 · v3)', () => {
     type(root, 'q2');
     submit(root);
     await tick();
-    expect(ask).toHaveBeenLastCalledWith({ question: 'q2', history: [{ question: 'q1', answer: GROUNDED.answer }] });
+    expect(ask).toHaveBeenLastCalledWith({ question: 'q2', history: [{ question: 'q1', answer: GROUNDED.answer }], effort: 'considered' });
     expect(root.querySelectorAll('.ask-turn')).toHaveLength(2);
+  });
+
+  it('sends the selected effort — Quick after toggling, Considered by default (VUX-11, #487 wired)', async () => {
+    const ask = vi.fn(async () => GROUNDED);
+    setAsk(ask);
+    mountAsk(root);
+    // default is Considered
+    type(root, 'q-default');
+    submit(root);
+    await tick();
+    expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ question: 'q-default', effort: 'considered' }));
+    // toggle to Quick → the next ask carries effort:'quick'
+    root.querySelector<HTMLElement>('#askModes .ask-mode[data-effort="quick"]')!.click();
+    type(root, 'q-quick');
+    submit(root);
+    await tick();
+    expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ question: 'q-quick', effort: 'quick' }));
   });
 
   it('the header reflects the conversation — title = first question, meta counts turns + sources', async () => {

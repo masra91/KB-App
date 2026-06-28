@@ -7,8 +7,9 @@
 // v3 (VUX-11): a full-pane chat — header (title · meta · actions) + scrolling conversation column
 // (you-bubble + grounded answer w/ seal, prose, foot-stat, references) + a floating ask bar carrying a
 // Quick/Considered effort toggle. v3 token system (no `--viz-*`). The "recall settings live on Ask"
-// IA-lock (VUX-19) = the effort toggle here. Effort wiring + Past-chats + Save-chat are DEV-1 backend
-// slices; the controls render now (effort holds state; past/save are disabled until backed).
+// IA-lock (VUX-19) = the effort toggle here. The toggle is now WIRED — onAsk sends `effort` (AskRequest,
+// #487) so Quick/Considered modulates recall depth. Past-chats + Save-chat remain DEV-1 backend slices
+// (those controls stay disabled until backed).
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { esc } from '../html';
@@ -215,7 +216,8 @@ async function onAsk(container: HTMLElement): Promise<void> {
     .filter((t) => t.result !== null)
     .map((t) => ({ question: t.question, answer: t.result!.answer }));
 
-  const turn: Turn = { question, result: null, askedAt: Date.now(), effort };
+  const askedWith = effort; // capture the mode at submit time (the toggle can change mid-flight)
+  const turn: Turn = { question, result: null, askedAt: Date.now(), effort: askedWith };
   turns.push(turn);
   if (input) {
     input.value = '';
@@ -229,9 +231,9 @@ async function onAsk(container: HTMLElement): Promise<void> {
 
   const started = Date.now();
   try {
-    // effort is held in the UI; recall-wiring is DEV-1's slice (AskRequest.effort). Pass only the
-    // currently-supported shape to keep the view typecheck-clean.
-    turn.result = await window.kbApi.ask({ question, history });
+    // VUX-11: send the Quick/Considered effort (AskRequest.effort, #487) so the toggle modulates recall
+    // depth — Quick = shallow/fast floor, Considered = full configured depth. Omitted ⇒ considered.
+    turn.result = await window.kbApi.ask({ question, history, effort: askedWith });
   } catch (err) {
     turn.error = err instanceof Error ? err.message : String(err);
   } finally {
