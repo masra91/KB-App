@@ -79,6 +79,23 @@ describe('captureView — blocked-capture recovery (MACOS-7 / #56)', () => {
     expect(ta.value).toBe('');
     expect(root.querySelector('#captureNote')!.textContent).toContain('Captured 1 item');
   });
+
+  it('#160: an IPC-transport reject is honest, not silent — a note shows and the typed text is preserved', async () => {
+    // The main handler always returns a structured result, but the channel itself can reject; the submit
+    // must surface an honest note (not fail silently) AND never lose the user's capture.
+    setApi(OK); // full kbApi shape (incl. pipelineStatus for the status timer)…
+    captureMock().mockRejectedValue(new Error('channel down')); // …then make the capture channel reject
+    mountCapture(root, '/v', 'KB');
+    const ta = root.querySelector('#captureText') as HTMLTextAreaElement;
+    ta.value = 'a precious thought';
+    root.querySelector<HTMLButtonElement>('#capture')!.click();
+    await Promise.resolve(); await Promise.resolve();
+
+    const note = root.querySelector('#captureNote')!.textContent ?? '';
+    expect(note).toMatch(/couldn’t capture/i); // honest feedback, not silence
+    expect(note).not.toContain('channel down'); // no raw error string leaked
+    expect(ta.value).toBe('a precious thought'); // input preserved — capture never lost
+  });
 });
 
 describe('captureView — RICHIN rich ingestion (SPEC-0040)', () => {

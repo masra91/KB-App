@@ -20,8 +20,13 @@ const STAGE_LABELS: Record<string, string> = {
   recall: 'Recall',
 };
 
-/** The human label for a stage/actor id (display only — see the file header). */
+/** The human label for a stage/actor id (display only — see the file header). NULL-SAFE (ENG-15/16):
+ *  a legacy/partial audit event can reach the render layer with a null/undefined `actor` (the trust
+ *  boundary parses events off disk with unchecked casts); a raw `titleCase(null)` threw and — inside an
+ *  unguarded feed `.map` — blanked the whole Activity/Status surface. Coerce a non-string id to '' so it
+ *  degrades to an empty badge instead of crashing. */
 export function stageDisplayName(stage: string): string {
+  if (typeof stage !== 'string' || stage.length === 0) return '';
   return STAGE_LABELS[stage] ?? titleCase(stage);
 }
 

@@ -442,6 +442,24 @@ describe('The Line — body states', () => {
     expect(lineBodyHtml({ view: null, loading: false, errorMsg: 'boom', expanded: new Set(), lens: 'stage' }, NOW)).toContain('boom');
   });
 
+  it('ENG-15/16: a legacy/partial view missing inFlight + setAsideItems renders the Line without crashing', () => {
+    // load()/buildStations already coalesce these; the lineBodyHtml derefs were the lone unguarded outliers
+    // (splitCarriages spreads inFlight; siding filters setAsideItems) — a null payload threw and blanked the Line.
+    const partial = { ...STALLED, inFlight: undefined, setAsideItems: undefined } as unknown as PipelineStatusView;
+    expect(() => body(partial)).not.toThrow();
+    expect(body(partial)).toContain('line-core'); // the Line still renders
+  });
+
+  it('#160 leave-last-known: a transient poll error with a prior snapshot keeps the Line, not the error banner', () => {
+    // After a successful first paint, `view` holds the last-known snapshot; a 2.5s poll blip sets errorMsg
+    // but must NOT wipe a healthy Line (the poll self-heals). Only a COLD failure (no view) shows the banner.
+    const withView = body(STALLED, { errorMsg: 'copilot blip' });
+    expect(withView).toContain('line-core'); // last-known Line preserved
+    expect(withView).not.toContain('Couldn’t load status'); // no banner over a healthy snapshot
+    // ...but with no prior snapshot, the cold-failure banner still surfaces.
+    expect(body(null, { errorMsg: 'cold boom' })).toContain('Couldn’t load status');
+  });
+
   it('the full body wraps the Line in a .viz-surface root (so the reduced-motion reset catches it)', () => {
     // mountStatus sets the .viz-surface root; the body itself carries the spine + siding + readout.
     const h = body(STALLED);

@@ -4,7 +4,7 @@
 // stays default). The IPC is mocked (`window.kbApi.activityFeed/activityLineage`); we assert the
 // rendered DOM, the drill-down, the filter→re-query, lineage, and read-only/escaping behavior.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mountActivity, lineageHtml } from './activityView';
+import { mountActivity, lineageHtml, entryHtml, rawEventHtml } from './activityView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { ActivityFeedResult, Lineage, KbApi } from '../../kb/types';
 
@@ -82,6 +82,35 @@ describe('Activity feed (AUDIT-5)', () => {
     setApi();
     const c = await mount();
     expect(c.querySelector('.activity-empty')).not.toBeNull();
+  });
+
+  // ENG-15/16: a legacy/partial audit entry (null actor, missing `events`/`provenance`/`payload`) must
+  // NOT throw and blank the whole feed; one bad entry is isolated, its siblings still render.
+  it('renders legacy/partial entries without crashing, and isolates a malformed entry from its siblings', async () => {
+    type Entry = ActivityFeedResult['entries'][number];
+    const legacy = { id: 'BAD', ts: '2026-01-01T00:03:00.000Z', actor: null, summary: 'legacy entry', eventCount: 1 } as unknown as Entry; // null actor + NO events array
+    activityFeed = vi.fn(async () => feed([ENTRIES[0], legacy, ENTRIES[1]], 4));
+    setApi();
+    const c = await mount();
+    // No throw + the feed isn't blanked: all three rows present (the malformed one degraded, not dropped).
+    expect(c.querySelectorAll('.activity-entry')).toHaveLength(3);
+    expect(c.textContent).toContain('Claims derived 2 claims about E1'); // good sibling intact
+    expect(c.textContent).toContain('Archived a new source'); // good sibling intact
+    expect(c.textContent).toContain('legacy entry'); // the malformed entry still shows its summary
+  });
+
+  it('ENG-15/16: entryHtml/rawEventHtml/lineageHtml tolerate missing events/provenance/payload (no throw)', () => {
+    type Entry = ActivityFeedResult['entries'][number];
+    const noEvents = { id: 'X', ts: '2026-01-01T00:00:00.000Z', actor: null, summary: 'no events', eventCount: 0 } as unknown as Entry;
+    expect(() => entryHtml(noEvents, false)).not.toThrow();
+    expect(() => entryHtml(noEvents, true)).not.toThrow(); // open → would map e.events (absent)
+    // A raw event missing `provenance` → drill-down renders the JSON without the file:line footer.
+    const noProv = { ts: '2026-01-01T00:00:00.000Z', actor: 'claims', eventType: 'x', subjects: {}, payload: {} } as unknown as Parameters<typeof rawEventHtml>[0];
+    expect(() => rawEventHtml(noProv)).not.toThrow();
+    expect(rawEventHtml(noProv)).not.toContain('activity-event-src');
+    // A lineage decision missing `payload` → no throw (needs non-empty events to reach the decisions map).
+    const lineage = { subjectId: 'E1', kind: 'entity', sources: [], events: ENTRIES[0].events, decisions: [{ eventType: 'reviewed' }] } as unknown as Lineage;
+    expect(() => lineageHtml(lineage)).not.toThrow();
   });
 
   it('shows an error state when the feed fails to load', async () => {
