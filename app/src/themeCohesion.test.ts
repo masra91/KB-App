@@ -68,3 +68,21 @@ describe('dark "night-study" is an OPT-IN data-theme variant (brand/DARK-MODE-AD
     expect(lightRoot).toContain('#f4efe3');
   });
 });
+
+describe('.warning caution is tokenized (SPEC-0057 dark-coverage + #184)', () => {
+  // .warning was a hardcoded amber (background:#fff8e1) that wouldn't flip under the [data-theme=dark]
+  // role-token re-point → a glaring light island on the dark ground (it was also off-brand in light).
+  // Now the Vellum caution language: --viz-ink label + --viz-brass border/wash → adapts to dark for free.
+  const rule = css.slice(css.indexOf('.warning {'), css.indexOf('}', css.indexOf('.warning {')));
+
+  it('drops the hardcoded amber (won’t-flip light-island) values', () => {
+    expect(rule).not.toContain('#fff8e1'); // old light-yellow bg
+    expect(rule).not.toContain('#8a6d00'); // old amber text
+    expect(rule).not.toContain('#f0d98c'); // old amber border
+  });
+
+  it('hue rides the --viz-brass role token; the label stays --viz-ink (AA, #184)', () => {
+    expect(rule).toContain('var(--viz-brass)'); // border/wash carry the caution hue → re-themes on dark
+    expect(rule).toContain('var(--viz-ink)'); // readable label stays ink, never the sub-AA brass
+  });
+});
