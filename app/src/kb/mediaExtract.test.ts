@@ -112,3 +112,70 @@ describe('extractMediaText — guard ladder + fail-loud typed outcomes', () => {
     expect(res).toEqual({ ok: true, text: 'ok' });
   });
 });
+
+describe('MEDIA-8 — born-digital PDF local text-layer fast-path', () => {
+  it('a digital PDF with a real text layer is extracted LOCALLY — NO vision model / session call', async () => {
+    const vision = vi.fn();
+    const session = vi.fn();
+    const res = await extractMediaText(bytes(), 'application/pdf', 'born-digital.pdf', {
+      pdfText: async () => '  Quarterly report — revenue up 12%.  ',
+      vision,
+      session,
+    });
+    expect(res).toEqual({ ok: true, text: 'Quarterly report — revenue up 12%.' });
+    expect(vision).not.toHaveBeenCalled(); // fast-path → never touched the model (no API cost/latency)
+    expect(session).not.toHaveBeenCalled();
+  });
+
+  it('a SCANNED PDF (empty/near-empty text layer) falls through to the multimodal path', async () => {
+    const session = vi.fn(async () => ({ text: 'OCR: invoice total $50' }));
+    const res = await extractMediaText(bytes(), 'application/pdf', 'scan.pdf', {
+      pdfText: async () => '   \n  ', // no usable text layer (scanned)
+      vision: async () => limits(),
+      session,
+    });
+    expect(res).toEqual({ ok: true, text: 'OCR: invoice total $50' }); // multimodal fallback
+    expect(session).toHaveBeenCalledOnce();
+  });
+
+  it('a too-short text layer (below the digital threshold) also falls through to multimodal', async () => {
+    const session = vi.fn(async () => ({ text: 'OCR text' }));
+    const res = await extractMediaText(bytes(), 'application/pdf', 'tiny.pdf', {
+      pdfText: async () => 'hi', // < MIN_PDF_TEXT_LAYER_CHARS non-whitespace
+      vision: async () => limits(),
+      session,
+    });
+    expect(res.ok).toBe(true);
+    expect(session).toHaveBeenCalledOnce();
+  });
+
+  it('a pdfText error is never fatal — falls through to the multimodal path', async () => {
+    const session = vi.fn(async () => ({ text: 'OCR fallback' }));
+    const res = await extractMediaText(bytes(), 'application/pdf', 'broken.pdf', {
+      pdfText: async () => { throw new Error('pdfjs blew up'); },
+      vision: async () => limits(),
+      session,
+    });
+    expect(res).toEqual({ ok: true, text: 'OCR fallback' });
+    expect(session).toHaveBeenCalledOnce();
+  });
+
+  it('the fast-path is PDF-only — an image never hits pdfText', async () => {
+    const pdfText = vi.fn();
+    const res = await extractMediaText(bytes(), 'image/png', 'photo.png', {
+      pdfText,
+      vision: async () => limits(),
+      session: async () => ({ text: 'a photo of a cat' }),
+    });
+    expect(res).toEqual({ ok: true, text: 'a photo of a cat' });
+    expect(pdfText).not.toHaveBeenCalled();
+  });
+
+  it('a born-digital PDF works even with NO vision model configured (deterministic, no API)', async () => {
+    const res = await extractMediaText(bytes(), 'application/pdf', 'digital.pdf', {
+      pdfText: async () => 'A fully digital PDF with selectable text content.',
+      vision: async () => null, // no vision model at all — fast-path doesn't need one
+    });
+    expect(res).toEqual({ ok: true, text: 'A fully digital PDF with selectable text content.' });
+  });
+});
