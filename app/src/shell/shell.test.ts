@@ -92,3 +92,28 @@ describe('shell kb:navigate view→view nav primitive (SHELL — Field Desk esca
     expect(reviewsBtn(root).getAttribute('aria-current')).not.toBe('page');
   });
 });
+
+describe('shell UX v2 sidebar brand header', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    setApi(vi.fn(async () => []));
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('renders the Vellum wordmark + crystalline glyph at the top of the rail (v2 shell language)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    const brand = root.querySelector('.sidebar .sidebar-brand');
+    expect(brand).not.toBeNull();
+    expect(root.querySelector('.sidebar-brand-name')?.textContent).toBe('Vellum');
+    expect(root.querySelector('.sidebar-brand-glyph')).not.toBeNull(); // the gold crystalline mark
+    // the nav lives in its own wrapper below the brand, and the watermark is decorative (aria-hidden)
+    expect(root.querySelector('.sidebar .sidebar-nav .nav-item')).not.toBeNull();
+    expect(root.querySelector('.sidebar-wmark')?.getAttribute('aria-hidden')).toBe('true');
+  });
+});

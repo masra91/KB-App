@@ -238,46 +238,77 @@ body.shell-active #app {
   height: 100vh;
 }
 
+/* UX v2 sidebar (vellum-ux-v2-language "Shell language") — a gradient rail with the Vellum wordmark +
+   crystalline glyph, grouped nav, a GOLD inset active accent (not a solid-blue fill), hover-life, and a
+   faint fractal watermark. Consumes the #453 material foundation. */
 .sidebar {
-  flex: 0 0 13rem;
+  flex: 0 0 13.25rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  padding: 0.75rem;
-  background: var(--card);
-  border-right: 1px solid var(--border);
+  padding: 1.1rem 0.85rem 0.85rem;
+  background: linear-gradient(160deg, #f0e7d3, #e7dcc3); /* linen → parchment */
+  border-right: 0.5px solid var(--border);
+  position: relative;
+  overflow: hidden;
 }
+:root[data-theme='dark'] .sidebar { background: linear-gradient(160deg, #192933, #16242d); } /* night rail */
+
+/* Brand header — Spectral wordmark + the gold crystalline glyph (drop-shadow gives it a struck feel). */
+.sidebar-brand { display: flex; align-items: center; gap: 0.6rem; margin: 0.1rem 0.4rem 1.2rem; }
+.sidebar-brand-name { font-size: 1.45rem; color: var(--viz-patina); letter-spacing: 0.2px; }
+.sidebar-brand-glyph { filter: drop-shadow(0 1px 1px rgba(168, 130, 60, 0.3)); }
+.sidebar-nav { display: flex; flex-direction: column; gap: 0.1rem; position: relative; z-index: 1; }
 
 .sidebar .nav-item {
   appearance: none;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.7rem;
   width: 100%;
   text-align: left;
-  border: 0;
-  border-radius: 8px;
+  border: 0.5px solid transparent;
+  border-radius: 10px;
   background: none;
-  color: var(--fg);
+  color: var(--viz-ink-muted);
   font: inherit;
-  font-size: 0.95rem;
-  padding: 0.55rem 0.7rem;
+  font-size: 0.9rem;
+  font-weight: 450;
+  padding: 0.5rem 0.7rem;
   cursor: pointer;
+  position: relative;
+  transition: background var(--viz-dur-quick) var(--viz-ease-out), color var(--viz-dur-quick) var(--viz-ease-out), transform var(--viz-dur-quick) var(--viz-ease-out);
 }
-
-.sidebar .nav-item:hover {
-  background: var(--hover);
-}
-
+/* Hover-life: warm the row, gild + grow the icon. */
+.sidebar .nav-item:hover { background: rgba(251, 246, 234, 0.7); color: var(--viz-ink); }
+:root[data-theme='dark'] .sidebar .nav-item:hover { background: var(--hover); } /* tokenized white-film on dark (themeCohesion guard forbids a hardcoded white :hover bg) */
+.sidebar .nav-item:hover .nav-icon { color: var(--viz-brass); transform: scale(1.08); }
+/* Active: a raised linen panel + the GOLD inset bar (the rationed one-highlight), NOT a solid-blue fill. */
 .sidebar .nav-item[aria-current='page'] {
-  background: var(--accent);
-  color: #fff;
+  background: linear-gradient(var(--viz-panel), var(--viz-rule));
+  color: var(--viz-ink);
+  font-weight: 500;
+  border-color: var(--viz-rule);
+  box-shadow: var(--viz-shadow-card);
 }
+.sidebar .nav-item[aria-current='page'] .nav-icon { color: var(--viz-brass); }
+.sidebar .nav-item[aria-current='page']::before {
+  content: ""; position: absolute; left: -0.85rem; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 1.1rem; border-radius: 0 3px 3px 0; background: var(--viz-brass);
+}
+.sidebar .nav-item:focus-visible { outline: none; box-shadow: var(--viz-ring); }
 
 .nav-icon {
   width: 1.2rem;
   text-align: center;
+  color: var(--viz-idle);
+  transition: color var(--viz-dur-quick) var(--viz-ease-out), transform var(--viz-dur-quick) var(--viz-ease-out);
 }
+.nav-label { flex: 1 1 auto; }
+
+/* Faint fractal-lattice watermark, low in the rail (gold, very low opacity; ambient drift). */
+.sidebar-wmark { position: absolute; left: -2.5rem; bottom: 4.5rem; opacity: 0.1; pointer-events: none; color: var(--viz-brass); animation: viz-drift var(--viz-dur-field) ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sidebar-wmark { animation: none; } }
 
 .content {
   flex: 1 1 auto;
@@ -635,11 +666,12 @@ button:disabled {
 
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {
-  margin: 0.75rem 0.7rem 0.2rem;
-  font-size: 0.7rem;
+  margin: 0.85rem 0.75rem 0.4rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  color: var(--viz-idle);
 }
 
 /* WS2: the Jobs view reads in "The Line" instrument language — flat ruled strips composing the shared
@@ -743,7 +775,7 @@ button:disabled {
   line-height: 1.25rem;
   text-align: center;
 }
-.sidebar .nav-item[aria-current='page'] .nav-badge { background: rgba(255, 255, 255, 0.25); }
+/* Active item is now a light linen panel (not a blue fill), so the badge keeps its accent pill (above) — readable on both. */
 
 /* === #108 UI polish pass (KB-Lead's batch) ===================================================== */
 

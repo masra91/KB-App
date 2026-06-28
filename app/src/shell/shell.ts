@@ -32,6 +32,18 @@ import { mountAgentsHub } from './views/agentsHubView';
 import { mountSources } from './views/sourcesView';
 import { mountSettings } from './views/settingsView';
 
+// The Vellum crystalline mark (brand/assets/icon/vellum-glyph-mono.svg) — gold-stroked via --viz-brass
+// (rationed accent; unchanged on dark). Inlined (no asar-asset path gotcha). Decorative → aria-hidden.
+const BRAND_GLYPH =
+  `<svg class="sidebar-brand-glyph" width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">` +
+  `<g fill="none" stroke="var(--viz-brass)" stroke-linejoin="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.4"/>` +
+  `<polygon points="12,7 17,12 12,17 7,12" stroke-width="1.1"/></g><circle cx="12" cy="12" r="1.9" fill="var(--viz-brass)"/></svg>`;
+// A large, very-faint fractal-lattice watermark low in the sidebar (UX v2 shell language).
+const SIDEBAR_WMARK =
+  `<div class="sidebar-wmark" aria-hidden="true"><svg width="220" height="220" viewBox="0 0 24 24">` +
+  `<g fill="none" stroke="var(--viz-brass)" stroke-linejoin="round" stroke-width="0.5"><polygon points="12,2 22,12 12,22 2,12"/>` +
+  `<polygon points="12,7 17,12 12,17 7,12"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></g></svg></div>`;
+
 /** Build the rail's inner HTML: a section heading before each new `group`, then one button per view. */
 function railHtml(views: readonly NavView[]): string {
   let lastGroup: string | undefined;
@@ -86,7 +98,9 @@ export function mountShell(root: HTMLElement, vaultPath: string, name: string): 
   root.innerHTML = `
     <div class="shell">
       <nav class="sidebar" aria-label="Primary">
-        ${railHtml(NAV_VIEWS)}
+        <div class="sidebar-brand">${BRAND_GLYPH}<span class="sidebar-brand-name viz-voice">Vellum</span></div>
+        <div class="sidebar-nav">${railHtml(NAV_VIEWS)}</div>
+        ${SIDEBAR_WMARK}
       </nav>
       <main class="content" id="viewHost"></main>
     </div>`;
