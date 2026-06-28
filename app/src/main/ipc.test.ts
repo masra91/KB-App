@@ -639,3 +639,48 @@ describe('SPEC-0038 QCAP — quick capture IPC', () => {
     await expect(invoke<void>('kb:quickCaptureClose')).resolves.toBeUndefined();
   });
 });
+
+// SPEC-0058 slice-0 — Explore + Health read the EVERGREEN graph via makeReadOnlyTools. The packaged P0
+// was these views failing to load on that path. These regress through the REAL IPC handlers (registerIpc
+// + a real git vault with real entity files), NOT a mocked stub of the read — so a genuine break in the
+// evergreen-graph read path (the thing that shipped broken) is caught here, not hidden behind a fake.
+describe('SPEC-0058 slice-0 — Explore + Health evergreen-graph read path (REAL IPC handlers)', () => {
+  /** Seed the active vault with two real, parser-valid entity files linked Ada → Steve. */
+  async function seedGraphVault(): Promise<void> {
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'Graph KB', initGitIfNeeded: true }); // active = vaultDir
+    const ada = '---\nid: 01ADA\nkind: person\nname: Ada Lovelace\ntags: ["type/person"]\n---\n# Ada Lovelace\nWorked with [[entities/person/steve.md]].\n';
+    const steve = '---\nid: 01STEVE\nkind: person\nname: Steve\ntags: ["type/person"]\n---\n# Steve\n';
+    await fs.mkdir(path.join(vaultDir, 'entities', 'person'), { recursive: true });
+    await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'ada.md'), ada, 'utf8');
+    await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'steve.md'), steve, 'utf8');
+  }
+
+  it('kb:exploreEntities returns the real entity list from the live vault scan', async () => {
+    await seedGraphVault();
+    const entities = await invoke<{ name: string }[]>('kb:exploreEntities');
+    expect(entities.map((e) => e.name).sort()).toEqual(['Ada Lovelace', 'Steve']);
+  });
+
+  it('kb:exploreNeighborhood builds a real 1-hop neighborhood (center + linked neighbor) from the vault', async () => {
+    await seedGraphVault();
+    const nb = await invoke<{ found: boolean; center?: { name: string }; neighbors: { name: string }[] }>('kb:exploreNeighborhood', 'Ada Lovelace');
+    expect(nb.found).toBe(true);
+    expect(nb.center?.name).toBe('Ada Lovelace');
+    expect(nb.neighbors.map((n) => n.name)).toContain('Steve'); // the [[steve]] wikilink resolved to a real edge
+  });
+
+  it('kb:healthReport scans the real vault and reports a structural readout (no throw on the read path)', async () => {
+    await seedGraphVault();
+    const report = await invoke<{ scanned: number; counts: { orphans: number; thin: number; dangling: number } }>('kb:healthReport');
+    expect(report.scanned).toBe(2); // both entities were really walked + parsed
+    expect(report.counts).toMatchObject({ orphans: expect.any(Number), thin: expect.any(Number), dangling: expect.any(Number) });
+  });
+
+  it('all three handlers degrade to safe empty results when no vault is active (never throw)', async () => {
+    // no kb:create → readAppConfig has no activeVaultPath
+    await fs.writeFile(path.join(state.userData, 'kb-app.config.json'), JSON.stringify({ activeVaultPath: null }) + '\n');
+    expect(await invoke<unknown[]>('kb:exploreEntities')).toEqual([]);
+    expect(await invoke<{ found: boolean }>('kb:exploreNeighborhood')).toMatchObject({ found: false });
+    expect(await invoke<{ scanned: number }>('kb:healthReport')).toMatchObject({ scanned: 0 });
+  });
+});

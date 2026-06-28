@@ -673,6 +673,13 @@ button:disabled {
 /* Retryable load-failure fallback (#145) — the Retry button reuses .btn; just space it from the text. */
 .load-error .load-retry { margin-left: 0.5rem; font-size: 0.85em; padding: 0.2rem 0.6rem; }
 
+/* SPEC-0058 slice-0 — the WARMING state (a full-graph read still scanning a cold/large vault) is NOT an
+   error: calm muted ink, never the --error / --viz-oxide hue, so a cold start reads as "still preparing",
+   not "broken" (KB-Lead's warming-vs-error reframe). Functional/minimal — the warming-state visual
+   co-evolves with the UX-v2 redesign per surface (STATE-13 / DL-1·DL-2). */
+.load-warming { color: var(--viz-ink-muted); font-size: 0.9rem; }
+.load-warming .load-retry { margin-left: 0.5rem; font-size: 0.85em; padding: 0.2rem 0.6rem; }
+
 /* The Retry fallback button (renderLoadError, loadGuard.ts) is the last consumer of the legacy .btn.
    The legacy .confirm / .btn-danger were retired in the WS3 migration: Settings (their final consumer)
    now composes the blessed .viz-confirm / .viz-btn--danger primitives, as Jobs already does. */

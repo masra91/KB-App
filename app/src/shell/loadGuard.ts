@@ -9,6 +9,18 @@
  *  first load, short enough that a genuine hang doesn't strand the user staring at a spinner. */
 export const LOAD_TIMEOUT_MS = 8000;
 
+/** Timeout for a FULL-GRAPH read (Explore neighborhood, Health scan). These walk the whole
+ *  `entities/` + `claims/` tree LIVE on every mount (SPEC-0058) — legitimately heavier than a light
+ *  Manage read, so the 8s default false-trips on a cold/large vault and flips the view to an error face
+ *  even though the scan would have finished (the packaged-app Explore/Health "Couldn't load" P0). A more
+ *  generous bound lets a cold scan complete; it stays BOUNDED (never an infinite spinner, #145), and a
+ *  trip past THIS is the honest signal the maintained graph projection is needed, not a live walk. */
+export const GRAPH_LOAD_TIMEOUT_MS = 30000;
+
+/** How long a graph read may run before the view swaps its spinner for the calm WARMING face — so a
+ *  slow cold scan reads as "still preparing", not a frozen "Loading…", WHILE the scan keeps running. */
+export const WARMING_AFTER_MS = 3000;
+
 /** Thrown by {@link withTimeout} when the wrapped promise doesn't settle in time. */
 export class TimeoutError extends Error {
   constructor(ms: number) {
@@ -36,6 +48,66 @@ export function withTimeout<T>(p: Promise<T>, ms: number = LOAD_TIMEOUT_MS): Pro
       },
     );
   });
+}
+
+/** True when a load failure is the backend still WARMING — a {@link TimeoutError} on a cold/large first
+ *  scan — rather than a genuine fault. A warming state must NOT wear the alarming error face (SPEC-0058
+ *  STATE-* / KB-Lead reframe: a cold-start scan in flight is "warming", not "broken"). Any non-timeout
+ *  throw is a real error and routes to {@link renderLoadError}. */
+export function isWarming(err: unknown): boolean {
+  return err instanceof TimeoutError;
+}
+
+/**
+ * Un-swallow a view's load failure to the main app-log via the OBS-18 renderer-error channel, so a
+ * packaged-app walkthrough sees the REAL cause — a `TimeoutError` (the scan budget tripped on a cold/large
+ * vault) vs a thrown read error — instead of a silent `catch {}` (SPEC-0058 slice-0: nobody knew which it
+ * was). Fire-and-forget and self-guarded: telemetry must never throw over the original failure it reports.
+ * `view` tags the log line (e.g. "explore", "health").
+ */
+export function reportLoadFailure(view: string, err: unknown): void {
+  try {
+    const e = err instanceof Error ? err : new Error(String(err));
+    void window.kbApi?.reportRendererError?.({
+      kind: 'error',
+      message: `[${view}] load failed: ${e.name}: ${e.message}`,
+      ...(e.stack ? { stack: e.stack } : {}),
+    })?.catch?.(() => {});
+  } catch {
+    /* best-effort telemetry — swallow its own failure, never mask the load failure */
+  }
+}
+
+/**
+ * Run a full-graph `fetch()` with honest WARMING feedback (SPEC-0058 slice-0). Bounds it by
+ * {@link GRAPH_LOAD_TIMEOUT_MS}; if it hasn't settled after `warmingAfterMs`, `onWarming()` fires once so
+ * the view can swap its spinner for the calm "still preparing" face WHILE the scan keeps running. Resolves
+ * with the value on success; on failure rejects with the original error (a `TimeoutError` if the bound
+ * tripped — the caller routes that to {@link renderWarming}, any other error to {@link renderLoadError}).
+ */
+export async function loadGraphWithWarming<T>(
+  fetch: () => Promise<T>,
+  onWarming: () => void,
+  opts: { warmingAfterMs?: number; timeoutMs?: number } = {},
+): Promise<T> {
+  const warmTimer = setTimeout(onWarming, opts.warmingAfterMs ?? WARMING_AFTER_MS);
+  try {
+    return await withTimeout(fetch(), opts.timeoutMs ?? GRAPH_LOAD_TIMEOUT_MS);
+  } finally {
+    clearTimeout(warmTimer);
+  }
+}
+
+/**
+ * Render a calm "still preparing" WARMING state — NOT the error face — for when a graph read is slow or
+ * timed out because the backend is still warming on a cold/large vault (SPEC-0058 slice-0, KB-Lead's
+ * warming-vs-error reframe). A distinct `.load-warming` class (no error hue) + patient copy so the user
+ * reads "be patient", not "it broke"; the Retry re-runs the load. `headerHtml` is the view's own trusted
+ * static header (not user data), so it is intentionally not escaped — same contract as {@link renderLoadError}.
+ */
+export function renderWarming(container: HTMLElement, headerHtml: string, onRetry: () => void): void {
+  container.innerHTML = `<div class="card">${headerHtml}<p class="load-warming viz-body">Still preparing your knowledge graph — this can take a moment the first time on a large vault. <button type="button" class="btn load-retry">Retry</button></p></div>`;
+  container.querySelector<HTMLButtonElement>('.load-retry')?.addEventListener('click', () => onRetry());
 }
 
 /**

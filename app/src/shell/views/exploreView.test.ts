@@ -6,6 +6,7 @@
 // Obsidian (EXPLORE-4 click-through), and the §10 instrument-language composition (no native <select>).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountExplore } from './exploreView';
+import { TimeoutError } from '../loadGuard';
 import type { KbApi } from '../../kb/types';
 import type { ExploreEntityRef, ExploreNeighborhood } from '../../kb/explorePanel';
 
@@ -34,6 +35,7 @@ let exploreNeighborhood: ReturnType<typeof vi.fn>;
 let exploreEntities: ReturnType<typeof vi.fn>;
 let openCitation: ReturnType<typeof vi.fn>;
 let openSourceRef: ReturnType<typeof vi.fn>;
+let reportRendererError: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
@@ -41,6 +43,7 @@ function setApi(): void {
     exploreEntities: exploreEntities as unknown as KbApi['exploreEntities'],
     openCitation: openCitation as unknown as KbApi['openCitation'],
     openSourceRef: openSourceRef as unknown as KbApi['openSourceRef'],
+    reportRendererError: reportRendererError as unknown as KbApi['reportRendererError'],
   };
 }
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -50,6 +53,7 @@ beforeEach(() => {
   exploreEntities = vi.fn(async () => ENTITIES);
   openCitation = vi.fn(async () => ({ ok: true as const }));
   openSourceRef = vi.fn(async () => ({ status: 'opened' as const }));
+  reportRendererError = vi.fn(async () => {});
   setApi();
 });
 afterEach(() => {
@@ -478,5 +482,44 @@ describe('Explore view — contested entity (SPEC-0036 CONTRA)', () => {
     expect(c.querySelector('.explore-contested-flag')).toBeNull();
     expect(c.querySelector('.explore-contested')).toBeNull();
     expect(c.querySelector('.explore-claim-disputed')).toBeNull();
+  });
+
+  // SPEC-0058 slice-0 — warming-vs-error on the live evergreen-graph read path (the packaged Explore P0:
+  // a cold/large-vault neighborhood scan tripped the 8s deadline and flipped straight to "Couldn't load").
+  describe('load resilience — warming vs error + un-swallowed telemetry (SPEC-0058 slice-0)', () => {
+    it('shows the calm WARMING face (not the error face) when the graph read times out', async () => {
+      exploreNeighborhood = vi.fn(async () => {
+        throw new TimeoutError(30000); // the generous graph bound tripped → still warming, not broken
+      });
+      setApi();
+      const c = await mount();
+      expect(c.querySelector('.load-warming')).not.toBeNull(); // PASSES-AFTER
+      expect(c.querySelector('.load-error, .error')).toBeNull(); // FAILS-BEFORE: timeout → the error face
+      expect(c.textContent).not.toContain('Couldn’t load');
+    });
+
+    it('shows a retryable ERROR face (not warming) when the read throws a real error', async () => {
+      exploreNeighborhood = vi.fn(async () => {
+        throw new Error('read blew up');
+      });
+      setApi();
+      const c = await mount();
+      expect(c.querySelector('.load-error, .error')).not.toBeNull();
+      expect(c.querySelector('.load-warming')).toBeNull();
+    });
+
+    it('un-swallows BOTH a timeout and a real throw to the app-log (reportRendererError)', async () => {
+      for (const err of [new TimeoutError(30000), new Error('boom')]) {
+        reportRendererError = vi.fn(async () => {});
+        exploreNeighborhood = vi.fn(async () => {
+          throw err;
+        });
+        setApi();
+        await mount();
+        expect(reportRendererError).toHaveBeenCalledTimes(1); // FAILS-BEFORE: the bare catch swallowed it
+        expect((reportRendererError.mock.calls[0][0] as { message: string }).message).toMatch(/\[explore\] load failed/);
+        document.body.innerHTML = '';
+      }
+    });
   });
 });

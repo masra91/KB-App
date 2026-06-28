@@ -13,7 +13,7 @@
 // uses a CSS animation that degrades to instant under prefers-reduced-motion (EXPLORE-13), the same
 // reduced-motion discipline as the rest of The Line.
 import { esc, emptyState } from '../html';
-import { withTimeout, renderLoadError } from '../loadGuard';
+import { withTimeout, renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure, isWarming } from '../loadGuard';
 import type { ExploreClaim, ExploreContradiction, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
 
 const HEADER = `<h1 class="explore-title viz-signage">Explore</h1><p class="explore-sub viz-body">Walk your knowledge graph — start at an entity and follow its relationships. Read-only.</p>`;
@@ -70,11 +70,19 @@ async function load(container: HTMLElement, state: ExploreState): Promise<void> 
   let nb: ExploreNeighborhood;
   let entities: ExploreEntityRef[];
   try {
-    // #145-style: bound the whole load→render so a hung/failed IPC degrades to a retryable error,
-    // never an infinite spinner.
-    [nb, entities] = await Promise.all([withTimeout(window.kbApi.exploreNeighborhood(state.focus)), withTimeout(window.kbApi.exploreEntities())]);
-  } catch {
-    renderLoadError(container, HEADER, () => void load(container, state));
+    // SPEC-0058 slice-0: bound the whole live graph walk, but show a calm WARMING face (not a frozen
+    // spinner) once it's slow — and a generous bound so a cold/large-vault scan actually completes
+    // instead of false-tripping the old 8s deadline into an error face (the packaged Explore P0).
+    [nb, entities] = await loadGraphWithWarming(
+      () => Promise.all([window.kbApi.exploreNeighborhood(state.focus), window.kbApi.exploreEntities()]),
+      () => renderWarming(container, HEADER, () => void load(container, state)),
+    );
+  } catch (err) {
+    // Un-swallow to the app-log (was a bare `catch {}` — nobody could see if it was the timeout or a
+    // throw), then route honestly: a timeout = still WARMING (calm), any real throw = error face.
+    reportLoadFailure('explore', err);
+    if (isWarming(err)) renderWarming(container, HEADER, () => void load(container, state));
+    else renderLoadError(container, HEADER, () => void load(container, state));
     return;
   }
   state.cache = { nb, entities };
