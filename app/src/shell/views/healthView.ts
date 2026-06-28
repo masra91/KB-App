@@ -12,7 +12,7 @@
 // summary strip mean it's never a blank panel. Thin DOM over the typed IPC; scan is node-tested in
 // `kb/healthPanel`.
 import { esc } from '../html';
-import { withTimeout, renderLoadError } from '../loadGuard';
+import { renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure, isWarming } from '../loadGuard';
 import type { HealthReport, HealthFinding, DanglingLink } from '../../kb/healthPanel';
 
 const HEADER = `<h1 class="health-title viz-signage">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Read-only; scanned without AI.</p>`;
@@ -25,11 +25,19 @@ export async function mountHealth(container: HTMLElement): Promise<void> {
 async function render(container: HTMLElement): Promise<void> {
   let report: HealthReport;
   try {
-    // Bound the scan→render so a hung/failed IPC degrades to a retryable "unavailable · Recheck"
-    // affordance, never an endless spinner (#145/#160 honest degrade).
-    report = await withTimeout(window.kbApi.healthReport());
-  } catch {
-    renderLoadError(container, HEADER, () => void render(container));
+    // SPEC-0058 slice-0: bound the live structural scan, but show a calm WARMING face (not a frozen
+    // "Scanning…") once it's slow — and a generous bound so a cold/large-vault scan completes instead
+    // of false-tripping the old 8s deadline into an error face (the packaged Health P0).
+    report = await loadGraphWithWarming(
+      () => window.kbApi.healthReport(),
+      () => renderWarming(container, HEADER, () => void render(container)),
+    );
+  } catch (err) {
+    // Un-swallow to the app-log (was a bare `catch {}`), then route honestly: a timeout = still WARMING
+    // (calm, the scan just needs longer), any real throw = retryable error face.
+    reportLoadFailure('health', err);
+    if (isWarming(err)) renderWarming(container, HEADER, () => void render(container));
+    else renderLoadError(container, HEADER, () => void render(container));
     return;
   }
   container.innerHTML = `<div class="health viz-surface">${HEADER}${summaryStrip(report)}${groups(report)}${footnote()}</div>`;

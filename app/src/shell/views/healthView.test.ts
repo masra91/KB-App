@@ -6,6 +6,7 @@
 // name), click-through (openCitation), "+N more", ENG-15/16 partial-data safety, and load resilience.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountHealth } from './healthView';
+import { TimeoutError } from '../loadGuard';
 import type { KbApi } from '../../kb/types';
 import type { HealthReport } from '../../kb/healthPanel';
 
@@ -22,11 +23,13 @@ function report(over: Partial<HealthReport> = {}): HealthReport {
 
 let healthReport: ReturnType<typeof vi.fn>;
 let openCitation: ReturnType<typeof vi.fn>;
+let reportRendererError: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     healthReport: healthReport as unknown as KbApi['healthReport'],
     openCitation: openCitation as unknown as KbApi['openCitation'],
+    reportRendererError: reportRendererError as unknown as KbApi['reportRendererError'],
   };
 }
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -34,6 +37,7 @@ const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   healthReport = vi.fn(async () => report());
   openCitation = vi.fn(async () => ({ ok: true as const }));
+  reportRendererError = vi.fn(async () => {});
   setApi();
 });
 afterEach(() => {
@@ -133,12 +137,42 @@ describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
     expect(c.querySelector('.health-open[data-rel="entities/x/partial.md"] .health-untitled')?.textContent).toBe('(untitled)');
   });
 
-  it('degrades to a retryable error when the scan IPC fails (no endless spinner)', async () => {
+  it('degrades to a retryable error when the scan IPC throws a real error (no endless spinner)', async () => {
     healthReport = vi.fn(async () => {
       throw new Error('x');
     });
     setApi();
     const c = await mount();
     expect(c.querySelector('.load-error, .error')).not.toBeNull();
+    expect(c.querySelector('.load-warming')).toBeNull(); // a real throw is an ERROR, not warming
+  });
+
+  // SPEC-0058 slice-0 — a slow cold-start scan (TimeoutError) must read as WARMING, not the alarming
+  // "Couldn't load" error face (the packaged Health P0: a cold/large-vault scan flipped straight to error).
+  it('shows the calm WARMING face (not the error face) when the scan times out', async () => {
+    healthReport = vi.fn(async () => {
+      throw new TimeoutError(30000); // the generous graph bound tripped → still warming
+    });
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-warming')).not.toBeNull(); // PASSES-AFTER
+    expect(c.querySelector('.load-error, .error')).toBeNull(); // FAILS-BEFORE: timeout went to the error face
+    expect(c.textContent).not.toContain('Couldn’t load');
+  });
+
+  // SPEC-0058 slice-0 — the bare `catch {}` swallowed the real cause; both failure paths must now
+  // un-swallow it to the app-log so a packaged-app walkthrough can tell timeout from throw.
+  it('un-swallows BOTH a timeout and a real throw to the app-log (reportRendererError)', async () => {
+    for (const err of [new TimeoutError(30000), new Error('boom')]) {
+      reportRendererError = vi.fn(async () => {});
+      healthReport = vi.fn(async () => {
+        throw err;
+      });
+      setApi();
+      await mount();
+      expect(reportRendererError).toHaveBeenCalledTimes(1); // FAILS-BEFORE: swallowed, never logged
+      expect((reportRendererError.mock.calls[0][0] as { message: string }).message).toMatch(/\[health\] load failed/);
+      document.body.innerHTML = '';
+    }
   });
 });
