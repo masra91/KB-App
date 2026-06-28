@@ -1,10 +1,10 @@
 /* === "The Line" — SPEC-0032 pipeline-visualization SURFACE styles ============================== */
 /* Surface-specific composition for the Pipeline Status view, built ON the shared `_design-system`
    foundation (#179): it consumes the `--viz-*` tokens, type-role utilities (.viz-signage/.viz-numeric/
-   .viz-body), flat-ink primitives (.viz-ruled/.viz-chip/.viz-btn/.viz-focusable) and the ember-breathe
+   .viz-body), flat-ink primitives (.viz-ruled/.viz-chip/.viz-btn/.viz-focusable) and the breathe
    keyframe + reduced-motion reset declared there. Per the design-system boundary rule, the Line's own
    components (stations, gauge-rails, carriages, siding, alarm) live HERE, not in the shared layer.
-   Guardrails (§6): flat ink, NO card chrome (no radius on structure, no shadow/elevation), ember focus,
+   Guardrails (§6): flat ink, NO card chrome (no radius on structure, no shadow/elevation), accent focus,
    state never by colour alone (glyph + hue + fill), oxide never on small text. */
 
 .the-line {
@@ -49,7 +49,7 @@
   margin-right: 0.15rem;
 }
 /* State hue on the headline badge — a large/display element, so the hue is allowed (§3). */
-.line-overall-running { color: var(--viz-ember); }
+.line-overall-running { color: var(--viz-sprout); }
 .line-overall-idle { color: var(--viz-idle); }
 .line-overall-stalled { color: var(--viz-oxide); }
 .line-lastact {
@@ -94,8 +94,8 @@
   gap: 0.4rem;
 }
 .line-pivot-btn.line-pivot-on {
-  border-color: var(--viz-ember);
-  color: var(--viz-ember);
+  border-color: var(--viz-accent);
+  color: var(--viz-accent);
 }
 
 /* ── Core (spine + carriages), lens weighting ──────────────────────────────────────────────────
@@ -162,8 +162,8 @@
   font-size: 1.25rem;
   line-height: 1;
 }
-/* The one running station embers + breathes (§5 ambient). Reduced-motion reset (design-system.css
-   `.viz-surface *`) zeroes this to a static ember fill — full parity, state still reads via glyph+hue. */
+/* The one running station sprouts + breathes (§5 ambient). Reduced-motion reset (design-system.css
+   `.viz-surface *`) zeroes this to a static sprout fill — full parity, state still reads via glyph+hue. */
 .line-station-running .line-station-glyph,
 .line-cell-breathe {
   animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite;
@@ -262,22 +262,22 @@
 }
 /* VIZ-12 — the rail's primary fill is the two-segment PENDING bar (DEV-6's bar-fill geometry, #336):
    work-in-motion, not the cumulative end-state total. The bar is a graphic, so hue carries on it (§3).
-   In-progress = ember BASE at the spine + the ambient breathe (the Principal's "fade" = hue + motion +
+   In-progress = sprout BASE at the spine + the ambient breathe (the Principal's "fade" = hue + motion +
    position, never colour alone); queued = a still SLATE cap above, brass only when the backlog is
    actually STUCK (queueConcerning). Heights are a % of the rail track, scaled to the peak pending
    across stations; the empty remainder is calm headroom. */
 .line-rail-fill {
   display: flex;
-  flex-direction: column-reverse; /* source order [active, queued] → ember base at the spine, queued above */
+  flex-direction: column-reverse; /* source order [active, queued] → sprout base at the spine, queued above */
   width: 100%;
   height: 100%;
 }
 .line-pending-active {
   width: 100%;
   min-height: 1px;
-  background: var(--viz-ember);
-  /* the ambient ember breathe (§5) — opacity-only; the global reduced-motion reset zeroes it (static
-     ember fill stays distinct by hue + segment + the `▣ active` count). No height transition — animating
+  background: var(--viz-sprout);
+  /* the ambient sprout breathe (§5) — opacity-only; the global reduced-motion reset zeroes it (static
+     sprout fill stays distinct by hue + segment + the `▣ active` count). No height transition — animating
      a height change triggers layout (VIZ-9 wants transform/opacity-only motion); the bar snaps to its
      new fill on each push. */
   animation: viz-breathe var(--viz-dur-breathe) var(--viz-ease-state) infinite;
@@ -291,7 +291,7 @@
   background: var(--viz-brass); /* the backlog here is actually stuck → needs-you brass (VIZ-10/OBS-11) */
 }
 /* `▣ N active` — the in-progress count joins `queue N` in the ink live-state lane; the ▣ glyph carries
-   the ember heat (a glyph, hue allowed), the count stays ink-numeric, `active` is quiet signage. */
+   the sprout heat (a glyph, hue allowed), the count stays ink-numeric, `active` is quiet signage. */
 .line-station-active {
   font-size: 0.66rem;
   color: var(--viz-ink-muted);
@@ -301,7 +301,7 @@
   white-space: nowrap;
 }
 .line-active-glyph {
-  color: var(--viz-ember);
+  color: var(--viz-sprout);
 }
 /* Set-aside count under a station — oxide BORDER + ink text (oxide off small text, §3). */
 .line-badge-error {
@@ -348,14 +348,14 @@
   display: inline-flex;
   gap: 3px;
 }
-/* Stepper cells — graphics (hue allowed): done = patina, current = ember (lit), pending = idle dot. */
+/* Stepper cells — graphics (hue allowed): done = patina, current = sprout (lit), pending = idle dot. */
 .line-cell {
   width: 0.8rem;
   height: 0.4rem;
   background: var(--viz-rule);
 }
 .line-cell-done { background: var(--viz-patina); }
-.line-cell-current { background: var(--viz-ember); }
+.line-cell-current { background: var(--viz-sprout); }
 .line-cell-pending { background: transparent; border: 1px solid var(--viz-rule); }
 .line-carriage-stage {
   font-size: 0.72rem;
