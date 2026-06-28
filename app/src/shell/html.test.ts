@@ -66,4 +66,18 @@ describe('emptyState — branded empty primitive (#406)', () => {
     expect(h).toContain('aria-hidden="true">&lt;g&gt;<');
     expect(h).toContain('<button>ok</button>'); // action is trusted, not escaped
   });
+
+  it('compact mode (#406): toggles --compact, drops the default mark + the Spectral voice class', () => {
+    const c = emptyState({ compact: true, title: 'No feeds yet.', body: 'Add one below.' });
+    expect(c).toContain('class="viz-empty viz-empty--compact"');
+    expect(c).not.toContain('viz-empty__mark'); // compact drops the default crystalline mark
+    expect(c).toContain('class="viz-empty__title">No feeds yet.'); // title is Inter (no viz-voice), not a hero
+    expect(c).not.toContain('viz-voice');
+    // hero (non-compact) keeps the mark + the voice title
+    const hero = emptyState({ title: 'Nothing here.' });
+    expect(hero).toContain('viz-empty__mark');
+    expect(hero).toContain('class="viz-empty__title viz-voice"');
+    // an explicit glyph still renders in compact (DL-1: "or shrink to inline glyph")
+    expect(emptyState({ compact: true, title: 'x', glyph: '✓' })).toContain('viz-empty__mark');
+  });
 });

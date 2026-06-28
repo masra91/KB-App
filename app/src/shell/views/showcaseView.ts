@@ -142,6 +142,8 @@ function emptyStateSection(): string {
   cells.push(cell('title only', emptyState({ title: 'No claims recorded for this entity yet.' })));
   cells.push(cell('custom glyph', emptyState({ title: 'All caught up.', glyph: '✓' })));
   cells.push(cell('no mark (glyph:null)', emptyState({ title: 'Nothing on the line right now.', glyph: null })));
+  cells.push(cell('compact (in-section note)', emptyState({ compact: true, title: 'No feeds yet.', body: 'Add one from a template below.' })));
+  cells.push(cell('compact + inline glyph', emptyState({ compact: true, title: 'No watched folders yet.', glyph: '◇' })));
   return section('EmptyState', '#406', cells);
 }
 
