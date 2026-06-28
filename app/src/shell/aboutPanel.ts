@@ -1,0 +1,95 @@
+// About Vellum (#406 part-2 / SPEC-0057) — the one place we spend the FULL brand identity: a modal
+// dialog over the shell with the signature gradient hero (a dark island in the cream app), the Spectral
+// wordmark + crystalline lattice mark, one rationed-gold note, and the runtime version below on cream.
+//
+// Pattern: a modal-on-shell (NOT a root-replacement route like #qcap/showcase) — it overlays whatever
+// you're on and returns you there. role=dialog + aria-modal + focus-trap + Esc/scrim dismiss + restored
+// focus. Reachable from the Settings footer.
+//
+// Version: RELEASE-6 (SPEC-0055) — DEV-5 owns the `getAppVersion` IPC; here we just RENDER it, defensively
+// (a missing/failed call shows "Version unavailable", never blank/crash — #160). So About closes RELEASE-6.
+import { esc } from './html';
+
+const WORDMARK = 'Vellum';
+const TAGLINE = 'Your AI-native second brain — it reads, files, links, and recalls your knowledge, so you don’t have to.';
+const CREDITS = 'Built on an Obsidian-compatible markdown vault · GitHub Copilot · Electron · OFL faces (Inter · Spectral · IBM Plex Mono).';
+
+// The crystalline lattice mark (brand/assets/icon/vellum-glyph-mono.svg) — strokes use currentColor so it
+// recolors to the hero's cream. Inlined (no asar-asset path gotcha); decorative → aria-hidden at the call site.
+const MARK_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.5"/><polygon points="12,7 17,12 12,17 7,12" stroke-width="1.2"/><line x1="2" y1="12" x2="22" y2="12" stroke-width="0.9" opacity="0.85"/><line x1="12" y1="2" x2="12" y2="22" stroke-width="0.9" opacity="0.85"/></g><circle cx="12" cy="12" r="1.9" fill="currentColor"/></svg>`;
+
+/** Read the runtime version via DEV-5's RELEASE-6 IPC, defensively. Returns a display string; never throws. */
+async function loadVersion(): Promise<string> {
+  try {
+    const api = window.kbApi as unknown as { getAppVersion?: () => Promise<string> };
+    if (typeof api.getAppVersion !== 'function') return 'Version unavailable'; // IPC not on main yet
+    const v = await api.getAppVersion();
+    return v ? `${WORDMARK} · v${v}` : 'Version unavailable';
+  } catch {
+    return 'Version unavailable';
+  }
+}
+
+/** Mount the About modal over the shell. Dismissable (Esc / scrim / Close), focus-trapped, restores focus. */
+export function mountAboutPanel(host: HTMLElement = document.body): void {
+  const prevFocus = document.activeElement as HTMLElement | null;
+  const scrim = document.createElement('div');
+  scrim.className = 'about-scrim';
+  scrim.innerHTML = `
+    <div class="about-modal viz-surface" role="dialog" aria-modal="true" aria-label="About ${esc(WORDMARK)}">
+      <div class="about-hero viz-drift">
+        <span class="about-mark" aria-hidden="true">${MARK_SVG}</span>
+        <span class="about-wordmark viz-voice">${esc(WORDMARK)}</span>
+        <span class="about-rule" aria-hidden="true"></span>
+        <p class="about-tagline viz-voice">${esc(TAGLINE)}</p>
+      </div>
+      <div class="about-body">
+        <p class="about-version viz-numeric" aria-live="polite">…</p>
+        <p class="about-credits viz-body">${esc(CREDITS)}</p>
+        <div class="about-actions"><button type="button" class="about-close viz-btn viz-btn--ghost viz-focusable">Close</button></div>
+      </div>
+    </div>`;
+  host.appendChild(scrim);
+
+  const close = (): void => {
+    document.removeEventListener('keydown', onKey, true);
+    scrim.remove();
+    prevFocus?.focus?.(); // restore focus to the trigger (a11y)
+  };
+
+  // Focus-trap + Esc. Capture phase so it wins regardless of inner focus.
+  function onKey(e: KeyboardEvent): void {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const f = Array.from(scrim.querySelectorAll<HTMLElement>('button, [href], [tabindex]:not([tabindex="-1"])')).filter((el) => !el.hasAttribute('disabled'));
+    if (f.length === 0) return;
+    const first = f[0];
+    const last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+  document.addEventListener('keydown', onKey, true);
+
+  // Scrim click OUTSIDE the modal dismisses; a click inside does not.
+  scrim.addEventListener('mousedown', (e) => {
+    if (e.target === scrim) close();
+  });
+  const closeBtn = scrim.querySelector<HTMLButtonElement>('.about-close')!;
+  closeBtn.addEventListener('click', close);
+  closeBtn.focus(); // initial focus into the dialog
+
+  // Version (async, defensive) — fills once resolved; "Version unavailable" on absent/failed IPC (#160).
+  void loadVersion().then((v) => {
+    const el = scrim.querySelector<HTMLElement>('.about-version');
+    if (el) el.textContent = v;
+  });
+}

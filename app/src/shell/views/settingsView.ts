@@ -10,6 +10,7 @@
 // confirm-gate (guarded↔autonomous) re-wires onto the segment, not a removed select.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
+import { mountAboutPanel } from '../aboutPanel';
 import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
 // SPEC-0048 SCALE Settings (Scale card). Imported from the PURE `scaleConstants` (no node import) so
 // the renderer bundle never pulls the node-only `instanceConfig` (the renderer→node-builtin boundary).
@@ -211,8 +212,10 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <button id="quiesce-btn" type="button" class="viz-btn viz-focusable"${vaultPath ? '' : ' disabled'}>Prepare for shutdown</button>
         <button id="resume-btn" type="button" class="viz-btn viz-focusable" hidden>Resume</button>
         <p id="quiesce-status" class="settings-note" role="status" aria-live="polite"></p>
-      </div>`;
+      </div>
+      <p class="settings-footer"><button type="button" id="about-link" class="viz-btn viz-btn--ghost viz-focusable">About Vellum</button></p>`;
 
+    container.querySelector<HTMLButtonElement>('#about-link')?.addEventListener('click', () => mountAboutPanel());
     wireAutonomy(container, settings);
     wireVerbosity(container, settings);
     wireScale(container, settings);

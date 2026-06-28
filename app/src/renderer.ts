@@ -19,6 +19,7 @@ import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" 
 import './shell/setupFlow.css'; // SPEC-0009 SETUP — guided first-run (model → sample seed → tour)
 import './shell/views/showcase.css'; // DESIGN-SHOWCASE — dev-only primitive gallery layout (?showcase)
 import './qcap/qcap.css'; // SPEC-0038 QCAP — the frictionless quick-capture sheet (#qcap route)
+import './shell/aboutPanel.css'; // SPEC-0057 #406 — the About Vellum identity modal
 import './index.css';
 import type { PathInspection, RendererErrorReport } from './kb/types';
 import { esc, baseName } from './shell/html';
