@@ -172,8 +172,17 @@ async function onCapture(container: HTMLElement): Promise<void> {
 
   const warn = sizeWarning(text, stagedFiles);
 
-  // Fire-and-forget (CAPTURE-2): clear immediately so the next capture can start.
-  const res = await window.kbApi.capture({ inputs });
+  // The main `kb:capture` handler always resolves a structured CaptureResult, but the IPC channel itself
+  // can still reject (handler unregistered, serialization error). Guard so a transport reject becomes an
+  // honest, retryable note instead of a SILENT failure (#160) — and the typed text + staged files are
+  // left intact (never lose a capture on a failed submit).
+  let res: Awaited<ReturnType<typeof window.kbApi.capture>>;
+  try {
+    res = await window.kbApi.capture({ inputs });
+  } catch {
+    note.textContent = '⚠️ Couldn’t capture just now — your text is safe; try again.';
+    return;
+  }
   if (res.ok) {
     textArea.value = '';
     stagedFiles = [];

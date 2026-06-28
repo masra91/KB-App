@@ -214,12 +214,24 @@ export function bodyHtml(s: BodyState): string {
   const note = s.truncated
     ? `<p class="activity-note activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
     : `<p class="activity-note activity-count">${s.total} event${s.total === 1 ? '' : 's'}.</p>`;
-  return note + `<ul class="activity-feed">${s.entries.map((e) => entryHtml(e, s.expanded.has(e.id))).join('')}</ul>`;
+  // ENG-15/16 per-item isolation: a single legacy/malformed entry must not blank the whole feed. Wrap
+  // each row so a throw degrades to a skeleton <li> (the entry's own id when available) and its siblings
+  // still render. (entryHtml/rawEventHtml are also field-guarded below; this is the belt over the braces.)
+  return note + `<ul class="activity-feed">${s.entries.map((e) => safeEntryHtml(e, s.expanded.has(e?.id))).join('')}</ul>`;
+}
+
+/** Per-entry isolation wrapper — never throws into the feed `.map`. */
+function safeEntryHtml(e: ActivityFeedEntry, open: boolean): string {
+  try {
+    return entryHtml(e, open);
+  } catch {
+    return `<li class="activity-entry activity-entry--skeleton"><div class="activity-entry-row"><span class="activity-summary activity-note">An activity entry couldn’t be shown.</span></div></li>`;
+  }
 }
 
 /** A subject id to offer a lineage trace on (entity preferred, else source/claim). */
 function traceableSubject(e: ActivityFeedEntry): string | null {
-  const s = e.events[0]?.subjects ?? {};
+  const s = e.events?.[0]?.subjects ?? {}; // `?.` AFTER the index too: a legacy entry may lack `events`
   return s.entityId ?? s.sourceId ?? s.claimId ?? null;
 }
 
@@ -227,7 +239,7 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
   const trace = traceableSubject(e);
   const traceBtn = trace ? `<button class="activity-trace viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-act="lineage" data-id="${esc(trace)}" aria-label="Trace the origin of: ${esc(e.summary)}">trace origin</button>` : '';
   const raw = open
-    ? `<div class="activity-raw">${e.events.map(rawEventHtml).join('')}</div>`
+    ? `<div class="activity-raw">${(e.events ?? []).map(rawEventHtml).join('')}</div>`
     : '';
   // The expand toggle and the (optional) trace-origin action share one centered header row — trace can't
   // nest inside the head <button>, so the row aligns them as flex siblings (head fills, trace trails).
@@ -249,7 +261,10 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
 /** Drill-down: the raw canonical event behind a feed entry (AUDIT-5). */
 export function rawEventHtml(ev: AuditEvent): string {
   const json = JSON.stringify({ ts: ev.ts, actor: ev.actor, eventType: ev.eventType, runId: ev.runId, model: ev.model, subjects: ev.subjects, payload: ev.payload }, null, 2);
-  return `<pre class="activity-event"><code>${esc(json)}</code></pre><div class="activity-event-src">${esc(ev.provenance.file)}:${ev.provenance.line}</div>`;
+  // A legacy audit event may lack `provenance` — guard so the drill-down degrades to the JSON without the
+  // file:line footer rather than throwing (ENG-15/16).
+  const src = ev.provenance ? `<div class="activity-event-src">${esc(ev.provenance.file)}:${esc(String(ev.provenance.line ?? ''))}</div>` : '';
+  return `<pre class="activity-event"><code>${esc(json)}</code></pre>${src}`;
 }
 
 /** A source's sensitivity as a read-only chip (SENSE-10): the current label, tag-styled, with its origin
@@ -271,7 +286,7 @@ export function lineageHtml(l: Lineage, sensitivities: Record<string, SourceSens
     .map((e) => `<li class="lineage-step"><span class="activity-actor-badge viz-chip" title="${esc(e.actor)}">${esc(stageDisplayName(e.actor))}</span> <span>${esc(e.eventType)}</span> <span class="lineage-step-ts">${esc(formatTimestamp(e.ts))}</span></li>`)
     .join('');
   const decisions = l.decisions.length
-    ? `<div class="lineage-decisions"><span class="lineage-decisions-label viz-signage">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`
+    ? `<div class="lineage-decisions"><span class="lineage-decisions-label viz-signage">Decisions:</span><ul>${l.decisions.map((d) => `<li>${esc(d.eventType)}${typeof d.payload?.verdict === 'string' ? ` — ${esc(d.payload.verdict)}` : ''}${typeof d.payload?.question === 'string' ? ` (${esc(d.payload.question)})` : ''}</li>`).join('')}</ul></div>`
     : '';
   return `
     <div class="lineage-panel">

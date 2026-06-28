@@ -224,11 +224,17 @@ interface BodyState {
 
 /** The whole Line body (`nowMs` injected for the carriage dwell so it's testable without a clock). */
 export function lineBodyHtml(s: BodyState, nowMs: number): string {
-  if (s.errorMsg) return `<p class="line-error viz-body" role="alert">Couldn’t load status: ${esc(s.errorMsg)}</p>`;
+  // #160 "leave last-known": only surface the error banner when there's NO prior snapshot to show. After a
+  // successful first paint, `view` holds the last-known Line; a transient 2.5s poll blip sets `errorMsg`
+  // but must NOT wipe a healthy Line (the poll auto-retries + self-heals). With a view present we keep
+  // rendering it; only a cold failure (no last-known) shows the banner.
+  if (s.errorMsg && s.view === null) return `<p class="line-error viz-body" role="alert">Couldn’t load status: ${esc(s.errorMsg)}</p>`;
   if (s.loading && s.view === null) return `<p class="line-loading viz-body">Loading…</p>`;
   if (s.view === null) return `<p class="line-empty viz-body">No knowledge base open.</p>`;
   const stations = buildStations(s.view);
-  const { shown, more } = splitCarriages(s.view.inFlight, nowMs);
+  // ENG-15/16: a legacy/partial status payload may omit `inFlight`/`setAsideItems`; coalesce here to match
+  // the guards `load()`/`buildStations` already apply (the sibling derefs were the lone unguarded outliers).
+  const { shown, more } = splitCarriages(s.view.inFlight ?? [], nowMs);
   return [
     overallHtml(s.view),
     alarmHtml(s.view, nowMs),
@@ -238,7 +244,7 @@ export function lineBodyHtml(s: BodyState, nowMs: number): string {
     carriagesHtml(shown, more),
     `</div>`,
     sidingHtml(
-      s.view.setAsideItems.filter((it) => !s.actedKeys?.has(`${it.stage}:${it.itemId}`)),
+      (s.view.setAsideItems ?? []).filter((it) => !s.actedKeys?.has(`${it.stage}:${it.itemId}`)),
       { failures: s.failedActs },
     ),
     readoutHtml(s.view, s.expanded),
