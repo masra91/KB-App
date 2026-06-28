@@ -1,8 +1,9 @@
-// e2e smoke for SPEC-0028 RESEARCH-15 — "The Field Desk" Researchers Manage view is wired into the
+// e2e smoke for SPEC-0028 RESEARCH-15 — "The Field Desk" Researchers surface is wired into the
 // production shell. Drives the built app with a pre-configured KB so it boots to the shell, opens the
-// Manage → Researchers view from the real rail, and asserts it mounts as the redesigned surface +
-// holds the §6 anti-generic guardrail (NO native <select>) on the real packaged build. Row management
-// / run-now round-trips are covered by the node + happy-dom tiers; this is the shell-integration smoke
+// Agents hub from the real rail (WS-E SPEC-0053 folded Researchers from a top-level Manage view into
+// the hub's Researchers section), and asserts the Field Desk mounts as the redesigned surface + holds
+// the §6 anti-generic guardrail (NO native <select>) on the real packaged build. Row management /
+// run-now round-trips are covered by the node + happy-dom tiers; this is the shell-integration smoke
 // (CI-only, SPEC-0012 TEST-9).
 //
 // LIVE Run-now → typed report (the #160/#180 honesty in the packaged view): authoring a full Run-now
@@ -37,7 +38,7 @@ function seedConfiguredKb(userDataDir: string): string {
   return vault;
 }
 
-test.describe('RESEARCH-15 — the Researchers view is wired into the Manage shell', () => {
+test.describe('RESEARCH-15 — the Researchers Field Desk is wired into the Agents hub (WS-E SPEC-0053)', () => {
   let app: ElectronApplication | null = null;
   let userDataDir: string | null = null;
   let vaultDir: string | null = null;
@@ -50,7 +51,7 @@ test.describe('RESEARCH-15 — the Researchers view is wired into the Manage she
     userDataDir = vaultDir = null;
   });
 
-  test('opens Researchers from the Manage rail and mounts the Field Desk (add tiles, no native select)', async () => {
+  test('opens the Agents hub and mounts the Researchers Field Desk (add tiles, no native select)', async () => {
     const main = builtMainEntry();
     expect(main, 'built bundle not found — run `npm run package` first').toBeTruthy();
     userDataDir = freshUserDataDir();
@@ -60,20 +61,27 @@ test.describe('RESEARCH-15 — the Researchers view is wired into the Manage she
     const window = await app.firstWindow();
     await window.waitForLoadState('domcontentloaded');
 
-    const researchersNav = window.locator('.nav-item[data-view="researchers"]');
-    await expect(researchersNav).toBeVisible({ timeout: 15_000 });
-    await researchersNav.click();
+    // WS-E (SPEC-0053): Researchers is no longer a top-level rail item — it's the Researchers SECTION of
+    // the single Agents hub (views.ts Manage = Agents/Sources/Settings; the hub mounts mountResearchers
+    // into `.agents-section[data-section="researchers"]`). Open the hub from the rail.
+    const agentsNav = window.locator('.nav-item[data-view="agents"]');
+    await expect(agentsNav).toBeVisible({ timeout: 15_000 });
+    await agentsNav.click();
 
-    const view = window.locator('.view[data-view="researchers"]');
-    await expect(view.locator('.rdesk-title')).toContainText('Researchers');
+    const hub = window.locator('.view[data-view="agents"]');
+    // The hub owns the "Researchers" group title now (the section view no longer carries its own).
+    await expect(hub.locator('#agents-grp-researchers')).toContainText('Researchers');
+
+    const section = hub.locator('.agents-section[data-section="researchers"]');
     // A minimal (non-git) seeded vault has no researchers → empty state + the add DOCK (named template
-    // tiles, not a dropdown — the redesign's headline change; #65).
-    await expect(view.locator('.rdesk-add')).toBeVisible();
-    await expect(view.locator('.rdesk-tile')).toHaveCount(4); // web · code · m365 · custom
+    // tiles, not a dropdown — the redesign's headline change; #65). The dock renders even when empty.
+    await expect(section.locator('.rdesk-add')).toBeVisible();
+    await expect(section.locator('.rdesk-tile')).toHaveCount(4); // web · code · m365 · custom
 
     // §6 anti-generic guardrail, enforced on the REAL packaged build: the Field Desk uses ZERO native
     // <select> — clearance is a custom rung ladder, schedule/autonomy are segmented buttons, kind is
-    // tiles. (Asserted in happy-dom too; this proves it survives the production bundle.)
-    await expect(view.locator('select')).toHaveCount(0);
+    // tiles. (Asserted in happy-dom too; this proves it survives the production bundle.) Scoped to the
+    // Researchers section so it stays a guardrail on the Field Desk specifically.
+    await expect(section.locator('select')).toHaveCount(0);
   });
 });

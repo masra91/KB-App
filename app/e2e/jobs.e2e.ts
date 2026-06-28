@@ -1,10 +1,12 @@
 // e2e smoke for SPEC-0027 Control Panel slice 1 (PANEL-1). Drives the production-built app with a
 // pre-configured KB so it boots to the shell, then asserts the "Manage" section is wired into the
 // REAL navigation rail and the Jobs view mounts when selected — the shell integration the component
-// tier (jobsView.test.ts) can't cover. Job rows depend on an active pipeline (a git-backed vault +
-// staging worktree); this seed is a minimal non-git vault, so we assert the section + view mount,
-// not live rows (the enable→persist round-trip is covered by the component + node tiers). e2e is
-// CI-only (SPEC-0012 TEST-9).
+// tier (jobsView.test.ts) can't cover. WS-E (SPEC-0053) consolidated the Manage rail to
+// Agents/Sources/Settings and folded Jobs into the Agents hub's Schedules section, so we open the
+// hub and assert the Jobs view mounts there. Job rows depend on an active pipeline (a git-backed
+// vault + staging worktree); this seed is a minimal non-git vault, so we assert the section + view
+// mount, not live rows (the enable→persist round-trip is covered by the component + node tiers).
+// e2e is CI-only (SPEC-0012 TEST-9).
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -35,7 +37,7 @@ function seedConfiguredKb(userDataDir: string): string {
   return vault;
 }
 
-test.describe('PANEL-1 — the Manage section is wired into the shell', () => {
+test.describe('PANEL-1 — the Manage section + Jobs (Schedules) are wired into the shell (WS-E SPEC-0053)', () => {
   let app: ElectronApplication | null = null;
   let userDataDir: string | null = null;
   let vaultDir: string | null = null;
@@ -48,7 +50,7 @@ test.describe('PANEL-1 — the Manage section is wired into the shell', () => {
     userDataDir = vaultDir = null;
   });
 
-  test('shows a Manage section and opens the Jobs view from the rail', async () => {
+  test('shows a Manage section and opens the Jobs (Schedules) view via the Agents hub', async () => {
     const main = builtMainEntry();
     expect(main, 'built bundle not found — run `npm run package` first').toBeTruthy();
 
@@ -59,14 +61,21 @@ test.describe('PANEL-1 — the Manage section is wired into the shell', () => {
     const window = await app.firstWindow();
     await window.waitForLoadState('domcontentloaded');
 
-    // Configured KB ⇒ shell (not Setup). The Manage heading + the Manage views are in the rail.
+    // Configured KB ⇒ shell (not Setup). The Manage section is in the rail. WS-E (SPEC-0053) consolidated
+    // it to Agents/Sources/Settings — Jobs is no longer a top-level rail item; it mounts as the
+    // **Schedules** section inside the single Agents hub (the hub mounts mountJobs into
+    // `.agents-section[data-section="schedules"]`).
     await expect(window.locator('.sidebar .nav-group')).toHaveText('Manage', { timeout: 15_000 });
-    const jobsNav = window.locator('.nav-item[data-view="jobs"]');
-    await expect(jobsNav).toBeVisible();
+    const agentsNav = window.locator('.nav-item[data-view="agents"]');
+    await expect(agentsNav).toBeVisible();
     await expect(window.locator('.nav-item[data-view="settings"]')).toBeVisible();
 
-    // Selecting Jobs mounts the Jobs view.
-    await jobsNav.click();
-    await expect(window.locator('.view[data-view="jobs"] h1')).toContainText('Jobs');
+    // Selecting Agents mounts the hub, which mounts the Jobs view into its Schedules section.
+    await agentsNav.click();
+    const hub = window.locator('.view[data-view="agents"]');
+    await expect(hub.locator('.agents-hub-title')).toContainText('Agents');
+    const schedules = hub.locator('.agents-section[data-section="schedules"]');
+    // The Jobs view mounted here (its HEADER renders even with no live jobs on a minimal non-git vault).
+    await expect(schedules.locator('.job-sub')).toBeVisible();
   });
 });
