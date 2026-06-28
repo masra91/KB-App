@@ -11,9 +11,9 @@
 //
 // The `Projection<T>` envelope is the cross-boundary contract (the renderer reads it too), so it lives
 // in the neutral `kb/types`; this store owns the mechanics that maintain it.
-import type { Projection } from '../kb/types';
+import type { Projection, ProjectionStatus } from '../kb/types';
 
-export type { Projection };
+export type { Projection, ProjectionStatus };
 
 export interface ProjectionStoreDeps<T> {
   /** The expensive compute (the former synchronous recompute) — run ONLY on the background cadence,
@@ -62,12 +62,12 @@ export function createProjectionStore<T>(deps: ProjectionStoreDeps<T>): Projecti
   let timer: unknown = null;
   let inFlight: Promise<void> | null = null; // coalesce overlapping refreshes (a slow compute must not stack)
 
-  function set(data: T | null, stale: boolean): void {
+  function set(data: T | null, stale: boolean, status: ProjectionStatus): void {
     if (data === null) {
-      projection = null; // compute reported nothing to project → nothing to show
+      projection = null; // compute reported nothing to project → nothing to show (consumer = warming)
       return;
     }
-    projection = { data, builtAt: now(), stale };
+    projection = { data, builtAt: now(), stale, status };
     try {
       deps.onUpdate?.(projection);
     } catch {
@@ -79,7 +79,7 @@ export function createProjectionStore<T>(deps: ProjectionStoreDeps<T>): Projecti
     try {
       const next = await deps.compute();
       if (next !== null) {
-        set(next, false);
+        set(next, false, 'ready'); // a live refresh succeeded → fresh + ready
         try {
           deps.save?.(next);
         } catch {
@@ -90,8 +90,9 @@ export function createProjectionStore<T>(deps: ProjectionStoreDeps<T>): Projecti
       }
     } catch (err) {
       deps.onError?.(err);
-      // Keep the last-known-good payload but mark it stale — staleness is honest, a timeout is not.
-      if (projection) set(projection.data, true);
+      // STATE-10: keep the last-known-good payload but mark it stale + status 'error' (the cause is
+      // surfaced via onError, never the scary "app busy" string) — staleness is honest, a timeout is not.
+      if (projection) set(projection.data, true, 'error');
     }
   }
 
@@ -113,7 +114,10 @@ export function createProjectionStore<T>(deps: ProjectionStoreDeps<T>): Projecti
       if (deps.load) {
         try {
           const loaded = deps.load();
-          if (loaded !== null) projection = { data: loaded, builtAt: now(), stale: true }; // persisted = stale until first live refresh
+          // STATE-11 cold start: render the persisted last-known-good instantly, marked `warming` —
+          // it's shown but the first live refresh hasn't confirmed it yet (auto-resolves to `ready` on
+          // the refresh below / via push), so the surface shows a calm "indexing…", never an error.
+          if (loaded !== null) projection = { data: loaded, builtAt: now(), stale: true, status: 'warming' };
         } catch {
           projection = null;
         }

@@ -39,7 +39,7 @@ describe('createProjectionStore (SHELL-12 spine)', () => {
   it('refreshNow() populates current() with data + builtAt + stale:false', async () => {
     const store = createProjectionStore<string>({ compute: vi.fn().mockResolvedValue('hello'), intervalMs: 1000, now: fakeClock() });
     await store.refreshNow();
-    expect(store.current()).toEqual({ data: 'hello', builtAt: 't0', stale: false });
+    expect(store.current()).toEqual({ data: 'hello', builtAt: 't0', stale: false, status: 'ready' });
   });
 
   it('READS NEVER COMPUTE — current() does zero work on the render path (the SHELL-12 guarantee)', async () => {
@@ -55,9 +55,10 @@ describe('createProjectionStore (SHELL-12 spine)', () => {
     const fk = fakeScheduler();
     const store = createProjectionStore<string>({ compute, intervalMs: 1000, load: () => 'persisted', scheduler: fk.sched, now: fakeClock() });
     store.start();
-    expect(store.current()).toMatchObject({ data: 'persisted', stale: true }); // instant on launch, flagged stale until live
+    // STATE-11/9: persisted seed renders instantly, marked stale + `warming` (a calm "indexing…").
+    expect(store.current()).toMatchObject({ data: 'persisted', stale: true, status: 'warming' });
     await store.refreshNow();
-    expect(store.current()).toMatchObject({ data: 'live', stale: false }); // then goes live
+    expect(store.current()).toMatchObject({ data: 'live', stale: false, status: 'ready' }); // then goes live
     expect(fk.isRunning()).toBe(true);
   });
 
@@ -66,9 +67,10 @@ describe('createProjectionStore (SHELL-12 spine)', () => {
     const onError = vi.fn();
     const store = createProjectionStore<string>({ compute, intervalMs: 1000, onError, now: fakeClock() });
     await store.refreshNow();
-    expect(store.current()).toMatchObject({ data: 'good', stale: false });
+    expect(store.current()).toMatchObject({ data: 'good', stale: false, status: 'ready' });
     await store.refreshNow(); // this compute throws
-    expect(store.current()).toMatchObject({ data: 'good', stale: true }); // retained + flagged stale, NOT cleared, NOT thrown
+    // STATE-10: retained + flagged stale + status 'error' (cause via onError) — NOT cleared, NOT thrown.
+    expect(store.current()).toMatchObject({ data: 'good', stale: true, status: 'error' });
     expect(onError).toHaveBeenCalledOnce();
   });
 
@@ -89,7 +91,7 @@ describe('createProjectionStore (SHELL-12 spine)', () => {
     const onUpdate = vi.fn();
     const store = createProjectionStore<string>({ compute: vi.fn().mockResolvedValue('v'), intervalMs: 1000, onUpdate, now: fakeClock() });
     await store.refreshNow();
-    expect(onUpdate).toHaveBeenCalledWith({ data: 'v', builtAt: 't0', stale: false });
+    expect(onUpdate).toHaveBeenCalledWith({ data: 'v', builtAt: 't0', stale: false, status: 'ready' });
   });
 
   it('a failing onUpdate / save listener never breaks the projection (best-effort push + persist)', async () => {

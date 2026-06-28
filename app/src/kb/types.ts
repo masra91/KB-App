@@ -214,10 +214,20 @@ export interface QuiesceStatus {
  *  background refresh errored — the data is retained but may be behind. A consumer MUST honor `stale`
  *  with a visible "as of / updating…" affordance: stale-but-fast is honest, a frozen-but-looks-fresh UI
  *  is the failure mode SHELL-12 kills. The store (`main/projectionStore.ts`) owns the mechanics. */
+/** SPEC-0058 STATE-9/10/12: the freshness/health of a projection, read DIRECTLY by the view (never
+ *  inferred from a timeout). `warming` = not-yet-live — either nothing built yet, or showing the
+ *  persisted last-known-good while the first live refresh runs (a calm "indexing…", NOT an error);
+ *  `ready` = a successful live refresh; `error` = the last refresh threw — `data` is retained (last-
+ *  known-good) and `stale` is true, but the cause is surfaced, never the scary "app busy" string. */
+export type ProjectionStatus = 'warming' | 'ready' | 'error';
+
 export interface Projection<T> {
   data: T;
   builtAt: string;
   stale: boolean;
+  /** SPEC-0058 STATE-12: honest status the surface renders directly (warming/ready/error). A `null`
+   *  projection (none built or persisted yet) is itself the cold "warming" signal to the consumer. */
+  status: ProjectionStatus;
 }
 
 // --- Review / "needs you" queue (SPEC-0018 REVIEW) ---
