@@ -46,6 +46,7 @@ import {
   quiesceStatusForActive,
   isActiveQuiescing,
   graphProjectionForActive,
+  todayProjectionForActive,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from './quickCaptureScreenshot';
@@ -118,6 +119,7 @@ import type {
   RunIntakeConnectorResult,
   WorkIqStatus,
   InstallWorkIqResult,
+  TodayProjectionView,
 } from '../kb/types';
 import { workIqStatus, installWorkIq } from './researchWiring';
 
@@ -574,6 +576,18 @@ export function registerIpc(): void {
     const now = new Date().toISOString();
     if (!cfg.activeVaultPath) return toHealthProjection({ scanned: 0, orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }, now);
     return toHealthProjection(await buildHealthReport(makeReadOnlyTools(path.resolve(cfg.activeVaultPath))), now);
+  });
+
+  // SPEC-0058 Today: the single home read — `{status, data, builtAt, stale}` from the maintained Today
+  // projection (mirrors `kb:exploreProjection`). `status` is FIRST-CLASS: `warming` while the composite is
+  // still building its first snapshot (the view shows a calm "warming…", never the alarming error face —
+  // STATE-9/10), `ready` once built. ONE instant read serves everything Today draws; zero render-path scan
+  // (the composite's Health/activity walks run on the background cadence inside the store). The live clock
+  // is view-rendered (it ticks), not in `data`.
+  ipcMain.handle('kb:getTodayProjection', async (): Promise<TodayProjectionView> => {
+    const projection = todayProjectionForActive();
+    if (!projection) return { status: 'warming', data: null, builtAt: null, stale: false };
+    return { status: 'ready', data: projection.data, builtAt: projection.builtAt, stale: projection.stale };
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config

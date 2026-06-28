@@ -67,6 +67,7 @@ const kbApi: KbApi = {
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
   exploreProjection: (focus) => ipcRenderer.invoke('kb:exploreProjection', focus), // SPEC-0058 STATE-2
   healthReport: () => ipcRenderer.invoke('kb:healthReport'),
+  getTodayProjection: () => ipcRenderer.invoke('kb:getTodayProjection'), // SPEC-0058 Today (instant, maintained)
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

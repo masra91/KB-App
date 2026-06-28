@@ -31,6 +31,7 @@ const state = vi.hoisted(() => ({
   screenshotBytes: null as Uint8Array | null, // what consumeScreenshotHandle returns for a valid handle
   clipboardImage: null as { handle: string; name: string } | null,
   graphProjection: null as null | { data: unknown; builtAt: string; stale: boolean }, // SPEC-0058 STATE-2 graph store
+  todayProjection: null as null | { data: unknown; builtAt: string; stale: boolean }, // SPEC-0058 Today store
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -78,6 +79,7 @@ vi.mock('./pipeline', () => ({
   activeStagingRoot: (): string | null => state.stagingRoot,
   reviewProjectionForActive: (): null => null, // SHELL-12: kb:listReviews now reads the maintained projection
   graphProjectionForActive: () => state.graphProjection, // SPEC-0058 STATE-2: the maintained graph projection (or null = warming)
+  todayProjectionForActive: () => state.todayProjection, // SPEC-0058 Today: the maintained home projection (or null = warming)
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
@@ -104,7 +106,7 @@ import { computeGraphProjection } from '../kb/graphProjection';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { setQuickCaptureAgent } from './quickCaptureService';
 import type { QuickCaptureAgent, SelectionRead } from './quickCaptureAgent';
-import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext } from '../kb/types';
+import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext, TodayProjection } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const fn = state.handlers.get(channel);
@@ -126,6 +128,7 @@ beforeEach(async () => {
   state.screenshotBytes = null;
   state.clipboardImage = null;
   state.graphProjection = null;
+  state.todayProjection = null;
   setQuickCaptureAgent(null); // SPEC-0038: reset the QCAP agent singleton between tests (no cross-leak)
   mocks.startPipeline.mockClear();
   mocks.pipelineControl.mockClear();
@@ -741,5 +744,38 @@ describe('SPEC-0058 STATE-2 — kb:exploreProjection over the maintained graph s
     expect(nb.found).toBe(true);
     expect(nb.center?.name).toBe('Ada Lovelace');
     expect(nb.neighbors.map((n) => n.name)).toContain('Steve');
+  });
+});
+
+// SPEC-0058 Today — the MAINTAINED home projection at the IPC: kb:getTodayProjection serves
+// {status, data, builtAt, stale} from the in-memory snapshot (no live scan), mirroring exploreProjection.
+// The composite's COMPOSITION (assembleTodayProjection over the maintained reads) is proven in
+// todayProjection.test.ts; here we prove the IPC envelope + the warming/ready status discipline.
+describe('SPEC-0058 Today — kb:getTodayProjection over the maintained store (REAL handler)', () => {
+  it('returns a calm WARMING status (not an error face) when the projection has not built yet', async () => {
+    state.todayProjection = null; // store.current() === null → still warming
+    const res = await invoke<{ status: string; data: unknown; builtAt: string | null; stale: boolean }>('kb:getTodayProjection');
+    expect(res.status).toBe('warming');
+    expect(res.data).toBeNull();
+    expect(res.builtAt).toBeNull();
+  });
+
+  it('serves the full Today projection from the maintained snapshot when built, carrying the freshness envelope', async () => {
+    const data: TodayProjection = {
+      greeting: { salutation: 'Good evening' },
+      subtitle: 'Your library is quiet and current — nothing moved while you were away.',
+      line: { meta: 'nothing in flight · nothing composed yet', stations: [] },
+      stats: [],
+      activity: [],
+      decisions: [],
+      health: [],
+    };
+    state.todayProjection = { data, builtAt: '2026-06-28T00:00:00.000Z', stale: true };
+    const res = await invoke<{ status: string; data: typeof data; builtAt: string; stale: boolean }>('kb:getTodayProjection');
+    expect(res.status).toBe('ready');
+    expect(res.builtAt).toBe('2026-06-28T00:00:00.000Z');
+    expect(res.stale).toBe(true); // the envelope is preserved → the view can show "updating…"
+    expect(res.data.greeting.salutation).toBe('Good evening');
+    expect(res.data.subtitle).toContain('quiet and current');
   });
 });
