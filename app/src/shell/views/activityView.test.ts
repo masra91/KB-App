@@ -4,6 +4,8 @@
 // stays default). The IPC is mocked (`window.kbApi.activityFeed/activityLineage`); we assert the
 // rendered DOM, the drill-down, the filter→re-query, lineage, and read-only/escaping behavior.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountActivity, lineageHtml, entryHtml, rawEventHtml, SEARCH_DEBOUNCE_MS } from './activityView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { ActivityFeedResult, Lineage, KbApi } from '../../kb/types';
@@ -333,7 +335,7 @@ describe('WS3 design-system migration (DESIGN-LEGACY-VIEWS §2 — onto The Line
     expect(search.classList.contains('viz-field__input')).toBe(true);
     expect(actor.closest('.viz-field')).not.toBeNull(); // each control sits in a .viz-field wrapper
     expect(search.closest('.viz-field')).not.toBeNull();
-    expect(actor.getAttribute('aria-label')).toBe('Filter by actor'); // regression guard (§7)
+    expect(actor.getAttribute('aria-label')).toBe('Filter by stage or agent'); // v3 de-jargon (was "Filter by actor")
     expect(search.getAttribute('aria-label')).toBe('Search activity');
   });
 
@@ -432,5 +434,30 @@ describe('lineageHtml — SENSE-10 read-only sensitivity chip (AUDIT-8-safe)', (
   it('escapes an untrusted custom label (no HTML injection)', () => {
     const html = lineageHtml(base, { '01JSRC1': { sensitivity: '"><img src=x onerror=alert(1)>', by: 'principal' } });
     expect(html).not.toContain('<img');
+  });
+});
+
+// SPEC-0060 VUX-1: the Activity CSS block migrates off the instrument-panel --viz-* names onto the
+// warm-vellum v3 tokens. NO ember (activity is a log, not a decision). Guard on the CSS source.
+describe('VUX-1 v3 token migration (SPEC-0060 — off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Activity view — VELLUM v3'),
+    indexCss.indexOf('Vellum v3 Today'),
+  );
+
+  it('isolated the Activity v3 block', () => {
+    expect(block.length).toBeGreaterThan(500);
+  });
+
+  it('the v3 Activity block carries NO --viz-* tokens and NO ember (it is a log, not a decision)', () => {
+    expect(block).not.toMatch(/var\(--viz-/);
+    expect(block).not.toMatch(/--ember|var\(--ember/);
+  });
+
+  it('uses v3 ground/ink + event-kind hue tokens', () => {
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--sprout\b/); // active-kind glyph hue
+    expect(block).toMatch(/var\(--oxide\b/); // honest failure
   });
 });

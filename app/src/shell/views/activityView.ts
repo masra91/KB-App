@@ -46,7 +46,7 @@ export function mountActivity(container: HTMLElement): void {
   loading = true;
   errorMsg = '';
   container.innerHTML = `
-    <div class="activity-view viz-card viz-grain">
+    <div class="activity-view">
       <h1 class="activity-title viz-voice">Activity</h1>
       <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
@@ -191,8 +191,8 @@ export function controlsHtml(actors: readonly string[], f: ActivityFilter): stri
     .join('');
   return `
     <label class="viz-field activity-field">
-      <span class="viz-field__label viz-signage">actor</span>
-      <select id="activityActor" class="activity-actor viz-field__input viz-body viz-focusable" aria-label="Filter by actor">${opts}</select>
+      <span class="viz-field__label viz-signage">Filter</span>
+      <select id="activityActor" class="activity-actor viz-field__input viz-body viz-focusable" aria-label="Filter by stage or agent">${opts}</select>
     </label>
     <label class="viz-field activity-field">
       <span class="viz-field__label viz-signage">search</span>
