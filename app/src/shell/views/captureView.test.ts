@@ -227,12 +227,11 @@ describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 �
     expect(btn.classList.contains('primary')).toBe(false); // legacy indigo class gone
   });
 
-  it('gives the textarea a real accessible name — a .viz-field__label + aria-label, not just a placeholder (§6 a11y)', () => {
+  it('gives the textarea a real accessible name via aria-label; the Spectral head is the visible label (§6 a11y, SPEC-0058 v2)', () => {
     mountCapture(root, '/v', 'KB');
     const ta = root.querySelector<HTMLTextAreaElement>('#captureText')!;
-    expect(ta.closest('.viz-field')).not.toBeNull(); // wrapped in the blessed field primitive
-    expect(ta.closest('.viz-field')!.querySelector('.viz-field__label')?.textContent).toBe('Capture');
     expect(ta.getAttribute('aria-label')).toBe('Capture'); // accessible name (placeholder is NOT one)
+    expect(root.querySelector('.capture-title')?.textContent).toBe('Capture'); // Spectral head names the surface
     expect(ta.classList.contains('viz-field__input--multiline')).toBe(true);
   });
 
@@ -243,7 +242,7 @@ describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 �
     // drop target, so an announced region is the correct semantic; a role=button with no handler would
     // be a no-op-button anti-pattern (KB-Lead classify fast-follow on #285).
     expect(dz.getAttribute('role')).toBe('region');
-    expect(dz.getAttribute('aria-label')).toBe('Drop files here to capture them');
+    expect(dz.getAttribute('aria-label')).toBe('Drop files or images here to capture them');
     expect(dz.getAttribute('tabindex')).toBe('0'); // keyboard-reachable / announced
   });
 
@@ -274,5 +273,71 @@ describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 �
     expect(root.querySelector('.muted')).toBeNull(); // path / toggle / note / pipeline / size all migrated
     expect(root.querySelector('button.link')).toBeNull(); // remove → .viz-btn--ghost
     expect(root.querySelector('button.primary')).toBeNull(); // Capture → .viz-btn--primary
+  });
+});
+
+describe('captureView — Vellum UX v2 glance (SPEC-0058 STATE content view, DL-2 contract)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    setApi(OK);
+    root = document.createElement('div');
+    document.body.appendChild(root);
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('is a centered material composer: a Spectral head + a raised .viz-card (not legacy .card chrome)', () => {
+    mountCapture(root, '/v', 'KB');
+    expect(root.querySelector('.capture-v2')).not.toBeNull();
+    expect(root.querySelector('.capture-composer')?.classList.contains('viz-card')).toBe(true); // #453 material depth
+    expect(root.querySelector('.capture-title')?.classList.contains('viz-voice')).toBe(true); // Spectral head
+    expect(root.querySelector('.card')).toBeNull(); // legacy card chrome gone
+    expect(root.querySelector('.path')).toBeNull(); // vault path is no longer chrome (kept in state)
+  });
+
+  it('the dropzone drag-over adds the .over hook (CSS maps it to the --viz-accent wash, DL-2 ruling — not ember)', () => {
+    mountCapture(root, '/v', 'KB');
+    const dz = root.querySelector<HTMLElement>('#dropzone')!;
+    dz.dispatchEvent(new Event('dragover', { bubbles: true, cancelable: true }));
+    expect(dz.classList.contains('over')).toBe(true);
+    dz.dispatchEvent(new Event('dragleave', { bubbles: true, cancelable: true }));
+    expect(dz.classList.contains('over')).toBe(false);
+  });
+
+  it('the queue reads as a mono count, never an emoji (#184: tokenized glyph + Plex-Mono number)', async () => {
+    mountCapture(root, '/v', 'KB');
+    await flush(); // refreshStatus awaits pipelineStatus()
+    const q = root.querySelector('#pipeline')!;
+    expect(q.querySelector('.viz-numeric')).not.toBeNull(); // mono count
+    expect(q.textContent).not.toContain('📥'); // no emoji
+    expect(q.textContent).toContain('in queue');
+  });
+
+  it('a successful capture confirms with the OK (sprout) note state; clears the field', async () => {
+    mountCapture(root, '/v', 'KB');
+    (root.querySelector('#captureText') as HTMLTextAreaElement).value = 'a thought';
+    root.querySelector<HTMLButtonElement>('#capture')!.click();
+    await flush();
+    const note = root.querySelector('#captureNote')!;
+    expect(note.classList.contains('capture-note--ok')).toBe(true); // sprout state
+    expect((root.querySelector('#captureText') as HTMLTextAreaElement).value).toBe(''); // cleared
+  });
+
+  it('a true capture error uses the oxide (error) note state — not caution, not ember', async () => {
+    setApi({ ok: false, blocked: false, ids: [], captureBatch: '', committed: false, message: 'Disk is full.' });
+    mountCapture(root, '/v', 'KB');
+    (root.querySelector('#captureText') as HTMLTextAreaElement).value = 'x';
+    root.querySelector<HTMLButtonElement>('#capture')!.click();
+    await flush();
+    expect(root.querySelector('#captureNote')!.classList.contains('capture-note--error')).toBe(true); // oxide
+  });
+
+  it('NO ember anywhere — Capture is input, not a decision (colour discipline)', async () => {
+    mountCapture(root, '/v', 'KB');
+    drop(root.querySelector('#dropzone') as HTMLElement, [new File([new Uint8Array([1])], 'f.bin', { type: 'application/octet-stream' })]);
+    await flush();
+    expect(root.innerHTML.toLowerCase()).not.toContain('ember');
   });
 });

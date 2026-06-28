@@ -1,8 +1,12 @@
-// Capture view (SPEC-0013) relocated into the navigation shell (SPEC-0017 SHELL-3), extended
-// for Rich Ingestion (SPEC-0040 RICHIN): rich/formatted paste → Markdown (keeping the original
-// clipboard verbatim), multi-file drag, pasted images, a size-aware manifest, and a soft
-// large-capture warning. RICHIN-9: this only enriches the *composer surface* + the capture-time
-// text→Markdown step — the inbox→commit→archive preservation spine is untouched.
+// Capture view (SPEC-0013) in the navigation shell (SPEC-0017 SHELL-3), Rich Ingestion (SPEC-0040 RICHIN),
+// rendered at Vellum UX v2 (SPEC-0058 STATE content view — KB-Design-Lead-2's render contract). This slice
+// is a VISUAL rewrite: a centered, airy composer on the textured cream ground (a raised `.viz-card`), with
+// the data/IPC spine UNCHANGED (rich paste → Markdown, multi-file drag, pasted images, size-aware manifest,
+// soft large-capture caution → `kb:capture`). STATE-1: input-only, no live vault scan on mount.
+//
+// Colour discipline (DL-2): NO ember anywhere (Capture is input, no decision) — `--viz-accent` is the only
+// interactive hue (focus ring + the dropzone drag-over wash, DL-2's ruling), `--viz-sprout` = queued/
+// processing/captured-✓, `--viz-oxide` only on a true capture error. #184: hue rides a glyph, never text.
 import { esc } from '../html';
 import { mountPermissionGate } from '../permissionGate';
 import { interpretPaste } from '../../kb/richText';
@@ -31,16 +35,31 @@ function humanSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+type NoteKind = 'ok' | 'caution' | 'error';
+const NOTE_GLYPH: Record<NoteKind, string> = { ok: '✓', caution: '◆', error: '✕' };
+
+/** Set the capture note with a tokenized state (#184: hue on the glyph + a state class, never a multicolor
+ *  emoji). `ok` → sprout check, `caution` → brass ◆, `error` → oxide ✕. Empty text clears it. */
+function setNote(container: HTMLElement, text: string, kind: NoteKind = 'caution'): void {
+  const note = container.querySelector('#captureNote');
+  if (!note) return;
+  note.className = `capture-note viz-body capture-note--${kind}`;
+  note.innerHTML = text ? `<span class="capture-note-glyph" aria-hidden="true">${NOTE_GLYPH[kind]}</span> ${esc(text)}` : '';
+}
+
 function renderStagedFiles(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#staged');
   if (!el) return;
-  // RICHIN-6: per-item manifest — name · size, with a soft "large" flag (RICHIN-11), removable.
+  // RICHIN-6: per-item manifest — name · size in Plex-Mono, a soft "large" flag (RICHIN-11), removable.
   el.innerHTML = stagedFiles
     .map((f, i) => {
-      // RICHIN-11 caution: monochrome brass ◆ mark (aria-hidden) + ink label — unifies the caution
-      // glyph language with `.model-stale` (a11y audit fast-follow; drops the multicolor ⚠️ emoji).
-      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="capture-flag"><span class="capture-flag-mark" aria-hidden="true">◆</span>large</span>' : '';
-      return `<li>${esc(f.name)} <span class="capture-size">· ${humanSize(f.data.byteLength)}</span>${big} <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable" data-rm="${i}" aria-label="Remove ${esc(f.name)}">remove</button></li>`;
+      // RICHIN-11 caution: monochrome brass ◆ mark (aria-hidden) + ink label (#184) — never the multicolor emoji.
+      const big = f.data.byteLength > LARGE_FILE_BYTES ? ' <span class="capture-flag"><span class="capture-flag-mark" aria-hidden="true">◆</span> large</span>' : '';
+      return `<li class="capture-staged-row">
+          <span class="capture-staged-name viz-numeric">${esc(f.name)}</span>
+          <span class="capture-size viz-numeric">${humanSize(f.data.byteLength)}</span>${big}
+          <button class="viz-btn viz-btn--ghost viz-btn--sm viz-focusable capture-staged-rm" data-rm="${i}" aria-label="Remove ${esc(f.name)}">remove</button>
+        </li>`;
     })
     .join('');
   el.querySelectorAll<HTMLButtonElement>('button[data-rm]').forEach((b) =>
@@ -49,11 +68,6 @@ function renderStagedFiles(container: HTMLElement): void {
       renderStagedFiles(container);
     }),
   );
-}
-
-function setNote(container: HTMLElement, text: string): void {
-  const note = container.querySelector('#captureNote');
-  if (note) note.textContent = text;
 }
 
 /** Add dropped files as staged units — one per file (RICHIN-4). Per-file isolation: a file that
@@ -68,7 +82,7 @@ async function addDroppedFiles(container: HTMLElement, files: FileList): Promise
     }
   }
   renderStagedFiles(container);
-  if (failed.length) setNote(container, `⚠️ Couldn't read ${failed.join(', ')} — other items still staged.`);
+  if (failed.length) setNote(container, `Couldn't read ${failed.join(', ')} — other items still staged.`, 'caution');
 }
 
 /** Stage a single File (e.g. a pasted image, RICHIN-12), synthesizing a name when the clipboard
@@ -83,7 +97,7 @@ async function addStagedFile(container: HTMLElement, file: File): Promise<void> 
     stagedFiles.push({ name, data: new Uint8Array(await file.arrayBuffer()) });
     renderStagedFiles(container);
   } catch {
-    setNote(container, `⚠️ Couldn't read the pasted image.`);
+    setNote(container, `Couldn't read the pasted image.`, 'caution');
   }
 }
 
@@ -137,21 +151,26 @@ function onPaste(container: HTMLElement, ta: HTMLTextAreaElement, e: ClipboardEv
   pendingPaste = { markdown: res.markdown, html: res.html! };
 }
 
-/** Soft, non-blocking warning when a capture exceeds a size threshold (RICHIN-11). */
+/** Soft, non-blocking caution when a capture exceeds a size threshold (RICHIN-11). Plain text — the
+ *  caller folds it into the captured-confirmation note (preserved in full, never an error). */
 function sizeWarning(text: string, files: { data: Uint8Array }[]): string {
   const big: string[] = [];
   if (new TextEncoder().encode(text).byteLength > LARGE_TEXT_BYTES) big.push('large text');
   if (files.some((f) => f.data.byteLength > LARGE_FILE_BYTES)) big.push('a large file');
-  return big.length ? `⚠️ Captured ${big.join(' + ')} (preserved in full).` : '';
+  return big.length ? `${big.join(' + ')} preserved in full` : '';
 }
 
+/** The pipeline queue readout (DL-2 contract): a mono count + a tokenized sprout glyph (queued/processing
+ *  = sprout), no emoji. STATE-1-safe: reads the cheap pipeline status, never a vault walk. */
 async function refreshStatus(container: HTMLElement): Promise<void> {
   const el = container.querySelector<HTMLElement>('#pipeline');
   if (!el) return;
   const s = await window.kbApi.pipelineStatus();
-  const parts = [`📥 ${s.queueDepth} in queue`];
-  if (s.processing) parts.push('archiving…');
-  el.textContent = parts.join(' · ');
+  const active = s.queueDepth > 0 || !!s.processing;
+  el.className = `capture-queue viz-body${active ? ' capture-queue--active' : ''}`;
+  const glyph = `<span class="capture-queue-glyph" aria-hidden="true">◷</span>`;
+  const count = `<span class="viz-numeric">${s.queueDepth}</span> in queue`;
+  el.innerHTML = s.processing ? `${glyph} ${count} · filing…` : `${glyph} ${count}`;
 }
 
 async function onCapture(container: HTMLElement): Promise<void> {
@@ -166,9 +185,8 @@ async function onCapture(container: HTMLElement): Promise<void> {
   }
   for (const f of stagedFiles) inputs.push({ kind: 'file', name: f.name, data: f.data });
 
-  const note = container.querySelector('#captureNote') as HTMLElement;
   if (inputs.length === 0) {
-    note.textContent = 'Type something, paste, or drop a file first.';
+    setNote(container, 'Type something, paste, or drop a file first.', 'caution');
     return;
   }
 
@@ -182,7 +200,7 @@ async function onCapture(container: HTMLElement): Promise<void> {
   try {
     res = await window.kbApi.capture({ inputs });
   } catch {
-    note.textContent = '⚠️ Couldn’t capture just now — your text is safe; try again.';
+    setNote(container, 'Couldn’t capture just now — your text is safe; try again.', 'error');
     return;
   }
   if (res.ok) {
@@ -190,11 +208,11 @@ async function onCapture(container: HTMLElement): Promise<void> {
     stagedFiles = [];
     pendingPaste = null;
     renderStagedFiles(container);
-    note.textContent = warn ? `✓ ${res.message} · ${warn}` : `✓ ${res.message}`;
+    setNote(container, warn ? `${res.message} · ${warn}` : res.message, 'ok');
   } else if (res.blocked && vaultPath) {
     // SPEC-0034 MACOS-7 / #56: the capture write hit a folder-permission denial — route to the Blocked
-    // recovery (brass, actionable: Open System Settings + Retry) instead of a raw OS error. On grant +
-    // Retry the gate re-mounts the capture view (the loop stays closed; no relaunch).
+    // recovery (actionable: Open System Settings + Retry) instead of a raw OS error. On grant + Retry the
+    // gate re-mounts the capture view (the loop stays closed; no relaunch).
     mountPermissionGate(container, {
       vaultPath,
       folder: vaultPath,
@@ -203,7 +221,7 @@ async function onCapture(container: HTMLElement): Promise<void> {
     });
     return;
   } else {
-    note.textContent = `⚠️ ${res.message}`;
+    setNote(container, res.message, 'error');
   }
   void refreshStatus(container);
 }
@@ -211,23 +229,29 @@ async function onCapture(container: HTMLElement): Promise<void> {
 export function mountCapture(container: HTMLElement, vaultPathArg: string, name: string): void {
   vaultPath = vaultPathArg;
   vaultName = name;
+  // v2 (DL-2 contract): a centered airy composer — Spectral head + warm sub, a raised material card holding
+  // the field, controls, dropzone, staged manifest, and the calm note; the pipeline queue reads below it.
+  // `vaultName`/`vaultPath` are retained in state (for the Blocked-recovery re-mount) but no longer chrome.
   container.innerHTML = `
-    <div class="card">
-      <h1>📚 ${esc(name)}</h1>
-      <p class="path">${esc(vaultPath)}</p>
-      <label class="viz-field capture-field">
-        <span class="viz-field__label">Capture</span>
-        <textarea id="captureText" class="capture viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="4"
-          placeholder="Capture a thought… (fire and forget) — paste formatting and it's kept" aria-label="Capture"></textarea>
-      </label>
-      <label class="capture-toggle"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
-      <div id="dropzone" class="dropzone viz-focusable" role="region" tabindex="0" aria-label="Drop files here to capture them">Drop files here to capture them</div>
-      <ul id="staged" class="staged"></ul>
-      <div class="row">
-        <button id="capture" class="viz-btn viz-btn--primary viz-focusable">Capture</button>
-        <span id="captureNote" class="capture-note"></span>
+    <div class="capture-v2 viz-surface">
+      <header class="capture-head">
+        <h1 class="capture-title viz-voice">Capture</h1>
+        <p class="capture-sub viz-body">Drop a thought, a link, or a file — Vellum reads it, files it, and connects it.</p>
+      </header>
+      <div class="capture-composer viz-card">
+        <textarea id="captureText" class="capture viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="5"
+          placeholder="Capture a thought, paste a passage (formatting kept), or drop a file…" aria-label="Capture"></textarea>
+        <div id="dropzone" class="capture-dropzone viz-focusable" role="region" tabindex="0" aria-label="Drop files or images here to capture them">
+          <span class="capture-dropzone-glyph" aria-hidden="true">⊕</span> Drop files or images here
+        </div>
+        <ul id="staged" class="capture-staged"></ul>
+        <div class="capture-controls">
+          <label class="capture-toggle viz-body"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
+          <button id="capture" class="viz-btn viz-btn--primary viz-focusable capture-submit">Capture</button>
+        </div>
+        <p id="captureNote" class="capture-note viz-body" role="status"></p>
       </div>
-      <p id="pipeline" class="capture-note status"></p>
+      <p id="pipeline" class="capture-queue viz-body" role="status"></p>
     </div>`;
 
   container.querySelector('#capture')!.addEventListener('click', () => void onCapture(container));
@@ -242,7 +266,7 @@ export function mountCapture(container: HTMLElement, vaultPathArg: string, name:
   };
   dz.addEventListener('dragover', (e) => {
     stop(e);
-    dz.classList.add('over');
+    dz.classList.add('over'); // CSS: --viz-accent wash (interactive affordance, DL-2's ruling — not ember/sprout)
   });
   dz.addEventListener('dragleave', (e) => {
     stop(e);
