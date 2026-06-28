@@ -83,7 +83,7 @@ async function load(container: HTMLElement, state: TodayState): Promise<void> {
 function paint(container: HTMLElement, state: TodayState, data: TodayProjection): void {
   container.innerHTML = `<div class="today today-v2 viz-surface">
     ${hero(data)}
-    ${lineCard(data.line)}
+    ${flowStrip(data.line)}
     ${statsGrid(data.stats)}
     <div class="today-cols">
       ${activityPanel(data.activity)}
@@ -100,40 +100,49 @@ function paint(container: HTMLElement, state: TodayState, data: TodayProjection)
  *  library subtitle, the live clock, and the primary Capture CTA. */
 function hero(data: TodayProjection): string {
   const name = data.greeting.name ? `<span class="today-greet-name">, ${esc(data.greeting.name)}</span>` : '';
+  // v3: no hero Capture CTA — the top bar's global Quick-add covers it (SPEC-0060 §4). Just greeting + the
+  // live clock (the mock's "when"). Capture stays a click away via the rail + Quick-add.
   return `<header class="today-hero">
     <div class="today-hero-text">
-      <h1 class="today-greet viz-voice">${esc(data.greeting.salutation)}${name}</h1>
+      <h1 class="today-greet viz-voice">${esc(data.greeting.salutation)}${name}.</h1>
       <p class="today-sub viz-body">${esc(data.subtitle)}</p>
     </div>
-    <div class="today-hero-aside">
-      <time class="today-clock viz-numeric" aria-live="off">${esc(clockText())}</time>
-      <button type="button" class="today-capture viz-btn viz-btn--primary viz-focusable" data-target="capture">${navIcon('capture')} Capture</button>
-    </div>
+    <time class="today-clock viz-numeric" aria-live="off">${esc(clockText())}</time>
   </header>`;
 }
 
-/** "The Line" pipeline ribbon — the SAME station-state language as the Status view (one Line, one truth).
- *  Each station carries `data-state` (idle/running/blocked/error → CSS hue: running=sprout breathe ·
- *  blocked=brass · error=oxide · idle=neutral) and its glyph, so state is never colour-alone (#184). */
-function lineCard(line: TodayProjection['line']): string {
-  const stations = line.stations.map(station).join('');
-  return `<section class="today-line viz-card viz-grain" aria-label="The pipeline — The Line">
-    <div class="today-line-head">
-      <h2 class="today-line-name viz-voice">${navIcon('status')} The Line</h2>
-      <span class="today-line-meta viz-numeric">${esc(line.meta)}</span>
+/** The slim flow-strip (SPEC-0060 VUX-10) — the dialed-down "Line" on Today now that Status is dissolved:
+ *  a loom-marked lead (it's humming), compact named stages with a done/working/waiting legend, and a
+ *  "See activity" link. Stage state reads via a computed done/working/waiting class (+ blocked/error),
+ *  never colour-alone — the dot AND the legend carry it (#184). The continuous loom mark signals live work. */
+function flowStrip(line: TodayProjection['line']): string {
+  const sts = line.stations;
+  // Frontier = the furthest station with activity (count>0 or a live state). Items have passed everything
+  // before it (done); everything after is waiting. (The contract's `state` collapses passed→idle, so the
+  // done/waiting split — VUX-10's legend — is inferred from position relative to the live frontier.)
+  let frontier = -1;
+  sts.forEach((s, i) => {
+    if (s.count > 0 || s.state === 'running' || s.state === 'blocked' || s.state === 'error') frontier = i;
+  });
+  const stations = sts.map((s, i) => flowStation(s, i, frontier)).join('');
+  return `<section class="today-flow" aria-label="Pipeline flow">
+    <div class="today-flow-lead"><span class="vmark loom" aria-hidden="true"></span><span class="viz-numeric">${esc(line.meta)}</span></div>
+    <div class="today-flow-stations" role="list">${stations || '<span class="today-flow-empty viz-body">The pipeline is idle.</span>'}</div>
+    <div class="today-flow-key" aria-hidden="true">
+      <span><i style="background:var(--viridian)"></i>done</span>
+      <span><i style="background:var(--sprout)"></i>working</span>
+      <span><i style="background:var(--hair)"></i>waiting</span>
     </div>
-    <div class="today-thread" role="list">${stations || '<span class="today-thread-empty viz-body">The pipeline is idle.</span>'}</div>
+    <button type="button" class="today-flow-go viz-focusable" data-target="activity">See activity ›</button>
   </section>`;
 }
 
-/** One station tile: glyph + stage name + its current count ("—" at rest). */
-function station(s: TodayStation): string {
-  const count = s.count > 0 ? String(s.count) : '—';
-  return `<div class="today-station" data-state="${esc(s.state)}" role="listitem" title="${esc(s.name)} — ${esc(s.state)}">
-    <span class="today-station-glyph" aria-hidden="true">${esc(s.glyph)}</span>
-    <span class="today-station-name viz-signage">${esc(s.name)}</span>
-    <span class="today-station-count viz-numeric">${esc(count)}</span>
-  </div>`;
+/** One flow-strip stage: a state-coloured dot + name + (its count when items are present). The fs-class
+ *  is the glanceable done/working/waiting (+ blocked/error) reading; the legend names the three. */
+function flowStation(s: TodayStation, i: number, frontier: number): string {
+  const fs = s.state === 'running' ? 'working' : s.state === 'blocked' ? 'blocked' : s.state === 'error' ? 'error' : i < frontier ? 'done' : 'waiting';
+  const ct = s.count > 0 ? ` <span class="ct">${esc(String(s.count))}</span>` : '';
+  return `<span class="today-fs-st" data-fs="${fs}" role="listitem" title="${esc(s.name)} — ${esc(s.state)}"><span class="d" aria-hidden="true"></span>${esc(s.name)}${ct}</span>`;
 }
 
 /** The four headline stat cards, each with its today-delta ("+6 today" up / "stable" flat). */
