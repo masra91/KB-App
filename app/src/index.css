@@ -717,7 +717,13 @@ button:disabled {
 .rail-kind { font-size: 0.78rem; color: var(--viz-ink-muted); margin-top: 0.1rem; }
 .rail-sec { font-size: 0.95rem; color: var(--viz-ink); margin: 1rem 0 0.5rem; }
 .exp-rail .explore-open { margin: 0.4rem 0 0.6rem; }
-@media (max-width: 60rem) { .exp-rail { display: none; } } /* graph goes full-width on narrow */
+/* Narrow widths: the rail STACKS below the graph (never display:none — the entity detail is the
+   "leads back to reading" substance; hiding it loses it). Fluid reflow per the v2 layout rubric. */
+@media (max-width: 60rem) {
+  .explore-v2 { flex-direction: column; }
+  .exp-graph { min-height: 22rem; }
+  .exp-rail { flex: 0 0 auto; border-left: 0; border-top: 0.5px solid var(--viz-rule); }
+}
 
 /* --- Health view: structural-lint instrument panel (SPEC-0035 HEALTH; DL-2 anatomy) ---
    Three gauge groups hung off the shared spine; severity = hue on a graphic (tick + count chip),
