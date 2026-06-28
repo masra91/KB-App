@@ -2,9 +2,10 @@
 // logic: salutation-by-hour, stat deltas (up/flat), the honest line-meta, decision ordering + rest state,
 // health thresholds, compact relative-time, activity cap, and ENG-15/16 coalescing of garbage numerics.
 import { describe, it, expect } from 'vitest';
-import { buildTodayProjection, salutationFor, compactAgo, activityKind, todayActivityFromFeed, todayHealthFromProjection, type TodayInputs } from './todayProjection';
+import { buildTodayProjection, salutationFor, compactAgo, activityKind, todayActivityFromFeed, todayHealthFromProjection, countConnections, type TodayInputs } from './todayProjection';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { HealthProjection } from './healthProjection';
+import type { GraphProjection } from './graphProjection';
 
 function inputs(over: Partial<TodayInputs> = {}): TodayInputs {
   return {
@@ -184,5 +185,18 @@ describe('todayHealthFromProjection (HealthProjection dimensions → counts)', (
     const proj = buildTodayProjection(inputs({ health: inputsHealth }), NOON);
     expect(proj.health[0]).toMatchObject({ key: 'dangling', status: 'bad' }); // dangling → oxide
     expect(proj.health[2]).toMatchObject({ key: 'thin', status: 'warn' }); // thin → brass
+  });
+});
+
+describe('countConnections (graph backlinks → the Connections stat)', () => {
+  it('sums every precomputed backlink across the graph', () => {
+    const graph = { backlinks: { 'e/a.md': [{ from: 'b', to: 'a' }, { from: 'c', to: 'a' }], 'e/b.md': [{ from: 'c', to: 'b' }] } } as unknown as GraphProjection;
+    expect(countConnections(graph)).toBe(3);
+  });
+
+  it('null/warming graph or malformed backlinks → 0 (ENG-15/16, no live walk)', () => {
+    expect(countConnections(null)).toBe(0);
+    expect(countConnections({} as unknown as GraphProjection)).toBe(0);
+    expect(countConnections({ backlinks: { 'e/a.md': 'bad' as unknown as [] } } as unknown as GraphProjection)).toBe(0);
   });
 });

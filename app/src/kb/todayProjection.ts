@@ -16,6 +16,7 @@ import type {
 import type { ActivityFeedEntry } from './activityDigest';
 import type { HealthProjection, HealthDimensionKey } from './healthProjection';
 import type { AuditActor } from './audit';
+import type { GraphProjection } from './graphProjection';
 
 /** The precise upstream fields Today needs — mapped from existing projections by the main-side wiring. */
 export interface TodayInputs {
@@ -186,6 +187,17 @@ export function todayActivityFromFeed(
     const t = Date.parse(e?.ts ?? '');
     return { kind: activityKind(e?.actor), text: typeof e?.summary === 'string' ? e.summary : '', agoMs: Number.isFinite(t) ? Math.max(0, nowMs - t) : 0 };
   });
+}
+
+/** The "Connections" stat = the total number of links across the graph (every precomputed incoming
+ *  backlink is one edge). Read off the maintained graph projection (`graphProjectionForActive()!.data`);
+ *  null/absent graph (warming) → 0. No live walk — the projection already precomputed the backlinks. */
+export function countConnections(graph: GraphProjection | null | undefined): number {
+  const backlinks = graph?.backlinks;
+  if (!backlinks || typeof backlinks !== 'object') return 0;
+  let n = 0;
+  for (const hits of Object.values(backlinks)) n += Array.isArray(hits) ? hits.length : 0;
+  return n;
 }
 
 /** Map the Health projection's dimensions → `TodayInputs.health` counts (the glance reads the SAME
