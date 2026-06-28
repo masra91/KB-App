@@ -15,6 +15,22 @@
   --hover: rgba(0, 0, 0, 0.05); /* raised/hover wash on the cream ground */
 }
 
+/* Dark "night-study" shell mirror (brand/DARK-MODE-ADDENDUM.md) — OPT-IN only, when the app sets
+   `data-theme="dark"` on the root (Settings toggle, separate dev-paired PR). Light above stays the
+   default. Mirrors the dark --viz-* foundation 1:1 so chrome + panels stay ONE dark surface; the
+   hover wash flips to a light film so it reads on the dark ground. (`auto` = noted fast-follow.) */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #15242e;        /* canvas — matches --viz-field (dark) */
+  --card: #1e3340;      /* surface — matches --viz-panel (dark) */
+  --fg: #ece4d2;        /* parchment ink — matches --viz-ink (dark) */
+  --muted: #93a39e;     /* secondary — matches --viz-ink-muted (dark) */
+  --accent: #5e93b4;    /* interactive — matches --viz-accent (dark, mid-blue lifted) */
+  --border: #2c4150;    /* window border (addendum) — a touch cooler than the hairline --viz-rule */
+  --error: #cf5238;     /* lifted brick — matches --viz-oxide (dark) */
+  --hover: rgba(255, 255, 255, 0.06); /* raised/hover wash — light film on the dark ground */
+}
+
 * {
   box-sizing: border-box;
 }
