@@ -969,18 +969,72 @@ button:disabled {
 /* --- Agents hub: direction-framed Manage IA (SPEC-0053 WS-E) ---
    One "Agents" surface; two groups framed inward (Librarians + their Schedules) vs outward (Researchers).
    Group headers carry the naming + the inward/outward descriptor; each group body is an existing view. */
-.agents-hub { padding: 0.25rem 0; }
-.agents-hub-title { font-family: var(--viz-font-voice); font-size: 1.5rem; margin: 0; color: var(--viz-ink); } /* v2: Spectral voice head */
-.agents-hub-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1.2rem; max-width: 64ch; }
-.agents-group { margin: 0 0 1.6rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--viz-rule); }
-.agents-group-head { display: block; font-family: var(--viz-font-voice); font-weight: 600; font-size: 1.05rem; letter-spacing: 0; color: var(--viz-ink); margin: 0; } /* v2: Spectral, sentence case */
-.agents-group-why { color: var(--viz-ink-muted); font-size: 0.8rem; margin: 0.2rem 0 0.8rem; max-width: 68ch; }
-.agents-group-why strong { color: var(--viz-ink); font-weight: 600; }
-/* Schedules nests under Librarians — a quieter, indented sub-band. */
-.agents-subgroup { margin: 1rem 0 0; padding: 0 0 0 0.8rem; border-left: 1px dashed var(--viz-rule); }
-.agents-subgroup-head { display: block; font-family: var(--viz-font-voice); font-size: 0.92rem; letter-spacing: 0; color: var(--viz-ink-muted); margin: 0; } /* v2: Spectral, sentence case (was uppercase signage) */
-.agents-subgroup-why { color: var(--viz-ink-muted); font-size: 0.74rem; margin: 0.1rem 0 0.5rem; max-width: 64ch; }
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Agents view — VELLUM v3 (SPEC-0060 VUX-1). The WS-E HUB (Librarians + Schedules + Researchers, folded
+   by direction-of-reach), rebuilt as a card grid on the warm-vellum tokens (retires --viz-*). The
+   surface reclaims the full column (no clamp). Motion: a live agent flies the continuous LOOM mark; a
+   resting one a calm dot. Colour discipline: viridian = the agent identity · sprout = active · slate =
+   interactive · gold = caution (stale model) · oxide = true error · NO ember (agent activity is never a
+   decision). Light is the fixed default (v3 dark deferred, §2). Plex-Mono for ids/models/pointers. */
+.agents-hub { max-width: 64rem; margin: 0 auto; padding: 0.25rem 0; }
+.ag-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 1.1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.ag-top h1 { font-family: var(--voice); font-weight: 500; font-size: 1.6rem; letter-spacing: 0.01em; color: var(--ink); margin: 0; }
+.ag-top p { font-family: var(--ui); font-size: 0.82rem; color: var(--stone); margin: 0.3rem 0 0; max-width: 52ch; line-height: 1.5; }
+
+/* Section — a headed band; Schedules nests as a quieter sub-band under Librarians. */
+.ag-sec { margin-top: 2rem; }
+.ag-subsec { margin-top: 1.5rem; padding-left: 0.9rem; border-left: 1px dashed var(--hair); }
+.ag-sechead { display: flex; align-items: baseline; gap: 0.7rem; margin: 0 0.1rem 0.85rem; padding-bottom: 0.55rem; border-bottom: 1px solid var(--hair); }
+.ag-sechead h2 { font-family: var(--voice); font-weight: 500; font-size: 1.05rem; color: var(--ink); margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+.ag-sechead.sub { border-bottom: 0; padding-bottom: 0; margin-bottom: 0.6rem; }
+.ag-sechead.sub h3 { font-family: var(--voice); font-weight: 500; font-size: 0.92rem; color: var(--ink-2); margin: 0; }
+.ag-sechead .ti { color: var(--viridian); opacity: 0.85; font-style: normal; }
+.ag-sechead .ct { font-family: var(--mono); font-size: 0.68rem; color: var(--faint); }
+.ag-sechead .hint { margin-left: auto; font-family: var(--ui); font-size: 0.74rem; color: var(--stone); }
 .agents-section { margin: 0; }
+
+/* The card grid + each agent card. */
+.ag-grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fill, minmax(18.5rem, 1fr)); }
+.ag-card { position: relative; background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 1rem 1.05rem 0.9rem; }
+.ag-card .path { font-family: var(--mono); color: var(--stone); }
+.ag-chead { display: flex; align-items: flex-start; gap: 0.75rem; }
+.ag-av { flex: none; width: 2.35rem; height: 2.35rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center; font-family: var(--voice); font-weight: 600; font-size: 1.05rem; color: #f2eee2; background: radial-gradient(circle at 40% 35%, var(--viridian-2), #1e5443); box-shadow: 0 5px 13px -7px rgba(30, 53, 71, 0.55); }
+.ag-idblock { min-width: 0; flex: 1; }
+.ag-name { font-family: var(--voice); font-weight: 500; font-size: 1rem; color: var(--ink); margin: 0.05rem 0 0.15rem; line-height: 1.2; }
+.ag-kind { font-family: var(--ui); font-size: 0.78rem; color: var(--stone); line-height: 1.4; }
+/* State pill — status-first (PANEL-9). run = looming viridian; on = calm resting viridian. NO ember. */
+.ag-state { flex: none; display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.22rem 0.6rem 0.22rem 0.55rem; border-radius: var(--r-pill); font-family: var(--ui); font-size: 0.72rem; font-weight: 500; line-height: 1; white-space: nowrap; }
+.ag-state .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; }
+.ag-state.run { background: rgba(62, 158, 130, 0.13); color: #2c7560; border: 1px solid rgba(62, 158, 130, 0.30); }
+.ag-state.on { background: rgba(47, 107, 91, 0.10); color: var(--viridian); border: 1px solid rgba(47, 107, 91, 0.20); }
+.ag-state.on .dot { background: var(--viridian); }
+.ag-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.85rem; padding-top: 0.7rem; border-top: 1px solid var(--hair); }
+.ag-last { font-family: var(--mono); font-size: 0.7rem; color: var(--faint); display: inline-flex; align-items: center; gap: 0.4rem; min-width: 0; }
+.ag-last .path { font-size: inherit; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Per-card "Model" disclosure — quiet, rarely opened (observe-first). */
+.ag-adv { margin-top: 0.7rem; border-top: 1px solid var(--hair); padding-top: 0.2rem; }
+.ag-adv summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.1rem 0.3rem; font-family: var(--ui); font-size: 0.75rem; color: var(--stone); transition: color var(--t); }
+.ag-adv summary::-webkit-details-marker { display: none; }
+.ag-adv summary:hover { color: var(--ink); }
+.ag-adv summary .chev { transition: transform var(--t); font-size: 0.9rem; }
+.ag-adv[open] summary .chev { transform: rotate(90deg); }
+.ag-adv summary .sub { margin-left: auto; font-family: var(--mono); font-size: 0.68rem; color: var(--faint); }
+.ag-adv-body { padding: 0.3rem 0.1rem 0.4rem; display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* Loading + empty (calm, never blank). */
+.ag-loading, .ag-empty { font-family: var(--ui); font-size: 0.86rem; color: var(--stone); padding: 0.6rem 0; }
+
+/* SPEC-0048 — the global "Default model" bar (above the librarian grid) + the per-agent picker (in the
+   per-card disclosure). On the v3 tokens. */
+.ag-modelbar { display: flex; flex-direction: column; gap: 0.2rem; margin: 0 0 1rem; }
+.model-label { font-family: var(--ui); letter-spacing: 0; font-size: 0.74rem; color: var(--stone); }
+.model-select, .agent-model-select, .agent-model-text { max-width: 100%; }
+.model-runs { font-family: var(--mono); font-size: 0.72rem; color: var(--stone); margin: 0.1rem 0 0; }
+.model-runs .path { font-family: var(--mono); color: var(--stone); }
+.agent-model-runs { display: block; margin: 0.2rem 0 0; }
+/* Stale-model note — #184: label reads AA in --ink; the gold caution hue rides the aria-hidden ◆ mark. */
+.model-stale { font-family: var(--ui); font-size: 0.72rem; color: var(--ink); margin: 0.1rem 0 0; }
+.model-stale-mark { color: var(--gold); margin-right: 0.3rem; }
 
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {
@@ -1038,59 +1092,8 @@ button:disabled {
 .btn:hover { background: var(--hover); }
 .btn:disabled { opacity: 0.5; cursor: default; }
 
-/* --- Control Panel: Agents / Sources / Settings autonomy (SPEC-0027 slice 2) --- */
-/* WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §4): the status chip is the blessed .viz-chip
-   primitive (shape/signage/muted base from design-system.css); the status-* family carries STATE via
-   the canonical hue tokens — never a hard-coded hex (was #7ad17a/#2f5c2f). State also reads via the
-   text label (never color-alone, §3 DESIGN-4). Secondary text on --viz-ink-muted (was legacy .muted). */
-.agent-list, .source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
-/* UX v2 (DL-2 Agents adoption): each agent is a raised material card (.viz-card .viz-card--lift in the
-   markup) — depth + hover-life carry it, so this rule is layout-only (no border/radius/bg of its own;
-   that would fight the card chrome). */
-.agent { padding: 0.85rem 1rem; }
-.agent-head { display: flex; align-items: center; gap: 0.5rem; }
-/* v2: card head in the Spectral voice (.viz-voice in the markup), ink, a touch larger than body. */
-.agent-label { font-family: var(--viz-font-voice); font-weight: 600; font-size: 1.02rem; color: var(--viz-ink); }
-/* Layout only — shape/signage/muted base from .viz-chip (design-system.css). */
-.agent-status { margin-left: auto; }
-/* State tokens (§4 / DL-2 v2): running → sprout, idle/paused → patina (settled), blocked → brass,
-   error → oxide. NO ember (reserved for "needs your decision"). The hue colors the glyph/label + ties
-   the border via currentColor (≥3:1). Exception: oxide MUST NOT color small text (contract §2) → error
-   carries the hue on the BORDER only, label stays --viz-ink-muted. */
-.agent-status.status-running { color: var(--viz-state-running); border-color: currentColor; }
-.agent-status.status-idle { color: var(--viz-state-settled); border-color: currentColor; }
-.agent-status.status-blocked { color: var(--viz-state-blocked); border-color: currentColor; }
-.agent-status.status-error { border-color: var(--viz-state-error); }
-.agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
-.agent-meta { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0.15rem 0.6rem; font-size: 0.82rem; align-items: start; }
-.agent-meta dt { color: var(--viz-ink-muted); }
-/* min-width:0 lets the 1fr value cell shrink below the <select>'s intrinsic width instead of overflowing
-   into (and colliding with) the row's selection highlight. */
-.agent-meta dd { margin: 0; min-width: 0; }
-/* Per-agent Model cell — the <select> and its "runs as:" caption STACK: the select is capped to its
-   column and the caption is a block on its own line below it. Without this the inline caption sat beside
-   the select and wrapped/overlapped it (and the row highlight) at narrow widths (P1 chip-overlap fix). */
-.agent-meta dd .agent-model-select, .agent-meta dd .agent-model-text { max-width: 100%; }
-.agent-model-runs { display: block; margin: 0.2rem 0 0; }
-
-/* SPEC-0048 — the global "Default model" picker control (Design-Lead visual). */
-.model-control { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.3rem 0 0.9rem; }
-/* v2 (DL-2): control label in Inter, sentence case — was uppercase signage. */
-.model-label { font-family: var(--viz-font-body); letter-spacing: 0; font-size: 0.72rem; color: var(--viz-ink-muted); }
-.model-runs { font-family: var(--viz-font-numeric); font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.1rem 0 0; }
-/* Stale-model note — #184 a11y: label reads AA in `--viz-ink`; the caution hue rides a small
-   aria-hidden brass glyph (DL-1's inline glyph variant), not the text. */
-.model-stale { font-family: var(--viz-font-body); font-size: 0.72rem; color: var(--viz-ink); margin: 0.1rem 0 0; }
-.model-stale-mark { color: var(--viz-brass); margin-right: 0.3rem; }
-
-/* === Agents v2 — UX v2 material adoption (DL-2 contract; vellum-ux-v2-language §1/§3/§4) ===========
-   The group container is a raised material card with a faint paper-grain (.viz-card .viz-grain in the
-   markup); agent rows are .viz-card--lift cards inside it (above). Scoped under .agents-v2 so nothing
-   bleeds into the shared .path / other surfaces (mirrors the .settings-v2 / .src-v2 precedent). No
-   design-system.css token edits — pure adoption. */
-.agents-v2 { padding: 1.5rem 1.6rem; }
-/* model ids + resolved + instruction pointers → IBM Plex Mono, the data face (§4). */
-.agents-v2 .path { font-family: var(--viz-font-numeric); color: var(--viz-ink-muted); }
+/* --- Sources slots (shared layout; the Agents librarian rows moved to the v3 .ag-card block above) --- */
+.source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
 /* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
    controls are SegmentedControls now, laid out by .settings-control above.) */
