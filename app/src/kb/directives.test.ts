@@ -41,6 +41,10 @@ import {
   recordRevokeDirective,
   isDirectiveRevoked,
   isClaimSuppressedActive,
+  ENRICH_DIRECTIVES_REL,
+  readEnrichDirectives,
+  recordEnrichDirective,
+  activeEnrichTowardForIdentity,
 } from './directives';
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
@@ -455,6 +459,35 @@ describe('revoke directives (SPEC-0050 slice-3)', () => {
       [corr, rv] = [await readCorrectionDirectives(root), await readRevokeDirectives(root)];
       expect(isClaimSuppressed(corr, 'person|a', 'Wrong fact.')).toBe(true); // raw read is unchanged…
       expect(isClaimSuppressedActive(corr, rv, 'person|a', 'Wrong fact.')).toBe(false); // …but the revoke un-suppresses it
+    });
+  });
+});
+
+describe('enrich directives (SPEC-0050 slice-3c)', () => {
+  it('stores the enrich log under the evergreen directives/ tree', () => {
+    expect(ENRICH_DIRECTIVES_REL.startsWith(DIRECTIVES_DIR + path.sep)).toBe(true);
+  });
+
+  it('records + reads a "toward" steer, last-wins; empty identity/toward throw', async () => {
+    await withRoot(async (root) => {
+      await recordEnrichDirective(root, { identityKey: 'person|ada lovelace', toward: 'her mathematics', reviewId: 'r1', decidedAt: '1' });
+      await recordEnrichDirective(root, { identityKey: 'person|ada lovelace', toward: 'her publications', reviewId: 'r2', decidedAt: '2' });
+      expect((await readEnrichDirectives(root)).get('person|ada lovelace')?.toward).toBe('her publications'); // last-wins
+      await expect(recordEnrichDirective(root, { identityKey: '', toward: 'x', reviewId: 'r', decidedAt: '1' })).rejects.toThrow(/identityKey/);
+      await expect(recordEnrichDirective(root, { identityKey: 'person|a', toward: '  ', reviewId: 'r', decidedAt: '1' })).rejects.toThrow(/toward/);
+    });
+  });
+
+  it('activeEnrichTowardForIdentity returns the facet, and undefined once revoked', async () => {
+    await withRoot(async (root) => {
+      await recordEnrichDirective(root, { identityKey: 'person|ada lovelace', toward: 'her publications', reviewId: 'r', decidedAt: '2' });
+      let [e, rv] = [await readEnrichDirectives(root), await readRevokeDirectives(root)];
+      expect(activeEnrichTowardForIdentity(e, rv, 'person|ada lovelace')).toBe('her publications');
+      expect(activeEnrichTowardForIdentity(e, rv, 'person|nobody')).toBeUndefined();
+
+      await recordRevokeDirective(root, { family: 'enrich', targetKey: 'person|ada lovelace', reviewId: 'r', decidedAt: '3' });
+      [e, rv] = [await readEnrichDirectives(root), await readRevokeDirectives(root)];
+      expect(activeEnrichTowardForIdentity(e, rv, 'person|ada lovelace')).toBeUndefined(); // revoked
     });
   });
 });
