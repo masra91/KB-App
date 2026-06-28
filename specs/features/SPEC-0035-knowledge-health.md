@@ -71,14 +71,14 @@ Deterministic auto-fixes (top three) cost **no model call**; the bottom three ar
 
 | ID       | Priority | Statement (short) | Verify | Traces |
 | -------- | -------- | ----------------- | ------ | ------ |
-| HEALTH-1 | must | A **deterministic** scan of the canonical link/file graph detects the §3 catalog (dead links, malformed links, path-polluted names, orphans, stubs, missing aliases) **with no model calls** | none-yet | LIFE-8; PRIN-5; VAULT |
+| HEALTH-1 | must | A **deterministic** scan of the canonical link/file graph detects the §3 catalog (dead links, malformed links, path-polluted names, orphans, stubs, missing aliases) **with no model calls** | healthPanel.test (v1: dead links · orphans · thin stubs) | LIFE-8; PRIN-5; VAULT |
 | HEALTH-2 | must | Purely-**structural** issues are **auto-fixed deterministically** — never inventing content: rewrite malformed links, repoint dead links to a known alias, normalize polluted filenames + repoint all refs | none-yet | DATA-9; VAULT; CONNECT |
 | HEALTH-3 | must | Issues needing **content judgment** (orphan adoption, stub expansion, alias completion) are **queued as REFLECT findings** — HEALTH adds **no** second judgment/auto-apply engine; REFLECT's guarded auto/Review split governs them | none-yet | SPEC-0024 REFLECT-3,4,5 |
 | HEALTH-4 | must | Repairs run in a **causality order** (normalize names → complete aliases → dedup/merge → fix dead links → adopt orphans → expand stubs); each stage **settles before the next** so an earlier fix can't spawn a downstream violation | none-yet | ORCH-3 |
 | HEALTH-5 | must | HEALTH runs as a **bounded, single-flight, audited job** on the SPEC-0023 engine, writing on `staging` and publishing via the gate (deletion-aware for renames/repoints) | none-yet | JOBS-1,3,5; STAGING; CANON |
 | HEALTH-6 | should | **Triggers:** a **scheduled** sweep always; **opt-in** on-idle / on-startup (default OFF) | none-yet | JOBS-4 |
 | HEALTH-7 | must | Every fix is **append-only audited** (the *what* + the *why*); structural auto-fixes are reversible via history (no source/identity mutation — CLAIMS-11 analogue) | none-yet | AUDIT-2; DATA-2 |
-| HEALTH-8 | should | Health findings + the running fix-pass are **visible in the Status surface**; anything a deterministic fix can't safely resolve routes to the **#192 needs-you queue** | none-yet | SPEC-0030 OBS; SPEC-0032 VIZ-7; SPEC-0018 |
+| HEALTH-8 | should | Health findings + the running fix-pass are **visible in the Status surface**; anything a deterministic fix can't safely resolve routes to the **#192 needs-you queue** | healthView.test (v1: a dedicated read-only Health view; fix-pass + needs-you routing pending the fix slice) | SPEC-0030 OBS; SPEC-0032 VIZ-7; SPEC-0018 |
 | HEALTH-9 | should | A **`protected` / human-edited** node is **never overwritten** by a structural auto-fix beyond reference-repointing (a human edit is sacred; only links pointing *at* it are repaired) | none-yet | PRIN-19; AUTO-1 |
 
 ## 5. Key user flows / surface
@@ -107,6 +107,16 @@ Deterministic auto-fixes (top three) cost **no model call**; the bottom three ar
 
 ## 8. Changelog
 
+- 2026-06-27 — **v1 passive dashboard built** by KB-Developer-4 (Principal: all devs flowing). The
+  read-only **detect + surface** half: a deterministic, **no-model-call** scan (`kb/healthPanel`)
+  over the canonical graph flags **orphans** (0 in/0 out), **dangling/dead links** (target resolves
+  to no node after alias resolution), and **sparse/thin stubs** (prose body, machinery stripped,
+  below `THIN_BODY_CHARS`); a dedicated read-only **Health view** renders the calm §5 readout +
+  per-issue sections with click-through to the node. **Deferred to a later slice** (explicitly not
+  v1): deterministic auto-fixes (HEALTH-2), causality-ordered repair (HEALTH-4), the bounded audited
+  job + staging/gate publish (HEALTH-5), the REFLECT handoff for content repairs (HEALTH-3), the
+  remaining §3 checks (malformed links, path-polluted names, missing aliases). Gates: QD-2 code +
+  Design-Lead visual.
 - 2026-06-03 — created (draft). The **deterministic structural-lint** layer: a free, always-on
   vault-graph linter (dead/malformed/polluted/orphan/stub/missing-alias) that auto-fixes structural
   rot and **queues content repairs to REFLECT**, in a causality-ordered, audited, bounded job.
