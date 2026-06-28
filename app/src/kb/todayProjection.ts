@@ -33,8 +33,9 @@ export interface TodayInputs {
   /** Open "needs you" counts. */
   openReviews: number;
   contradictions: number;
-  /** Health-glance metrics (from the graph projection / health derivation). */
-  health: { groundingPct: number; thinStubs: number; orphans: number };
+  /** Health-glance metrics — the SAME dimensions as the real Health projection (dangling/orphans/thin);
+   *  grounding-coverage is deferred (not computed), so it's intentionally not surfaced. */
+  health: { dangling: number; orphans: number; thin: number };
   /** How many items moved through the pipeline recently (drives the calm subtitle). */
   movedRecently: number;
 }
@@ -119,14 +120,17 @@ function buildDecisions(inputs: TodayInputs): TodayDecision[] {
   return out;
 }
 
+/** The health glance — same dimensions + `ok|warn|bad` severity as the real Health projection (so a
+ *  dimension reads identically on Today and Health). Severity per DL-2's HealthProjection: a dangling
+ *  (dead) link is `bad` (oxide); orphans/thin are `warn` (brass); a zero count is `ok` (settled). */
 function buildHealth(inputs: TodayInputs): TodayHealthRow[] {
-  const grounding = clampPct(inputs.health.groundingPct);
-  const thin = safeCount(inputs.health.thinStubs);
+  const dangling = safeCount(inputs.health.dangling);
   const orphans = safeCount(inputs.health.orphans);
+  const thin = safeCount(inputs.health.thin);
   return [
-    { key: 'grounding', label: 'Grounding', sub: 'Every claim cites a source', value: `${grounding}%`, status: grounding >= 100 ? 'ok' : 'warn' },
-    { key: 'thin', label: 'Thin stubs', sub: 'Entities with <2 claims', value: String(thin), status: thin === 0 ? 'ok' : 'warn' },
+    { key: 'dangling', label: 'Dangling links', sub: 'Links to nothing', value: String(dangling), status: dangling === 0 ? 'ok' : 'bad' },
     { key: 'orphans', label: 'Orphans', sub: 'Unlinked sources', value: String(orphans), status: orphans === 0 ? 'ok' : 'warn' },
+    { key: 'thin', label: 'Thin stubs', sub: 'Entities with <2 claims', value: String(thin), status: thin === 0 ? 'ok' : 'warn' },
   ];
 }
 
@@ -139,11 +143,6 @@ export function compactAgo(ms: number): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
-}
-
-function clampPct(n: number): number {
-  if (typeof n !== 'number' || !Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 function isNonEmpty(v: unknown): v is string {

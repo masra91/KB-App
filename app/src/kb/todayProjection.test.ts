@@ -22,7 +22,7 @@ function inputs(over: Partial<TodayInputs> = {}): TodayInputs {
     ],
     openReviews: 0,
     contradictions: 0,
-    health: { groundingPct: 100, thinStubs: 11, orphans: 0 },
+    health: { dangling: 0, orphans: 0, thin: 11 },
     movedRecently: 3,
     ...over,
   };
@@ -85,14 +85,16 @@ describe('buildTodayProjection', () => {
     expect(both[1].title).toBe('2 reviews waiting');
   });
 
-  it('health rows carry ok/warn status by threshold', () => {
+  it('health glance = dangling/orphans/thin with ok|warn|bad (identical to the Health projection)', () => {
     const health = buildTodayProjection(inputs(), NOON).health;
-    expect(health.map((h) => h.key)).toEqual(['grounding', 'thin', 'orphans']);
-    expect(health[0]).toMatchObject({ value: '100%', status: 'ok' }); // grounding 100
-    expect(health[1]).toMatchObject({ value: '11', status: 'warn' }); // thin stubs > 0
-    expect(health[2]).toMatchObject({ value: '0', status: 'ok' }); // no orphans
-    // grounding below 100 → warn
-    expect(buildTodayProjection(inputs({ health: { groundingPct: 98, thinStubs: 0, orphans: 0 } }), NOON).health[0]).toMatchObject({ value: '98%', status: 'warn' });
+    expect(health.map((h) => h.key)).toEqual(['dangling', 'orphans', 'thin']); // no Grounding (deferred)
+    expect(health[0]).toMatchObject({ value: '0', status: 'ok' }); // no dangling
+    expect(health[1]).toMatchObject({ value: '0', status: 'ok' }); // no orphans
+    expect(health[2]).toMatchObject({ value: '11', status: 'warn' }); // thin stubs > 0 → brass warn
+    // a dangling (dead) link is BAD (oxide), not warn — matches DL-2's HealthProjection severity
+    const bad = buildTodayProjection(inputs({ health: { dangling: 3, orphans: 2, thin: 0 } }), NOON).health;
+    expect(bad[0]).toMatchObject({ key: 'dangling', value: '3', status: 'bad' });
+    expect(bad[1]).toMatchObject({ key: 'orphans', value: '2', status: 'warn' });
   });
 
   it('caps the activity feed at 5, newest-first, with compact ages', () => {
@@ -108,7 +110,7 @@ describe('buildTodayProjection', () => {
       inputs({
         counts: { sources: NaN, claims: -3, entities: 1.9, connections: undefined as unknown as number },
         todayDeltas: { sources: undefined as unknown as number, claims: -1, entities: 0, connections: 4 },
-        health: { groundingPct: NaN, thinStubs: -2, orphans: 1.5 },
+        health: { dangling: NaN, orphans: 1.5, thin: -2 },
       }),
       NOON,
     );
@@ -116,7 +118,8 @@ describe('buildTodayProjection', () => {
     expect(dirty.stats[1].value).toBe(0); // -3 → clamped 0
     expect(dirty.stats[0].delta).toEqual({ dir: 'flat', text: 'stable' }); // undefined delta → stable
     expect(dirty.stats[3].delta).toEqual({ dir: 'up', text: '+4 today' });
-    expect(dirty.health[0].value).toBe('0%'); // NaN grounding → 0
-    expect(dirty.health[1].value).toBe('0'); // -2 thin → 0
+    expect(dirty.health[0]).toMatchObject({ key: 'dangling', value: '0', status: 'ok' }); // NaN → 0 → ok
+    expect(dirty.health[1].value).toBe('1'); // 1.5 orphans → floor 1
+    expect(dirty.health[2].value).toBe('0'); // -2 thin → 0
   });
 });

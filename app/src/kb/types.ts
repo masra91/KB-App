@@ -264,13 +264,15 @@ export interface TodayDecision {
   targetView: string; // the view id to navigate to (e.g. "reviews")
 }
 
-/** One health-glance row. */
+/** One health-glance row — the SAME dimensions + severity enum as the real Health projection (SPEC-0058
+ *  STATE-3), so a dimension reads identically (incl. oxide for a `bad` dead-link) on Today and Health.
+ *  Grounding-coverage is deferred (not computed yet), so it's intentionally NOT a row here. */
 export interface TodayHealthRow {
-  key: 'grounding' | 'thin' | 'orphans';
+  key: 'dangling' | 'orphans' | 'thin';
   label: string;
   sub: string;
-  value: string; // "100%" / "11" / "0"
-  status: 'ok' | 'warn';
+  value: string; // the count, e.g. "0" / "11"
+  status: 'ok' | 'warn' | 'bad'; // bad=oxide (dangling/dead links), warn=brass (orphans/thin), ok=settled
 }
 
 /** The whole Today surface, served as one `Projection<TodayProjection>`. */
