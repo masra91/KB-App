@@ -1,7 +1,8 @@
 // Curation engine (SPEC-0029 AUDIT-5). Deterministic templates per event-type + run-grouping; the
 // raw events ride along each feed entry for drill-down.
 import { describe, it, expect } from 'vitest';
-import { digestEvent, buildFeed, shortRef } from './activityDigest';
+import { digestEvent, buildFeed, shortRef, filterFeedByText } from './activityDigest';
+import type { ActivityFeedEntry } from './activityDigest';
 import type { AuditEvent, AuditActor } from './audit';
 
 let line = 0;
@@ -87,5 +88,44 @@ describe('buildFeed — run grouping + drill-down (AUDIT-5)', () => {
     ];
     const feed = buildFeed(events);
     expect(feed.map((e) => e.ts)).toEqual(['2026-01-03T00:00:00.000Z', '2026-01-02T00:00:00.000Z', '2026-01-01T00:00:00.000Z']);
+  });
+});
+
+describe('filterFeedByText — search hits the VISIBLE summary (SPEC-0060 VUX-14)', () => {
+  // The bug class: search ran on the raw event stream (actor/eventType/subjects/payload), so a word
+  // the Principal could plainly READ in a curated summary ("Archived…", "Connect resolved…") did not
+  // match. The fix searches the built feed by its summary text. These rows model that gap directly.
+  const entries: ActivityFeedEntry[] = [
+    { id: 'R1', ts: '2026-01-03T00:00:00.000Z', actor: 'connect', summary: 'Connect resolved 3 candidates into Project Atlas', eventCount: 1,
+      events: [ev('connect', 'resolved', { runId: 'R1', subjects: { entityId: 'ent_9f2c' }, payload: { candidates: 3 } })] },
+    { id: 'R2', ts: '2026-01-02T00:00:00.000Z', actor: 'archivist', summary: 'Archived a new source', eventCount: 1,
+      events: [ev('archivist', 'archived', { runId: 'R2', subjects: { sourceId: 'src_obsidian_note' } })] },
+  ];
+
+  it('matches a word that appears ONLY in the curated summary (the original miss)', () => {
+    // "Atlas" lives in the summary, not in any raw field — the old per-event haystack missed it.
+    expect(filterFeedByText(entries, 'atlas').map((e) => e.id)).toEqual(['R1']);
+    expect(filterFeedByText(entries, 'archived').map((e) => e.id)).toEqual(['R2']);
+  });
+
+  it('still matches a token visible only in the drill-down raw events (e.g. a source id)', () => {
+    expect(filterFeedByText(entries, 'obsidian').map((e) => e.id)).toEqual(['R2']);
+  });
+
+  it('is case-insensitive and returns every entry for empty / whitespace text', () => {
+    expect(filterFeedByText(entries, 'CONNECT').map((e) => e.id)).toEqual(['R1']);
+    expect(filterFeedByText(entries, '   ')).toHaveLength(2);
+    expect(filterFeedByText(entries, '')).toHaveLength(2);
+  });
+
+  it('tolerates legacy/partial entries — missing summary or missing events never throws (ENG-15/16)', () => {
+    const legacy = [
+      { id: 'L1', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', eventCount: 0 } as unknown as ActivityFeedEntry, // no summary, no events
+      { id: 'L2', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', summary: 'Claims derived 2 claims', eventCount: 1, events: undefined } as unknown as ActivityFeedEntry,
+      ...entries,
+    ];
+    expect(() => filterFeedByText(legacy, 'claims')).not.toThrow();
+    expect(filterFeedByText(legacy, 'claims').map((e) => e.id)).toEqual(['L2']);
+    expect(filterFeedByText(legacy, 'atlas').map((e) => e.id)).toEqual(['R1']); // good rows still searchable
   });
 });

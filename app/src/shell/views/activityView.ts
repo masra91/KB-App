@@ -29,6 +29,10 @@ let lineage: Lineage | null = null;
 let sourceSensitivities: Record<string, SourceSensitivity> = {}; // SENSE-10: per-source label for the lineage chips (read-only)
 let loading = false;
 let errorMsg = '';
+// SPEC-0060 VUX-14: debounce the search input so a (re)load fires after the Principal pauses typing,
+// not on every keystroke — no per-keystroke IPC, no flicker.
+export const SEARCH_DEBOUNCE_MS = 200;
+let searchDebounce: ReturnType<typeof setTimeout> | undefined;
 
 export function mountActivity(container: HTMLElement): void {
   entries = [];
@@ -91,7 +95,12 @@ function wire(container: HTMLElement): void {
     if (t.id === 'activitySearch') {
       const v = (t as HTMLInputElement).value.trim();
       filter = { ...filter, text: v || undefined };
-      void load(container);
+      // Debounced: coalesce a burst of keystrokes into one load once typing pauses (VUX-14).
+      if (searchDebounce !== undefined) clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        searchDebounce = undefined;
+        void load(container);
+      }, SEARCH_DEBOUNCE_MS);
     }
   });
   container.addEventListener('change', (e) => {

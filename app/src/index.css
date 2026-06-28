@@ -428,6 +428,35 @@ ul.review-list {
   flex-direction: column;
   gap: 0.85rem;
 }
+/* Warming skeleton (SPEC-0060 VUX-13): placeholder card shapes shown while the review projection is
+   still building on a cold launch — a calm opacity pulse (no spinner, no wrong-empty), in the same v2
+   card metrics so the real list lands with no layout jump. Tokens only (themeCohesion guard). The spine
+   is neutral --viz-rule here, NOT ember — there's no decision to make yet. */
+.rev-skeleton-list { pointer-events: none; }
+.reviews-v2 li.rev-skeleton-card {
+  background: var(--viz-panel);
+  border: 0.5px solid var(--viz-rule);
+  border-left: 2px solid var(--viz-rule);
+  border-radius: var(--viz-r-card);
+  box-shadow: var(--viz-shadow-card);
+  padding: 0.95rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.rev-skeleton {
+  display: block;
+  height: 0.7rem;
+  border-radius: 4px;
+  background: var(--viz-rule);
+  animation: rev-skeleton-pulse 1.4s ease-in-out infinite;
+}
+.rev-skeleton-line { width: 78%; }
+.rev-skeleton-line--short { width: 44%; }
+.rev-skeleton-line--sub { width: 32%; height: 0.6rem; }
+.reviews-v2 .rev-skeleton-sub { margin-top: 1rem; }
+@keyframes rev-skeleton-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
+@media (prefers-reduced-motion: reduce) { .rev-skeleton { animation: none; } }
 /* A review item is a real raised CARD with an EMBER decision-cue spine (the one sanctioned ember on the
    peripheral screens — it means "this needs your decision", language §4 / DL-1's Today decision cue). */
 .reviews-v2 li.review {

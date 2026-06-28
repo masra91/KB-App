@@ -29,9 +29,19 @@ const LINK_REVIEW: ReviewSummary = {
   createdAt: '2026-06-02T11:00:00.000Z',
 };
 
-function setApi(list: KbApi['listReviews'], answerReview?: KbApi['answerReview'], openCitation?: KbApi['openCitation']): void {
-  (window as unknown as { kbApi: Pick<KbApi, 'listReviews' | 'answerReview' | 'openCitation'> }).kbApi = {
+function setApi(
+  list: KbApi['listReviews'],
+  answerReview?: KbApi['answerReview'],
+  openCitation?: KbApi['openCitation'],
+  reviewProjection?: KbApi['reviewProjection'],
+): void {
+  // The view reads the warming-aware ENVELOPE (`reviewProjection`), not the flattened `listReviews`
+  // (SPEC-0060 VUX-13). By default derive the envelope from the same `list` mock so existing tests
+  // (which return a ReviewSummary[]) keep working; the warming/error tests pass an explicit override.
+  const derived: KbApi['reviewProjection'] = async () => ({ data: await list(), builtAt: '2026-06-02T12:00:00.000Z', stale: false });
+  (window as unknown as { kbApi: Pick<KbApi, 'listReviews' | 'answerReview' | 'openCitation' | 'reviewProjection'> }).kbApi = {
     listReviews: list,
+    reviewProjection: reviewProjection ?? derived,
     answerReview: answerReview ?? vi.fn(async () => ({ ok: true, message: 'answered' })),
     openCitation: openCitation ?? vi.fn(async () => ({ ok: true as const })),
   };
@@ -137,11 +147,11 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     const list = vi.fn<KbApi['listReviews']>().mockReturnValue(new Promise<ReviewSummary[]>(() => {})); // hangs
     setApi(list);
     const mounted = mountReviews(root);
-    expect(root.textContent).toContain('Loading…'); // spinner initially
+    expect(root.querySelector('.rev-skeleton')).toBeTruthy(); // calm warming skeleton initially (VUX-13)
 
     await vi.advanceTimersByTimeAsync(LOAD_TIMEOUT_MS); // trip the timeout
     await mounted;
-    expect(root.textContent).not.toContain('Loading…'); // no infinite spinner
+    expect(root.querySelector('.rev-skeleton')).toBeFalsy(); // no infinite skeleton
     expect(root.querySelector('.load-error')).toBeTruthy();
     expect(root.querySelector('.load-retry')).toBeTruthy();
 
@@ -485,5 +495,60 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
       ); // sibling's in-progress note preserved (no full repaint)
       await vi.advanceTimersByTimeAsync(0);
     });
+  });
+});
+
+// SPEC-0060 VUX-13 — the warming skeleton. On a cold launch the review projection is still building
+// for a beat (`reviewProjection()` → null). The OLD view read `listReviews()`, which collapses that
+// warming-null to `[]`, so it flashed the "Nothing needs you right now" empty state — wrong-empty, the
+// ~2s blank these tests pin down. The fix reads the envelope and paints a skeleton while warming.
+describe('Reviews warming skeleton (SPEC-0060 VUX-13 — no 2s blank / wrong-empty)', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div id="host"></div>';
+    root = document.createElement('div');
+    document.getElementById('host')!.appendChild(root);
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it('shows the skeleton — NOT the "Nothing needs you" empty state — while the projection is warming', async () => {
+    // Warming: the envelope is null (projection not yet built). The list mock is irrelevant here.
+    setApi(vi.fn(async () => []), undefined, undefined, vi.fn(async () => null));
+    await mountReviews(root);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.rev-skeleton')).toBeTruthy(); // calm warming affordance
+    // Fails-before: the old view collapsed warming→[] and painted the empty state. It must NOT now.
+    expect(root.textContent).not.toContain('Nothing needs you right now');
+    expect(root.querySelector('.load-error')).toBeFalsy(); // warming is not an error
+  });
+
+  it('swaps the skeleton for the real list once the projection finishes building (poll catches up)', async () => {
+    // First read warming (null); the poll re-reads and gets a ready envelope with one open review.
+    const proj = vi
+      .fn<KbApi['reviewProjection']>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ data: [CLAIM_REVIEW], builtAt: '2026-06-02T12:00:00.000Z', stale: false });
+    setApi(vi.fn(async () => [CLAIM_REVIEW]), undefined, undefined, proj);
+    await mountReviews(root);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.rev-skeleton')).toBeTruthy(); // warming first
+
+    await vi.advanceTimersByTimeAsync(POLL_MS); // the next poll lands the built projection
+    expect(root.querySelector('.rev-skeleton')).toBeFalsy();
+    expect(root.querySelector('.review-q')?.textContent).toContain('Ada Lovelace');
+  });
+
+  it('shows the calm empty state (not a skeleton) once the projection is BUILT and genuinely empty', async () => {
+    // Ready + zero open reviews → the queue is honestly quiet; the skeleton must give way to the
+    // "Nothing needs you" empty state. This is the distinction the old flattened read could not make.
+    setApi(vi.fn(async () => []), undefined, undefined, vi.fn(async () => ({ data: [], builtAt: '2026-06-02T12:00:00.000Z', stale: false })));
+    await mountReviews(root);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(root.querySelector('.rev-skeleton')).toBeFalsy();
+    expect(root.textContent).toContain('Nothing needs you right now');
   });
 });
