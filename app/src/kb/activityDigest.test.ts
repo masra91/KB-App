@@ -121,7 +121,7 @@ describe('filterFeedByText — search hits the VISIBLE summary (SPEC-0060 VUX-14
   it('tolerates legacy/partial entries — missing summary or missing events never throws (ENG-15/16)', () => {
     const legacy = [
       { id: 'L1', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', eventCount: 0 } as unknown as ActivityFeedEntry, // no summary, no events
-      { id: 'L2', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', summary: 'Claims derived 2 claims', eventCount: 1, events: undefined as unknown as ActivityFeedEntry['events'] },
+      { id: 'L2', ts: '2026-01-01T00:00:00.000Z', actor: 'claims', summary: 'Claims derived 2 claims', eventCount: 1, events: undefined } as unknown as ActivityFeedEntry,
       ...entries,
     ];
     expect(() => filterFeedByText(legacy, 'claims')).not.toThrow();
