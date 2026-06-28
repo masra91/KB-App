@@ -18,13 +18,14 @@ function neighborhood(over: Partial<ExploreNeighborhood> = {}): ExploreNeighborh
   return {
     found: true,
     center: { rel: 'entities/project/atlas.md', id: 'a', name: 'Project Atlas', kind: 'project', confidence: 0.9, tags: ['type/project', 'topic/q3'] },
-    claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [] }],
+    claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [], contested: false }],
     neighbors: [
       { rel: 'entities/org/finance.md', id: 'f', name: 'Finance Team', kind: 'organization', confidence: 0.7, direction: 'out', predicate: 'funds', speculative: false },
       { rel: 'entities/person/steve.md', id: 's', name: 'Steve Park', kind: 'person', confidence: 0.6, direction: 'in', speculative: true },
     ],
     shown: 2,
     total: 2,
+    contradictions: [],
     ...over,
   };
 }
@@ -169,7 +170,7 @@ describe('Explore view — click-through (EXPLORE-4)', () => {
 describe('Explore view — clickable wiki-citations (SPEC-0046 WS-A)', () => {
   const cited = (): ExploreNeighborhood =>
     neighborhood({
-      claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/ab/01JABC/source.md', title: 'Q3 board memo' }] }],
+      claims: [{ statement: 'Funded for Q3', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/ab/01JABC/source.md', title: 'Q3 board memo' }], contested: false }],
     });
 
   it('renders a claim\'s cited source as a clickable, titled affordance (not a ULID)', async () => {
@@ -229,9 +230,9 @@ describe('Explore view — clickable wiki-citations (SPEC-0046 WS-A)', () => {
     exploreNeighborhood = vi.fn(async () =>
       neighborhood({
         claims: [
-          { statement: 'No sources here', status: 'hypothesis', confidence: 0.4, citations: [] },
-          { statement: 'Bad ref', status: 'fact', confidence: 0.5, citations: [{ ref: '', title: 'broken' }] },
-          { statement: 'Good one', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/cd/02JXYZ/source.md', title: 'Memo' }] },
+          { statement: 'No sources here', status: 'hypothesis', confidence: 0.4, citations: [], contested: false },
+          { statement: 'Bad ref', status: 'fact', confidence: 0.5, citations: [{ ref: '', title: 'broken' }], contested: false },
+          { statement: 'Good one', status: 'fact', confidence: 0.8, citations: [{ ref: 'sources/cd/02JXYZ/source.md', title: 'Memo' }], contested: false },
         ],
       }),
     );
@@ -244,7 +245,7 @@ describe('Explore view — clickable wiki-citations (SPEC-0046 WS-A)', () => {
 
   it('a [[Name]] woven into a claim is clickable and re-centers on that entity', async () => {
     exploreNeighborhood = vi.fn(async () =>
-      neighborhood({ claims: [{ statement: 'Works with [[Finance Team]] closely', status: 'fact', confidence: 0.8, citations: [] }] }),
+      neighborhood({ claims: [{ statement: 'Works with [[Finance Team]] closely', status: 'fact', confidence: 0.8, citations: [], contested: false }] }),
     );
     setApi();
     const c = await mount();
@@ -429,5 +430,50 @@ describe('Explore view — load resilience', () => {
     setApi();
     const c = await mount();
     expect(c.querySelector('.load-error, .error')).not.toBeNull();
+  });
+});
+
+// SPEC-0036 CONTRA-6/7 — the contested entity flag + per-claim "disputed" badge in the read view.
+describe('Explore view — contested entity (SPEC-0036 CONTRA)', () => {
+  it('renders the contested flag + a "sources disagree" banner showing BOTH statements', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({
+        contradictions: [{ statements: ['Born in 1815.', 'Born in 1816.'] }],
+        claims: [{ statement: 'Born in 1815.', status: 'fact', confidence: 0.8, citations: [], contested: true }],
+      }),
+    );
+    setApi();
+    const c = await mount();
+    // The compact flag on the center head.
+    expect(c.querySelector('.explore-contested-flag')?.textContent).toContain('contested');
+    // The banner shows both sides — never asserts one.
+    const banner = c.querySelector('.explore-contested');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('Born in 1815.');
+    expect(banner?.textContent).toContain('Born in 1816.');
+    // The contested claim wears the disputed badge.
+    expect(c.querySelector('.explore-claim--disputed .explore-claim-disputed')?.textContent).toContain('disputed');
+  });
+
+  it('shows a count on the flag when an entity has multiple open contradictions', async () => {
+    exploreNeighborhood = vi.fn(async () =>
+      neighborhood({
+        contradictions: [
+          { statements: ['A1', 'A2'] },
+          { statements: ['B1', 'B2'] },
+        ],
+      }),
+    );
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.explore-contested-flag .viz-numeric')?.textContent).toBe('2');
+    expect(c.querySelectorAll('.explore-contested-item')).toHaveLength(2);
+  });
+
+  it('no flag, no banner, no disputed badge when the entity is uncontested (default)', async () => {
+    const c = await mount(); // default neighborhood() has contradictions: [] + contested: false claim
+    expect(c.querySelector('.explore-contested-flag')).toBeNull();
+    expect(c.querySelector('.explore-contested')).toBeNull();
+    expect(c.querySelector('.explore-claim-disputed')).toBeNull();
   });
 });
