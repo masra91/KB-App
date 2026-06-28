@@ -563,9 +563,9 @@ button:disabled {
 .health-healthy { margin: 0.2rem 0 0; font-size: 0.82rem; display: flex; align-items: baseline; gap: 0.4rem; } /* color from .viz-state-settled */
 .health-row-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .health-open { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
-.health-open:hover { border-left-color: var(--viz-ember); background: var(--viz-rule); }
+.health-open:hover { border-left-color: var(--viz-accent); background: var(--viz-rule); } /* interactive hover → --viz-accent (SPEC-0057 ember migration; ember reserved for "decide") */
 .health-finding-name { color: var(--viz-ink); } /* name stays ink — never the severity hue (#184) */
-.health-open:hover .health-finding-name { color: var(--viz-ember); }
+.health-open:hover .health-finding-name { color: var(--viz-accent); }
 .health-untitled { color: var(--viz-ink-muted); font-style: italic; }
 .health-kind { color: var(--viz-ink-muted); }
 .health-defect { color: var(--viz-ink-muted); font-size: 0.74rem; margin-left: auto; } /* the specific defect, muted */
