@@ -18,6 +18,7 @@ import {
   type CreateKbResult,
 } from './types';
 import { detectCopilot } from './copilot';
+import { ensureObsidianConfig } from './obsidianConfig';
 
 const run = promisify(execFile);
 
@@ -184,6 +185,10 @@ export async function createKb(opts: CreateKbOptions): Promise<CreateKbResult> {
 
   await writeIfAbsent(path.join(root, 'README.md'), readmeFor(config));
   await writeIfAbsent(path.join(root, '.gitignore'), VAULT_GITIGNORE);
+
+  // SPEC-0031 VAULT-5/6: ship the curated `.obsidian/` config (entities-only graph, tag colors,
+  // core-Obsidian defaults), non-destructively. Committed with the initial scaffold below.
+  await ensureObsidianConfig(root);
 
   // SETUP-5: initial commit (only if there's something new to commit).
   await git.add('.');

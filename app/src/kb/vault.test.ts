@@ -119,6 +119,8 @@ describe.skipIf(!gitAvailable)('vault setup (SETUP-2/3/5)', () => {
     expect(await pathExists(path.join(target, '.kb', 'config.json'))).toBe(true);
     expect(await pathExists(path.join(target, 'README.md'))).toBe(true);
     expect(await pathExists(path.join(target, '.gitignore'))).toBe(true);
+    // SPEC-0031 VAULT-5: the curated `.obsidian/` config ships with the vault (committed below).
+    expect(await pathExists(path.join(target, '.obsidian', 'graph.json'))).toBe(true);
 
     // SETUP-3: a git repo with exactly the one SETUP-5 initial commit.
     const git = simpleGit(target);

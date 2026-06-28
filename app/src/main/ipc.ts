@@ -3,6 +3,7 @@ import { ipcMain, dialog, shell, BrowserWindow, clipboard, type OpenDialogOption
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
+import { ensureObsidianConfig } from '../kb/obsidianConfig';
 import { isPermissionDeniedError } from '../kb/permissions';
 import { readAppConfig, writeAppConfig } from './appConfig';
 import {
@@ -136,7 +137,12 @@ const NO_PIPELINE: CaptureResult = {
 export async function initPipeline(): Promise<void> {
   const cfg = await readAppConfig();
   if (cfg.activeVaultPath && (await loadVaultConfig(cfg.activeVaultPath))) {
-    await startPipeline(path.resolve(cfg.activeVaultPath));
+    const root = path.resolve(cfg.activeVaultPath);
+    // SPEC-0031 VAULT-5/6: maintain the `.obsidian/` config on launch so EXISTING vaults (created
+    // before this shipped) also get it. Idempotent + non-destructive (write-if-absent); best-effort —
+    // a config-write hiccup must never block the pipeline from starting.
+    await ensureObsidianConfig(root).catch(() => {});
+    await startPipeline(root);
   }
 }
 
