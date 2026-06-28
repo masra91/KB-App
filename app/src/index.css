@@ -1236,27 +1236,25 @@ option { background: var(--card); color: var(--fg); }
 /* All data stays Plex-Mono (ids, the watched path). */
 .src-v2 .rdesk-id, .src-v2 .path { font-family: var(--viz-font-numeric); }
 
-/* 5. Activity feed — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §2). Repointed off the legacy
-   palette (--bg/--card/--fg/--muted/--accent/--border) onto the WS2 --viz-* tokens so the view reads as
-   one surface with the rest of the system: flat-ruled entries (no card radius/fill), --viz-field raw-JSON
-   surface, --viz-ink-muted secondary text, accent focus. Markup carries the blessed primitives
-   (.viz-field/.viz-btn--ghost/.viz-chip); these view-local rules supply only layout + the token color. */
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Activity view — VELLUM v3 (SPEC-0060 VUX-1). The read-only "observatory" feed, migrated off --viz-*
+   onto the warm-vellum tokens. A reclaimed reading column of flat-ruled glyph-tile entries (substance
+   shipped in #462/#470/#481 — this is the token + material delta). Colour: the glyph tile carries the
+   event-kind hue (#184, hue-on-tile, label stays ink); failure=oxide; NO ember (a log of past events
+   is not a decision — slate=interactive, sprout=active). Light-only (§2). */
+.activity-view { max-width: 61rem; margin: 0 auto; padding: 0.5rem 0.25rem 2.5rem; }
+.activity-title { font-family: var(--voice); font-weight: 500; font-size: 1.6rem; color: var(--ink); letter-spacing: 0.01em; margin: 0; }
 .activity-feed, .lineage-timeline, .lineage-decisions ul { list-style: none; padding: 0; margin: 0.5rem 0 0; display: flex; flex-direction: column; gap: 0.4rem; }
-/* Secondary/helper text — the WS2 muted token (was the legacy global .muted → var(--muted)). */
-.activity-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
-/* Filter row: the actor select + search field (now .viz-field columns) sit on one baseline-aligned row. */
-.activity-controls { display: flex; gap: 0.8rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.activity-note { color: var(--stone); font-family: var(--ui); font-size: 0.86rem; line-height: 1.5; }
+/* Filter row: the stage select + search + trace fields sit on one baseline-aligned row. */
+.activity-controls { display: flex; gap: 0.8rem; align-items: flex-end; flex-wrap: wrap; margin: 0.9rem 0 0.6rem; }
 .activity-field { flex: 0 1 auto; }
 .activity-field .viz-field__input { min-width: 12rem; }
-/* Trace-by-id lookup (AUDIT-6/7): the id input + "trace" submit sit together on the field's baseline,
-   so the lookup reads as one affordance distinct from the actor/search filters. */
 .activity-trace-input { display: flex; gap: 0.4rem; align-items: stretch; }
 .activity-trace-go { flex: none; white-space: nowrap; }
-/* Flat-ruled entry — no card chrome (DESIGN-LEGACY-VIEWS §2 "flat ruled per WS2"); a top rule separates rows. */
-.activity-entry { border: 0; border-top: 1px solid var(--viz-rule); border-radius: 0; background: transparent; overflow: hidden; }
+/* Flat-ruled entry — a hairline top rule separates rows (no card chrome on the feed). */
+.activity-entry { border: 0; border-top: 1px solid var(--hair); border-radius: 0; background: transparent; overflow: hidden; }
 .activity-entry:first-child { border-top: 0; }
-/* Header row: the expand toggle fills, the trace-origin action trails — both vertically centered so the
-   trace action is no longer an orphan flush against the entry's left edge (it can't nest in the head button). */
 .activity-entry-row { display: flex; align-items: center; }
 .activity-entry-head {
   appearance: none;
@@ -1267,26 +1265,20 @@ option { background: var(--card); color: var(--fg); }
   gap: 0.5rem;
   text-align: left;
   font: inherit;
-  color: var(--viz-ink);
+  color: var(--ink);
   background: transparent;
   border: 0;
-  padding: 0.55rem 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--r-chip);
   cursor: pointer;
+  transition: background var(--t);
 }
-.activity-entry-head:hover { background: var(--viz-rule); }
-/* Trailing trace-origin action — inset to the entry's right edge (matching the head's 0.7rem padding),
-   centered with the toggle. .viz-btn--ghost zeroes its side padding, so re-inset here. */
+.activity-entry-head:hover { background: var(--hover); }
 .activity-entry-row .activity-trace { flex: none; padding: 0 0.7rem; white-space: nowrap; }
-/* Clipped row → keep the accent focus ring inset (the viz-focusable outward offset would be clipped);
-   matches the global --viz-accent .viz-focusable ring (interactive, not ember; #450 ember sweep). */
-.activity-entry-head:focus-visible { outline: 2px solid var(--viz-accent); outline-offset: -2px; }
-.activity-actor-badge { flex: none; } /* still used by the lineage timeline steps (lineageHtml) */
-/* UX v2 material (#453): the Activity view is a raised .viz-card + paper-grain (was the flat legacy
-   .card) — DL-2 gate item. Keep the legacy card's padding so content isn't flush to the panel edge. */
-.activity-view { padding: 1.75rem 2rem; }
-/* ── UX v2 Activity row (DL-2 contract): glyph-tile · text · compact relative timestamp ──────────── */
-/* Glyph TILE — 26×26, .5px hairline, hue typed by event kind (#184 hue-on-tile). The HUE rides the
-   tile; the row text stays ink (AA). No ember anywhere (a log of past events needs no decision). */
+/* Clipped row → keep the focus ring inset (slate interactive, not ember). */
+.activity-entry-head:focus-visible { outline: 2px solid var(--slate); outline-offset: -2px; }
+.activity-actor-badge { flex: none; } /* lineage timeline step badge */
+/* Glyph TILE — 26×26, hairline, hue typed by event kind (#184 hue-on-tile, label stays ink/AA). NO ember. */
 .activity-gl {
   flex: none;
   width: 26px;
@@ -1294,44 +1286,43 @@ option { background: var(--card); color: var(--fg); }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 0.5px solid var(--viz-rule);
-  border-radius: 5px;
+  border: 1px solid var(--hair);
+  border-radius: 6px;
   font-size: 0.82rem;
   line-height: 1;
-  color: var(--viz-ink-muted);
-  background: transparent;
+  color: var(--stone);
+  background: var(--linen);
 }
-/* kind hues — tile border + glyph tint only (rationed: gold/oxide stay meaningful, never fills/body) */
-.gl--capture  { border-color: var(--viz-accent); color: var(--viz-accent); }
-.gl--connect  { border-color: var(--viz-sprout); color: var(--viz-sprout); }
-.gl--enrich   { border-color: var(--viz-sprout); color: var(--viz-sprout); }
-.gl--research { border-color: var(--viz-sprout); color: var(--viz-sprout); }
-.gl--claim    { border-color: var(--viz-brass);  color: var(--viz-brass); }
-.gl--promote  { border-color: var(--viz-brass);  color: var(--viz-brass); }
-.gl--compose  { border-color: var(--viz-deep, var(--viz-accent)); color: var(--viz-deep, var(--viz-accent)); }
-.gl--failed   { border-color: var(--viz-oxide);  color: var(--viz-oxide); } /* honest failure, still rationed */
-.gl--decompose, .gl--reflect, .gl--recall, .gl--config, .gl--replay, .gl--event { color: var(--viz-ink-muted); } /* neutral kinds */
-/* TEXT — flex:1 + min-width:0 + overflow-wrap so a long unbreakable id (ULID) shrinks/wraps and can
-   NEVER overflow into the timestamp/trace action (root-cause fix for the QD-2 overlap bug). */
-.activity-ft { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.activity-verb { color: var(--viz-ink); font-weight: 600; }
-.activity-detail { color: var(--viz-ink-muted); }
-.activity-evcount { color: var(--viz-ink-muted); font-size: 0.78rem; font-family: var(--viz-font-numeric, ui-monospace, monospace); }
-/* TIMESTAMP — flex:none + nowrap → structurally immune to text pressure; Plex-Mono, faint, compact. */
+/* kind hues — tile border + glyph tint only (rationed; gold/oxide stay meaningful, never fills/body) */
+.gl--capture  { border-color: var(--slate);    color: var(--slate); }
+.gl--connect  { border-color: var(--sprout);   color: var(--sprout); }
+.gl--enrich   { border-color: var(--sprout);   color: var(--sprout); }
+.gl--research { border-color: var(--sprout);   color: var(--sprout); }
+.gl--claim    { border-color: var(--gold);     color: var(--gold-deep); }
+.gl--promote  { border-color: var(--gold);     color: var(--gold-deep); }
+.gl--compose  { border-color: var(--deep);     color: var(--deep); }
+.gl--failed   { border-color: var(--oxide);    color: var(--oxide); } /* honest failure, still rationed */
+.gl--decompose, .gl--reflect, .gl--recall, .gl--config, .gl--replay, .gl--event { color: var(--stone); } /* neutral kinds */
+/* TEXT — flex:1 + min-width:0 + overflow-wrap so a long ULID wraps, never overflows into the timestamp. */
+.activity-ft { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: var(--ui); font-size: 0.88rem; }
+.activity-verb { color: var(--ink); font-weight: 600; }
+.activity-detail { color: var(--stone); }
+.activity-evcount { color: var(--faint); font-size: 0.78rem; font-family: var(--mono); }
+/* TIMESTAMP — flex:none + nowrap → structurally immune; Plex-Mono, faint, compact. */
 .activity-fw {
   flex: none;
   white-space: nowrap;
-  color: var(--viz-ink-muted);
+  color: var(--faint);
   font-size: 0.78rem;
-  font-family: var(--viz-font-numeric, ui-monospace, monospace);
+  font-family: var(--mono);
 }
 .activity-body { padding: 0 0.7rem 0.6rem; }
-.activity-event { background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.5rem 0.6rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; }
-.activity-event code { color: var(--viz-ink); }
-.activity-event-src { color: var(--viz-ink-muted); font-size: 0.75rem; }
-/* Lineage panel — secondary text on the WS2 muted token (was legacy .muted). */
-.lineage-sources, .lineage-step-ts, .lineage-kind { color: var(--viz-ink-muted); }
-.lineage-decisions-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
+.activity-event { background: var(--parchment); color: var(--ink); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.55rem 0.65rem; margin: 0.4rem 0 0.15rem; overflow-x: auto; font-size: 0.8rem; font-family: var(--mono); }
+.activity-event code { color: var(--ink); }
+.activity-event-src { color: var(--faint); font-size: 0.75rem; font-family: var(--mono); }
+/* Lineage panel — secondary text on the v3 stone/faint tokens. */
+.lineage-sources, .lineage-step-ts, .lineage-kind { color: var(--stone); }
+.lineage-decisions-label { color: var(--stone); font-size: 0.7rem; }
 
 /* === Vellum v3 Today — the command-center home (SPEC-0060, refined from SPEC-0058). The launch surface:
    a calm, glanceable state-of-the-library from one maintained projection. Migrated to the v3 token system
