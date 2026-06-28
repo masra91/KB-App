@@ -17,7 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
-import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted, recordContradictionDirective, readContradictionDirectives, openContradictionsForIdentity, isStatementContested } from './directives';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted, isClaimSuppressed, reattributedTarget, recordContradictionDirective, readContradictionDirectives, openContradictionsForIdentity, isStatementContested } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -424,6 +424,49 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
       // Survives on staging (the rebuild consults it — a re-derived claim stays retracted) AND on main.
       expect(isClaimRetracted(await readCorrectionDirectives(stagingWt), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
       expect(isClaimRetracted(await readCorrectionDirectives(root), 'person|steve jobs', 'Co-founded Apple in 1976.')).toBe(true);
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
+  // Data-integrity audit (SPEC-0050 slice-2c): the REATTRIBUTE family had steady-state unit tests but NO
+  // replay-durability test (retract did, above). Reattribute carries an EXTRA durable field retract doesn't
+  // — `toIdentity`, the corrected subject — and the whole point of a durable correction is that a human's
+  // "this claim belongs to B, not A" survives a clean rebuild (else the misattribution silently returns on
+  // the next claims pass over a re-derived claim). The directive is keyed on the content-derived
+  // `correctionKey` (kind|name + normalized statement, NOT the claim ULID) and lives in evergreen
+  // `directives/` (NOT in replay's PURGE_DIRS), so it must survive — this guards that, incl. the
+  // reattribute-specific `reattributedTarget` resolution. Fails-before if directives ever join the purge set
+  // or reattribute's `toIdentity` stops persisting through Replay.
+  it('keeps a correction (REATTRIBUTE) directive + its corrected target on staging AND main across a Full Replay', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      await createKb({ path: root, initGitIfNeeded: true });
+      const stagingWt = await ensureStagingWorktree(root);
+
+      // A settled reattribute: the claim was wrongly on `person|robin`; the human moved it to `person|devin`.
+      await recordCorrectionDirective(stagingWt, {
+        type: 'reattribute',
+        identityKey: 'person|robin',
+        statement: 'Worked at Disney for 20 years.',
+        toIdentity: 'person|devin',
+        reviewId: 'rev-reattr',
+        decidedAt: '2026-06-15T00:00:00Z',
+      });
+      const sg = simpleGit(stagingWt);
+      await sg.raw('add', '-A');
+      await sg.commit('seed: durable reattribute directive');
+
+      await runFullReplay(root, stagingWt, new Mutex());
+
+      // On staging AND main: still suppressed on the WRONG subject (a re-derived claim doesn't re-stick to
+      // robin) AND the corrected target still resolves to devin (the reattribute-specific durability).
+      for (const where of [stagingWt, root]) {
+        const map = await readCorrectionDirectives(where);
+        expect(isClaimSuppressed(map, 'person|robin', 'Worked at Disney for 20 years.')).toBe(true);
+        expect(reattributedTarget(map, 'person|robin', 'worked at disney for 20 years')).toBe('person|devin');
+      }
     } finally {
       await rmTempDir(dir);
     }
