@@ -142,6 +142,25 @@ describe('deleteResearcher (PANEL-11 lifecycle delete)', () => {
     });
   });
 
+  it('RMEM-7: deleting a researcher clears its run-memory (no graveyard); siblings keep theirs', async () => {
+    await withTemp(async (root) => {
+      const { appendRun, readLedger, ledgerPath } = await import('./researchLedger');
+      const { promises: fs } = await import('node:fs');
+      const path = (await import('node:path')).default;
+      await upsertResearcher(root, web({ id: 'web-1' }));
+      await upsertResearcher(root, web({ id: 'web-2' }));
+      const run = { target: 'X', angle: 'a', harvested: [] as string[], outcome: 'finding' as const, ts: 1 };
+      await appendRun(root, 'web-1', run);
+      await appendRun(root, 'web-2', run);
+
+      await deleteResearcher(root, 'web-1');
+      // web-1's `.kb/research/web-1/` dir is gone (ground truth untouched — that's sources/audit, not this).
+      expect(await fs.stat(path.dirname(ledgerPath(root, 'web-1'))).then(() => true).catch(() => false)).toBe(false);
+      // web-2's memory is intact.
+      expect((await readLedger(root, 'web-2')).runs).toHaveLength(1);
+    });
+  });
+
   it('rejects an unsafe id at the write boundary (#29 path-injection guard)', async () => {
     await withTemp(async (root) => {
       await expect(deleteResearcher(root, '../escape')).rejects.toThrow(/unsafe id/);

@@ -3,7 +3,7 @@
 // regression (orient ignoring the gap → bare-topic queries) drops coverage to the floor, so it can't ship
 // silently. The "real path" samples are built from the actual `chooseAngle` + `buildOrientedQuery`.
 import { describe, it, expect } from 'vitest';
-import { gapTargetingCoverage, queryTargetsGap, queryDiversity } from './gapOrientEval';
+import { gapTargetingCoverage, queryTargetsGap, queryDiversity, gapClosureRate, runClosesGap } from './gapOrientEval';
 import { chooseAngle, buildOrientedQuery } from './researchOrient';
 import type { ResearchRequest } from './researchers';
 import type { EnrichmentGap } from './enrichGap';
@@ -100,5 +100,36 @@ describe('gap-driven rotation eval — successive runs on one entity diverge AND
     const queries = simulateRuns(false, 3);
     expect(queryDiversity(queries).distinct).toBe(1);
     expect(queryDiversity(queries).ratio).toBeCloseTo(1 / 3);
+  });
+});
+
+describe('gapClosureRate (RMEM-5) — runs FILL the gap, not just differ', () => {
+  it('runClosesGap: closes iff the pursued facet is still-missing AND not already covered', () => {
+    expect(runClosesGap({ pursuedFacet: 'education', missingBefore: ['education', 'dob'], alreadyCovered: [] })).toBe(true);
+    expect(runClosesGap({ pursuedFacet: 'education', missingBefore: ['education'], alreadyCovered: ['education'] })).toBe(false); // re-assert
+    expect(runClosesGap({ pursuedFacet: 'role', missingBefore: ['education'], alreadyCovered: [] })).toBe(false); // not a gap
+    expect(runClosesGap({ pursuedFacet: '', missingBefore: ['education'], alreadyCovered: [] })).toBe(false); // cold run
+  });
+
+  it('ledger-backed rotation DRAINS the missing set (high closure); the dead rail re-asserts (collapses)', () => {
+    const missing = ['founding date', 'headquarters or location', 'leadership'];
+    // WITH rotation: each run pursues the next still-uncovered facet → every run closes a real gap.
+    const covered: string[] = [];
+    const rotated = missing.map(() => {
+      const facet = missing.find((f) => !covered.includes(f)) ?? '';
+      const sample = { pursuedFacet: facet, missingBefore: missing, alreadyCovered: [...covered] };
+      if (facet) covered.push(facet);
+      return sample;
+    });
+    expect(gapClosureRate(rotated).rate).toBe(1); // fills every run
+
+    // The dead rail: every run re-pursues the FIRST facet → closes once, then re-asserts known facts.
+    const deadRail = missing.map((_, i) => ({ pursuedFacet: 'founding date', missingBefore: missing, alreadyCovered: i === 0 ? [] : ['founding date'] }));
+    expect(gapClosureRate(deadRail).rate).toBeCloseTo(1 / 3); // closes only the first run
+  });
+
+  it('empty / cold input → rate 0 (never NaN)', () => {
+    expect(gapClosureRate([]).rate).toBe(0);
+    expect(gapClosureRate([{ pursuedFacet: '', missingBefore: ['x'], alreadyCovered: [] }]).rate).toBe(0);
   });
 });

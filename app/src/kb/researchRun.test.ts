@@ -189,4 +189,37 @@ describe.skipIf(!gitAvailable)('runResearcher — warm-start orient integration 
       expect(res.sourceIds.length).toBe(1); // the pass still produced a finding despite orient throwing
     });
   });
+
+  it('RMEM-2: a successful pass records a durable run in the ledger (target/facet/angle/harvested/outcome)', async () => {
+    await withVault(async (root) => {
+      const { readLedger } = await import('./researchLedger');
+      const reqWithGap: ResearchRequest = { ...request, gap: { present: [], missing: ['founding date', 'leadership'] } };
+      const orientDep = async (_r: ResearcherConfig, req: ResearchRequest): Promise<{ orientedReq: ResearchRequest; reads: number; angle: string }> => ({ orientedReq: req, reads: 1, angle: 're Project Atlas: founding date' });
+      const research: ResearchFn = async (_r, req) => ({ found: true, note: 'finding', citations: ['https://x.com/1'], query: req.what });
+      const res = await runResearcher(root, web, reqWithGap, { research, orient: orientDep, now: () => '2026-06-02T00:00:00.000Z' });
+
+      const ledger = await readLedger(root, 'web-1');
+      expect(ledger.runs).toHaveLength(1);
+      expect(ledger.runs[0]).toMatchObject({ target: 'Project Atlas', entityId: 'E1', gapFacet: 'founding date', angle: 're Project Atlas: founding date', outcome: 'finding' });
+      expect(ledger.runs[0].harvested).toEqual(res.sourceIds); // the produced source id is remembered
+    });
+  });
+
+  it('RMEM-3: a no-finding pass is still recorded (drilled), but a FAILED pass does not suppress a retry', async () => {
+    await withVault(async (root) => {
+      const { readLedger, coveredAngles } = await import('./researchLedger');
+      const reqWithGap: ResearchRequest = { ...request, gap: { present: [], missing: ['founding date'] } };
+      const orientDep = async (_r: ResearcherConfig, req: ResearchRequest): Promise<{ orientedReq: ResearchRequest; reads: number; angle: string }> => ({ orientedReq: req, reads: 1, angle: 're Project Atlas: founding date' });
+      const noFind: ResearchFn = async (_r, req) => ({ found: false, note: '', citations: [], query: req.what });
+      await runResearcher(root, web, reqWithGap, { research: noFind, orient: orientDep, now: () => '2026-06-02T00:00:00.000Z' });
+      const failPass: ResearchFn = async (_r, req) => ({ found: false, note: '', citations: [], query: req.what, failed: true, error: 'spawn ENOENT' });
+      await runResearcher(root, web, { ...reqWithGap, id: 'req-2' }, { research: failPass, orient: orientDep, now: () => '2026-06-02T02:00:00.000Z' });
+
+      const ledger = await readLedger(root, 'web-1');
+      expect(ledger.runs.map((r) => r.outcome).sort()).toEqual(['failed', 'no-finding']);
+      // The no-finding DID drill the facet (excluded); the failed one did not → net: the facet is covered.
+      const covered = coveredAngles(ledger, 'Project Atlas', 'E1', Date.parse('2026-06-02T03:00:00.000Z'));
+      expect(covered).toEqual(['re Project Atlas: founding date']);
+    });
+  });
 });
