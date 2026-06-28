@@ -117,3 +117,27 @@ describe('shell UX v2 sidebar brand header', () => {
     expect(root.querySelector('.sidebar-wmark')?.getAttribute('aria-hidden')).toBe('true');
   });
 });
+
+describe('shell UX v2 nav line-icons', () => {
+  let root: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    root = document.getElementById('app')!;
+    setApi(vi.fn(async () => []));
+  });
+  afterEach(() => {
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  it('nav items render monochrome inline line-icon SVGs, not emoji (v2 rail)', async () => {
+    mountShell(root, '/vault', 'KB');
+    await tick();
+    const icon = root.querySelector('.nav-item .nav-icon');
+    expect(icon).not.toBeNull();
+    expect(icon!.querySelector('svg')).not.toBeNull(); // a line glyph, not an emoji text node
+    expect(icon!.textContent?.trim()).toBe(''); // no emoji character left in the icon slot
+    // currentColor stroke → the glyph gilds gold with the nav item on hover/active (no hardcoded fill)
+    expect(icon!.querySelector('svg')?.getAttribute('stroke')).toBe('currentColor');
+  });
+});

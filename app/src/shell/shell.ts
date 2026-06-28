@@ -19,6 +19,7 @@ import {
   VIEW_SETTINGS,
 } from './views';
 import { esc } from './html';
+import { navIcon } from './icons';
 import { NAVIGATE_EVENT, type NavigateDetail } from './nav';
 import { reviewBadgeText, reviewBadgeAria } from './reviewBadge';
 import { mountCapture } from './views/captureView';
@@ -55,7 +56,8 @@ function railHtml(views: readonly NavView[]): string {
     lastGroup = v.group;
     html +=
       `<button type="button" class="nav-item" data-view="${esc(v.id)}">` +
-      `<span class="nav-icon" aria-hidden="true">${esc(v.icon ?? '')}</span>` +
+      // v.icon is a trusted icon-set KEY → inline line-icon SVG (UX v2); navIcon returns '' for an unknown key.
+      `<span class="nav-icon" aria-hidden="true">${v.icon ? navIcon(v.icon) : ''}</span>` +
       `<span class="nav-label">${esc(v.label)}</span></button>`;
   }
   return html;
