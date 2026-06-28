@@ -111,8 +111,9 @@
 
 /* ── Station spine (§2/§6) ──────────────────────────────────────────────────────────────────── */
 .line-spine-wrap {
-  /* the horizontal rule the stations sit on (registration line, not a card edge) */
-  border-top: 1px solid var(--viz-rule);
+  /* The gold thread (brand §8) — the stations sit on it: Capture → … → Compose on one rationed-gold
+     line. Gold is rationed to this single highlight per view (brand §3), never a fill. */
+  border-top: 1px solid var(--viz-brass);
   padding-top: 0.75rem;
 }
 .line-spine {
@@ -189,7 +190,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  border-bottom: 2px solid transparent; /* carries the maturity ramp (below) */
+  padding-bottom: 0.12rem;
 }
+/* Station maturity ramp (brand §8: "station color matures along ONE ramp — raw cream → composed deep
+   blue"). A positional 2px under-accent per station BY PIPELINE POSITION (nth-child), so it reads as the
+   pipeline maturing left→right. Kept off the glyph/cells/state-chip — those carry the live STATE hue
+   (running=sprout / done=patina / set-aside=oxide); the ramp is the stage's resting identity, a separate
+   axis. Six warm-raw → cool-composed stops (endpoints anchor brand cream/deep-blue; intermediates
+   interpolated for the single ramp). */
+.line-spine .line-station:nth-child(1) .line-station-name { border-bottom-color: #d8cdb0; } /* raw — warm parchment */
+.line-spine .line-station:nth-child(2) .line-station-name { border-bottom-color: #b9bfae; }
+.line-spine .line-station:nth-child(3) .line-station-name { border-bottom-color: #94aaa6; }
+.line-spine .line-station:nth-child(4) .line-station-name { border-bottom-color: #5f8a9a; }
+.line-spine .line-station:nth-child(5) .line-station-name { border-bottom-color: #3a6e88; } /* slate blue */
+.line-spine .line-station:nth-child(6) .line-station-name { border-bottom-color: #1e3557; } /* composed — deep blue */
 .line-station-state {
   /* small text → ink-muted (state already reads via glyph + bar); just a quiet ruled chip */
   font-size: 0.6rem;
