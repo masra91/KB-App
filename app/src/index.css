@@ -148,7 +148,9 @@ ul.checks li {
 .capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; font-family: var(--viz-font-signage); letter-spacing: 0.02em; color: var(--viz-ink-muted); font-size: 0.9rem; }
 .capture-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
 .capture-size { color: var(--viz-ink-muted); }
-.capture-flag { color: var(--viz-brass); } /* a soft, non-blocking large-capture caution (RICHIN-11) */
+/* Large-capture caution (RICHIN-11) — #184 a11y: the label reads AA in `--viz-ink`; the caution hue
+   rides the inline `⚠️` glyph already in the markup (DL-1's glyph variant — it's inline, not a block). */
+.capture-flag { color: var(--viz-ink); }
 
 .dropzone {
   margin-top: 0.75rem;
@@ -420,13 +422,14 @@ button:disabled {
 .ask-ref-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
 .ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
 .ask-flags { margin-top: 0.4rem; font-size: 0.85em; color: var(--viz-ink-muted); }
-/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. The accent is
-   the ember heat (the "lead back to source"), never the framework indigo (design-system §6). */
-.cite-link { color: var(--viz-ember); text-decoration: none; cursor: pointer; font-weight: 600; }
+/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. Interactive →
+   `--viz-accent` (slate-blue, AA-text-safe ~5:1 on cream; #415 state-language) — was ember, now
+   reserved for "needs your decision" + sub-AA as link text on cream (#184 a11y audit). */
+.cite-link { color: var(--viz-accent); text-decoration: none; cursor: pointer; font-weight: 600; }
 .cite-link:hover, .cite-link:focus-visible { text-decoration: underline; }
 .cite-ref { color: var(--viz-ink); text-decoration: none; cursor: pointer; }
-.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-ember); text-decoration: underline; }
-.cite-ref .cite-num { color: var(--viz-ember); font-weight: 600; }
+.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-accent); text-decoration: underline; }
+.cite-ref .cite-num { color: var(--viz-accent); font-weight: 600; }
 .cite-ref .cite-kind { color: var(--viz-ink-muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
 .ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--error); }
 .ask-form { display: flex; gap: 0.5rem; }
@@ -474,12 +477,15 @@ button:disabled {
    Muted at rest, ember on hover/focus — the established cite affordance language (mirrors .cite-ref). */
 .explore-cites { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; margin-left: 0.25rem; vertical-align: baseline; }
 .explore-cite { appearance: none; background: transparent; border: 0; padding: 0 0.15rem; cursor: pointer; font: inherit; font-size: 0.68rem; color: var(--viz-ink-muted); }
-.explore-cite .cite-mark { color: var(--viz-ember); font-weight: 600; }
-.explore-cite:hover, .explore-cite:focus-visible { color: var(--viz-ember); text-decoration: underline; }
-.explore-statement-link { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--viz-ember); }
+.explore-cite .cite-mark { color: var(--viz-accent); font-weight: 600; } /* interactive citation link → accent (#184/#415, same class as ASK cites) */
+.explore-cite:hover, .explore-cite:focus-visible { color: var(--viz-accent); text-decoration: underline; }
+.explore-statement-link { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--viz-accent); } /* interactive woven-claim link → accent (#184/#415) */
 .explore-statement-link:hover, .explore-statement-link:focus-visible { text-decoration: underline; }
-.explore-cite-note { margin: 0.45rem 0 0; min-height: 1em; font-size: 0.78rem; color: var(--viz-brass); }
-.explore-cite-note:empty { margin: 0; min-height: 0; }
+/* Citation-open status note — #184 a11y: label reads AA in `--viz-ink`; the caution hue rides a brass
+   left-border ≥3:1 (DL-1's `.viz-note--caution` block pattern). The `:empty` slot drops the border so
+   an idle (empty) note shows no stray rule. */
+.explore-cite-note { margin: 0.45rem 0 0; min-height: 1em; font-size: 0.78rem; color: var(--viz-ink); border-left: 3px solid var(--viz-brass); padding-left: 0.5rem; }
+.explore-cite-note:empty { margin: 0; min-height: 0; border-left: 0; padding-left: 0; }
 
 /* The 1-hop neighborhood */
 .explore-neighbors-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
@@ -508,7 +514,7 @@ button:disabled {
 .explore-filter-chip { appearance: none; cursor: pointer; font: inherit; font-size: 0.64rem; letter-spacing: 0.03em; color: var(--viz-ink-muted); border: 1px solid var(--viz-rule); border-radius: 999px; padding: 0.1rem 0.5rem; background: transparent; }
 .explore-filter-chip:hover, .explore-filter-chip:focus-visible { color: var(--viz-ink); border-color: var(--viz-ember); }
 .explore-filter-chip.is-on { color: var(--viz-ink); border-color: var(--viz-ember); background: var(--viz-rule); box-shadow: inset 2px 0 0 var(--viz-ember); }
-.explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-ember); }
+.explore-filter-clear { appearance: none; background: transparent; border: 0; padding: 0 0.2rem; cursor: pointer; font: inherit; font-size: 0.64rem; color: var(--viz-accent); } /* persistent interactive text button → accent (#184/#415); transient explore hovers reserved for #404 */
 .explore-filter-clear:hover, .explore-filter-clear:focus-visible { text-decoration: underline; }
 .explore-filter-none { margin: 0.3rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
 /* Neighbor row = expand toggle + the re-center button; the toggle is a slim fixed gutter. */
@@ -651,7 +657,10 @@ button:disabled {
 .model-control { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.3rem 0 0.9rem; }
 .model-label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
 .model-runs { font-family: var(--viz-font-numeric); font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.1rem 0 0; }
-.model-stale { font-family: var(--viz-font-body); font-size: 0.72rem; color: var(--viz-brass); margin: 0.1rem 0 0; }
+/* Stale-model note — #184 a11y: label reads AA in `--viz-ink`; the caution hue rides a small
+   aria-hidden brass glyph (DL-1's inline glyph variant), not the text. */
+.model-stale { font-family: var(--viz-font-body); font-size: 0.72rem; color: var(--viz-ink); margin: 0.1rem 0 0; }
+.model-stale-mark { color: var(--viz-brass); margin-right: 0.3rem; }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
 /* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
    controls are SegmentedControls now, laid out by .settings-control above.) */
