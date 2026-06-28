@@ -1290,137 +1290,127 @@ option { background: var(--card); color: var(--fg); }
 .lineage-sources, .lineage-step-ts, .lineage-kind { color: var(--viz-ink-muted); }
 .lineage-decisions-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
 
-/* === UX v2 Today — the command-center home (vellum-ux-v2-language; SPEC-0058 STATE-7). The launch
-   surface: a calm, glanceable state-of-the-library drawn from one maintained projection. Material depth
-   via the shared .viz-card primitives; the ONE attention hue (ember) is rationed to the "needs you" cards.
-   All hues are token-derived (translucent tints over the panel) so the whole surface adapts to dark with
-   no per-rule override; motion is reduced-motion-guarded. Markup: shell/views/todayView.ts. ===== */
-.today { max-width: 64rem; margin: 0 auto; padding: 0.4rem 0.2rem 1.5rem; }
+/* === Vellum v3 Today — the command-center home (SPEC-0060, refined from SPEC-0058). The launch surface:
+   a calm, glanceable state-of-the-library from one maintained projection. Migrated to the v3 token system
+   (VUX-1 — no `--viz-*` token refs here; the shared .viz-* type/material utility classes stay). The Line
+   becomes the slim flow-strip (VUX-10, Status dissolved); the continuous loom mark signals live work
+   (VUX-6); ember is rationed to the "needs you" cards. Light-only this cut (v3 dark deferred, §2); a small
+   survival block keeps bare-ground hero text legible under the #478 toggle. Markup: views/todayView.ts. == */
+.today { max-width: 61rem; margin: 0 auto; padding: 0.4rem 0.2rem 1.5rem; }
 
-/* Greeting hero — Spectral salutation + calm subtitle, with the live clock + Capture CTA opposite. */
+/* Greeting hero — Spectral salutation + calm subtitle, with the live clock opposite (no CTA; top-bar Quick-add). */
 .today-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
-.today-greet { font-weight: 500; font-size: 1.7rem; margin: 0 0 0.2rem; color: var(--viz-ink); letter-spacing: 0.01em; }
-.today-greet-name { color: var(--viz-ink); }
-.today-sub { color: var(--viz-ink-muted); font-size: 0.86rem; margin: 0; max-width: 42rem; }
-.today-hero-aside { display: flex; flex-direction: column; align-items: flex-end; gap: 0.55rem; }
-.today-clock { font-size: 0.72rem; color: var(--viz-ink-muted); white-space: nowrap; }
-/* Capture CTA — filled accent + sentence-case, matching the Capture/Ask folded primary (the .viz-btn base
-   is outlined/uppercase; --primary only re-borders). The one filled action on the home. */
-.today-capture { display: inline-flex; align-items: center; gap: 0.4rem; text-transform: none; letter-spacing: 0; background: var(--viz-accent); color: #fff; border-color: var(--viz-accent); }
-.today-capture:hover, .today-capture.is-hover { background: var(--viz-deep); border-color: var(--viz-deep); color: #fff; }
-.today-capture svg { width: 1.05em; height: 1.05em; }
+.today-greet { font-weight: 500; font-size: 1.7rem; margin: 0 0 0.2rem; color: var(--ink); letter-spacing: 0.01em; }
+.today-greet-name { color: var(--ink); }
+.today-sub { color: var(--stone); font-size: 0.86rem; margin: 0; max-width: 42rem; }
+.today-clock { font-size: 0.72rem; color: var(--faint); white-space: nowrap; text-align: right; }
 
-/* The Line ribbon — the same station-state language as Status (one Line, one truth). The glyph carries
-   the state (never colour-alone, #184); the spine drifts gold behind the stations. */
-.today-line { padding: 1.1rem 1.4rem 1.2rem; margin-bottom: 1.25rem; }
-.today-line-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-bottom: 1.1rem; }
-.today-line-name { display: flex; align-items: center; gap: 0.5rem; font-weight: 500; font-size: 0.96rem; margin: 0; color: var(--viz-ink); }
-.today-line-name svg { width: 1.05em; height: 1.05em; color: var(--viz-brass); }
-.today-line-meta { font-size: 0.72rem; color: var(--viz-ink-muted); }
-.today-thread { position: relative; display: flex; justify-content: space-between; gap: 0.4rem; padding: 0.5rem 0.5rem 0; }
-.today-thread::before {
-  content: ""; position: absolute; left: 1.6rem; right: 1.6rem; top: 1.15rem; height: 2px; border-radius: 2px;
-  background: linear-gradient(90deg, var(--viz-rule), var(--viz-brass) 50%, var(--viz-rule));
-  background-size: 200% 100%; animation: viz-drift var(--viz-dur-drift) linear infinite;
-}
-.today-thread-empty { color: var(--viz-ink-muted); font-size: 0.8rem; padding: 0.3rem 0; }
-.today-station { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-width: 3.2rem; }
-.today-station-glyph {
-  font-size: 1.05rem; line-height: 1; color: var(--viz-idle);
-  background: var(--viz-panel); border-radius: 50%; padding: 0.1rem;
-  transition: transform var(--viz-dur-quick) var(--viz-ease-out), color var(--viz-dur-state) var(--viz-ease-state);
-}
-.today-station:hover .today-station-glyph { transform: scale(1.16); }
-.today-station-name { font-size: 0.66rem; color: var(--viz-ink-muted); text-align: center; }
-.today-station-count { font-size: 0.66rem; color: var(--viz-ink-muted); }
-/* state → hue (glyph already encodes state non-colour-alone): running=sprout breathe · blocked=brass · error=oxide · idle=neutral */
-.today-station[data-state="running"] .today-station-glyph { color: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
-.today-station[data-state="running"] .today-station-name { color: var(--viz-patina); font-weight: 500; }
-.today-station[data-state="blocked"] .today-station-glyph { color: var(--viz-brass); }
-.today-station[data-state="error"] .today-station-glyph { color: var(--viz-oxide); }
-.today-station[data-state="error"] .today-station-name { color: var(--viz-oxide); }
+/* Slim flow-strip (VUX-10) — the dialed-down Line: a loom-marked lead + compact named stages with a
+   done/working/waiting legend, on a linen surface. Replaces the v2 ribbon (Status dissolved, §4). */
+.today-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 0.55rem 1.1rem; padding: 0.75rem 1.1rem; margin-bottom: 1.25rem;
+  background: linear-gradient(180deg, #fcf8ef, var(--linen)); border: 0.5px solid var(--hair); border-radius: var(--r-card); box-shadow: var(--shadow-card); }
+.today-flow-lead { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--ink); }
+.today-flow-stations { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 0.9rem; }
+.today-fs-st { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; color: var(--stone); white-space: nowrap; }
+.today-fs-st .d { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--hair); flex: none; }
+.today-fs-st .ct { font-family: var(--mono); font-size: 0.66rem; color: var(--faint); }
+.today-fs-st[data-fs="done"] { color: var(--ink-2); }
+.today-fs-st[data-fs="done"] .d { background: var(--viridian); }
+.today-fs-st[data-fs="working"] { color: var(--viridian); font-weight: 500; }
+.today-fs-st[data-fs="working"] .d { background: var(--sprout); box-shadow: 0 0 0 3px rgba(62, 158, 130, 0.18); }
+.today-fs-st[data-fs="blocked"] .d { background: var(--gold); }
+.today-fs-st[data-fs="error"] { color: var(--oxide); }
+.today-fs-st[data-fs="error"] .d { background: var(--oxide); }
+.today-flow-empty { color: var(--stone); font-size: 0.78rem; }
+.today-flow-key { display: flex; align-items: center; gap: 0.7rem; margin-left: auto; font-size: 0.66rem; color: var(--faint); }
+.today-flow-key span { display: inline-flex; align-items: center; gap: 0.3rem; }
+.today-flow-key i { width: 0.5rem; height: 0.5rem; border-radius: 50%; display: inline-block; }
+.today-flow-go { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; font-family: var(--ui); font-size: 0.72rem; color: var(--slate); white-space: nowrap; }
+.today-flow-go:hover { color: var(--viridian); text-decoration: underline; }
 
 /* The four headline stat cards — material, lift on hover (.viz-card--lift gives the gold-sheen bloom). */
 .today-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.85rem; margin-bottom: 1.25rem; }
 .today-stat { padding: 0.95rem 1rem; }
-.today-stat-k { display: flex; align-items: center; gap: 0.45rem; font-size: 0.64rem; color: var(--viz-ink-muted); }
-.today-stat-k svg { width: 0.9rem; height: 0.9rem; color: var(--viz-brass); }
-.today-stat-v { font-size: 1.85rem; font-weight: 500; letter-spacing: -0.02em; color: var(--viz-ink); margin: 0.5rem 0 0.15rem; }
-.today-stat-d { display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: var(--viz-sprout); }
+.today-stat-k { display: flex; align-items: center; gap: 0.45rem; font-size: 0.64rem; color: var(--stone); }
+.today-stat-k svg { width: 0.9rem; height: 0.9rem; color: var(--gold-deep); }
+.today-stat-v { font-size: 1.85rem; font-weight: 500; letter-spacing: -0.02em; color: var(--ink); margin: 0.5rem 0 0.15rem; }
+.today-stat-d { display: flex; align-items: center; gap: 0.25rem; font-size: 0.7rem; color: var(--sprout); }
 .today-stat-d svg { width: 0.85rem; height: 0.85rem; }
-.today-stat-d[data-dir="flat"] { color: var(--viz-ink-muted); }
+.today-stat-d[data-dir="flat"] { color: var(--faint); }
 
 /* Lower two columns — recent activity (wide) · needs-you + health (narrow). */
 .today-cols { display: grid; grid-template-columns: 1.35fr 1fr; gap: 1.1rem; align-items: start; }
 .today-side { display: flex; flex-direction: column; gap: 1.1rem; }
 .today-panel { overflow: hidden; }
-.today-panel-head { display: flex; align-items: center; gap: 0.5rem; font-weight: 500; font-size: 0.9rem; margin: 0; padding: 0.9rem 1.1rem 0.7rem; border-bottom: 0.5px solid var(--viz-rule); color: var(--viz-ink); }
-.today-panel-head svg { width: 1em; height: 1em; color: var(--viz-brass); }
-.today-panel-link { appearance: none; margin-left: auto; background: transparent; border: 0; padding: 0 0.1rem; cursor: pointer; font: inherit; font-family: var(--viz-font-signage); font-size: 0.68rem; color: var(--viz-accent); }
-.today-panel-link:hover { color: var(--viz-patina); text-decoration: underline; }
+.today-panel-head { display: flex; align-items: center; gap: 0.5rem; font-weight: 500; font-size: 0.9rem; margin: 0; padding: 0.9rem 1.1rem 0.7rem; border-bottom: 0.5px solid var(--hair); color: var(--ink); }
+.today-panel-head svg { width: 1em; height: 1em; color: var(--gold-deep); }
+.today-panel-link { appearance: none; margin-left: auto; background: transparent; border: 0; padding: 0 0.1rem; cursor: pointer; font: inherit; font-family: var(--ui); font-size: 0.68rem; color: var(--slate); }
+.today-panel-link:hover { color: var(--viridian); text-decoration: underline; }
 
 /* Recent activity feed — a kind-glyph tile, the summary (with highlighted refs), the age. */
 .today-feed { list-style: none; margin: 0; padding: 0.4rem 0.5rem 0.7rem; }
-.today-feed-row { display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.5rem 0.6rem; border-radius: var(--viz-r-chip); transition: background var(--viz-dur-quick) var(--viz-ease-out); }
+.today-feed-row { display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.5rem 0.6rem; border-radius: var(--r-chip); transition: background var(--t); }
 .today-feed-row:hover { background: var(--hover); }
-.today-feed-glyph { flex: 0 0 1.6rem; width: 1.6rem; height: 1.6rem; display: flex; align-items: center; justify-content: center; border-radius: var(--viz-r-chip); border: 0.5px solid var(--viz-rule); color: var(--viz-ink-muted); }
+.today-feed-glyph { flex: 0 0 1.6rem; width: 1.6rem; height: 1.6rem; display: flex; align-items: center; justify-content: center; border-radius: var(--r-chip); border: 0.5px solid var(--hair); color: var(--stone); }
 .today-feed-glyph svg { width: 0.92rem; height: 0.92rem; }
-.today-feed-glyph[data-kind="composed"] { background: rgba(30, 53, 71, 0.12); color: var(--viz-deep); }
-.today-feed-glyph[data-kind="connected"], .today-feed-glyph[data-kind="linked"] { background: rgba(47, 107, 91, 0.13); color: var(--viz-patina); }
-.today-feed-glyph[data-kind="extracted"] { background: rgba(201, 163, 90, 0.16); color: var(--viz-brass); }
-.today-feed-glyph[data-kind="captured"] { background: rgba(58, 110, 136, 0.13); color: var(--viz-accent); }
-.today-feed-text { flex: 1; min-width: 0; font-size: 0.78rem; line-height: 1.4; color: var(--viz-ink); overflow-wrap: anywhere; }
-.today-src { font-family: var(--viz-font-numeric); font-size: 0.72rem; color: var(--viz-patina); }
-.today-feed-when { flex: none; white-space: nowrap; font-size: 0.68rem; color: var(--viz-ink-muted); }
+.today-feed-glyph[data-kind="composed"] { background: rgba(30, 53, 71, 0.12); color: var(--deep); }
+.today-feed-glyph[data-kind="connected"], .today-feed-glyph[data-kind="linked"] { background: rgba(47, 107, 91, 0.13); color: var(--viridian); }
+.today-feed-glyph[data-kind="extracted"] { background: rgba(201, 163, 90, 0.16); color: var(--gold-deep); }
+.today-feed-glyph[data-kind="captured"] { background: rgba(58, 110, 136, 0.13); color: var(--slate); }
+.today-feed-text { flex: 1; min-width: 0; font-size: 0.78rem; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.today-src { font-family: var(--mono); font-size: 0.72rem; color: var(--viridian); }
+.today-feed-when { flex: none; white-space: nowrap; font-size: 0.68rem; color: var(--faint); }
 
-/* Needs you — the ONE ember surface on Today. Each card is ember-cued (left rule + tinted wash + ember
-   CTA); the panel only "lights" when there's a decision. Empty → a settled (NOT ember) rest state. */
+/* Needs you — the ONE ember surface on Today (gradient + ember glyph, NOT a bumper left-border, VUX-8…
+   note: a thin ember left-rule reads as a decision cue here, kept rationed). Empty → a settled rest state. */
 .today-needs.is-active { border-color: rgba(200, 116, 60, 0.4); }
 .today-decide {
   margin: 0.85rem 1.1rem; display: flex; gap: 0.7rem; align-items: flex-start; padding: 0.8rem 0.9rem;
-  border: 0.5px solid rgba(200, 116, 60, 0.4); border-left: 3px solid var(--viz-ember); border-radius: var(--viz-r-chip);
+  border: 0.5px solid rgba(200, 116, 60, 0.4); border-left: 3px solid var(--ember); border-radius: var(--r-chip);
   background: linear-gradient(100deg, rgba(200, 116, 60, 0.1), rgba(200, 116, 60, 0.03) 60%);
-  box-shadow: 0 6px 16px -12px rgba(200, 116, 60, 0.5); transition: transform var(--viz-dur-quick) var(--viz-ease-out), box-shadow var(--viz-dur-quick) var(--viz-ease-out);
+  box-shadow: 0 6px 16px -12px rgba(200, 116, 60, 0.5); transition: transform var(--t), box-shadow var(--t);
 }
 .today-decide:hover { transform: translateY(-1px); box-shadow: 0 10px 22px -12px rgba(200, 116, 60, 0.55); }
-.today-decide-ic { flex: 0 0 1.85rem; width: 1.85rem; height: 1.85rem; display: flex; align-items: center; justify-content: center; border-radius: var(--viz-r-chip); background: rgba(200, 116, 60, 0.12); color: var(--viz-ember); }
+.today-decide-ic { flex: 0 0 1.85rem; width: 1.85rem; height: 1.85rem; display: flex; align-items: center; justify-content: center; border-radius: var(--r-chip); background: rgba(200, 116, 60, 0.12); color: var(--ember); }
 .today-decide-ic svg { width: 1rem; height: 1rem; }
 .today-decide-tx { flex: 1; min-width: 0; }
-.today-decide-tx b { display: block; font-size: 0.8rem; font-weight: 500; color: var(--viz-ink); }
-.today-decide-tx p { margin: 0.2rem 0 0; font-size: 0.74rem; line-height: 1.45; color: var(--viz-ink-muted); }
-.today-go { appearance: none; align-self: center; white-space: nowrap; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; font-family: var(--viz-font-signage); font-size: 0.72rem; font-weight: 600; color: var(--viz-ember); }
+.today-decide-tx b { display: block; font-size: 0.8rem; font-weight: 500; color: var(--ink); }
+.today-decide-tx p { margin: 0.2rem 0 0; font-size: 0.74rem; line-height: 1.45; color: var(--stone); }
+.today-go { appearance: none; align-self: center; white-space: nowrap; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; font-family: var(--ui); font-size: 0.72rem; font-weight: 600; color: var(--ember); }
 .today-go:hover { text-decoration: underline; }
-.today-rest { display: flex; align-items: center; gap: 0.6rem; padding: 1.1rem; color: var(--viz-ink-muted); }
-.today-rest svg { width: 1.15rem; height: 1.15rem; color: var(--viz-patina); flex: none; }
+.today-rest { display: flex; align-items: center; gap: 0.6rem; padding: 1.1rem; color: var(--stone); }
+.today-rest svg { width: 1.15rem; height: 1.15rem; color: var(--viridian); flex: none; }
 .today-rest p { margin: 0; font-size: 0.8rem; }
 
-/* Health glance — same dimensions + severity as Health (ok=patina · warn=brass · bad=oxide), glyph-carried. */
-.today-hrow { display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 1.1rem; border-bottom: 0.5px solid var(--viz-rule); transition: background var(--viz-dur-quick) var(--viz-ease-out); }
+/* Health glance — same dimensions + severity as Health (ok=viridian · warn=gold · bad=oxide), glyph-carried. */
+.today-hrow { display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 1.1rem; border-bottom: 0.5px solid var(--hair); transition: background var(--t); }
 .today-hrow:last-child { border-bottom: none; }
 .today-hrow:hover { background: var(--hover); }
-.today-hi { flex: 0 0 1.85rem; width: 1.85rem; height: 1.85rem; display: flex; align-items: center; justify-content: center; border-radius: var(--viz-r-chip); }
+.today-hi { flex: 0 0 1.85rem; width: 1.85rem; height: 1.85rem; display: flex; align-items: center; justify-content: center; border-radius: var(--r-chip); }
 .today-hi svg { width: 1rem; height: 1rem; }
-.today-hrow[data-status="ok"] .today-hi { background: rgba(47, 107, 91, 0.13); color: var(--viz-patina); }
-.today-hrow[data-status="warn"] .today-hi { background: rgba(201, 163, 90, 0.16); color: var(--viz-brass); }
-.today-hrow[data-status="bad"] .today-hi { background: rgba(168, 67, 42, 0.14); color: var(--viz-oxide); }
+.today-hrow[data-status="ok"] .today-hi { background: rgba(47, 107, 91, 0.13); color: var(--viridian); }
+.today-hrow[data-status="warn"] .today-hi { background: rgba(201, 163, 90, 0.16); color: var(--gold-deep); }
+.today-hrow[data-status="bad"] .today-hi { background: rgba(168, 67, 42, 0.14); color: var(--oxide); }
 .today-ht { flex: 1; min-width: 0; }
-.today-ht b { display: block; font-size: 0.78rem; font-weight: 500; color: var(--viz-ink); }
-.today-ht span { font-size: 0.7rem; color: var(--viz-ink-muted); }
-.today-hn { flex: none; font-size: 0.95rem; color: var(--viz-ink); }
+.today-ht b { display: block; font-size: 0.78rem; font-weight: 500; color: var(--ink); }
+.today-ht span { font-size: 0.7rem; color: var(--stone); }
+.today-hn { flex: none; font-size: 0.95rem; color: var(--ink); }
 
-/* Dark — the lift-hover border literal (#d6cbad, from .viz-card--lift) reads wrong on the night ground. */
-:root[data-theme='dark'] .today-stat.viz-card--lift:hover { border-color: var(--viz-accent); }
+/* Dark SURVIVAL (not the deferred v3 dark design, §2): the v3 tokens are light literals, so only the
+   bare-ground hero text needs re-pointing under the #478 toggle (cards are light linen → their dark text
+   stays legible). data-theme, never prefers-color-scheme (themeCohesion). */
+:root[data-theme='dark'] .today-greet, :root[data-theme='dark'] .today-greet-name { color: #ece4d2; }
+:root[data-theme='dark'] .today-sub { color: #bfb8a6; }
+:root[data-theme='dark'] .today-clock { color: #9a927e; }
+:root[data-theme='dark'] .today-stat.viz-card--lift:hover { border-color: var(--slate); }
 
-/* Responsive — stats fold to 2-up, then the columns stack (mirrors the prototype's 1080px breakpoint). */
+/* Responsive — stats fold to 2-up, then the columns stack (mirrors the prototype's ~1080px breakpoint). */
 @media (max-width: 68rem) {
   .today-stats { grid-template-columns: repeat(2, 1fr); }
   .today-cols { grid-template-columns: 1fr; }
+  .today-flow-key { margin-left: 0; }
 }
 @media (max-width: 32rem) {
   .today-stats { grid-template-columns: 1fr; }
   .today-greet { font-size: 1.45rem; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .today-thread::before { animation: none; }
-  .today-station[data-state="running"] .today-station-glyph { animation: none; }
 }

@@ -98,20 +98,25 @@ describe('Today v2 — command-center home (SPEC-0058 STATE-7)', () => {
     setApi();
     const c = await mount();
     const greet = c.querySelector('.today-greet')?.textContent ?? '';
-    expect(greet.trim()).toBe('Good evening');
+    expect(greet.trim()).toBe('Good evening.');
     expect(c.querySelector('.today-greet-name')).toBeNull();
   });
 
-  it('renders The Line with one station per stage, carrying state + glyph (state never colour-alone)', async () => {
+  it('renders the v3 flow-strip (VUX-10): loom-marked lead, one stage per station, done/working/waiting reading', async () => {
     const c = await mount();
-    const stations = Array.from(c.querySelectorAll('.today-station'));
+    // the continuous loom mark on the lead + the meta line
+    expect(c.querySelector('.today-flow-lead .vmark.loom')).toBeTruthy();
+    expect(c.querySelector('.today-flow-lead')?.textContent).toContain('in flight');
+    const stations = Array.from(c.querySelectorAll('.today-fs-st'));
     expect(stations).toHaveLength(4);
-    expect(c.querySelector('.today-line-meta')?.textContent).toContain('in flight');
-    const running = c.querySelector('.today-station[data-state="running"]');
-    expect(running?.querySelector('.today-station-glyph')?.textContent).toBe('▣');
-    expect(c.querySelector('.today-station[data-state="error"]')).toBeTruthy();
-    // a zero-count station rests as "—"
-    expect(c.querySelector('.today-station[data-state="error"] .today-station-count')?.textContent).toBe('—');
+    // the running stage reads "working"; the legend names done/working/waiting
+    expect(c.querySelector('.today-fs-st[data-fs="working"]')).toBeTruthy();
+    expect(c.querySelector('.today-fs-st[data-fs="error"]')).toBeTruthy();
+    expect(c.querySelector('.today-flow-key')?.textContent).toContain('waiting');
+    // the idle "Capture" stage (before the live frontier, with count) reads done
+    expect(c.querySelector('.today-fs-st[data-fs="done"]')).toBeTruthy();
+    // "See activity" deep-links to Activity
+    expect(c.querySelector('.today-flow-go')?.getAttribute('data-target')).toBe('activity');
   });
 
   it('renders the four stat cards with values + deltas', async () => {
