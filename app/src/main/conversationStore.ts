@@ -116,3 +116,19 @@ export async function loadConversation(id: string): Promise<Conversation | null>
     return null;
   }
 }
+
+/**
+ * Delete one conversation by id (the Past-chats per-row remove — a thread list with no delete just
+ * accretes cruft). ULID-CONTAINED like load: a non-ULID id is rejected before any path is built, so a
+ * crafted `../…` can never unlink outside `conversations/`. Idempotent — `ok:true` whether the file was
+ * removed or already absent (the row is gone either way); `ok:false` only on an invalid id.
+ */
+export async function deleteConversation(id: string): Promise<{ ok: boolean }> {
+  if (typeof id !== 'string' || !isUlid(id)) return { ok: false };
+  try {
+    await fs.rm(conversationFile(id), { force: true }); // force ⇒ no throw when already absent
+    return { ok: true };
+  } catch {
+    return { ok: false };
+  }
+}

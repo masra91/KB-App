@@ -35,6 +35,7 @@ const kbApi: KbApi = {
   saveConversation: (req) => ipcRenderer.invoke('kb:saveConversation', req), // SPEC-0060 VUX-11 past-chats
   listConversations: () => ipcRenderer.invoke('kb:listConversations'),
   loadConversation: (id) => ipcRenderer.invoke('kb:loadConversation', id),
+  deleteConversation: (id) => ipcRenderer.invoke('kb:deleteConversation', id),
   openCitation: (ref) => ipcRenderer.invoke('kb:openCitation', ref),
   openSourceRef: (ref) => ipcRenderer.invoke('kb:openSourceRef', ref),
   listJobs: () => ipcRenderer.invoke('kb:listJobs'),
