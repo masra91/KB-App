@@ -5,6 +5,8 @@
 // stays in sync with the live rail badge (both read `listReviews()`), including the CONNECT-15
 // ambiguous-link review type (empty subject → empty `refs`).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountReviews } from './reviewsView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { KbApi, ReviewSummary } from '../../kb/types';
@@ -550,5 +552,30 @@ describe('Reviews warming skeleton (SPEC-0060 VUX-13 — no 2s blank / wrong-emp
     await vi.advanceTimersByTimeAsync(0);
     expect(root.querySelector('.rev-skeleton')).toBeFalsy();
     expect(root.textContent).toContain('Nothing needs you right now');
+  });
+});
+
+// SPEC-0060 VUX-1: the Reviews CSS block migrates off the instrument-panel --viz-* names onto the
+// warm-vellum v3 tokens. Ember stays — Reviews is the one sanctioned ember surface (needs-you = decision).
+// Guard on the CSS source (happy-dom applies no stylesheet).
+describe('VUX-1 v3 token migration (SPEC-0060 — off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Reviews view — VELLUM v3'),
+    indexCss.indexOf('Ask view — VELLUM v3'),
+  );
+
+  it('isolated the Reviews v3 block', () => {
+    expect(block.length).toBeGreaterThan(500);
+  });
+
+  it('the v3 Reviews block carries NO --viz-* tokens (retired, VUX-1)', () => {
+    expect(block).not.toMatch(/var\(--viz-/);
+  });
+
+  it('keeps ember on the review card + uses v3 ground/ink tokens', () => {
+    expect(block).toMatch(/rgba\(200,\s*116,\s*60/); // the sanctioned ember wash/border (needs-you decision)
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--linen\b/);
   });
 });
