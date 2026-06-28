@@ -34,7 +34,7 @@ beforeEach(() => {
 
 describe('recall skill (ASK-4)', () => {
   it('teaches KB structure, grounding, and the submitAnswer finish protocol', () => {
-    expect(RECALL_SKILL).toContain('KB-App Recall agent');
+    expect(RECALL_SKILL).toContain('Vellum Recall agent');
     expect(RECALL_SKILL).toContain('KB STRUCTURE');
     expect(RECALL_SKILL).toContain('GROUNDING');
     expect(RECALL_SKILL).toContain('submitAnswer');

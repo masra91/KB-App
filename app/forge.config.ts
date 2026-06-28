@@ -21,12 +21,20 @@ const SIGN_MACOS = process.env.KB_OSX_SIGN === '1';
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    // #401: the production app icon (Dock / Finder / Cmd-Tab). `icon` is given WITHOUT an extension —
+    // electron-packager appends the per-platform form (`build/icon.icns` on macOS, `build/icon.ico` on
+    // Windows, `build/icon.png` for the Linux makers). Built from the brand mark in `brand/`.
+    icon: 'build/icon',
+    // #400: an explicit, stable bundle identifier for the rebrand (was the electron-packager default
+    // `com.electron.kb-app`). Drives the macOS CFBundleIdentifier — the app's durable identity for
+    // Launch Services, the TCC grant, and (when signed) the designated requirement.
+    appBundleId: 'com.vellum.app',
     // MACOS-6: folder usage-description strings so the macOS TCC prompt explains WHY the app wants
     // the user's Documents/Desktop/Downloads (the consent rationale). Harmless in an unsigned build.
     extendInfo: {
-      NSDocumentsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Documents folder.',
-      NSDesktopFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives on your Desktop.',
-      NSDownloadsFolderUsageDescription: 'KB-App reads and writes your knowledge-base vault when it lives in your Downloads folder.',
+      NSDocumentsFolderUsageDescription: 'Vellum reads and writes your knowledge-base vault when it lives in your Documents folder.',
+      NSDesktopFolderUsageDescription: 'Vellum reads and writes your knowledge-base vault when it lives on your Desktop.',
+      NSDownloadsFolderUsageDescription: 'Vellum reads and writes your knowledge-base vault when it lives in your Downloads folder.',
       // SPEC-0038 QCAP-8 (Principal revision 2026-06-08): the macOS DUAL-MODEL — present BOTH a Dock
       // app AND a persistent tray agent ("do both"). `LSUIElement: false` so the **Dock icon shows**
       // (Dock + Cmd-Tab + app menu) — the original accessory mode (`true`) hid the app from the Dock,
@@ -37,7 +45,7 @@ const config: ForgeConfig = {
       // which triggers the macOS Automation TCC prompt — this usage string is its honest rationale.
       // A denied/absent grant degrades to clipboard-only (never silently dead). Harmless when unsigned.
       NSAppleEventsUsageDescription:
-        'KB-App captures the text you have selected in the frontmost app when you summon Quick Capture. If you decline, capture still works from your clipboard.',
+        'Vellum captures the text you have selected in the frontmost app when you summon Quick Capture. If you decline, capture still works from your clipboard.',
     },
     // MACOS-3: sign with the hardened runtime + the non-sandboxed entitlements (opt-in; see above).
     ...(SIGN_MACOS

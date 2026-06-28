@@ -16,7 +16,7 @@ import { esc } from './html';
 /** PRE-PROMPT (MACOS-7 flow 1) — why + the exact folder (mono); Continue triggers the OS TCC dialog. */
 export function prePromptHtml(folder: string): string {
   return `<div class="perm-panel perm-preprompt viz-no-chrome">
-    <div class="perm-head"><span class="perm-glyph" aria-hidden="true">⌖</span><h1 class="perm-title viz-signage">KB-App needs access to your vault folder</h1></div>
+    <div class="perm-head"><span class="perm-glyph" aria-hidden="true">⌖</span><h1 class="perm-title viz-signage">Vellum needs access to your vault folder</h1></div>
     <p class="perm-body viz-body">To read and write your notes in <span class="perm-path viz-numeric">${esc(folder)}</span>, macOS will ask next — choose <strong>Allow</strong>.</p>
     <div class="perm-actions"><button type="button" id="perm-continue" class="viz-btn viz-focusable perm-primary">Continue</button></div>
   </div>`;
@@ -29,9 +29,9 @@ export function blockedHtml(folder: string, opts: { acting?: boolean; note?: str
   const dis = opts.acting ? ' disabled' : '';
   const note = opts.note ? `<p class="perm-note viz-body">${esc(opts.note)}</p>` : '';
   return `<div class="perm-panel perm-blocked viz-no-chrome" role="alert">
-    <div class="perm-head"><span class="perm-glyph perm-glyph-blocked" aria-hidden="true">⚠</span><h1 class="perm-title viz-signage">KB-App can’t reach your vault folder</h1></div>
+    <div class="perm-head"><span class="perm-glyph perm-glyph-blocked" aria-hidden="true">⚠</span><h1 class="perm-title viz-signage">Vellum can’t reach your vault folder</h1></div>
     <p class="perm-body viz-body">Access to <span class="perm-path viz-numeric">${esc(folder)}</span> is turned off, so your notes can’t be read or written until you allow it.</p>
-    <p class="perm-steps viz-body">To fix: <strong>System Settings → Privacy &amp; Security → Files and Folders</strong> → enable <strong>KB-App</strong>.</p>
+    <p class="perm-steps viz-body">To fix: <strong>System Settings → Privacy &amp; Security → Files and Folders</strong> → enable <strong>Vellum</strong>.</p>
     ${note}
     <div class="perm-actions">
       <button type="button" id="perm-open-settings" class="viz-btn viz-focusable"${dis}>Open System Settings</button>
@@ -42,7 +42,7 @@ export function blockedHtml(folder: string, opts: { acting?: boolean; note?: str
 
 /** iCloud detect-warn (MACOS-7 flow 6) — a quiet, NON-blocking inline note (v1: detect + warn only). */
 export function icloudNoteHtml(): string {
-  return `<p class="perm-icloud viz-body"><span class="perm-glyph-icloud" aria-hidden="true">☁</span> Your vault is in iCloud Drive — files may sync or be offloaded; KB-App reads them on demand.</p>`;
+  return `<p class="perm-icloud viz-body"><span class="perm-glyph-icloud" aria-hidden="true">☁</span> Your vault is in iCloud Drive — files may sync or be offloaded; Vellum reads them on demand.</p>`;
 }
 
 export interface PermissionGateOptions {
@@ -110,8 +110,8 @@ export function mountPermissionGate(container: HTMLElement, opts: PermissionGate
       const res = await window.kbApi.openSystemSettingsPrivacy();
       note = res.ok
         ? res.usedFallback
-          ? 'Opened Privacy & Security — find Files and Folders, enable KB-App, then Retry.'
-          : 'Opened System Settings — enable KB-App under Files and Folders, then Retry.'
+          ? 'Opened Privacy & Security — find Files and Folders, enable Vellum, then Retry.'
+          : 'Opened System Settings — enable Vellum under Files and Folders, then Retry.'
         : 'Couldn’t open System Settings — open it manually: Privacy & Security → Files and Folders.';
     } catch {
       note = 'Couldn’t open System Settings — open it manually: Privacy & Security → Files and Folders.';

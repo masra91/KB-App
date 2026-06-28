@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const APP_NAME = 'KB-App';
+const APP_NAME = 'Vellum';
 const appRoot = path.resolve(__dirname, '..');
 
 export function builtMainEntry(): string | null {

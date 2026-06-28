@@ -1,6 +1,6 @@
 // The M365/WorkIQ researcher SDK adapter (SPEC-0028 Slice 3, RESEARCH-8/9/12/16) — the production
 // `ResearchFn` for the `internal-tenant` tier, backed by the Copilot SDK with a read-only Microsoft
-// Graph MCP server (the user's OWN tenant, via the MCP's OAuth — KB-App stores no secrets, RESEARCH-9).
+// Graph MCP server (the user's OWN tenant, via the MCP's OAuth — Vellum stores no secrets, RESEARCH-9).
 // Mirrors researchWebAgent.ts so the framework stays unit-testable behind the `ResearchFn` seam: this
 // module is the only one that imports the SDK / reaches the tenant; everything else stays pure.
 //
@@ -14,7 +14,7 @@
 //   can only read the authenticated user's tenant); the concrete tenant-verification finalizes at
 //   env-time with the concrete Graph MCP.
 // - RESEARCH-9 BYOA: auth is the Graph MCP's OWN OAuth, owned by the Electron main process — the token
-//   NEVER touches the renderer and is redacted in the dev log (PRIN-19). KB-App persists no secret.
+//   NEVER touches the renderer and is redacted in the dev log (PRIN-19). Vellum persists no secret.
 // - RESEARCH-10/12 read-only + untrusted-content-as-DATA: the session allow-lists ONLY the MCP's
 //   read tools (search/read mail/calendar/SharePoint/Teams) + a `submitFindings` sink — no send/post/
 //   write tool is ever exposed; the system message hard-frames returned mail/docs as DATA, never
@@ -43,7 +43,7 @@ export const SUBMIT_FINDINGS_TOOL = 'submitFindings';
  * constrains to report + cite, and reminds of the request-only scope + the read-only posture.
  */
 export const M365_RESEARCH_SKILL = [
-  'You are the KB-App M365/WorkIQ researcher. Your job: research the REQUESTED topic across the',
+  'You are the Vellum M365/WorkIQ researcher. Your job: research the REQUESTED topic across the',
   "user's own Microsoft 365 tenant (mail, calendar, SharePoint, Teams — read-only) and return a",
   'short, grounded findings-note with citations, to corroborate/expand the KB.',
   '',

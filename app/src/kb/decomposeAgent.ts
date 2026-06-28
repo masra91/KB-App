@@ -78,7 +78,7 @@ export const DECOMPOSE_PROMPT_VERSION = 'decompose/v2';
 export function buildDecomposePrompt(input: SourceInput): string {
   const body = input.text ?? '(no extractable text — this is an opaque file; infer only from its name/type)';
   return [
-    'You are the KB-App Decompose librarian. Read ONE source and DECOMPOSE it into the',
+    'You are the Vellum Decompose librarian. Read ONE source and DECOMPOSE it into the',
     'distinct ENTITIES it mentions — the nodes of the knowledge graph. Extract only entities',
     'grounded in the text; do NOT invent anything not supported by it.',
     '',

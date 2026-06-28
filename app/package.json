@@ -1,6 +1,6 @@
 {
   "name": "kb-app",
-  "productName": "KB-App",
+  "productName": "Vellum",
   "version": "0.1.0",
   "description": "AI-native second brain over an Obsidian/markdown vault.",
   "main": ".vite/build/main.js",

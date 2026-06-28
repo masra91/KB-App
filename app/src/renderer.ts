@@ -69,14 +69,14 @@ function renderDetails(): void {
       <li>${mark(ins.gitInstalled)} git installed</li>
       <li>${mark(ins.isGitRepo)} git repository ${ins.isGitRepo ? '' : '<span class="muted">(will initialize)</span>'}</li>
       <li>${mark(ins.copilot.available, true)} Copilot &mdash; <span class="muted">${esc(ins.copilot.detail)}</span></li>
-      ${ins.alreadyKb ? '<li>⚠️ This folder already contains a KB-App config (will be reused).</li>' : ''}
+      ${ins.alreadyKb ? '<li>⚠️ This folder already contains a Vellum config (will be reused).</li>' : ''}
     </ul>
     ${
       isICloudVault(ins.tccProtectedDir)
         ? // iCloud is detect-warn-only (v1, MACOS-2): a calm, non-blocking note — not a steer-away.
           icloudNoteHtml()
         : ins.tccProtectedDir
-          ? `<p class="warning">⚠️ This folder is inside your <strong>${esc(ins.tccProtectedDir)}</strong>, a macOS-protected location. KB-App's background tasks (git, Copilot) can be silently blocked there — captures may never finish processing. <strong>Pick a folder outside ${esc(ins.tccProtectedDir)}</strong> (e.g. one directly in your home directory) to be safe.</p>`
+          ? `<p class="warning">⚠️ This folder is inside your <strong>${esc(ins.tccProtectedDir)}</strong>, a macOS-protected location. Vellum's background tasks (git, Copilot) can be silently blocked there — captures may never finish processing. <strong>Pick a folder outside ${esc(ins.tccProtectedDir)}</strong> (e.g. one directly in your home directory) to be safe.</p>`
           : ''
     }
     <label class="field">Name<input id="name" value="${esc(baseName(ins.path))}" /></label>

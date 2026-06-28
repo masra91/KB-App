@@ -1,4 +1,4 @@
-# KB-App CI — the authoritative test gate (SPEC-0012 TEST-10/TEST-11).
+# Vellum CI — the authoritative test gate (SPEC-0012 TEST-10/TEST-11).
 #
 # COVERAGE — read this before assuming "green == fully verified" (TEST-11, no silent caps):
 #   NOW (phased rollout), two GATING jobs on every PR + push to `main` (Linux):
@@ -168,21 +168,21 @@ jobs:
           # electron-forge exits non-zero on a hard failure, but assert the artifact exists too
           # so a silently-empty package can never read as green. Per-OS output layout.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            app=$(ls -d out/KB-App-darwin-*/KB-App.app 2>/dev/null | head -n1)
-            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/KB-App" ]; then
+            app=$(ls -d out/Vellum-darwin-*/Vellum.app 2>/dev/null | head -n1)
+            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/Vellum" ]; then
               echo "::error::npm run package produced no launchable macOS .app under out/ (fsevents/native-bundling regression?)"
               ls -R out || true
               exit 1
             fi
             echo "Packaged artifact OK: $app"
           else
-            dir=$(ls -d out/KB-App-linux-* 2>/dev/null | head -n1)
-            if [ -z "$dir" ] || [ ! -x "$dir/KB-App" ]; then
+            dir=$(ls -d out/Vellum-linux-* 2>/dev/null | head -n1)
+            if [ -z "$dir" ] || [ ! -x "$dir/Vellum" ]; then
               echo "::error::npm run package produced no runnable Linux artifact under out/"
               ls -R out || true
               exit 1
             fi
-            echo "Packaged artifact OK: $dir/KB-App"
+            echo "Packaged artifact OK: $dir/Vellum"
           fi
 
   # macOS package build-check — the durable catch for the macOS-only NATIVE-dep regression class
@@ -216,21 +216,21 @@ jobs:
           # electron-forge exits non-zero on a hard failure, but assert the artifact exists too
           # so a silently-empty package can never read as green. Per-OS output layout.
           if [ "$RUNNER_OS" = "macOS" ]; then
-            app=$(ls -d out/KB-App-darwin-*/KB-App.app 2>/dev/null | head -n1)
-            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/KB-App" ]; then
+            app=$(ls -d out/Vellum-darwin-*/Vellum.app 2>/dev/null | head -n1)
+            if [ -z "$app" ] || [ ! -x "$app/Contents/MacOS/Vellum" ]; then
               echo "::error::npm run package produced no launchable macOS .app under out/ (fsevents/native-bundling regression?)"
               ls -R out || true
               exit 1
             fi
             echo "Packaged artifact OK: $app"
           else
-            dir=$(ls -d out/KB-App-linux-* 2>/dev/null | head -n1)
-            if [ -z "$dir" ] || [ ! -x "$dir/KB-App" ]; then
+            dir=$(ls -d out/Vellum-linux-* 2>/dev/null | head -n1)
+            if [ -z "$dir" ] || [ ! -x "$dir/Vellum" ]; then
               echo "::error::npm run package produced no runnable Linux artifact under out/"
               ls -R out || true
               exit 1
             fi
-            echo "Packaged artifact OK: $dir/KB-App"
+            echo "Packaged artifact OK: $dir/Vellum"
           fi
 
   e2e:

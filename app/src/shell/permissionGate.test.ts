@@ -42,7 +42,7 @@ describe('permissionGate render helpers (MACOS-7)', () => {
   });
 
   it('blockedHtml disables the buttons single-flight + shows a transient note', () => {
-    const h = blockedHtml(FOLDER, { acting: true, note: 'Opened System Settings — enable KB-App, then Retry.' });
+    const h = blockedHtml(FOLDER, { acting: true, note: 'Opened System Settings — enable Vellum, then Retry.' });
     expect(h).toContain('disabled');
     expect(h).toContain('Opened System Settings');
   });

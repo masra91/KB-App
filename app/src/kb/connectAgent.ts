@@ -116,7 +116,7 @@ export function buildConnectPrompt(set: CandidateSet): string {
       ? set.priorDecisions.map((d) => `  - ${d.a} and ${d.b}: ALREADY DECIDED ${d.verdict.toUpperCase()} — do NOT raise a review for this pair`)
       : null;
   return [
-    'You are the KB-App Connect librarian. ENTITY RESOLUTION: decide which of these',
+    'You are the Vellum Connect librarian. ENTITY RESOLUTION: decide which of these',
     `per-source candidate mentions (all loosely grouped as kind "${set.kind}") refer to the`,
     'SAME real-world thing. The grouping is deliberately loose — it may over-group. SPLIT it',
     'into one CLUSTER per distinct real thing.',

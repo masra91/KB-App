@@ -69,7 +69,7 @@ export function budgetExhaustedMessage(maxToolCalls: number): string {
  * security and MUST NOT be loosened; we just read more (the raised budget) and capture richer per pass.
  */
 export const WEB_RESEARCH_SKILL = [
-  'You are the KB-App Web researcher. Your job: research the REQUESTED topic on the public web and',
+  'You are the Vellum Web researcher. Your job: research the REQUESTED topic on the public web and',
   'return a SUBSTANTIVE, well-structured, source-attributed findings-note — to corroborate/expand the',
   'KB. This note becomes a secondary source the pipeline mines for claims, so its VALUE is in the',
   'specifics it carries, not in being short.',
