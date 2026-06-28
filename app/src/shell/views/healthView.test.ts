@@ -7,6 +7,8 @@
 // safety, the status-driven warming/unavailable faces, and load resilience. The mock returns the REAL
 // `HealthProjection` (built via `toHealthProjection`) so the view + transform are exercised together.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountHealth } from './healthView';
 import { TimeoutError } from '../loadGuard';
 import type { KbApi } from '../../kb/types';
@@ -201,6 +203,52 @@ describe('Health view — projection-backed glance (HEALTH-8, SPEC-0058 STATE-13
       expect(reportRendererError).toHaveBeenCalledTimes(1);
       expect((reportRendererError.mock.calls[0][0] as { message: string }).message).toMatch(/\[health\] load failed/);
       document.body.innerHTML = '';
+    }
+  });
+});
+
+// SPEC-0060 VUX-1 — the Health CSS block is migrated OFF the instrument-panel `--viz-*` tokens onto the
+// v3 warm-vellum set (consumed from design-system.css, never redefined here). Fails-before: the pre-v3
+// block referenced `var(--viz-ink)` / `var(--viz-rule)` / `var(--viz-brass)` etc. — this guard keeps the
+// migration complete and prevents a regression that re-introduces a retired token. CSS-content tier
+// (mirrors themeCohesion): read index.css, isolate the `.health*`/`.hrow*` block, assert on it.
+describe('Health v3 token migration (SPEC-0060 VUX-1)', () => {
+  const css = readFileSync(path.join(__dirname, '..', '..', 'index.css'), 'utf8');
+  // The block spans from the VUX-1 marker comment to the next view section (Agents hub).
+  const start = css.indexOf('SPEC-0060 VUX-1 — Health migrated');
+  const end = css.indexOf('Agents hub: direction-framed');
+  const block = css.slice(start, end);
+  // Drop comment lines so a `--viz-*` mention in prose (e.g. "retires --viz-*") doesn't mask a real ref.
+  const declarations = block
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('/*') && !l.trim().startsWith('*'))
+    .join('\n');
+
+  it('isolated a non-empty Health CSS block', () => {
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(declarations).toContain('.health-title');
+    expect(declarations).toContain('.hrow');
+  });
+
+  it('references ZERO retired --viz-* tokens in its actual declarations (fully migrated)', () => {
+    const leaks = declarations.match(/var\(--viz-[a-z0-9-]+\)/g) ?? [];
+    expect(leaks).toEqual([]);
+  });
+
+  it('consumes the v3 warm-vellum tokens (ink/stone/hair/slate) + the severity hues (sprout/gold/oxide)', () => {
+    for (const tok of ['var(--ink)', 'var(--stone)', 'var(--hair)', 'var(--slate)', 'var(--sprout)', 'var(--gold-deep)', 'var(--oxide)', 'var(--mono)']) {
+      expect(declarations).toContain(tok);
+    }
+  });
+
+  it('tokenizes hover washes (themeCohesion §: no hardcoded :hover background)', () => {
+    // Both interactive hovers (.hrow, .health-open) must use the v3 --hover wash, never a literal color.
+    const hovers = declarations.match(/:hover\s*\{[^}]*\}/g) ?? [];
+    expect(hovers.length).toBeGreaterThan(0);
+    for (const h of hovers) {
+      if (h.includes('background')) expect(h).toContain('var(--hover)');
+      expect(h).not.toMatch(/#[0-9a-fA-F]{3,6}/); // no hex literal in a hover rule
     }
   });
 });
