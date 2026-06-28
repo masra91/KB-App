@@ -106,7 +106,7 @@ import { computeGraphProjection } from '../kb/graphProjection';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { setQuickCaptureAgent } from './quickCaptureService';
 import type { QuickCaptureAgent, SelectionRead } from './quickCaptureAgent';
-import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext, TodayProjection } from '../kb/types';
+import type { ActivityFeedResult, AuditEvent, Lineage, OpenCitationResult, CaptureResult, QuickCaptureContext, TodayProjection, ConversationTurn } from '../kb/types';
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
   const fn = state.handlers.get(channel);
@@ -349,6 +349,33 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     expect(res.grounded).toBe(true);
     expect(res.citations[0].ref).toBe('claims/person/ada-lovelace.md');
     expect(mocks.recall).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC-0060 VUX-11 — kb:saveConversation / listConversations / loadConversation (past-chats)', () => {
+  const turn = (q: string, a: string): ConversationTurn => ({ result: { question: q, answer: a, citations: [], grounded: true, toolCalls: 1, truncated: false }, askedAt: '2026-06-28T00:00:00.000Z' });
+
+  it('round-trips a thread through the IPC layer: save → list (newest-first) → load (faithful)', async () => {
+    const { id } = await invoke<{ id: string }>('kb:saveConversation', { turns: [turn('Who is Ada?', 'Ada Lovelace.')] });
+    expect(typeof id).toBe('string');
+    const list = await invoke<{ id: string; title: string; turnCount: number }[]>('kb:listConversations');
+    expect(list.find((s) => s.id === id)).toMatchObject({ title: 'Who is Ada?', turnCount: 1 });
+    const loaded = await invoke<{ id: string; turns: { result: { answer: string } }[] } | null>('kb:loadConversation', id);
+    expect(loaded?.turns[0].result.answer).toBe('Ada Lovelace.'); // full AskResult restored
+  });
+
+  it('an id can UPDATE the same thread (no duplicate row)', async () => {
+    const { id } = await invoke<{ id: string }>('kb:saveConversation', { turns: [turn('q1', 'a1')] });
+    await invoke('kb:saveConversation', { id, turns: [turn('q1', 'a1'), turn('q2', 'a2')] });
+    const list = await invoke<unknown[]>('kb:listConversations');
+    expect(list).toHaveLength(1);
+    const loaded = await invoke<{ turns: unknown[] }>('kb:loadConversation', id);
+    expect(loaded.turns).toHaveLength(2);
+  });
+
+  it('load is ULID-contained — a crafted traversal id returns null (no escape)', async () => {
+    expect(await invoke('kb:loadConversation', '../kb-app.config')).toBeNull();
+    expect(await invoke('kb:loadConversation', 'not-a-ulid')).toBeNull();
   });
 });
 

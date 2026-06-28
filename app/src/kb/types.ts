@@ -376,6 +376,8 @@ export type { AskResult, Citation, RecallTurn } from './recall';
 import type { AskResult, RecallTurn } from './recall';
 import type { RecallEffort } from './recallConstants';
 export type { RecallEffort };
+import type { Conversation, ConversationTurn, ConversationSummary } from './conversation';
+export type { Conversation, ConversationTurn, ConversationSummary };
 
 /** A recall request from the Ask view: an NL question + the in-session history (ASK-8). */
 export interface AskRequest {
@@ -794,6 +796,11 @@ export interface KbApi {
   ask(req: AskRequest): Promise<AskResult>;
   // SPEC-0026 ASK-6: save a grounded recall answer as a KB Output.
   saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult>;
+  // SPEC-0060 VUX-11 (past-chats): persist/list/load Ask threads in app userData (NOT the vault). The id
+  // a save returns can be passed back to UPDATE the same thread; load is ULID-contained in the store.
+  saveConversation(req: { turns: ConversationTurn[]; id?: string; title?: string }): Promise<{ id: string }>;
+  listConversations(): Promise<ConversationSummary[]>;
+  loadConversation(id: string): Promise<Conversation | null>;
   // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian (obsidian:// deep-link). The
   // renderer passes the citation's vault-relative `ref`; main resolves + contains it, then opens it.
   openCitation(ref: string): Promise<OpenCitationResult>;

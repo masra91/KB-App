@@ -53,6 +53,8 @@ import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
 import { recallEffortLevers } from '../kb/recallConstants';
+import { saveConversation, listConversations, loadConversation } from './conversationStore';
+import type { Conversation, ConversationTurn, ConversationSummary } from '../kb/conversation';
 import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
@@ -470,6 +472,20 @@ export function registerIpc(): void {
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) };
     }
+  });
+
+  // SPEC-0060 VUX-11 (slice-2b/2c): past-chats — persist / list / load Ask threads in app userData (NOT
+  // the vault; distinct from saveRecallOutput, which git-commits an answer AS a KB Output). The id a save
+  // returns can be passed back to UPDATE the same thread as it grows. Load is ULID-contained (the store
+  // rejects a crafted id), so a renderer-supplied id can never escape the conversations dir.
+  ipcMain.handle('kb:saveConversation', async (_e, req: { turns: ConversationTurn[]; id?: string; title?: string }): Promise<{ id: string }> => {
+    return saveConversation(req?.turns ?? [], { id: req?.id, title: req?.title });
+  });
+  ipcMain.handle('kb:listConversations', async (): Promise<ConversationSummary[]> => {
+    return listConversations();
+  });
+  ipcMain.handle('kb:loadConversation', async (_e, id: unknown): Promise<Conversation | null> => {
+    return typeof id === 'string' ? loadConversation(id) : null;
   });
 
   // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian. The renderer hands us the
