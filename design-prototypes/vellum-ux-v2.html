@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vellum — UX rethink (prototype)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<style>
+/* ============================================================================
+   VELLUM — design language v2 (prototype tokens)
+   A calm, scholarly study: warm vellum ground, cool depth, rationed gold,
+   ambient motion. Light is the brand face. Crystalline, not botanical.
+   ============================================================================ */
+:root{
+  /* — palette — */
+  --vellum:#F4EFE3; --linen:#FBF7EC; --parchment:#ECE4D2;
+  --viridian:#2F6B5B; --viridian-2:#3E9E82; --deep:#1E3557; --slate:#3A6E88; --mist:#BFD7E6;
+  --gold:#C9A35A; --gold-deep:#A8823C; --sprout:#3E9E82;
+  --ember:#C8743C; --oxide:#A8432A;
+  --ink:#2B2F36; --ink-2:#4A4E55; --stone:#6A6456; --faint:#9A927E; --hair:#E0D6BE;
+
+  /* — type — */
+  --voice:'Spectral',Georgia,serif;
+  --ui:'Inter',system-ui,sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+
+  /* — depth: a cool, blue-tinted shadow + a warm inner top-light. the signature. — */
+  --shadow-card: 0 1px 0 rgba(255,255,255,.75) inset, 0 1px 2px rgba(30,53,71,.05), 0 10px 24px -16px rgba(20,40,55,.30);
+  --shadow-raise: 0 1px 0 rgba(255,255,255,.85) inset, 0 2px 6px rgba(30,53,71,.07), 0 22px 44px -22px rgba(20,40,55,.42);
+  --shadow-win: 0 2px 0 rgba(255,255,255,.6) inset, 0 40px 90px -30px rgba(16,34,48,.55);
+  --ring: 0 0 0 3px rgba(47,107,91,.16);
+
+  /* — geometry — */
+  --r-win:16px; --r-card:13px; --r-chip:9px; --r-pill:22px;
+
+  /* — motion — */
+  --e-out:cubic-bezier(.2,.7,.3,1);
+  --e-spring:cubic-bezier(.34,1.56,.46,1);
+  --t:.18s var(--e-out);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; font-family:var(--ui); color:var(--ink); padding:26px;
+  font-size:14px; line-height:1.45; -webkit-font-smoothing:antialiased;
+  background:
+    radial-gradient(120% 110% at 22% -8%, #F8F3E7 0%, #EFE7D5 46%, #E3D7BD 100%);
+  min-height:100vh; display:flex; align-items:flex-start; justify-content:center;
+}
+::selection{background:rgba(47,107,91,.16)}
+
+/* ---- window shell ---- */
+.win{
+  width:100%; max-width:1220px; height:min(82vh,860px);
+  background:var(--vellum); border-radius:var(--r-win); overflow:hidden;
+  border:.5px solid #CFC4A6; box-shadow:var(--shadow-win);
+  display:flex; flex-direction:column; position:relative;
+}
+/* faint vellum grain over the whole window */
+.win::after{
+  content:""; position:absolute; inset:0; pointer-events:none; opacity:.5; mix-blend-mode:multiply;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+/* ---- titlebar ---- */
+.bar{
+  height:46px; flex:0 0 46px; display:flex; align-items:center; gap:12px; padding:0 16px;
+  background:linear-gradient(var(--linen),#EFE6D1); border-bottom:.5px solid var(--hair);
+  -webkit-app-region:drag; position:relative; z-index:5;
+}
+.lights{display:flex;gap:8px}
+.lights i{width:12px;height:12px;border-radius:50%;display:block;box-shadow:0 0 0 .5px rgba(0,0,0,.08) inset}
+.l1{background:#ED6A5E}.l2{background:#F4BF4F}.l3{background:#61C554}
+.titg{font-family:var(--voice);font-weight:500;font-size:16px;color:var(--ink);margin-left:6px;display:flex;align-items:center;gap:7px}
+.titg .spark{color:var(--gold-deep);font-size:14px;animation:twinkle 5s ease-in-out infinite}
+.cmdk{
+  margin-left:auto; display:flex; align-items:center; gap:9px; width:300px;
+  background:var(--linen); border:.5px solid var(--hair); border-radius:var(--r-chip);
+  padding:6px 11px; color:var(--faint); font-size:12.5px; cursor:text; transition:var(--t);
+}
+.cmdk:hover{border-color:#D2C7A8;background:#fff}
+.cmdk .kbd{margin-left:auto;font-family:var(--mono);font-size:11px;color:#B6AD96;border:.5px solid var(--hair);border-radius:5px;padding:1px 5px;background:#fff}
+
+.body{flex:1;display:flex;min-height:0;position:relative;z-index:1}
+
+/* ---- sidebar ---- */
+.side{
+  width:212px;flex:0 0 212px;background:linear-gradient(160deg,#F0E7D3,#E7DCC3);
+  border-right:.5px solid var(--hair);padding:18px 14px 14px;display:flex;flex-direction:column;
+  position:relative;overflow:hidden;
+}
+.brand{
+  font-family:var(--voice);font-size:23px;color:var(--viridian);margin:2px 6px 20px;
+  display:flex;align-items:center;gap:10px;letter-spacing:.2px;
+}
+.brand svg{filter:drop-shadow(0 1px 1px rgba(168,130,60,.3))}
+.navgrp{margin-bottom:14px}
+.navgrp .lbl{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--faint);margin:0 11px 7px;font-weight:600}
+.nav a{
+  display:flex;align-items:center;gap:11px;padding:8px 11px;border-radius:10px;
+  color:var(--stone);text-decoration:none;font-size:13.5px;font-weight:450;position:relative;
+  transition:background var(--t),color var(--t),transform var(--t);margin-bottom:1px;
+}
+.nav a i{font-size:18px;width:18px;text-align:center;transition:color var(--t),transform var(--t)}
+.nav a .ct{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+.nav a:hover{background:rgba(251,246,234,.7);color:var(--ink)}
+.nav a:hover i{color:var(--gold-deep);transform:scale(1.08)}
+.nav a.on{
+  background:linear-gradient(#FCF8EE,#F2EAD7);color:var(--ink);font-weight:500;
+  border:.5px solid #E5DABE;box-shadow:0 1px 0 rgba(255,255,255,.7) inset,0 4px 12px -8px rgba(20,40,55,.3);
+}
+.nav a.on i{color:var(--gold-deep)}
+.nav a.on::before{
+  content:"";position:absolute;left:-14px;top:50%;transform:translateY(-50%);
+  width:3px;height:18px;border-radius:0 3px 3px 0;background:linear-gradient(var(--gold),var(--gold-deep));
+}
+.nav a .pip{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--ember);box-shadow:0 0 0 3px rgba(200,116,60,.16);animation:pulse 2.4s ease-in-out infinite}
+.wmark{position:absolute;left:-40px;bottom:74px;opacity:.10;pointer-events:none;animation:drift 40s ease-in-out infinite}
+.user{
+  margin-top:auto;display:flex;align-items:center;gap:10px;padding:9px;border-radius:11px;
+  border:.5px solid var(--hair);background:#FBF6EA;cursor:default;transition:var(--t);
+}
+.user:hover{box-shadow:var(--shadow-card);transform:translateY(-1px)}
+.user .ini{width:30px;height:30px;border-radius:9px;background:radial-gradient(circle at 40% 35%,var(--viridian-2),#1E5443);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500;border:.5px solid rgba(201,163,90,.5)}
+.user b{font-size:12.5px;font-weight:500}.user span{font-size:10.5px;color:var(--stone)}
+
+/* ---- main scroll area ---- */
+.main{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;position:relative}
+.main::-webkit-scrollbar{width:10px}
+.main::-webkit-scrollbar-thumb{background:rgba(106,100,86,.22);border-radius:8px;border:3px solid transparent;background-clip:content-box}
+.main::-webkit-scrollbar-thumb:hover{background:rgba(106,100,86,.34);background-clip:content-box}
+.view{display:none;animation:fadein .4s var(--e-out)}
+.view.show{display:block}
+
+/* ============================ OVERVIEW VIEW ============================ */
+.pad{padding:26px 30px 34px}
+.hello{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px;gap:16px}
+.hello h1{font-family:var(--voice);font-weight:500;font-size:27px;margin:0 0 3px;color:var(--ink);letter-spacing:.2px}
+.hello .sub{color:var(--stone);font-size:13px}
+.hello .when{font-family:var(--mono);font-size:11.5px;color:var(--faint);text-align:right;line-height:1.7}
+.btn{
+  font-family:var(--ui);font-size:13px;font-weight:500;color:var(--ink);cursor:pointer;
+  border:.5px solid var(--hair);background:linear-gradient(var(--linen),#F1E8D5);border-radius:10px;
+  padding:9px 15px;display:inline-flex;align-items:center;gap:8px;transition:var(--t);
+  box-shadow:var(--shadow-card);
+}
+.btn i{font-size:16px;color:var(--gold-deep)}
+.btn:hover{transform:translateY(-1px);box-shadow:var(--shadow-raise);border-color:#D2C7A8}
+.btn:active{transform:translateY(0);box-shadow:var(--shadow-card)}
+.btn--primary{background:linear-gradient(var(--viridian-2),var(--viridian));color:#fff;border-color:#296253}
+.btn--primary i{color:#D9F0E6}
+.btn:focus-visible{outline:none;box-shadow:var(--ring),var(--shadow-card)}
+
+/* the Line — pipeline ribbon */
+.line-card{
+  background:linear-gradient(180deg,#FCF8EF,var(--linen));border:.5px solid var(--hair);
+  border-radius:var(--r-card);padding:18px 22px 20px;margin-bottom:20px;box-shadow:var(--shadow-card);position:relative;overflow:hidden;
+}
+.line-card .field{position:absolute;inset:0;opacity:.05;pointer-events:none}
+.line-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.line-head h2{font-family:var(--voice);font-weight:500;font-size:15px;margin:0;display:flex;align-items:center;gap:8px}
+.line-head h2 i{color:var(--gold-deep)}
+.line-head .meta{font-size:11.5px;color:var(--stone);font-family:var(--mono)}
+.thread{position:relative;display:flex;justify-content:space-between;padding:6px 8px 0}
+.thread::before{
+  content:"";position:absolute;left:30px;right:30px;top:13px;height:2px;border-radius:2px;
+  background:linear-gradient(90deg,var(--hair),var(--gold) 50%,var(--hair));
+  background-size:200% 100%;animation:thread 6s linear infinite;
+}
+.station{position:relative;display:flex;flex-direction:column;align-items:center;gap:9px;z-index:1;flex:1}
+.station .dot{
+  width:14px;height:14px;border-radius:50%;background:var(--linen);border:2px solid var(--hair);
+  transition:var(--t);position:relative;
+}
+.station.done .dot{background:var(--deep);border-color:var(--deep)}
+.station.active .dot{background:var(--sprout);border-color:var(--sprout);box-shadow:0 0 0 4px rgba(62,158,130,.18);animation:breathe 2.2s ease-in-out infinite}
+.station .nm{font-size:11px;color:var(--stone);transition:var(--t)}
+.station .n{font-family:var(--mono);font-size:10px;color:var(--faint)}
+.station.active .nm{color:var(--viridian);font-weight:500}
+.station:hover .dot{transform:scale(1.18)}
+
+/* stat grid */
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.stat{
+  background:var(--linen);border:.5px solid var(--hair);border-radius:var(--r-card);padding:15px 16px;
+  box-shadow:var(--shadow-card);transition:transform var(--t),box-shadow var(--t),border-color var(--t);cursor:default;position:relative;overflow:hidden;
+}
+.stat::before{content:"";position:absolute;right:-14px;top:-14px;width:54px;height:54px;border-radius:50%;background:radial-gradient(circle,rgba(201,163,90,.10),transparent 70%);opacity:0;transition:opacity .3s}
+.stat:hover{transform:translateY(-3px);box-shadow:var(--shadow-raise);border-color:#D6CBAD}
+.stat:hover::before{opacity:1}
+.stat .k{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--stone);display:flex;align-items:center;gap:7px}
+.stat .k i{color:var(--gold-deep);font-size:14px}
+.stat .v{font-family:var(--mono);font-size:30px;color:var(--ink);margin:9px 0 2px;font-weight:500;letter-spacing:-1px}
+.stat .d{font-size:11px;color:var(--sprout);display:flex;align-items:center;gap:4px}
+.stat .d.flat{color:var(--faint)}
+
+/* two-column lower */
+.cols{display:grid;grid-template-columns:1.35fr 1fr;gap:18px}
+.panel{background:var(--linen);border:.5px solid var(--hair);border-radius:var(--r-card);box-shadow:var(--shadow-card);overflow:hidden}
+.panel h3{font-family:var(--voice);font-weight:500;font-size:14.5px;margin:0;padding:15px 18px 12px;display:flex;align-items:center;gap:8px;border-bottom:.5px solid var(--hair)}
+.panel h3 i{color:var(--gold-deep)}
+.panel h3 .all{margin-left:auto;font-size:11.5px;font-family:var(--ui);color:var(--slate);font-weight:450;cursor:pointer}
+.panel h3 .all:hover{color:var(--viridian);text-decoration:underline}
+
+/* decision card (ember — the one attention surface) */
+.decide{
+  margin:14px 18px;border:.5px solid rgba(200,116,60,.4);border-left:3px solid var(--ember);
+  border-radius:11px;background:linear-gradient(100deg,#FBF1E8,#FBF6EA 60%);padding:13px 15px;
+  display:flex;gap:12px;align-items:flex-start;transition:var(--t);box-shadow:0 6px 16px -12px rgba(200,116,60,.5);
+}
+.decide:hover{transform:translateY(-1px);box-shadow:0 10px 22px -12px rgba(200,116,60,.55)}
+.decide .ic{width:30px;height:30px;flex:0 0 30px;border-radius:9px;background:rgba(200,116,60,.12);color:var(--ember);display:flex;align-items:center;justify-content:center;font-size:17px}
+.decide .tx{flex:1}
+.decide .tx b{font-size:13px;color:var(--ink);font-weight:500}
+.decide .tx p{margin:3px 0 0;font-size:12px;color:var(--stone);line-height:1.45}
+.decide .go{font-size:12px;color:var(--ember);font-weight:500;white-space:nowrap;cursor:pointer;display:flex;align-items:center;gap:4px}
+
+/* activity feed */
+.feed{list-style:none;margin:0;padding:6px 8px 12px}
+.feed li{display:flex;gap:12px;padding:9px 11px;border-radius:9px;transition:var(--t);cursor:default}
+.feed li:hover{background:rgba(251,246,234,.8)}
+.feed .gl{width:26px;height:26px;flex:0 0 26px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;border:.5px solid var(--hair)}
+.gl.cap{background:#EAF1F6;color:var(--slate)}.gl.cla{background:#FBF1DD;color:var(--gold-deep)}.gl.con{background:#E7F2EC;color:var(--viridian)}.gl.com{background:#EAEAF2;color:var(--deep)}
+.feed .ft{flex:1;font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.feed .ft b{color:var(--ink);font-weight:500}
+.feed .ft .src{font-family:var(--mono);font-size:11px;color:var(--viridian)}
+.feed .fw{font-family:var(--mono);font-size:10.5px;color:var(--faint);white-space:nowrap}
+
+/* health glance */
+.hrow{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:.5px solid var(--hair);transition:var(--t);cursor:default}
+.hrow:last-child{border-bottom:none}
+.hrow:hover{background:rgba(251,246,234,.7)}
+.hrow .hi{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.hi.ok{background:#E7F2EC;color:var(--sprout)}.hi.warn{background:#FBF1DD;color:var(--gold-deep)}.hi.bad{background:#F6E7E2;color:var(--oxide)}
+.hrow .ht{flex:1}.hrow .ht b{font-size:12.5px;font-weight:500;display:block}.hrow .ht span{font-size:11px;color:var(--stone)}
+.hrow .hn{font-family:var(--mono);font-size:15px;color:var(--ink)}
+
+/* ============================ EXPLORE VIEW ============================ */
+.exp{display:flex;height:100%}
+.graph{flex:1;position:relative;min-height:0;overflow:hidden;background:
+  radial-gradient(120% 100% at 50% 0%, #FBF7EC, #F1E9D7 70%, #EADFC6)}
+.graph .field{position:absolute;inset:0;width:100%;height:100%;opacity:.06;pointer-events:none;animation:drift 50s ease-in-out infinite}
+.exp-bar{position:absolute;top:14px;left:16px;right:16px;display:flex;gap:8px;z-index:3}
+.chip{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--stone);border:.5px solid var(--hair);background:rgba(251,247,236,.92);border-radius:var(--r-chip);padding:6px 11px;backdrop-filter:blur(4px);transition:var(--t);cursor:default}
+.chip i{font-size:14px;color:var(--gold-deep)}
+.chip:hover{border-color:#D2C7A8;color:var(--ink);transform:translateY(-1px);box-shadow:var(--shadow-card)}
+.legend{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);display:flex;gap:16px;background:rgba(251,247,236,.9);border:.5px solid var(--hair);border-radius:var(--r-pill);padding:7px 16px;font-size:11.5px;color:var(--stone);backdrop-filter:blur(4px);box-shadow:var(--shadow-card)}
+.legend i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+.zoom{position:absolute;bottom:16px;left:16px;display:flex;align-items:center;gap:2px;background:rgba(251,247,236,.92);border:.5px solid var(--hair);border-radius:10px;padding:3px;font-size:13px;color:var(--stone);backdrop-filter:blur(4px);box-shadow:var(--shadow-card)}
+.zoom span{padding:4px 9px;cursor:pointer;border-radius:7px;transition:var(--t)}
+.zoom span:hover{background:rgba(201,163,90,.14);color:var(--ink)}
+.zoom b{font-family:var(--mono);padding:0 8px;font-size:12px}
+
+svg .edge{stroke:var(--slate);stroke-width:1.2;opacity:.34;fill:none;transition:stroke .2s,opacity .2s,stroke-width .2s}
+svg .edge.hot{stroke:var(--gold);opacity:.9;stroke-width:1.8}
+svg .node{cursor:pointer}
+svg .node circle{transition:r .25s var(--e-spring),filter .25s}
+svg .node:hover circle{filter:drop-shadow(0 3px 8px rgba(20,40,55,.3))}
+svg .node text{font-family:var(--ui);font-size:11px;fill:var(--ink);font-weight:500;pointer-events:none}
+svg .node .ty{font-size:8.5px;fill:var(--stone);text-transform:uppercase;letter-spacing:.5px}
+.core-ring{transform-origin:center}
+
+/* explore rail */
+.rail{width:298px;flex:0 0 298px;border-left:.5px solid var(--hair);background:linear-gradient(var(--linen),var(--vellum));padding:20px 18px;overflow-y:auto}
+.rhead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.rhead .av{width:46px;height:46px;border-radius:13px;background:radial-gradient(circle at 42% 38%,var(--viridian-2),#1E5443);border:1px solid var(--gold);display:flex;align-items:center;justify-content:center;color:#EAF7F1;font-size:20px;box-shadow:0 6px 16px -8px rgba(30,84,67,.7)}
+.rhead h3{font-family:var(--voice);font-weight:500;font-size:19px;margin:0;color:var(--ink)}
+.rhead .ty{font-size:10px;letter-spacing:1.2px;color:var(--viridian);text-transform:uppercase;margin-top:2px}
+.desc{font-size:12.5px;color:var(--stone);line-height:1.55;margin:0 0 14px}
+.kv{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:7px 0;border-top:.5px solid var(--hair)}
+.kv .k{color:var(--stone);letter-spacing:.4px;font-size:10px;text-transform:uppercase}
+.kv .vv{font-family:var(--mono);color:var(--ink);font-size:12px}
+.sec{font-family:var(--voice);font-size:13.5px;color:var(--ink);margin:18px 0 9px;display:flex;align-items:center;gap:7px}
+.sec i{color:var(--gold-deep);font-size:15px}
+.claim{border:.5px solid var(--hair);background:#FBF6EA;border-radius:10px;padding:10px 12px;margin-bottom:8px;transition:var(--t);cursor:default}
+.claim:hover{transform:translateY(-1px);box-shadow:var(--shadow-card);border-color:#D6CBAD}
+.claim .t{font-size:12px;color:var(--ink);line-height:1.45;display:flex;justify-content:space-between;gap:8px}
+.claim .t b{font-family:var(--mono);color:var(--viridian);font-weight:500;white-space:nowrap}
+.claim .s{font-size:10.5px;color:var(--stone);margin-top:6px;display:flex;align-items:center;gap:6px}
+.conf{height:4px;border-radius:3px;background:var(--hair);flex:1;overflow:hidden;max-width:70px}
+.conf i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--sprout),var(--viridian))}
+.note{font-family:var(--voice);font-style:italic;font-size:12.5px;color:var(--stone);line-height:1.55;border-left:2px solid var(--gold);padding-left:11px}
+
+/* ---- keyframes ---- */
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes breathe{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:1;transform:scale(1.04)}}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(200,116,60,.30)}50%{box-shadow:0 0 0 5px rgba(200,116,60,0)}}
+@keyframes twinkle{0%,100%{opacity:.55;transform:scale(.9)}50%{opacity:1;transform:scale(1.1)}}
+@keyframes thread{0%{background-position:200% 0}100%{background-position:0 0}}
+@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(-12px,8px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+@media (max-width:1080px){.grid{grid-template-columns:repeat(2,1fr)}.cols{grid-template-columns:1fr}.rail{display:none}}
+</style>
+</head>
+<body>
+<div class="win">
+  <!-- titlebar -->
+  <div class="bar">
+    <div class="lights"><i class="l1"></i><i class="l2"></i><i class="l3"></i></div>
+    <div class="titg">Vellum <i class="ti ti-sparkles spark"></i></div>
+    <div class="cmdk"><i class="ti ti-search" style="font-size:14px"></i> Search entities, claims, sources… <span class="kbd">⌘K</span></div>
+  </div>
+
+  <div class="body">
+    <!-- sidebar -->
+    <aside class="side">
+      <div class="brand">
+        <svg width="26" height="26" viewBox="0 0 24 24"><g fill="none" stroke="#C9A35A" stroke-linejoin="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.4"/><polygon points="12,7 17,12 12,17 7,12" stroke-width="1.1"/></g><circle cx="12" cy="12" r="1.9" fill="#C9A35A"/></svg>
+        Vellum
+      </div>
+
+      <div class="navgrp">
+        <nav class="nav">
+          <a href="#" data-view="overview" class="on"><i class="ti ti-layout-dashboard"></i> Today</a>
+          <a href="#"><i class="ti ti-pencil-plus"></i> Capture</a>
+          <a href="#"><i class="ti ti-message-circle"></i> Ask</a>
+          <a href="#" data-view="explore"><i class="ti ti-affiliate"></i> Explore</a>
+        </nav>
+      </div>
+
+      <div class="navgrp">
+        <div class="lbl">Pipeline</div>
+        <nav class="nav">
+          <a href="#"><i class="ti ti-timeline-event"></i> The Line</a>
+          <a href="#"><i class="ti ti-checkup-list"></i> Reviews <span class="pip"></span></a>
+          <a href="#"><i class="ti ti-activity"></i> Activity</a>
+          <a href="#"><i class="ti ti-stethoscope"></i> Health</a>
+        </nav>
+      </div>
+
+      <div class="navgrp">
+        <div class="lbl">Manage</div>
+        <nav class="nav">
+          <a href="#"><i class="ti ti-robot"></i> Agents <span class="ct">8</span></a>
+          <a href="#"><i class="ti ti-files"></i> Sources <span class="ct">214</span></a>
+          <a href="#"><i class="ti ti-settings"></i> Settings</a>
+        </nav>
+      </div>
+
+      <div class="wmark"><svg width="220" height="220" viewBox="0 0 24 24"><g fill="none" stroke="#A8823C" stroke-linejoin="round" stroke-width="0.5"><polygon points="12,2 22,12 12,22 2,12"/><polygon points="12,7 17,12 12,17 7,12"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></g></svg></div>
+      <div class="user"><span class="ini">AM</span><div><b>Alex Mercer</b><br><span>Atlas vault · synced</span></div></div>
+    </aside>
+
+    <!-- main -->
+    <div class="main">
+
+      <!-- ========== OVERVIEW ========== -->
+      <section class="view show" id="overview">
+        <div class="pad">
+          <div class="hello">
+            <div>
+              <h1>Good evening, Alex.</h1>
+              <div class="sub">Your library is quiet and current — 3 things moved through while you were away.</div>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center">
+              <div class="when">Friday, June 27<br>11:48 PM</div>
+              <button class="btn btn--primary"><i class="ti ti-pencil-plus"></i> Capture</button>
+            </div>
+          </div>
+
+          <!-- the Line -->
+          <div class="line-card">
+            <svg class="field" viewBox="0 0 800 120" preserveAspectRatio="none" aria-hidden="true"><g stroke="#2F6B5B" stroke-width=".5" fill="none"><path d="M40 30 L120 70 L90 110 M520 20 L600 60 M680 90 L740 50"/></g></svg>
+            <div class="line-head">
+              <h2><i class="ti ti-timeline-event"></i> The Line</h2>
+              <span class="meta">2 in flight · last composed 6m ago</span>
+            </div>
+            <div class="thread">
+              <div class="station done"><div class="dot"></div><div class="nm">Capture</div><div class="n">214</div></div>
+              <div class="station done"><div class="dot"></div><div class="nm">Archive</div><div class="n">214</div></div>
+              <div class="station active"><div class="dot"></div><div class="nm">Decompose</div><div class="n">2</div></div>
+              <div class="station active"><div class="dot"></div><div class="nm">Connect</div><div class="n">1</div></div>
+              <div class="station"><div class="dot"></div><div class="nm">Claims</div><div class="n">—</div></div>
+              <div class="station"><div class="dot"></div><div class="nm">Compose</div><div class="n">—</div></div>
+            </div>
+          </div>
+
+          <!-- stats -->
+          <div class="grid">
+            <div class="stat"><div class="k"><i class="ti ti-files"></i> Sources</div><div class="v">214</div><div class="d"><i class="ti ti-arrow-up-right"></i> +6 today</div></div>
+            <div class="stat"><div class="k"><i class="ti ti-quote"></i> Claims</div><div class="v">1,847</div><div class="d"><i class="ti ti-arrow-up-right"></i> +38 today</div></div>
+            <div class="stat"><div class="k"><i class="ti ti-affiliate"></i> Entities</div><div class="v">392</div><div class="d flat">stable</div></div>
+            <div class="stat"><div class="k"><i class="ti ti-link"></i> Connections</div><div class="v">1,204</div><div class="d"><i class="ti ti-arrow-up-right"></i> +21 today</div></div>
+          </div>
+
+          <!-- two cols -->
+          <div class="cols">
+            <div class="panel">
+              <h3><i class="ti ti-activity"></i> Recent activity <span class="all">View all</span></h3>
+              <ul class="feed">
+                <li><span class="gl com"><i class="ti ti-book"></i></span><div class="ft"><b>Composed</b> an encyclopedic page for <span class="src">[[Project Atlas]]</span> from 14 claims</div><span class="fw">6m</span></li>
+                <li><span class="gl con"><i class="ti ti-link"></i></span><div class="ft"><b>Connected</b> 7 new claims to <span class="src">[[Q3 Roadmap]]</span></div><span class="fw">22m</span></li>
+                <li><span class="gl cla"><i class="ti ti-quote"></i></span><div class="ft"><b>Extracted</b> 38 claims from <span class="src">standup-notes.md</span></div><span class="fw">41m</span></li>
+                <li><span class="gl cap"><i class="ti ti-pencil-plus"></i></span><div class="ft"><b>Captured</b> 6 sources from your Obsidian inbox</div><span class="fw">1h</span></li>
+                <li><span class="gl con"><i class="ti ti-link"></i></span><div class="ft"><b>Linked</b> orphan <span class="src">[[Vendor SLA]]</span> into 3 neighborhoods</div><span class="fw">2h</span></li>
+              </ul>
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <div class="panel">
+                <h3><i class="ti ti-bell"></i> Needs you</h3>
+                <div class="decide">
+                  <div class="ic"><i class="ti ti-arrows-split-2"></i></div>
+                  <div class="tx"><b>A contradiction surfaced</b><p>Two sources disagree on the Atlas launch date. Pick the canonical claim.</p></div>
+                  <div class="go">Resolve <i class="ti ti-chevron-right"></i></div>
+                </div>
+                <div class="decide" style="margin-top:0">
+                  <div class="ic"><i class="ti ti-help-circle"></i></div>
+                  <div class="tx"><b>2 reviews waiting</b><p>New entities the librarian wasn't sure how to merge.</p></div>
+                  <div class="go">Review <i class="ti ti-chevron-right"></i></div>
+                </div>
+              </div>
+
+              <div class="panel">
+                <h3><i class="ti ti-stethoscope"></i> Health <span class="all">Full report</span></h3>
+                <div class="hrow"><span class="hi ok"><i class="ti ti-circle-check"></i></span><div class="ht"><b>Grounding</b><span>Every claim cites a source</span></div><span class="hn">100%</span></div>
+                <div class="hrow"><span class="hi warn"><i class="ti ti-alert-triangle"></i></span><div class="ht"><b>Thin stubs</b><span>Entities with &lt;2 claims</span></div><span class="hn">11</span></div>
+                <div class="hrow"><span class="hi ok"><i class="ti ti-circle-check"></i></span><div class="ht"><b>Orphans</b><span>Unlinked sources</span></div><span class="hn">0</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== EXPLORE ========== -->
+      <section class="view" id="explore">
+        <div class="exp">
+          <div class="graph">
+            <svg class="field" viewBox="0 0 720 600" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+              <g stroke="#2F6B5B" stroke-width=".6" fill="none"><path d="M60 90 L150 150 L100 250 M520 80 L600 140 M620 420 L690 360 M90 430 L160 480 M300 60 L360 120"/></g>
+              <g fill="#A8823C"><circle cx="60" cy="90" r="2.5"/><circle cx="150" cy="150" r="2.5"/><circle cx="600" cy="140" r="2.5"/><circle cx="690" cy="360" r="2.5"/><circle cx="160" cy="480" r="2.5"/><circle cx="360" cy="120" r="2.5"/></g>
+            </svg>
+            <div class="exp-bar">
+              <span class="chip"><i class="ti ti-filter"></i> Filters</span>
+              <span class="chip"><i class="ti ti-category"></i> All types <i class="ti ti-chevron-down" style="font-size:12px"></i></span>
+              <span class="chip">Confidence ≥ 0.6 <i class="ti ti-chevron-down" style="font-size:12px"></i></span>
+            </div>
+            <svg id="g" viewBox="0 0 720 600" style="width:100%;height:100%" role="img" aria-label="Knowledge graph centered on Project Atlas">
+              <g id="edges"></g><g id="nodes"></g>
+            </svg>
+            <div class="legend">
+              <span><i style="background:#1E3557"></i>Person</span>
+              <span><i style="background:#2F6B5B"></i>Concept</span>
+              <span><i style="background:#3A6E88"></i>Document</span>
+              <span><i style="background:#C9A35A"></i>Claim</span>
+            </div>
+            <div class="zoom"><span>−</span><b>100%</b><span>+</span><span style="border-left:.5px solid var(--hair)"><i class="ti ti-maximize" style="font-size:13px"></i></span></div>
+          </div>
+
+          <aside class="rail">
+            <div class="rhead">
+              <div class="av"><i class="ti ti-affiliate"></i></div>
+              <div><h3>Project Atlas</h3><div class="ty">Concept · 14 claims</div></div>
+            </div>
+            <p class="desc">The cross-team initiative to unify the data platform. Center of a dense neighborhood — 9 connected entities, 2 open questions.</p>
+            <div class="kv"><span class="k">Confidence</span><span class="vv">0.91</span></div>
+            <div class="kv"><span class="k">First seen</span><span class="vv">2026-04-12</span></div>
+            <div class="kv"><span class="k">Sources</span><span class="vv">7</span></div>
+
+            <div class="sec"><i class="ti ti-quote"></i> Key claims</div>
+            <div class="claim"><div class="t">Targets a Q3 GA, gated on the migration. <b>0.88</b></div><div class="s">3 sources <div class="conf"><i style="width:88%"></i></div></div></div>
+            <div class="claim"><div class="t">Owned by the Platform team under Dana. <b>0.94</b></div><div class="s">5 sources <div class="conf"><i style="width:94%"></i></div></div></div>
+            <div class="claim"><div class="t">Launch date disputed across two memos. <b>0.52</b></div><div class="s" style="color:var(--ember)"><i class="ti ti-arrows-split-2"></i> contested <div class="conf"><i style="width:52%;background:var(--ember)"></i></div></div></div>
+
+            <div class="sec"><i class="ti ti-bulb"></i> Synthesis</div>
+            <p class="note">Atlas is on track for Q3 but the launch date is the live risk — two sources disagree, and it's the only thing blocking a clean roadmap page.<span style="display:block;font-style:normal;font-size:10.5px;color:var(--faint);margin-top:6px">composed from 14 claims · 7 sources</span></p>
+          </aside>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- view switching ----
+document.querySelectorAll('.nav a[data-view]').forEach(a=>{
+  a.addEventListener('click',e=>{
+    e.preventDefault();
+    document.querySelectorAll('.nav a').forEach(x=>x.classList.remove('on'));
+    a.classList.add('on');
+    const v=a.dataset.view;
+    document.querySelectorAll('.view').forEach(s=>s.classList.toggle('show',s.id===v));
+  });
+});
+
+// ---- render the Explore graph ----
+const NS='http://www.w3.org/2000/svg';
+const cx=360, cy=300;
+const nodes=[
+  {id:'atlas',label:'Project Atlas',ty:'',x:cx,y:cy,r:30,fill:'core'},
+  {label:'Dana Okoye',ty:'person',x:170,y:170,r:15,fill:'#1E3557'},
+  {label:'Platform team',ty:'concept',x:170,y:430,r:14,fill:'#2F6B5B'},
+  {label:'Q3 Roadmap',ty:'document',x:560,y:150,r:14,fill:'#3A6E88'},
+  {label:'Data migration',ty:'concept',x:580,y:340,r:16,fill:'#2F6B5B'},
+  {label:'Launch memo A',ty:'document',x:540,y:480,r:12,fill:'#3A6E88'},
+  {label:'Launch memo B',ty:'document',x:360,y:520,r:12,fill:'#3A6E88'},
+  {label:'Vendor SLA',ty:'concept',x:200,y:300,r:12,fill:'#2F6B5B'},
+];
+const edges=[[0,1],[0,2],[0,3],[0,4],[0,7],[4,3],[0,5,'hot'],[0,6,'hot'],[4,5]];
+const eg=document.getElementById('edges'), ng=document.getElementById('nodes');
+edges.forEach(([a,b,hot])=>{
+  const l=document.createElementNS(NS,'line');
+  l.setAttribute('x1',nodes[a].x);l.setAttribute('y1',nodes[a].y);
+  l.setAttribute('x2',nodes[b].x);l.setAttribute('y2',nodes[b].y);
+  l.setAttribute('class','edge'+(hot?' hot':''));
+  eg.appendChild(l);
+});
+nodes.forEach((n,i)=>{
+  const g=document.createElementNS(NS,'g');g.setAttribute('class','node');
+  g.setAttribute('transform',`translate(${n.x},${n.y})`);
+  if(n.fill==='core'){
+    const ring=document.createElementNS(NS,'circle');
+    ring.setAttribute('r',n.r+7);ring.setAttribute('fill','none');
+    ring.setAttribute('stroke','#C9A35A');ring.setAttribute('stroke-width','1');
+    ring.setAttribute('class','core-ring');ring.setAttribute('opacity','.6');g.appendChild(ring);
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('r',n.r);c.setAttribute('fill','url(#core)');
+    c.setAttribute('stroke','#C9A35A');c.setAttribute('stroke-width','1.5');g.appendChild(c);
+    // inner lattice
+    const latt=document.createElementNS(NS,'path');
+    latt.setAttribute('d','M0,-13 L13,0 L0,13 L-13,0 Z M0,-7 L7,0 L0,7 L-7,0 Z');
+    latt.setAttribute('fill','none');latt.setAttribute('stroke','#E6CE86');latt.setAttribute('stroke-width','1');latt.setAttribute('opacity','.85');g.appendChild(latt);
+    const dot=document.createElementNS(NS,'circle');dot.setAttribute('r','2');dot.setAttribute('fill','#FBF7EC');g.appendChild(dot);
+  }else{
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('r',n.r);c.setAttribute('fill',n.fill);
+    c.setAttribute('stroke','rgba(255,255,255,.5)');c.setAttribute('stroke-width','1');g.appendChild(c);
+  }
+  if(n.fill!=='core'){
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('y',n.r+15);t.setAttribute('text-anchor','middle');t.textContent=n.label;ng.appendChild(g);g.appendChild(t);
+    const ty=document.createElementNS(NS,'text');
+    ty.setAttribute('y',n.r+26);ty.setAttribute('text-anchor','middle');ty.setAttribute('class','ty');ty.textContent=n.ty;g.appendChild(ty);
+  }else{
+    const t=document.createElementNS(NS,'text');
+    t.setAttribute('y',n.r+22);t.setAttribute('text-anchor','middle');t.setAttribute('style','font-family:var(--voice);font-size:14px;font-weight:500');t.textContent=n.label;ng.appendChild(g);g.appendChild(t);
+  }
+  // hover: grow + light up incident edges
+  g.addEventListener('mouseenter',()=>{
+    const circ=g.querySelector('circle:not(.core-ring)');if(circ&&n.fill!=='core'){circ.setAttribute('r',n.r+3);}
+    eg.querySelectorAll('line').forEach((l,li)=>{if(edges[li][0]===i||edges[li][1]===i)l.classList.add('hot')});
+  });
+  g.addEventListener('mouseleave',()=>{
+    const circ=g.querySelector('circle:not(.core-ring)');if(circ&&n.fill!=='core'){circ.setAttribute('r',n.r);}
+    eg.querySelectorAll('line').forEach((l,li)=>{if(!edges[li][2])l.classList.remove('hot')});
+  });
+});
+// core gradient def
+const defs=document.createElementNS(NS,'defs');
+defs.innerHTML='<radialGradient id="core" cx="42%" cy="38%"><stop offset="0%" stop-color="#3E9E82"/><stop offset="100%" stop-color="#1E5443"/></radialGradient>';
+document.getElementById('g').prepend(defs);
+</script>
+</body>
+</html>

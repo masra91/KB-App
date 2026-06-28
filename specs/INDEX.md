@@ -68,6 +68,7 @@ and a unique `key` here.
 | SPEC-0054 | RMEM    | Researcher Memory & KB-Grounding (fit-and-fill, don't repeat, resume) | feature | draft | `features/` |
 | SPEC-0055 | RELEASE | Release Cadence & Signed Builds (tag-based, signed+notarized; macOS first) | feature | draft | `features/` |
 | SPEC-0056 | UPDATE  | In-app Auto-Update (electron-updater via GitHub Releases; stable+beta) | feature | draft | `features/` |
+| SPEC-0058 | STATE   | UI State Model — Projection-Backed Reads (no live vault scans on the render path) | architecture | draft | `architecture/` |
 
 ## Reserved / planned (not yet written)
 
