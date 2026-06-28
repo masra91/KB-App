@@ -149,11 +149,13 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(c.querySelector('img')).toBeNull(); // the payload is escaped, never parsed as a tag
   });
 
-  it('renders the empty state when there are no feeds', async () => {
+  it('renders the branded compact empty state (#406) when there are no feeds', async () => {
     listIntakeConnectors = vi.fn(async () => []);
     setApi();
     const c = await mount();
-    expect(c.querySelector('.src-section .rdesk-empty')!.textContent).toMatch(/No feeds yet/);
+    const empty = c.querySelector('.src-section .viz-empty--compact');
+    expect(empty).not.toBeNull();
+    expect(empty!.textContent).toMatch(/No feeds yet/);
     expect(c.querySelector('.rdesk-tile[data-type]')).toBeTruthy(); // feed add-dock still present
   });
 

@@ -4,7 +4,7 @@
 // based + generic) for visual consistency with Researchers/Jobs. Both halves are live: Feeds manage
 // INTAKE connectors; Watched folders manage WATCH folders (DEV-5's backend). Degrades gracefully — a
 // section whose IPC fails still renders the other (PANEL-9), never a broken canvas.
-import { esc } from '../html';
+import { esc, emptyState } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import {
   schedulePresetLabel,
@@ -53,16 +53,17 @@ async function render(container: HTMLElement): Promise<void> {
   const connectors = connectorsR.status === 'fulfilled' ? connectorsR.value : null;
   const folders = foldersR.status === 'fulfilled' ? foldersR.value : null;
 
+  // connectors===null is a load FAILURE → retry path (#160). The else is empty-BY-DESIGN → compact .viz-empty.
   const feeds = connectors === null
     ? `<p class="rdesk-empty viz-body">Couldn’t load feeds — <button type="button" class="src-retry viz-btn viz-btn--sm">retry</button></p>`
     : connectors.length
       ? `<ul class="rdesk-roster">${connectors.map(strip).join('')}</ul>`
-      : `<p class="rdesk-empty viz-body">No feeds yet — add one from a template below.</p>`;
+      : emptyState({ compact: true, title: 'No feeds yet.', body: 'Add one from a template below.' });
   const watched = folders === null
     ? `<p class="rdesk-empty viz-body">Couldn’t load watched folders — <button type="button" class="src-retry viz-btn viz-btn--sm">retry</button></p>`
     : folders.length
       ? `<ul class="rdesk-roster">${folders.map(watchStrip).join('')}</ul>`
-      : `<p class="rdesk-empty viz-body">No watched folders yet — add one below. Files dropped in are brought in as sources, kept verbatim.</p>`;
+      : emptyState({ compact: true, title: 'No watched folders yet.', body: 'Add one below — files dropped in are kept verbatim as sources.' });
 
   container.innerHTML = `<div class="rdesk viz-surface">${HEADER}
     <section class="src-section">
