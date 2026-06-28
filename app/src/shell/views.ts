@@ -40,16 +40,17 @@ export const GROUP_MANAGE = 'Manage';
  * that directly — no dead "Coming soon" item in the rail (SPEC-0017 SHELL-3 amended).
  */
 export const NAV_VIEWS: NavView[] = [
-  { id: VIEW_CAPTURE, label: 'Capture', icon: '📥' },
-  { id: VIEW_REVIEWS, label: 'Reviews', icon: '🔍' },
-  { id: VIEW_ACTIVITY, label: 'Activity', icon: '📜' },
-  { id: VIEW_STATUS, label: 'Status', icon: '📊' },
-  { id: VIEW_ASK, label: 'Ask', icon: '💬' },
-  { id: VIEW_EXPLORE, label: 'Explore', icon: '🗺️' },
-  { id: VIEW_HEALTH, label: 'Health', icon: '🩺' },
-  { id: VIEW_AGENTS, label: 'Agents', icon: '🤖', group: GROUP_MANAGE },
-  { id: VIEW_SOURCES, label: 'Sources', icon: '🔌', group: GROUP_MANAGE },
-  { id: VIEW_SETTINGS, label: 'Settings', icon: '⚙️', group: GROUP_MANAGE },
+  // icon = a key into the inline line-icon set (shell/icons.ts), NOT an emoji — UX v2 monochrome rail glyphs.
+  { id: VIEW_CAPTURE, label: 'Capture', icon: 'capture' },
+  { id: VIEW_REVIEWS, label: 'Reviews', icon: 'reviews' },
+  { id: VIEW_ACTIVITY, label: 'Activity', icon: 'activity' },
+  { id: VIEW_STATUS, label: 'Status', icon: 'status' },
+  { id: VIEW_ASK, label: 'Ask', icon: 'ask' },
+  { id: VIEW_EXPLORE, label: 'Explore', icon: 'explore' },
+  { id: VIEW_HEALTH, label: 'Health', icon: 'health' },
+  { id: VIEW_AGENTS, label: 'Agents', icon: 'agents', group: GROUP_MANAGE },
+  { id: VIEW_SOURCES, label: 'Sources', icon: 'sources', group: GROUP_MANAGE },
+  { id: VIEW_SETTINGS, label: 'Settings', icon: 'settings', group: GROUP_MANAGE },
 ];
 
 /** The view active on launch (SHELL-4). */
