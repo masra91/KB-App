@@ -19,6 +19,7 @@ import type { EgressTier } from './researchers';
 import { resolveOrientBudget, type ResearcherConfig, type ResearchRequest } from './researchers';
 import { buildOutboundQuery } from './researchRun';
 import { areaKey, deriveNotebook, knownSourceUrls } from './researchNotebook';
+import { readLedger, coveredAngles, frontierFacets } from './researchLedger';
 import { buildNeighborhood } from './explorePanel';
 import { makeReadOnlyTools } from './recallTools';
 
@@ -67,8 +68,12 @@ export async function orient(root: string, r: ResearcherConfig, req: ResearchReq
   const budget = resolveOrientBudget(r);
   let reads = 0;
 
-  // (1) Own field notebook — RESEARCH-21, no egress, no gate (reading its own prior outputs). 1 read.
-  const notebook = await deriveNotebook(root, r.id, Date.parse(now()) || Date.now());
+  // (1) Own memory — RESEARCH-21/RMEM-2, no egress, no gate (reading its own prior work). The field
+  // notebook (audit-derived working set) AND the durable run-ledger (first-class overlay) are one logical
+  // "own-memory" read — the ledger is a cheap local file, so it doesn't take a second orient-budget tick.
+  const nowMs = Date.parse(now()) || Date.now();
+  const notebook = await deriveNotebook(root, r.id, nowMs);
+  const ledger = await readLedger(root, r.id);
   reads++;
   const dedupSet = knownSourceUrls(notebook);
 
@@ -93,15 +98,24 @@ export async function orient(root: string, r: ResearcherConfig, req: ResearchReq
   }
   const contentRead = contentHints.length > 0;
 
-  // The facets this subject was already drilled on (RESEARCH-QUALITY) — the per-area exclusion set so a
-  // re-run ROTATES to a different missing facet instead of re-issuing the identical gap query. Keyed the
-  // same way deriveNotebook stamps areas (normalized `what` + entityId).
-  const targetedFacets = notebook.areas.find((a) => a.key === areaKey(orientSubject(req), req.by.entityId))?.targetedFacets ?? [];
+  // The angles this subject was already drilled on (RESEARCH-QUALITY + RMEM-3) — the exclusion set so a
+  // re-run ROTATES to a different missing facet instead of re-issuing a covered tuple. The DURABLE LEDGER is
+  // authoritative (first-class run-memory, survives restart/replay); the audit-derived notebook is unioned
+  // in for back-compat (a vault researched before the ledger existed). Both keyed by normalized `what` + entityId.
+  const notebookTargeted = notebook.areas.find((a) => a.key === areaKey(orientSubject(req), req.by.entityId))?.targetedFacets ?? [];
+  const ledgerCovered = coveredAngles(ledger, orientSubject(req), req.by.entityId, nowMs);
+  const targetedAngles = [...new Set([...ledgerCovered, ...notebookTargeted])];
+
+  // The frontier — leads surfaced but not yet pursued (RMEM-4). The ledger resolves the request's still-
+  // missing gap facets against what's been drilled (resume where it stopped), unioned with the audit-derived
+  // notebook frontier. Run-metadata only — facet labels, never raw KB content (RMEM-6 / D6a).
+  const ledgerFrontier = frontierFacets(ledger, orientSubject(req), req.by.entityId, req.gap?.missing ?? [], nowMs);
+  const frontierTerms = [...new Set([...ledgerFrontier, ...notebook.frontier.map((f) => f.term)])];
 
   // Choose the gap/angle: prefer the entity's still-MISSING gap facet (skipping any already drilled), else
   // an expand-next frontier lead, else a known neighbor the request doesn't already name, else a gated
   // content hint, else cold ('').
-  const angle = chooseAngle(req, notebook.frontier.map((f) => f.term), floor, contentHints, centerName, targetedFacets);
+  const angle = chooseAngle(req, frontierTerms, floor, contentHints, centerName, targetedAngles);
   return { angle, dedupSet, reads, floor, contentRead };
 }
 

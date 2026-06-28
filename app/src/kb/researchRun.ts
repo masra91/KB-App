@@ -17,7 +17,28 @@ import { captureToInbox } from './ingest';
 import { appendAuditEvent } from './audit';
 import { admitResearchPass } from './researchCeiling';
 import { deriveNotebook, writeNotebook } from './researchNotebook';
+import { appendRun, type RunLedgerEntry } from './researchLedger';
 import { isSafeResearcherId, RESEARCH_INSTANCE_CEILING, RESEARCH_INSTANCE_WINDOW_MS, type ResearcherConfig, type ResearchRequest, type ResearchProvenance } from './researchers';
+
+/** RMEM-2: append one run to the researcher's durable ledger — the first-class run-memory the next pass
+ *  consults to skip covered ground + resume the frontier. The pursued gap facet is the missing facet the
+ *  chosen angle filled (when any). Best-effort: a ledger write must never fail the research pass. */
+async function recordRun(root: string, r: ResearcherConfig, req: ResearchRequest, angle: string, outcome: RunLedgerEntry['outcome'], harvested: string[], tsMs: number): Promise<void> {
+  const gapFacet = req.gap?.missing.find((f) => f.trim().length > 0 && angle.toLowerCase().includes(f.toLowerCase()));
+  try {
+    await appendRun(root, r.id, {
+      target: req.what,
+      ...(req.by.entityId ? { entityId: req.by.entityId } : {}),
+      ...(gapFacet ? { gapFacet } : {}),
+      angle,
+      harvested,
+      outcome,
+      ts: tsMs,
+    });
+  } catch {
+    /* the ledger is best-effort run-memory — never block the pass on it */
+  }
+}
 
 /** What the injected cognition returns. `found:false` = nothing worth recording (audited no-op). */
 export interface ResearchFindings {
@@ -133,6 +154,8 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
       subjects: { researcherId: r.id, requestId: req.id, ...(req.by.entityId ? { entityId: req.by.entityId } : {}), ...(req.by.sourceId ? { sourceId: req.by.sourceId } : {}) },
       payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier, error: findings.error ?? 'unknown error' },
     });
+    // RMEM-2: record the failed run (run-history/observability) — `coveredAngles` skips failed so the facet retries.
+    await recordRun(root, r, req, chosenAngle, 'failed', [], Date.parse(now()) || Date.now());
     return { sourceIds: [], note: `research failed: ${findings.error ?? 'unknown error'}`, failed: true, ...(findings.error ? { error: findings.error } : {}) };
   }
 
@@ -148,6 +171,8 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
       // still counts as drilled — don't immediately re-issue the same query).
       payload: { what: req.what, why: req.why, query: findings.query, egressTier: r.egressTier, ...(chosenAngle ? { angle: chosenAngle } : {}), ...(req.gap ? { gap: req.gap } : {}) },
     });
+    // RMEM-2/3: a looked-and-found-nothing pass DID drill the facet → record it so the next run rotates away.
+    await recordRun(root, r, req, chosenAngle, 'no-finding', [], Date.parse(now()) || Date.now());
     return { sourceIds: [], note: 'no finding' };
   }
 
@@ -184,6 +209,10 @@ export async function runResearcher(root: string, r: ResearcherConfig, req: Rese
   } catch {
     /* notebook is a derived cache — never block the pass on it */
   }
+
+  // RMEM-2: durably record the run in the first-class ledger (target/facet/angle/harvested) so the next
+  // pass skips this covered tuple and resumes the frontier — independent of the audit (RMEM-7 overlay).
+  await recordRun(root, r, req, chosenAngle, 'finding', out.ids, Date.parse(fetchedAt) || Date.now());
 
   return { sourceIds: out.ids, note: `secondary source ${out.ids[0]} (${findings.citations.length} citation(s))` };
 }

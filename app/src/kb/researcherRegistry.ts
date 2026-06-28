@@ -21,6 +21,7 @@ import {
   type ResearcherTemplate,
   type ResearcherBudget,
 } from './researchers';
+import { clearResearchMemory } from './researchLedger';
 import { noopDevLog, type DevLog } from './devlog';
 
 const REGISTRY_REL = path.join('.kb', 'researchers', 'registry.json');
@@ -156,7 +157,12 @@ export async function deleteResearcher(root: string, id: string): Promise<Resear
   if (!isSafeResearcherId(id)) throw new Error(`refusing to delete researcher with unsafe id: ${JSON.stringify(id)}`);
   const researchers = await readResearcherRegistry(root);
   const remaining = researchers.filter((r) => r.id !== id);
-  if (remaining.length !== researchers.length) await writeResearcherRegistry(root, remaining);
+  if (remaining.length !== researchers.length) {
+    await writeResearcherRegistry(root, remaining);
+    // RMEM-7: a deleted researcher leaves no run-memory graveyard — clear its `.kb/research/<id>/` (ledger +
+    // notebook, derived working state). Ground truth (sources/findings + audit) is untouched, per above.
+    await clearResearchMemory(root, id);
+  }
   return remaining;
 }
 
