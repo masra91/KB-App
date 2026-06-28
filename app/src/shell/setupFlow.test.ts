@@ -123,6 +123,14 @@ describe('Guided setup — sample seed step (SPEC-0009)', () => {
     expect(root.querySelector('.setup-tour')).toBeTruthy();
   });
 
+  it('Back from the seed step returns to the model step (skip/back works across guided steps)', async () => {
+    const root = await toSeed();
+    (root.querySelector('#setup-seed-back') as HTMLButtonElement).click();
+    await flush();
+    expect(root.querySelector('#setup-model-next')).toBeTruthy(); // back on the model step
+    expect(root.querySelectorAll('.setup-dot')[0].classList.contains('setup-dot--on')).toBe(true);
+  });
+
   it('a failed seed is NON-BLOCKING — honest note + a Continue that still advances (ENG-15/16)', async () => {
     capture = vi.fn(async () => { throw new Error('disk full'); });
     setApi();

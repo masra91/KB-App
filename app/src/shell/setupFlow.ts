@@ -126,11 +126,13 @@ async function renderSeedStep(root: HTMLElement, index: number, goTo: (i: number
     <p class="setup-note viz-body">Samples are ordinary notes — you can edit or delete them like anything else.</p>
     <p class="setup-seed-status viz-body" role="status" aria-live="polite"></p>`;
   const footer = `
+    <button type="button" class="viz-btn setup-back" id="setup-seed-back">Back</button>
     <button type="button" class="viz-btn setup-skip" id="setup-seed-skip">Skip — start empty</button>
     <button type="button" class="viz-btn viz-btn--primary setup-next" id="setup-seed-add">Add ${SAMPLE_SEED_NOTES.length} samples</button>`;
   root.innerHTML = frame(index, 'Add a few samples?', lead, body, footer);
 
   const advance = (): void => goTo(index + 1);
+  root.querySelector<HTMLButtonElement>('#setup-seed-back')!.addEventListener('click', () => goTo(index - 1));
   root.querySelector<HTMLButtonElement>('#setup-seed-skip')!.addEventListener('click', advance);
   root.querySelector<HTMLButtonElement>('#setup-seed-add')!.addEventListener('click', async () => {
     const add = root.querySelector<HTMLButtonElement>('#setup-seed-add')!;
