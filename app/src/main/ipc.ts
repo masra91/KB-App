@@ -54,7 +54,8 @@ import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
-import { buildHealthReport, type HealthReport } from '../kb/healthPanel';
+import { buildHealthReport } from '../kb/healthPanel';
+import { toHealthProjection, type HealthProjection } from '../kb/healthProjection';
 import { readContradictionDirectives } from '../kb/directives';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
@@ -532,10 +533,19 @@ export function registerIpc(): void {
 
   // SPEC-0035 HEALTH: deterministic, read-only structural-lint scan (orphans / dangling links / thin
   // stubs) over the EVERGREEN graph at the active vault root — no model calls, no fixes (v1 passive).
-  ipcMain.handle('kb:healthReport', async (): Promise<HealthReport> => {
+  ipcMain.handle('kb:healthReport', async (): Promise<HealthProjection> => {
+    // SPEC-0058 STATE-3/13: return the Health PROJECTION (DL-2's render contract) — the view draws everything
+    // from this one read, severity baked in. Surface-local for now: built off the read-only scan
+    // (`makeReadOnlyTools`). The STATE-3 read-layer swap is a ONE-LINE change once the maintained graph
+    // projection store (#457's `computeGraphProjection`/`makeProjectionTools` core) is instantiated at this
+    // layer — replace `makeReadOnlyTools(...)` below with `makeProjectionTools(graphStore.current().data)`:
+    // `buildHealthReport` already takes `RecallTools`, and `makeProjectionTools` returns exactly that, so the
+    // projection-backed report is byte-identical minus the per-mount walk. Held until that store is wired (the
+    // shared read-layer, DEV-5/DEV-3's lane) so this surface PR doesn't collide with it.
     const cfg = await readAppConfig();
-    if (!cfg.activeVaultPath) return { scanned: 0, orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } };
-    return buildHealthReport(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)));
+    const now = new Date().toISOString();
+    if (!cfg.activeVaultPath) return toHealthProjection({ scanned: 0, orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }, now);
+    return toHealthProjection(await buildHealthReport(makeReadOnlyTools(path.resolve(cfg.activeVaultPath))), now);
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config
