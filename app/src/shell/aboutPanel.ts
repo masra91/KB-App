@@ -20,12 +20,10 @@ const CREDITS = 'Built on an Obsidian-compatible markdown vault · GitHub Copilo
 // recolors to the hero's cream. Inlined (no asar-asset path gotcha); decorative → aria-hidden at the call site.
 const MARK_SVG = `<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><g fill="none" stroke="currentColor" stroke-linejoin="round" stroke-linecap="round"><polygon points="12,2 22,12 12,22 2,12" stroke-width="1.5"/><polygon points="12,7 17,12 12,17 7,12" stroke-width="1.2"/><line x1="2" y1="12" x2="22" y2="12" stroke-width="0.9" opacity="0.85"/><line x1="12" y1="2" x2="12" y2="22" stroke-width="0.9" opacity="0.85"/></g><circle cx="12" cy="12" r="1.9" fill="currentColor"/></svg>`;
 
-/** Read the runtime version via DEV-5's RELEASE-6 IPC, defensively. Returns a display string; never throws. */
+/** Read the runtime version via DEV-5's RELEASE-6 IPC (now typed on KbApi). Honest fallback (#160) if it rejects. */
 async function loadVersion(): Promise<string> {
   try {
-    const api = window.kbApi as unknown as { getAppVersion?: () => Promise<string> };
-    if (typeof api.getAppVersion !== 'function') return 'Version unavailable'; // IPC not on main yet
-    const v = await api.getAppVersion();
+    const v = await window.kbApi.getAppVersion();
     return v ? `${WORDMARK} · v${v}` : 'Version unavailable';
   } catch {
     return 'Version unavailable';
