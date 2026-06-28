@@ -17,7 +17,7 @@ import { decomposeOne, findSourceDirs, readDecomposeQueue } from './decomposeSta
 import { findEntityFiles } from './claimsStage';
 import { readCandidates, connectOne, readConnectQueue } from './connectStage';
 import { runFullReplay } from './replay';
-import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted, isClaimSuppressed, reattributedTarget, recordContradictionDirective, readContradictionDirectives, openContradictionsForIdentity, isStatementContested, recordGuidanceDirective, readGuidanceDirectives, activeGuidanceForIdentity, recordRevokeDirective, readRevokeDirectives, isDirectiveRevoked } from './directives';
+import { recordDisambiguationDirective, readDisambiguationDirectives, directiveForIdentity, recordConsolidationDirective, readConsolidationDirectives, consolidationDirectiveForPair, recordCorrectionDirective, readCorrectionDirectives, isClaimRetracted, isClaimSuppressed, reattributedTarget, recordContradictionDirective, readContradictionDirectives, openContradictionsForIdentity, isStatementContested, recordGuidanceDirective, readGuidanceDirectives, activeGuidanceForIdentity, recordRevokeDirective, readRevokeDirectives, isDirectiveRevoked, recordEnrichDirective, readEnrichDirectives, activeEnrichTowardForIdentity } from './directives';
 import { REPLAY_RESET_EVENT } from './replayEpoch';
 import type { DecomposeDecider } from './decomposeAgent';
 import type { ConnectDecider, CandidateSet } from './connectAgent';
@@ -508,7 +508,7 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
     }
   });
 
-  it('SPEC-0050 slice-3: a guidance steer + a revoke survive a Full Replay on staging AND on main', async () => {
+  it('SPEC-0050 slice-3: a guidance steer + a revoke + an enrich steer survive a Full Replay on staging AND on main', async () => {
     const dir = await makeTempDir();
     try {
       const root = path.join(dir, 'vault');
@@ -519,16 +519,18 @@ describe.skipIf(!gitAvailable)('Full Replay — SPEC-0050 directives survive res
       // evergreen, so both must outlive the purge/rebuild.
       await recordGuidanceDirective(stagingWt, { identityKey: 'person|ada lovelace', guidance: 'Orient toward her publications.', reviewId: 'rg', decidedAt: '2026-06-27T00:00:00Z' });
       await recordRevokeDirective(stagingWt, { family: 'correction', targetKey: 'person|a::wrong fact', reviewId: 'rr', decidedAt: '2026-06-27T00:00:00Z' });
+      await recordEnrichDirective(stagingWt, { identityKey: 'person|ada lovelace', toward: 'her publications', reviewId: 're', decidedAt: '2026-06-27T00:00:00Z' });
       const sg = simpleGit(stagingWt);
       await sg.raw('add', '-A');
-      await sg.commit('seed: durable guidance + revoke');
+      await sg.commit('seed: durable guidance + revoke + enrich');
 
       await runFullReplay(root, stagingWt, new Mutex());
 
       for (const where of [stagingWt, root]) {
-        const [g, rv] = [await readGuidanceDirectives(where), await readRevokeDirectives(where)];
+        const [g, rv, e] = [await readGuidanceDirectives(where), await readRevokeDirectives(where), await readEnrichDirectives(where)];
         expect(activeGuidanceForIdentity(g, rv, 'person|ada lovelace')?.guidance).toBe('Orient toward her publications.');
         expect(isDirectiveRevoked(rv, 'correction', 'person|a::wrong fact', '2026-06-26T00:00:00Z')).toBe(true);
+        expect(activeEnrichTowardForIdentity(e, rv, 'person|ada lovelace')).toBe('her publications');
       }
     } finally {
       await rmTempDir(dir);

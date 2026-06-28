@@ -42,6 +42,9 @@ export const GUIDANCE_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'guidance.jsonl
 /** Repo-relative path of the durable revoke-directive log (evergreen). SPEC-0050 slice-3. */
 export const REVOKE_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'revokes.jsonl');
 
+/** Repo-relative path of the durable enrich-directive log (evergreen). SPEC-0050 slice-3c. */
+export const ENRICH_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'enrich.jsonl');
+
 export type DirectiveVerdict = 'same' | 'distinct';
 
 /**
@@ -625,7 +628,7 @@ export async function recordContradictionDirective(
 // "correct this" affordances. Both live under the evergreen `directives/` tree (durable across replay).
 
 /** The directive families a `revoke` can target — each is a distinct evergreen JSONL keyed on a stable key. */
-export type DirectiveFamily = 'disambiguation' | 'consolidation' | 'correction' | 'contradiction' | 'guidance';
+export type DirectiveFamily = 'disambiguation' | 'consolidation' | 'correction' | 'contradiction' | 'guidance' | 'enrich';
 
 /** Sentinel identity for a GLOBAL guidance steer (applies everywhere, not one entity). Never collides with a
  *  real block identity: `blockKey` always contains a `|`, and this token has none. */
@@ -723,7 +726,7 @@ function revokesAbs(root: string): string {
   return path.join(path.resolve(root), REVOKE_DIRECTIVES_REL);
 }
 
-const DIRECTIVE_FAMILIES: ReadonlySet<string> = new Set(['disambiguation', 'consolidation', 'correction', 'contradiction', 'guidance']);
+const DIRECTIVE_FAMILIES: ReadonlySet<string> = new Set(['disambiguation', 'consolidation', 'correction', 'contradiction', 'guidance', 'enrich']);
 
 /**
  * Read every revoke into a last-wins map keyed by `(family, targetKey)` — the LATEST revoke per target wins
@@ -835,4 +838,97 @@ export function isClaimSuppressedActive(
   const d = corrections.get(key);
   if (!d || (d.type !== 'retract' && d.type !== 'reattribute')) return false;
   return !isDirectiveRevoked(revokes, 'correction', key, d.decidedAt);
+}
+
+// ── Enrich (SPEC-0050 slice-3c: "keep enriching X toward Y") ────────────────────────────────────
+//
+// An ENRICH directive is a durable Principal steer for RESEARCH: "keep enriching <entity> toward <facet>"
+// (e.g. "Ada Lovelace → her publications"). It is the research analogue of `guidance` (which steers
+// Compose): keyed on the entity's STABLE block identity, last-wins, revocable. The CONSUMER is the
+// researcher's orient phase (SPEC-0028 RESEARCH-24): the active `toward` facet is offered to `chooseAngle`
+// as a TOP-PRIORITY missing-gap facet, so a re-run pursues the Principal's standing target before the
+// auto-detected gap. (The orient wire is coordinated with DEV-2, who owns `researchOrient.ts`;
+// `activeEnrichTowardForIdentity` is the seam it reads.)
+
+/** One durable enrich steer. Keyed on `identityKey` (the entity's block identity, rebirth-proof); `toward`
+ *  is the facet to keep pursuing. Last-wins per identity; a `revoke` for `('enrich', identityKey)` cancels it. */
+export interface EnrichDirective {
+  identityKey: string; // entity block identity (kind|normalizedName)
+  toward: string; // the enrichment facet/angle to keep pursuing (verbatim)
+  reviewId: string; // provenance (PRIN-5/6)
+  decidedAt: string; // ISO; last-wins ordering + revoke comparison
+}
+
+function enrichAbs(root: string): string {
+  return path.join(path.resolve(root), ENRICH_DIRECTIVES_REL);
+}
+
+/**
+ * Read every enrich steer into a last-wins map keyed by `identityKey`. Absent/garbled lines skipped; an
+ * absent file → empty map (ENG-16 tolerant). Does NOT apply revokes — use `activeEnrichTowardForIdentity`
+ * (or filter with `isDirectiveRevoked`) for the revoke-aware ACTIVE view the orient consumer reads.
+ */
+export async function readEnrichDirectives(root: string): Promise<Map<string, EnrichDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(enrichAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, EnrichDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<EnrichDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<EnrichDirective>;
+    } catch {
+      continue;
+    }
+    if (typeof obj.identityKey !== 'string' || obj.identityKey.length === 0) continue;
+    if (typeof obj.toward !== 'string' || obj.toward.trim().length === 0) continue;
+    out.set(obj.identityKey, {
+      identityKey: obj.identityKey,
+      toward: obj.toward,
+      reviewId: typeof obj.reviewId === 'string' ? obj.reviewId : '',
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    });
+  }
+  return out;
+}
+
+/**
+ * Append an enrich steer. Does NOT commit — the caller is inside the shared canonical-writer lock / a stage
+ * worktree and stages/commits (atomic + promoted). Last-wins per `identityKey`. Throws on empty `toward`.
+ */
+export async function recordEnrichDirective(
+  root: string,
+  enrich: { identityKey: string; toward: string; reviewId: string; decidedAt: string },
+): Promise<EnrichDirective> {
+  if (!enrich.identityKey || enrich.identityKey.length === 0) {
+    throw new Error('directives: an enrich steer requires a non-empty identityKey (the entity block identity)');
+  }
+  if (!enrich.toward || enrich.toward.trim().length === 0) {
+    throw new Error('directives: an enrich steer requires a non-empty toward facet');
+  }
+  const rec: EnrichDirective = { identityKey: enrich.identityKey, toward: enrich.toward, reviewId: enrich.reviewId, decidedAt: enrich.decidedAt };
+  const file = enrichAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
+}
+
+/**
+ * The ACTIVE enrich `toward` facet for an entity identity (revokes applied), or `undefined` if none / revoked.
+ * The orient consumer (RESEARCH-24) offers this to `chooseAngle` as the top-priority gap facet so a research
+ * pass pursues the Principal's standing steer first. This is the revoke-aware read; `readEnrichDirectives`
+ * is the pre-revoke view.
+ */
+export function activeEnrichTowardForIdentity(
+  enrich: Map<string, EnrichDirective>,
+  revokes: Map<string, RevokeDirective>,
+  identityKey: string,
+): string | undefined {
+  const e = enrich.get(identityKey);
+  if (!e) return undefined;
+  return isDirectiveRevoked(revokes, 'enrich', identityKey, e.decidedAt) ? undefined : e.toward;
 }

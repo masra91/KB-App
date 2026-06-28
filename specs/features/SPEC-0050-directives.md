@@ -59,7 +59,7 @@ produces them (so the directive lands in the **same commit** as the answer/corre
 | **retract** | block identity + normalized statement | "this claim is wrong — suppress it" | Claims block-regen + Compose cited-claims | 2b ✅ |
 | **reattribute** | wrong-subject identity + statement (+ target) | "this claim is on the wrong subject (belongs to B)" | Claims block-regen + Compose (suppress-on-wrong-subject; surface-on-B is a follow-up) | 2c ✅ (v1) |
 | **guidance** | block identity (or global) | freeform durable steer for an entity | Compose entity-page prompt (`composeStage`) | 3 ✅ |
-| **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient (`enrichGap`) | 3 ▢ (folds into DEV-2 RESEARCH-24) |
+| **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient — `activeEnrichTowardForIdentity` → `chooseAngle` top-priority facet | 3c ✅ type / ▢ orient-wire (DEV-2 coord) |
 | **revoke** | `(family, targetKey)` | cancels a prior directive of any family (timestamp-ordered; re-assert un-revokes) | active-set readers + corrections (`isClaimSuppressedActive`) | 3 ✅ |
 
 ### 2.1 Stable keys
@@ -114,8 +114,13 @@ gate** in addition to QD-2.
   of any family by `(family, targetKey)`, timestamp-ordered (`isDirectiveRevoked`; a later re-assertion
   un-revokes); made functional on corrections via `isClaimSuppressedActive` (a revoked retract un-suppresses
   at Claims block-regen + Compose). Both replay-survival tested. `recordGuidanceDirective`/
-  `recordRevokeDirective` are the seams the Rules-surface "correct this" UI calls. `enrich` still folds into
-  RESEARCH-24's gap payload (DEV-2 coord).
+  `recordRevokeDirective` are the seams the Rules-surface "correct this" UI calls.
+- **Slice 3c enrich — ✅ (type) / ▢ (orient-wire, DEV-2 coord).** `directives/enrich.jsonl` ("keep enriching X
+  toward Y", keyed on block identity, last-wins, revocable) + `activeEnrichTowardForIdentity` (revoke-aware).
+  Replay-survival tested. The consumer is the researcher's orient gap (RESEARCH-24): the active `toward`
+  facet is offered to `chooseAngle` as the top-priority missing facet — wired in coordination with DEV-2
+  (owner of `researchOrient.ts` + the subject↔entity-identity resolution). `recordEnrichDirective` is the
+  seam the Rules-surface UI calls.
 - **Slice 3 (Rules surface + "correct this") — ▢.** Read-only "Rules" view over the active directives +
   inline create affordances. QD-2 + Design-Lead visual. (Next PR; sequencing-checked vs the Explore/WS-E nav.)
 
