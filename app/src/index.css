@@ -348,30 +348,42 @@ dl.settings dd {
 /* active/in-progress backing-off → --viz-sprout (was ember; ember is "needs your decision" only). */
 .scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
 
-/* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). */
+/* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). UX v2 (SPEC-0058): lifted off the legacy
+   `.card`/`--border`/`--accent` chrome onto v2 material, scoped under `.reviews-v2`. Per DL-2's contract,
+   Reviews is the ONE peripheral screen where EMBER is correct — an open review IS a "needs your decision"
+   cue, so each item wears an ember left-spine. The empty state stays calm (no ember). Heads = Spectral. */
+.reviews-v2 { padding: 1rem 1.25rem 2rem; }
+.reviews-v2 .reviews-title { font-size: 1.5rem; color: var(--viz-ink); letter-spacing: 0; line-height: 1.15; margin: 0; }
+.reviews-v2 .reviews-sub, .reviews-v2 .muted { color: var(--viz-ink-muted); }
 ul.review-list {
   list-style: none;
   padding: 0;
   margin: 1rem 0 0;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
 }
-li.review {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.85rem 1rem;
+/* A review item is a real raised CARD with an EMBER decision-cue spine (the one sanctioned ember on the
+   peripheral screens — it means "this needs your decision", language §4 / DL-1's Today decision cue). */
+.reviews-v2 li.review {
+  background: var(--viz-panel);
+  border: 0.5px solid var(--viz-rule);
+  border-left: 2px solid var(--viz-ember);
+  border-radius: var(--viz-r-card);
+  box-shadow: var(--viz-shadow-card);
+  padding: 0.95rem 1.1rem;
 }
-.review-q {
+.reviews-v2 .review-q {
   font-weight: 600;
   font-size: 1rem;
+  color: var(--viz-ink);
 }
 .review-detail {
   margin: 0.5rem 0;
 }
-.review-detail summary {
+.reviews-v2 .review-detail summary {
   cursor: pointer;
-  color: var(--accent);
+  color: var(--viz-accent);
   font-size: 0.9rem;
 }
 .review-detail p {

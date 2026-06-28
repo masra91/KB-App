@@ -74,6 +74,26 @@ describe('Reviews view (SPEC-0018) + #110 list/badge reconciliation', () => {
     expect(root.textContent).toContain('About: Ada');
   });
 
+  it('UX v2 (SPEC-0058): v2 material surface, Spectral head, no emoji — items present (ember spine is CSS)', async () => {
+    setApi(vi.fn(async () => [CLAIM_REVIEW]));
+    await mountReviews(root);
+    // lifted off the legacy `.card` onto the scoped v2 surface; head is the Spectral voice, no 🔍
+    expect(root.querySelector('.reviews-v2.viz-surface')).toBeTruthy();
+    expect(root.querySelector('.reviews-title.viz-voice')?.textContent).toBe('Reviews');
+    expect(root.querySelector('.card')).toBeNull(); // legacy card chrome gone
+    expect(root.querySelector('.review')).toBeTruthy(); // the item (its ember decision-spine is in CSS)
+    // no raw emoji anywhere (🔍 head / 🎉 empty removed, #184)
+    expect(/[\u{1F300}-\u{1FAFF}]|🔍|🎉/u.test(root.textContent ?? '')).toBe(false);
+  });
+
+  it('UX v2: the empty state is the calm v2 .viz-empty (no 🎉, no ember)', async () => {
+    setApi(vi.fn(async () => []));
+    await mountReviews(root);
+    expect(root.querySelector('.viz-empty')).toBeTruthy();
+    expect(root.textContent).toContain('Nothing needs you');
+    expect(root.textContent).not.toContain('🎉');
+  });
+
   it('PRIN-24 backstop: scrubs a raw source ULID parroted into the question / detail / gloss', async () => {
     const ULID = '01KTJHC7MYV1MZ8XEBA4AAJH3M';
     const leaky: ReviewSummary = {
