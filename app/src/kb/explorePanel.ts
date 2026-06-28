@@ -62,6 +62,25 @@ export interface ExploreContradiction {
   statements: [string, string];
 }
 
+/** Everything the Explore view draws from ONE projection read (SPEC-0058 STATE-2 / DL-1's render
+ *  contract): the focused neighborhood + the entity list for the search picker. */
+export interface ExploreProjectionData {
+  neighborhood: ExploreNeighborhood;
+  entities: readonly ExploreEntityRef[];
+}
+
+/** The `kb:exploreProjection` envelope (SPEC-0058 STATE-2/9/10). `status` is FIRST-CLASS — the view
+ *  switches on it directly (calm `warming` while the graph projection is still building, never the
+ *  alarming error face), not the slice-0 timeout-inference. `data` is null while `warming`; `builtAt`/
+ *  `stale` carry the freshness envelope ("as of / updating…"). `error` is reserved for the CORE's
+ *  STATE-12 formal status (DEV-5); this layer emits `warming`|`ready`. */
+export interface ExploreProjection {
+  status: 'warming' | 'ready' | 'error';
+  data: ExploreProjectionData | null;
+  builtAt: string | null;
+  stale: boolean;
+}
+
 /** The focused entity + its bounded 1-hop neighborhood (EXPLORE-2/3/8). */
 export interface ExploreNeighborhood {
   found: boolean; // false → the requested focus didn't resolve (or the graph is empty)

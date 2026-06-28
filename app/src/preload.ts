@@ -65,6 +65,7 @@ const kbApi: KbApi = {
   getSourceSensitivities: (sourceIds) => ipcRenderer.invoke('kb:getSourceSensitivities', sourceIds),
   exploreEntities: () => ipcRenderer.invoke('kb:exploreEntities'),
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
+  exploreProjection: (focus) => ipcRenderer.invoke('kb:exploreProjection', focus), // SPEC-0058 STATE-2
   healthReport: () => ipcRenderer.invoke('kb:healthReport'),
 };
 
