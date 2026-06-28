@@ -58,8 +58,33 @@
   --viz-ease-index: cubic-bezier(0.2, 0.8, 0.2, 1); /* ease-out w/ a hint of stepper-seat overshoot */
   --viz-ease-state: ease-in-out;
 }
-/* No prefers-color-scheme override: the Vellum skin is fixed-light (brand §3 — "surfaces don't invert;
-   the cream study is the product"). The single :root above is the whole palette. */
+/* Light is the DEFAULT identity (brand §3 — "the cream study is the product"); there is no
+   prefers-color-scheme auto-switch on :root. Dark is an OPT-IN "night-study" variant, activated only
+   when the app sets `data-theme="dark"` on the root (the Settings toggle — a separate dev-paired PR).
+   The single :root above is the light palette; the block below re-points the SAME --viz-* role names
+   to the dark values, so dark is zero-call-site-churn. (brand/DARK-MODE-ADDENDUM.md / SPEC-0057) */
+
+/* Dark "night-study" variant (brand/DARK-MODE-ADDENDUM.md) — NOT an inversion: the icon's deep blue-green
+   ground expanded to fill the canvas, and cream becomes the INK. Only COLOR tokens change; type, motion
+   durations, and eases are unchanged. Gold stays rationed (discipline is stricter on dark) and ember stays
+   reserved for "needs your decision". (`auto`/prefers-color-scheme = a noted fast-follow with the toggle.) */
+:root[data-theme='dark'] {
+  --viz-field: #15242e;   /* canvas / background */
+  --viz-panel: #1e3340;   /* raised panel / surface */
+  --viz-rule: #2e4350;    /* hairline / dividers */
+  --viz-idle: #93a39e;    /* at-rest / neutral (parallels light: idle == ink-muted tone) */
+  --viz-ember: #c8743c;   /* RESERVED "needs your decision" — unchanged (glows harder on dark) */
+  --viz-sprout: #5bc09c;  /* active / in-progress — Sprout lifted */
+  --viz-accent: #5e93b4;  /* INTERACTIVE — mid-blue lifted (focus/hover/selected/primary) */
+  --viz-patina: #4e9e86;  /* settled / promoted — Viridian lifted */
+  --viz-brass: #c9a35a;   /* rationed gold — unchanged hue (rationing is STRICTER on dark) */
+  --viz-oxide: #cf5238;   /* error — lifted from the light brick #a8432a for legibility on the dark ground */
+  --viz-ink: #ece4d2;     /* labels / body — parchment (cream is now the ink) */
+  --viz-ink-muted: #93a39e; /* secondary / units */
+  --viz-deep: #1c3441;    /* depth anchor / graph vignette center */
+  --viz-mist: #5e93b4;    /* gradient light end — mid-blue on dark */
+  --viz-field-gradient: linear-gradient(135deg, #15252f 0%, #1c3441 45%, #1e4a39 100%); /* in-world, darker than light's */
+}
 
 /* Type-role utilities (apply the §4 roles without re-stating the stack). */
 .viz-signage { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; }
