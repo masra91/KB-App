@@ -140,7 +140,7 @@ function graphBar(entities: readonly ExploreEntityRef[], nb: ExploreNeighborhood
  *  re-center. A DOM `<title>` per node keeps it keyboard-/SR-reachable (the node carries data-rel/name). */
 function graphSvg(nb: ExploreNeighborhood, state: ExploreState): string {
   const all = applyFilters(nb.neighbors, state.filters);
-  const shown = all.slice(0, 16); // bound the radial ring; "+N more" note carries the rest
+  const shown = all.slice(0, 12); // bound the radial ring (DEFAULT_TOP_K) — never a hairball; "+N more" carries the rest
   const W = 760;
   const H = 560;
   const cx = W / 2;
@@ -383,8 +383,15 @@ function wire(container: HTMLElement, state: ExploreState): void {
   search?.addEventListener('change', submitSearch); // datalist selection fires change
 
   // Re-center on a clicked graph node (EXPLORE-6 navigate) — keyboard-reachable (Enter/Space).
+  // Hover/focus a node → light ITS incident edge gold (§3 hover-life signature): the edge shares the
+  // node's data-rel, so we toggle `.exp-edge--hot` on the matching edge (they live in separate <g>s).
   for (const node of Array.from(container.querySelectorAll<SVGGElement>('.exp-node'))) {
+    const rel = node.dataset.rel ?? '';
     const go = (): void => focusTo(node.dataset.rel, node.dataset.name ?? '');
+    const edge = container.querySelector<SVGPathElement>(`.exp-edge[data-rel="${CSS.escape(rel)}"]`);
+    const gild = (on: boolean): void => {
+      edge?.classList.toggle('exp-edge--hot', on);
+    };
     node.addEventListener('click', go);
     node.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -392,6 +399,10 @@ function wire(container: HTMLElement, state: ExploreState): void {
         go();
       }
     });
+    node.addEventListener('mouseenter', () => gild(true));
+    node.addEventListener('mouseleave', () => gild(false));
+    node.addEventListener('focus', () => gild(true));
+    node.addEventListener('blur', () => gild(false));
   }
 
   // Filter chips (EXPLORE-9): toggle a value in its group, repaint from cache (no IPC round-trip).
