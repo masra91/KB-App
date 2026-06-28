@@ -49,9 +49,10 @@
   --viz-font-numeric: 'IBM Plex Mono', ui-monospace, monospace;
   --viz-font-body: 'Inter', system-ui, sans-serif;
 
-  /* 3. Motion tokens (§5) — durations + easings; one reduced-motion reset (below) zeroes them all. */
+  /* 3. Motion tokens (§5 / Vellum §6) — durations + easings; one reduced-motion reset (below) zeroes them all. */
   --viz-dur-index: 220ms;     /* the signature "it moved" index hop */
-  --viz-dur-breathe: 1.8s;    /* the single ambient ember pulse */
+  --viz-dur-breathe: 1.8s;    /* the ambient breathe (sprout in-progress · the ember decision pulse) — slow, not a blink */
+  --viz-dur-drift: 24s;       /* Vellum §6 ambient drift (20–30s loops) — node-fields + the gold connecting thread */
   --viz-dur-odometer: 400ms;  /* count/bar rolls */
   --viz-dur-state: 240ms;     /* state-change crossfades */
   --viz-ease-index: cubic-bezier(0.2, 0.8, 0.2, 1); /* ease-out w/ a hint of stepper-seat overshoot */
@@ -187,12 +188,25 @@
 
 /* ============================================================================================== */
 
-/* Motion: the single ambient breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
+/* Motion: the ambient breathe (§5) — opacity-only (VIZ-9). Surfaces apply it to their
    own active element (e.g. .viz-breathe .viz-cell-current). */
 @keyframes viz-breathe { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+
+/* Vellum §6 motion language — "breathing, not blinking; ambient drift; one ember exception."
+   All opacity/background-position only (VIZ-9: no layout), all zeroed by the reduced-motion reset below. */
+/* Ambient drift (§6) — a slow 20–30s loop for node-field textures + the gold connecting thread: a
+   gentle background-position glide (apply to an element with a wide gradient/field background). */
+@keyframes viz-drift { from { background-position: 0% 50%; } to { background-position: 200% 50%; } }
+.viz-drift { animation: viz-drift var(--viz-dur-drift) linear infinite; }
+/* The ONE attention exception (§6) — the ember "needs your decision" cue may pulse softly. Gentler than
+   the breathe (higher floor) so it reads as a calm waiting-choice, not an alarm. Opacity-only. Reserve
+   strictly for decision cues (pairs with --viz-ember, never sprout/idle). */
+@keyframes viz-decision-pulse { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
+.viz-decision-pulse { animation: viz-decision-pulse var(--viz-dur-breathe) ease-in-out infinite; }
 
 /* The one reduced-motion reset (§5) — full functional parity: every viz animation/transition becomes
    an instant state change (state still reads via glyph + hue + fill, so nothing is lost). */
 @media (prefers-reduced-motion: reduce) {
-  .viz-surface, .viz-surface * { animation: none !important; transition: none !important; }
+  /* covers ::before/::after too — the ambient-drift thread/field textures animate on pseudos. */
+  .viz-surface, .viz-surface *, .viz-surface *::before, .viz-surface *::after { animation: none !important; transition: none !important; }
 }
