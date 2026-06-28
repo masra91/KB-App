@@ -12,12 +12,14 @@ import '@fontsource/ibm-plex-sans/400.css';
 import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
 import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
 import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" — folder-permission UX
+import './shell/setupFlow.css'; // SPEC-0009 SETUP — guided first-run (model → sample seed → tour)
 import './shell/views/showcase.css'; // DESIGN-SHOWCASE — dev-only primitive gallery layout (?showcase)
 import './qcap/qcap.css'; // SPEC-0038 QCAP — the frictionless quick-capture sheet (#qcap route)
 import './index.css';
 import type { PathInspection, RendererErrorReport } from './kb/types';
 import { esc, baseName } from './shell/html';
 import { mountShell } from './shell/shell';
+import { runGuidedSetup } from './shell/setupFlow';
 import { mountShowcase } from './shell/views/showcaseView';
 import { mountQuickCaptureSheet } from './qcap/qcapSheet';
 import { mountPermissionGate, icloudNoteHtml } from './shell/permissionGate';
@@ -94,15 +96,21 @@ async function onCreate(): Promise<void> {
   if (res.ok && res.vaultConfig) {
     const path = chosenPath;
     const vaultName = res.vaultConfig.name;
+    // SPEC-0009 SETUP: the KB now exists → walk the remaining one-time guided steps (model → optional
+    // sample seed → short tour) on the WS2 flow, THEN hand off to the shell. This runs only in the create
+    // path, so a returning launch (vault already configured) never re-onboards (SETUP-6).
+    const enterShell = (): void => mountShell(root, path, vaultName);
+    const guided = (): void => runGuidedSetup(root, { vaultName, onDone: enterShell });
     // SPEC-0034 MACOS-7: for a vault in a LOCAL TCC-gated folder (Documents/Desktop/Downloads), gate the
     // first run behind the pre-prompt — Continue performs a probe write so the macOS grant dialog fires
-    // coupled to our explanation (MACOS-5), and a denial drops to the Blocked recovery. Other locations
-    // (incl. iCloud, which is detect-warn-only) proceed straight to the shell.
+    // coupled to our explanation (MACOS-5), and a denial drops to the Blocked recovery. The guided setup
+    // runs only after the grant (model-pick/seed need a writable vault). Other locations (incl. iCloud,
+    // which is detect-warn-only) proceed straight into the guided flow.
     if (isLocalTccProtected(inspection?.tccProtectedDir ?? null)) {
-      mountPermissionGate(root, { vaultPath: path, folder: path, onGranted: () => mountShell(root, path, vaultName) });
+      mountPermissionGate(root, { vaultPath: path, folder: path, onGranted: guided });
       return;
     }
-    mountShell(root, path, vaultName);
+    guided();
     return;
   }
   document.getElementById('result')!.innerHTML = `<p class="error">${esc(res.message)}</p>`;
