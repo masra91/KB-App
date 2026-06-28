@@ -477,9 +477,9 @@ button:disabled {
    Muted at rest, ember on hover/focus — the established cite affordance language (mirrors .cite-ref). */
 .explore-cites { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; margin-left: 0.25rem; vertical-align: baseline; }
 .explore-cite { appearance: none; background: transparent; border: 0; padding: 0 0.15rem; cursor: pointer; font: inherit; font-size: 0.68rem; color: var(--viz-ink-muted); }
-.explore-cite .cite-mark { color: var(--viz-ember); font-weight: 600; }
-.explore-cite:hover, .explore-cite:focus-visible { color: var(--viz-ember); text-decoration: underline; }
-.explore-statement-link { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--viz-ember); }
+.explore-cite .cite-mark { color: var(--viz-accent); font-weight: 600; } /* interactive citation link → accent (#184/#415, same class as ASK cites) */
+.explore-cite:hover, .explore-cite:focus-visible { color: var(--viz-accent); text-decoration: underline; }
+.explore-statement-link { appearance: none; background: transparent; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--viz-accent); } /* interactive woven-claim link → accent (#184/#415) */
 .explore-statement-link:hover, .explore-statement-link:focus-visible { text-decoration: underline; }
 /* Citation-open status note — #184 a11y: label reads AA in `--viz-ink`; the caution hue rides a brass
    left-border ≥3:1 (DL-1's `.viz-note--caution` block pattern). The `:empty` slot drops the border so
