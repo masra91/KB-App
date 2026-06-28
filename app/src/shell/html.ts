@@ -20,3 +20,26 @@ export function esc(s: string | null | undefined): string {
 export function baseName(p: string): string {
   return p.split(/[\\/]/).filter(Boolean).pop() ?? 'My KB';
 }
+
+/**
+ * Branded empty-state (#406 / SPEC-0057) — the ONE "nothing here yet" block every view composes instead
+ * of ad-hoc `.muted` lines, rendering the `.viz-empty` primitive. Empty is a CALM idle state and this is
+ * for empty BY DESIGN only — a load FAILURE must use `renderLoadError` / "Recheck" (#160), never this, so
+ * the user never reads "nothing here" when data actually failed to load.
+ *
+ * `title`/`body`/`glyph` are escaped (null-safe, ENG-16). `glyph` is decorative (aria-hidden); omit it for
+ * the default crystalline mark, or pass `null`/'' for none. `action` is caller-built TRUSTED html (e.g. a
+ * `.viz-btn`) — keep it to a known primitive, never interpolate user data into it.
+ */
+export function emptyState(opts: {
+  title: string;
+  body?: string | null;
+  glyph?: string | null;
+  action?: string;
+}): string {
+  const g = opts.glyph === undefined ? '◇' : opts.glyph; // undefined → default mark; null/'' → no mark
+  const glyph = g ? `<div class="viz-empty__mark" aria-hidden="true">${esc(g)}</div>` : '';
+  const body = opts.body ? `<p class="viz-empty__body">${esc(opts.body)}</p>` : '';
+  const action = opts.action ? `<div class="viz-empty__action">${opts.action}</div>` : '';
+  return `<div class="viz-empty">${glyph}<p class="viz-empty__title viz-voice">${esc(opts.title)}</p>${body}${action}</div>`;
+}
