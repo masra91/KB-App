@@ -113,9 +113,20 @@
 /* ── Station spine (§2/§6) ──────────────────────────────────────────────────────────────────── */
 .line-spine-wrap {
   /* The gold thread (brand §8) — the stations sit on it: Capture → … → Compose on one rationed-gold
-     line. Gold is rationed to this single highlight per view (brand §3), never a fill. */
-  border-top: 1px solid var(--viz-brass);
+     line. Gold is rationed to this single highlight per view (brand §3), never a fill. The thread
+     drifts ambiently (§6, 24s) via the ::before gradient below; reduced-motion → static gold line. */
+  position: relative;
   padding-top: 0.75rem;
+}
+.line-spine-wrap::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0; /* a 1px line along the top, in place of the old border-top */
+  height: 1px;
+  /* a faint highlight travels the gold thread — brass with two lighter glints; 200% so it can glide */
+  background: linear-gradient(90deg, var(--viz-brass) 0%, #e3cd93 25%, var(--viz-brass) 50%, #e3cd93 75%, var(--viz-brass) 100%);
+  background-size: 200% 100%;
+  animation: viz-drift var(--viz-dur-drift) linear infinite; /* §6 ambient drift; reduced-motion zeroes it (static gold) */
 }
 .line-spine {
   list-style: none;
