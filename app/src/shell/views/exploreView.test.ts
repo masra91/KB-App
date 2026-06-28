@@ -184,3 +184,59 @@ describe('Explore v2 — render safety + sparse (ENG-15/16, EXPLORE-11)', () => 
     expect(c.querySelectorAll('.exp-node')).toHaveLength(0);
   });
 });
+
+describe('Explore v2 — click-throughs (EXPLORE-4 / WS-A / REVIEW-17, retained from v1)', () => {
+  // A center claim carrying both a cited source and a woven [[Name]] link, so the rail renders
+  // an .explore-cite and an .explore-statement-link to exercise the two click handlers.
+  function withRichClaim(): ExploreProjection {
+    return {
+      status: 'ready',
+      data: {
+        neighborhood: neighborhood({
+          claims: [
+            {
+              statement: 'Funded by [[Finance Team]] for Q3',
+              status: 'fact',
+              confidence: 0.8,
+              contested: false,
+              citations: [{ ref: 'sources/budget.md', title: 'Budget Doc' }],
+            },
+          ],
+        }),
+        entities: ENTITIES,
+      },
+      builtAt: 't',
+      stale: false,
+    };
+  }
+
+  it('Open in Obsidian opens the focused entity (EXPLORE-4 click-through)', async () => {
+    const c = await mount();
+    c.querySelector<HTMLButtonElement>('.explore-open')!.click();
+    await flush();
+    expect(openCitation).toHaveBeenCalledWith('entities/project/atlas.md');
+  });
+
+  it('a claim’s cited source opens working-zone-aware (WS-A / REVIEW-17)', async () => {
+    exploreProjection = vi.fn(async () => withRichClaim());
+    setApi();
+    const c = await mount();
+    const cite = c.querySelector<HTMLButtonElement>('.explore-cite[data-ref="sources/budget.md"]')!;
+    expect(cite).not.toBeNull();
+    cite.click();
+    await flush();
+    expect(openSourceRef).toHaveBeenCalledWith('sources/budget.md');
+  });
+
+  it('a woven [[Name]] in a claim re-centers on that entity (WS-A)', async () => {
+    exploreProjection = vi.fn(async () => withRichClaim());
+    setApi();
+    const c = await mount();
+    exploreProjection.mockClear();
+    const link = c.querySelector<HTMLButtonElement>('.explore-statement-link[data-name="Finance Team"]')!;
+    expect(link).not.toBeNull();
+    link.click();
+    await flush();
+    expect(exploreProjection).toHaveBeenCalledWith('Finance Team');
+  });
+});
