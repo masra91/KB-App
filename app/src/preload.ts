@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { KbApi } from './kb/types';
 
 const kbApi: KbApi = {
+  getAppVersion: () => ipcRenderer.invoke('kb:getAppVersion'), // SPEC-0055 RELEASE-6
   getState: () => ipcRenderer.invoke('kb:getState'),
   pickFolder: () => ipcRenderer.invoke('kb:pickFolder'),
   inspect: (p) => ipcRenderer.invoke('kb:inspect', p),

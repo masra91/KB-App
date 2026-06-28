@@ -1,5 +1,5 @@
 // IPC handlers — the main-process side of the KbApi contract (preload mirrors it).
-import { ipcMain, dialog, shell, BrowserWindow, clipboard, type OpenDialogOptions } from 'electron';
+import { app, ipcMain, dialog, shell, BrowserWindow, clipboard, type OpenDialogOptions } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { inspectPath, createKb } from '../kb/vault';
@@ -141,6 +141,10 @@ export async function initPipeline(): Promise<void> {
 }
 
 export function registerIpc(): void {
+  // SPEC-0055 RELEASE-6: report the running app version (from the packaged Info.plist / package.json,
+  // matching the release tag) so a build is identifiable at runtime — the About panel renders this.
+  ipcMain.handle('kb:getAppVersion', async (): Promise<string> => app.getVersion());
+
   ipcMain.handle('kb:getState', async (): Promise<AppState> => {
     const cfg = await readAppConfig();
     const vaultConfig = cfg.activeVaultPath ? await loadVaultConfig(cfg.activeVaultPath) : null;

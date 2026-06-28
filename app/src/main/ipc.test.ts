@@ -54,7 +54,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('electron', () => ({
-  app: { getPath: (): string => state.userData },
+  app: { getPath: (): string => state.userData, getVersion: (): string => '9.9.9-test' },
   ipcMain: { handle: (channel: string, fn: Handler) => state.handlers.set(channel, fn) },
   dialog: { showOpenDialog: vi.fn(async () => state.dialogResult) },
   shell: { openExternal: mocks.openExternal },
@@ -137,6 +137,13 @@ beforeEach(async () => {
 afterEach(async () => {
   await rmTempDir(state.userData);
   await rmTempDir(vaultDir);
+});
+
+describe('SPEC-0055 RELEASE-6 — the app reports its version at runtime', () => {
+  it('kb:getAppVersion returns app.getVersion() so a build is identifiable (the About panel renders it)', async () => {
+    // FAILS-BEFORE: with no handler registered this throws "no handler registered for kb:getAppVersion".
+    expect(await invoke<string>('kb:getAppVersion')).toBe('9.9.9-test');
+  });
 });
 
 describe('SETUP-2 — the picked folder becomes the vault root', () => {
