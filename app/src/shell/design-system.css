@@ -15,10 +15,11 @@
    prefers-color-scheme override — brand §3). Role-named so the whole system re-themes by token with zero
    call-site churn. State hues color fills / glyphs / borders / large+display text ONLY (all ≥3:1 on cream);
    small body text stays --viz-ink (~11:1). oxide/ember/gold (<4.5:1) MUST NOT color normal-size text.
-   SEMANTIC MIGRATION (deferred to the screen rethemes #403-406, not this slice): brand reserves --viz-ember
-   for "needs your decision" and uses --viz-sprout (green) for active/in-progress. Today --viz-ember carries
-   "active work" (25 sites); this slice re-colors the existing roles to brand + ADDS --viz-sprout for the
-   rethemes to migrate active→sprout / interactive→accent onto (ember stays decision-only). So no call-site churn here. */
+   SEMANTIC MIGRATION (COMPLETE — the corrective sweep that #403-406 punted): --viz-ember is now reserved
+   for "needs your decision" ONLY (Vellum UX v2 §4). Every former "active work" / interactive / focus / error
+   ember site was repointed: active/in-progress → --viz-sprout · interactive (hover/focus/selected) →
+   --viz-accent · true error → --viz-oxide. The ONLY surviving --viz-ember sites are decision cues and the
+   explicitly KEEP-ember clearance "public-web egress" temperature (grep for "KEEP-ember"). */
 :root {
   --viz-field: #f4efe3;     /* Vellum cream — the canvas/ground (fixed-light: the study) */
   --viz-panel: #fbf7ec;     /* Linen — a raised panel over the canvas (rethemes adopt) */

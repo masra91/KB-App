@@ -149,7 +149,7 @@ export function researcherRunEligibility(r: Pick<ResearcherView, 'enabled' | 'sc
  *   - `installed`     → `ok`    (patina)  — calm, done; no action
  *   - `not-installed` → `wait`  (brass)   — needs-you/actionable (NOT an error — like paused-rate-limit);
  *                                            offers Install
- *   - `installing`    → `busy`  (ember)   — active work; the breathe pulse
+ *   - `installing`    → `busy`  (sprout)  — active work; the breathe pulse
  *   - `checking`      → `idle`  (muted)   — transient, calm; no alarm
  *   - `install-failed`→ `error` (oxide)   — a genuine failure; offers Retry
  *   - `error`         → `error` (oxide)   — detect itself failed; offers Recheck
@@ -171,13 +171,13 @@ export interface WorkIqCardPresentation {
   label: string;
   /** Trailing glyph appended to the label ("✓" when installed); '' if none. Monochrome — no emoji (§6). */
   glyph: string;
-  /** Tone token → CSS `data-tone` (dot + text hue): ok=patina · wait=brass · busy=ember · error=oxide · idle=muted. */
+  /** Tone token → CSS `data-tone` (dot + text hue): ok=patina · wait=brass · busy=sprout · error=oxide · idle=muted. */
   tone: 'ok' | 'wait' | 'busy' | 'error' | 'idle';
   /** The action affordance, or null when none. `busy` dims+breathes the button mid-install. */
   action: { label: string; busy: boolean } | null;
   /** Secondary detail text ('' if none). */
   detail: string;
-  /** Whether the ember breathe applies (transient/active states); reduced-motion makes it static. */
+  /** Whether the sprout breathe applies (transient/active states); reduced-motion makes it static. */
   live: boolean;
 }
 

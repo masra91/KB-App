@@ -2,7 +2,7 @@
 /* Surface styles for the pre-prompt + blocked-recovery + iCloud note, built ON the shared
    `_design-system` ("The Line") so this app chrome reads as the SAME instrument — not a generic OS
    permission modal. Guardrails: flat ink, NO card chrome (a ruled panel, not a floating shadowed
-   modal), ember focus (from .viz-focusable), brass = needs-you (the blocked state is expected setup,
+   modal), accent focus (from .viz-focusable), brass = needs-you (the blocked state is expected setup,
    waiting on YOU — never oxide/broken), the exact folder in mono. Calm: effectively no motion. */
 
 .perm-surface {
@@ -71,10 +71,11 @@
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
-/* The primary action leans ember (the signature accent), without a filled card-button look. */
+/* The primary action leans --viz-accent (the interactive emphasis hue), without a filled card-button
+   look. (Was ember; ember is reserved for "needs your decision" only — Vellum UX v2 §4.) */
 .perm-primary {
-  border-color: var(--viz-ember);
-  color: var(--viz-ember);
+  border-color: var(--viz-accent);
+  color: var(--viz-accent);
 }
 
 /* iCloud detect-warn — quiet, non-blocking, muted info (never an alarm). */
