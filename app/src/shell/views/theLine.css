@@ -528,3 +528,31 @@
   }
   .line-carriage-name { flex-basis: 7rem; }
 }
+
+/* ── UX v2 (SPEC-0058) — Status material adoption ────────────────────────────────────────────────
+   Scoped to `.status-v2` so The Line's instrument is unchanged everywhere it's reused. Per DL-2's
+   peripheral contract: card the PIPELINE + IN-FLIGHT regions (depth, not the old flat read) and lift the
+   sub-heads to Spectral ink. Color discipline is already correct (#450 ember→sprout sweep); counts stay
+   Plex-Mono (viz-numeric). Stations/rails/carriages/motion + the rationed gold thread are untouched. */
+.status-v2 .line-title { color: var(--viz-ink); }
+.status-v2 .line-spine-wrap,
+.status-v2 .line-flight {
+  background: var(--viz-panel);
+  border: 0.5px solid var(--viz-rule);
+  border-radius: var(--viz-r-card);
+  box-shadow: var(--viz-shadow-card);
+  padding: 1.15rem 1.25rem 1.3rem;
+}
+/* the rationed gold thread now rides the card's inner top edge (rounded to match the card corners). */
+.status-v2 .line-spine-wrap { padding-top: 1.15rem; }
+.status-v2 .line-spine-wrap::before { border-radius: var(--viz-r-card) var(--viz-r-card) 0 0; }
+/* In-flight / siding / readout sub-heads → Spectral, sentence case, ink (were small muted captions). */
+.status-v2 .line-flight .line-h2,
+.status-v2 .line-siding .line-h2,
+.status-v2 .line-readout .line-h2 {
+  font-family: var(--viz-font-voice);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.95rem;
+  color: var(--viz-ink);
+}

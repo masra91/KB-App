@@ -67,7 +67,10 @@ export function mountStatus(container: HTMLElement): void {
   failedActs = new Map();
   lastHtml = '';
   motionStores = createMotionStores(); // fresh motion history per mount (no carry-over across vault switches)
-  container.innerHTML = `<div class="viz-surface the-line"><div class="line-body" id="lineBody"></div></div>`;
+  // UX v2 (SPEC-0058): `status-v2` scopes the material/voice adoption to Status only — the pipeline +
+  // in-flight regions gain card depth + Spectral heads, KEEPING The Line's instrument (stations, rails,
+  // carriages, motion). Color discipline is already correct (#450 ember→sprout sweep). Counts stay mono.
+  container.innerHTML = `<div class="viz-surface the-line status-v2"><div class="line-body" id="lineBody"></div></div>`;
   wire(container);
   void load(container);
   // Live-update (OBS-8) — poll only while visible (don't burn IPC when another view is showing).
