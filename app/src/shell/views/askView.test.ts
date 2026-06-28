@@ -44,6 +44,52 @@ describe('Ask view (SPEC-0026 ASK-1/2/8)', () => {
     expect(root.querySelector('#askBtn')?.textContent).toBe('Ask');
   });
 
+  describe('UX v2 (DL-2 render contract)', () => {
+    it('is a material .viz-card with a Spectral (.viz-voice) head — no emoji, no flat legacy .card', () => {
+      setAsk(vi.fn(async () => GROUNDED));
+      mountAsk(root);
+      const view = root.querySelector('.ask-view');
+      expect(view?.classList.contains('viz-card')).toBe(true);
+      expect(view?.classList.contains('viz-grain')).toBe(true);
+      expect(view?.classList.contains('card')).toBe(false); // off the flat legacy chrome
+      expect(root.querySelector('h1')?.classList.contains('viz-voice')).toBe(true);
+      expect(root.querySelector('h1')?.textContent).not.toMatch(/💬|🗨|📣/);
+    });
+
+    it('shows a calm empty prompt before any question (never a blank panel)', () => {
+      setAsk(vi.fn(async () => GROUNDED));
+      mountAsk(root);
+      expect(root.querySelector('.ask-empty')).toBeTruthy();
+    });
+
+    it('renders the answer as Spectral prose with accent Plex-Mono citation chips (WS-A preserved)', async () => {
+      setAsk(vi.fn(async () => GROUNDED));
+      mountAsk(root);
+      type(root, 'Who was Ada Lovelace?');
+      submit(root);
+      await tick();
+      expect(root.querySelector('.ask-answer')?.classList.contains('viz-voice')).toBe(true); // scholarly prose
+      // the References entry is the clickable deep-link with a mono [n] + named source (WS-A intact)
+      const ref = root.querySelector('.cite-ref');
+      expect(ref).toBeTruthy();
+      expect(ref?.querySelector('.cite-name')?.textContent).toContain('first computer programmer');
+    });
+
+    it('shows a calm "Searching your library…" state while in flight (never a scary spinner), and no ember anywhere', async () => {
+      let resolve!: (r: AskResult) => void;
+      setAsk(vi.fn(() => new Promise<AskResult>((r) => (resolve = r))));
+      mountAsk(root);
+      type(root, 'Who was Ada Lovelace?');
+      submit(root);
+      await tick();
+      expect(root.querySelector('.ask-searching')?.textContent).toContain('Searching your library');
+      expect(root.querySelector('[class*="ember"]')).toBeNull(); // Ask is a read, never a decision
+      resolve(GROUNDED);
+      await tick();
+      expect(root.querySelector('.ask-answer.viz-voice')).toBeTruthy(); // resolves to the answer card
+    });
+  });
+
   it('submitting renders a grounded answer with its citations (ASK-1/7)', async () => {
     const ask = vi.fn(async () => GROUNDED);
     setAsk(ask);

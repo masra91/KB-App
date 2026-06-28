@@ -61,14 +61,14 @@ export function mountAsk(container: HTMLElement): void {
   turns = [];
   busy = false;
   container.innerHTML = `
-    <div class="card ask-view">
-      <h1>💬 Ask</h1>
+    <div class="ask-view ask-v2 viz-card viz-grain">
+      <h1 class="ask-title viz-voice">Ask</h1>
       <p class="ask-note">Ask your knowledge base a question. Answers are grounded in your sources, entities, and claims — with citations.</p>
-      <ul class="ask-transcript" id="askTranscript"></ul>
       <form class="ask-form" id="askForm">
         <input id="askInput" class="ask-input viz-field__input viz-body viz-focusable" type="text" autocomplete="off" placeholder="Ask a question…" aria-label="Ask a question" />
-        <button id="askBtn" class="viz-btn viz-btn--primary viz-focusable" type="submit">Ask</button>
+        <button id="askBtn" class="ask-submit viz-btn viz-btn--primary viz-focusable" type="submit">Ask</button>
       </form>
+      <ul class="ask-transcript" id="askTranscript"></ul>
     </div>`;
   const form = container.querySelector<HTMLFormElement>('#askForm');
   form?.addEventListener('submit', (e) => {
@@ -211,7 +211,7 @@ function renderReferences(citations: Citation[], turnIndex: number): string {
     .map((c, i) => {
       const n = i + 1;
       const kind = CITATION_KIND_LABEL[c.kind] ?? c.kind;
-      return `<li><a class="cite-ref viz-focusable" role="link" tabindex="0" aria-label="Citation ${n}: ${esc(refDisplayName(c))}" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span> <span class="cite-kind">${esc(kind)}</span> ${esc(refDisplayName(c))}</a></li>`;
+      return `<li><a class="cite-ref viz-focusable" role="link" tabindex="0" aria-label="Citation ${n}: ${esc(refDisplayName(c))}" data-turn="${turnIndex}" data-cite="${n}" title="${esc(c.ref)} — open in Obsidian"><span class="cite-num">[${n}]</span><span class="cite-kind">${esc(kind)}</span><span class="cite-name">${esc(refDisplayName(c))}</span></a></li>`;
     })
     .join('');
   return `<div class="ask-citations"><span class="ask-ref-label viz-signage">References</span><ul>${items}</ul></div>`;
@@ -226,7 +226,8 @@ function renderAnswer(r: AskResult, turnIndex: number, citeError?: string): stri
   // a source-naming aria-label (§5 a11y) — the citations carry the per-marker accessible names.
   const answerHtml = renderMarkdown(linkifyCitationMarkers(r.answer, turnIndex, r.citations));
   const citeErr = citeError ? `<div class="ask-cite-status error">${esc(citeError)}</div>` : '';
-  return `<div class="ask-answer">${answerHtml}</div>${renderReferences(r.citations, turnIndex)}${citeErr}${flagHtml}`;
+  // The synthesis prose reads as scholarly writing (Spectral / .viz-voice), not a chat bubble (DL-2).
+  return `<div class="ask-answer viz-voice">${answerHtml}</div>${renderReferences(r.citations, turnIndex)}${citeErr}${flagHtml}`;
 }
 
 /** The save-as-Output affordance for a completed turn (ASK-6): a button, or the saved confirmation. */
@@ -241,8 +242,10 @@ function renderSaveRow(t: Turn, index: number): string {
 function renderTurn(t: Turn, index: number): string {
   let body: string;
   let saveRow = '';
-  if (t.error) body = `<div class="ask-answer error">Sorry — recall failed: ${esc(t.error)}</div>`;
-  else if (t.result === null) body = `<div class="ask-answer ask-note">Thinking…</div>`;
+  // Error state: oxide only on a genuine failure (DL-2 contract). A calm, honest message.
+  if (t.error) body = `<div class="ask-answer ask-error error">Couldn’t answer — ${esc(t.error)}. Try again from the box above.</div>`;
+  // Warming/in-flight: a calm "searching" state (ink-muted), never a scary spinner string.
+  else if (t.result === null) body = `<div class="ask-answer ask-searching ask-note">Searching your library…</div>`;
   else {
     body = renderAnswer(t.result, index, t.citeError);
     saveRow = renderSaveRow(t, index); // grounded OR ungrounded — saving an ungrounded answer is allowed (F4)
@@ -253,5 +256,10 @@ function renderTurn(t: Turn, index: number): string {
 function renderTranscript(container: HTMLElement): void {
   const el = container.querySelector<HTMLElement>('#askTranscript');
   if (!el) return;
+  // Empty state (DL-2): a calm prompt, never a blank panel.
+  if (turns.length === 0) {
+    el.innerHTML = `<li class="ask-empty ask-note">Your answers will appear here — grounded in your library, with citations you can open.</li>`;
+    return;
+  }
   el.innerHTML = turns.map((t, i) => renderTurn(t, i)).join('');
 }

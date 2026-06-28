@@ -499,35 +499,49 @@ button:disabled {
    legacy palette/accent (--border/--accent/#d66) onto --viz-* tokens; secondary text on
    --viz-ink-muted (was legacy .muted); the Ask + Save buttons compose the blessed .viz-btn primitive
    (design-system.css). No new tokens/components (DESIGN-7). */
-.ask-view .ask-transcript { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.75rem; }
-.ask-turn { border: 1px solid var(--viz-rule); border-radius: 8px; padding: 0.75rem; }
-.ask-q { font-weight: 600; margin-bottom: 0.4rem; }
-.ask-who { color: var(--viz-ink-muted); font-size: 0.7rem; }
-/* Long unbroken tokens (URLs, hashes, IDs) in a recall answer wrap instead of forcing horizontal
-   scroll (§5). The render path already sanitizes (marked + DOMPurify) — presentation only. */
-.ask-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
-.ask-answer.error { color: var(--viz-oxide); }
-/* Secondary/helper text — the WS2 muted token (was the legacy global .muted). */
-.ask-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
-.ask-citations { margin-top: 0.5rem; font-size: 0.9em; }
-.ask-ref-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
-.ask-citations ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
-.ask-flags { margin-top: 0.4rem; font-size: 0.85em; color: var(--viz-ink-muted); }
-/* Citation deep-links (ASK-14) — clickable inline `[n]` markers + References entries. Interactive →
-   `--viz-accent` (slate-blue, AA-text-safe ~5:1 on cream; #415 state-language) — was ember, now
-   reserved for "needs your decision" + sub-AA as link text on cream (#184 a11y audit). */
-.cite-link { color: var(--viz-accent); text-decoration: none; cursor: pointer; font-weight: 600; }
-.cite-link:hover, .cite-link:focus-visible { text-decoration: underline; }
-.cite-ref { color: var(--viz-ink); text-decoration: none; cursor: pointer; }
-.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-accent); text-decoration: underline; }
-.cite-ref .cite-num { color: var(--viz-accent); font-weight: 600; }
-.cite-ref .cite-kind { color: var(--viz-ink-muted); font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; }
-.ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--error); }
-.ask-form { display: flex; gap: 0.5rem; }
+/* ── UX v2 Ask (DL-2 contract): material card · Spectral answer prose · accent citation chips ─────── */
+.ask-view { padding: 1.75rem 2rem; } /* the view is a .viz-card + grain now (was the flat legacy .card) */
+.ask-title { margin: 0 0 0.3rem; } /* Spectral via .viz-voice */
+.ask-form { display: flex; gap: 0.5rem; margin: 0.9rem 0 0; }
 .ask-input { flex: 1; }
+/* Primary CTA — FILLED accent + sentence-case (the .viz-btn base is outlined+uppercase; DL-2 #473
+   polish, matches Capture's filled CTA). The one emphasized action on the view. */
+.ask-submit.viz-btn { background: var(--viz-accent); color: #fff; border-color: var(--viz-accent); text-transform: none; letter-spacing: 0.01em; font-weight: 600; }
+.ask-submit.viz-btn:hover, .ask-submit.viz-btn:focus-visible { background: var(--viz-ink); border-color: var(--viz-ink); color: #fff; }
+.ask-view .ask-transcript { list-style: none; padding: 0; margin: 1.1rem 0 0; display: flex; flex-direction: column; gap: 0; }
+/* Flat, ruled turns (not chat bubbles, DL-2) — a top rule separates each Q/A, like the Activity feed. */
+.ask-turn { border: 0; border-top: 1px solid var(--viz-rule); padding: 0.9rem 0; }
+.ask-turn:first-child { border-top: 0; }
+.ask-empty { padding: 1.2rem 0 0.2rem; }
+.ask-q { font-weight: 600; margin-bottom: 0.45rem; }
+.ask-who { color: var(--viz-ink-muted); font-size: 0.7rem; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 0.4rem; }
+/* The synthesis answer reads as scholarly prose (Spectral / .viz-voice) — generous line-height, a
+   comfortable reading measure. Long unbroken tokens still wrap (the render path sanitizes upstream). */
+.ask-answer { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-answer.viz-voice { line-height: 1.6; max-width: 64ch; color: var(--viz-ink); }
+.ask-searching { font-style: italic; } /* calm "Searching your library…" (ink-muted via .ask-note) */
+.ask-answer.ask-error, .ask-answer.error { color: var(--viz-oxide); font-style: normal; } /* oxide only on a genuine no-result */
+/* Secondary/helper text. */
+.ask-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+/* References — material rows beneath the answer: a small signage label + each source as a clickable row. */
+.ask-citations { margin-top: 0.9rem; }
+.ask-ref-label { color: var(--viz-ink-muted); font-size: 0.7rem; }
+.ask-citations ul { margin: 0.3rem 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.15rem; }
+.ask-citations li { font-size: 0.9em; }
+.ask-flags { margin-top: 0.5rem; font-size: 0.85em; color: var(--viz-ink-muted); }
+/* Citation deep-links (ASK-14/WS-A). Interactive → --viz-accent (slate-blue, AA on cream; #415). The
+   inline marker reads as a small Plex-Mono chip; the References entry is a row with a mono [n] + name. */
+.cite-link { color: var(--viz-accent); text-decoration: none; cursor: pointer; font-family: var(--viz-font-numeric, ui-monospace, monospace); font-size: 0.82em; vertical-align: super; line-height: 0; padding: 0 0.15em; }
+.cite-link:hover, .cite-link:focus-visible { text-decoration: underline; }
+.cite-ref { color: var(--viz-ink); text-decoration: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 0.4rem; }
+.cite-ref:hover, .cite-ref:focus-visible { color: var(--viz-accent); }
+.cite-ref:hover .cite-name, .cite-ref:focus-visible .cite-name { text-decoration: underline; }
+.cite-ref .cite-num { color: var(--viz-accent); font-family: var(--viz-font-numeric, ui-monospace, monospace); font-size: 0.85em; }
+.cite-ref .cite-kind { color: var(--viz-ink-muted); font-size: 0.78em; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.04em; }
+.ask-cite-status.error { margin-top: 0.4rem; font-size: 0.85em; color: var(--viz-oxide); }
 /* Save-as-Output (ASK-6) — the action composes .viz-btn--sm (design-system.css). */
-.ask-save-row { margin-top: 0.5rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
-.ask-save-status.error { color: var(--error); }
+.ask-save-row { margin-top: 0.6rem; font-size: 0.85em; display: flex; align-items: center; gap: 0.5rem; }
+.ask-save-status.error { color: var(--viz-oxide); }
 
 /* --- Explore view (SPEC-0039 EXPLORE) — the read-only entity-neighborhood graph, in "The Line"
    instrument language: flat ruled structure (no card chrome), composing the design-system primitives
