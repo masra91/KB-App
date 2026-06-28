@@ -8,6 +8,8 @@ import {
   recallBudget,
   clampRecallMaxToolCalls,
   resolveRecallMaxToolCallsWrite,
+  recallEffortLevers,
+  RECALL_EFFORT_QUICK,
 } from './recallConstants';
 
 // SPEC-0026 ASK-17/19 — the PURE recall budget constants/clamps. The renderer ("Recall & Ask" card)
@@ -74,5 +76,44 @@ describe('recall retrieval tool-call budget (ASK-19) — raised bounds + overrid
     // a number sets the clamped override regardless of prior
     expect(resolveRecallMaxToolCallsWrite(undefined, 8)).toBe(8);
     expect(resolveRecallMaxToolCallsWrite(12, 999)).toBe(RECALL_BUDGET.MAX);
+  });
+});
+
+// SPEC-0060 VUX-11 — the Ask "Quick vs Considered" effort toggle maps to recall's DEPTH levers (hop
+// budget + interactive time budget), never a fake model swap. Fails-before/passes-after: pins that Quick
+// genuinely shallows + shortens, Considered/undefined pass the configured baseline through untouched.
+describe('recallEffortLevers — Ask effort → recall depth (VUX-11)', () => {
+  // A typical 'considered' baseline: graph-scaled default budget + the 4-min interactive time.
+  const base = { maxToolCalls: 18, sessionBudgetMs: DEFAULT_RECALL_BUDGET_MS };
+
+  it('Quick forces the floor hop budget + the 60s floor time (a fast, shallow lookup)', () => {
+    const q = recallEffortLevers('quick', base);
+    expect(q.maxToolCalls).toBe(RECALL_EFFORT_QUICK.maxToolCalls); // = RECALL_BUDGET.BASE (4)
+    expect(q.maxToolCalls).toBe(RECALL_BUDGET.BASE);
+    expect(q.sessionBudgetMs).toBe(RECALL_BUDGET_MS_MIN); // 60s floor
+    // Genuinely shallower + shorter than the baseline (the whole point of Quick).
+    expect(q.maxToolCalls!).toBeLessThan(base.maxToolCalls);
+    expect(q.sessionBudgetMs).toBeLessThan(base.sessionBudgetMs);
+  });
+
+  it('Considered passes the configured baseline through UNCHANGED', () => {
+    expect(recallEffortLevers('considered', base)).toEqual(base);
+  });
+
+  it('undefined effort == considered (full back-compat for callers/saved threads that send no effort)', () => {
+    expect(recallEffortLevers(undefined, base)).toEqual(base);
+  });
+
+  it('Quick never EXCEEDS a tightly-configured baseline (min, not a fixed override)', () => {
+    // A baseline already tighter than Quick's ceilings stays tight — Quick only ever shallows.
+    const tight = { maxToolCalls: RECALL_BUDGET.MIN, sessionBudgetMs: RECALL_BUDGET_MS_MIN };
+    const q = recallEffortLevers('quick', tight);
+    expect(q.maxToolCalls).toBe(RECALL_BUDGET.MIN);
+    expect(q.sessionBudgetMs).toBe(RECALL_BUDGET_MS_MIN);
+  });
+
+  it('Quick caps an undefined (graph-scaled) baseline hop budget to the floor too', () => {
+    const q = recallEffortLevers('quick', { maxToolCalls: undefined, sessionBudgetMs: DEFAULT_RECALL_BUDGET_MS });
+    expect(q.maxToolCalls).toBe(RECALL_EFFORT_QUICK.maxToolCalls); // not left undefined → a concrete shallow cap
   });
 });

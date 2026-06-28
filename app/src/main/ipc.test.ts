@@ -317,6 +317,25 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
     expect(opts.maxToolCalls).toBeUndefined();
   });
 
+  it('VUX-11: effort "quick" shallows recall depth — floor hops + 60s — even over a deep Principal config', async () => {
+    await configureVault(vaultDir);
+    // Principal configured a DEEP baseline (5min, 18 hops); Quick must still force the fast/shallow floor.
+    mocks.getActiveInstanceSettings.mockResolvedValueOnce({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 300_000, recallMaxToolCalls: 18 });
+    await invoke('kb:ask', { question: 'Who?', history: [], effort: 'quick' });
+    const opts = (mocks.recall.mock.calls[0] as unknown[])[2] as { sessionBudgetMs?: number; maxToolCalls?: number };
+    expect(opts.maxToolCalls).toBe(4); // RECALL_BUDGET.BASE floor
+    expect(opts.sessionBudgetMs).toBe(60_000); // RECALL_BUDGET_MS_MIN floor
+  });
+
+  it('VUX-11: effort "considered" passes the configured depth through unchanged (the full-depth default)', async () => {
+    await configureVault(vaultDir);
+    mocks.getActiveInstanceSettings.mockResolvedValueOnce({ autonomyDefault: 'guarded', devLogLevel: 'info', quickCaptureAccelerator: 'Alt+Space', recallBudgetMs: 300_000, recallMaxToolCalls: 18 });
+    await invoke('kb:ask', { question: 'Who?', history: [], effort: 'considered' });
+    const opts = (mocks.recall.mock.calls[0] as unknown[])[2] as { sessionBudgetMs?: number; maxToolCalls?: number };
+    expect(opts.sessionBudgetMs).toBe(300_000); // unchanged from config
+    expect(opts.maxToolCalls).toBe(18);
+  });
+
   it('returns an honest ungrounded result when no KB is configured (recall not run)', async () => {
     const res = await invoke<{ grounded: boolean; answer: string }>('kb:ask', { question: 'Who?' });
     expect(res.grounded).toBe(false);
