@@ -1049,29 +1049,33 @@ button:disabled {
 /* WS2: the Jobs view reads in "The Line" instrument language — flat ruled strips composing the shared
    design-system primitives (Button / SegmentedControl / ConfirmInline; design-system.css). NO card
    chrome (§6); the spine + arm switch light patina when a job is enabled. */
+/* v3 (SPEC-0060 VUX-1): the Schedules section reads as v3 cards (.job.ag-card in a wide grid), on the
+   warm-vellum tokens. The arm switch is a calm pill — viridian dot when enabled. All wiring + the
+   PANEL-7 confirm gate (.viz-confirm) + segmented controls (.viz-seg) are unchanged. */
 .jobs-view { padding: 0.25rem 0; }
-.job-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
-.job-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 60ch; }
-.job-empty { color: var(--viz-ink-muted); padding: 1rem 0; }
-.job-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1.1rem; }
-.job { padding: 0.5rem 0 0.75rem 0.9rem; border-left: 2px solid var(--viz-idle); }
-.job[data-armed='true'] { border-left-color: var(--viz-patina); }
-.job-head { display: flex; align-items: baseline; gap: 0.6rem; }
-.job-label { font-size: 0.95rem; color: var(--viz-ink); font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.04em; }
+.job-sub { color: var(--stone); margin: 0.25rem 0 1rem; max-width: 60ch; }
+.job-empty { color: var(--stone); padding: 1rem 0; }
+.job-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fill, minmax(27rem, 1fr)); }
+.job.ag-card { padding: 1rem 1.1rem 0.95rem; }
+.job.ag-card[data-armed='true'] { border-color: var(--viridian-2); }
+.job-head { display: flex; align-items: center; gap: 0.6rem; }
+.job-label { font-family: var(--voice); font-weight: 500; font-size: 1rem; color: var(--ink); letter-spacing: 0; }
 .job-badge { margin-left: 0.1rem; }
-/* Arm switch (enable) — graphite ○ PAUSED at rest, patina ◉ ENABLED when armed; a surface-specific stateful switch. */
-.job-enabled { margin-left: auto; background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.1rem 0.5rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--viz-idle); cursor: pointer; }
-.job[data-armed='true'] .job-enabled { color: var(--viz-patina); border-color: currentColor; }
-.job-desc { margin: 0.4rem 0 0.6rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
-.job-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem 1.5rem; }
+/* Arm switch — a calm pill; resting = stone outline, enabled = viridian dot + ink. */
+.job-enabled { margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; background: var(--vellum); border: 1px solid var(--hair); border-radius: var(--r-pill); padding: 0.25rem 0.7rem; font-family: var(--ui); font-size: 0.72rem; font-weight: 500; color: var(--stone); cursor: pointer; transition: color var(--t), border-color var(--t); }
+.job-enabled .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--faint); }
+.job[data-armed='true'] .job-enabled { color: var(--viridian); border-color: rgba(47, 107, 91, 0.3); }
+.job[data-armed='true'] .job-enabled .dot { background: var(--viridian); }
+.job-desc { margin: 0.5rem 0 0.7rem; font-family: var(--ui); font-size: 0.85rem; color: var(--ink-2); line-height: 1.5; }
+.job-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 0.6rem 1.2rem; }
 .job-field { display: inline-flex; align-items: center; gap: 0.4rem; }
-.job-field-label { font-size: 0.62rem; color: var(--viz-ink-muted); }
+.job-field-label { font-family: var(--ui); font-size: 0.66rem; color: var(--stone); }
 .job-run { margin-left: auto; align-self: center; }
-.job-lastrun { margin: 0.6rem 0 0; font-size: 0.82rem; color: var(--viz-ink-muted); }
+.job-lastrun { margin: 0.7rem 0 0; font-family: var(--mono); font-size: 0.72rem; color: var(--faint); }
 /* The confirm box composes the ConfirmInline primitive (.viz-confirm; design-system.css §5; incl. its
    own [hidden] guard); only the top margin is a surface delta. */
-.job-confirm { margin-top: 0.6rem; }
-.job-status { margin: 0.35rem 0 0; font-size: 0.82rem; min-height: 1em; color: var(--viz-ink-muted); }
+.job-confirm { margin-top: 0.7rem; }
+.job-status { margin: 0.4rem 0 0; font-family: var(--ui); font-size: 0.8rem; min-height: 1em; color: var(--stone); }
 
 .badge { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.05rem 0.35rem; }
 
@@ -1139,43 +1143,48 @@ option { background: var(--card); color: var(--fg); }
    on a ruled spine, built on the shared design system (design-system.css: --viz-* tokens, type-roles,
    primitives). NO card chrome / radius / shadow on structure (§6). Clearance = temperature; armed =
    clearance-lit rail; typed report (found/nothing/failed/paused). */
+/* v3 (SPEC-0060 VUX-1): the Researchers desk reads as v3 cards (.rdesk-strip.ag-card in a wide grid),
+   on the warm-vellum tokens. Clearance = an EXPOSURE temperature ramp (local=viridian inward → tenant=
+   gold → public-web=gold-deep, the STRONGEST caution): the prior KEEP-ember on public-web is RETIRED
+   (ember is decision-only; egress exposure is a caution → gold family). All wiring + the PANEL-7 confirm
+   gate (.viz-confirm) + segmented controls (.viz-seg) + editable fields (.viz-field) are unchanged. */
 .rdesk { padding: 0.25rem 0; }
-.rdesk-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
-.rdesk-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 60ch; }
-.rdesk-empty { color: var(--viz-ink-muted); padding: 1rem 0; }
-.rdesk-roster { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+.rdesk-sub { color: var(--stone); margin: 0.25rem 0 1rem; max-width: 60ch; }
+.rdesk-empty { color: var(--stone); padding: 1rem 0; }
+.rdesk-roster { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fill, minmax(27rem, 1fr)); }
 
-/* Strip — hangs off the spine; the spine + id light in the clearance temperature when ARMED, graphite at rest. */
-.rdesk-strip { padding: 0.5rem 0 0.75rem 0.9rem; border-left: 2px solid var(--viz-idle); }
-.rdesk-strip[data-armed='true'][data-clearance='local-only'] { border-left-color: var(--viz-patina); }
-.rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] { border-left-color: var(--viz-brass); }
-.rdesk-strip[data-armed='true'][data-clearance='public-web'] { border-left-color: var(--viz-ember); } /* KEEP-ember: public-web egress "exposure" temp = conscious-egress cue (mirrors .viz-seg-opt--clearance); revisit in researchers retheme */
+/* Strip card — armed lifts the card border to the clearance EXPOSURE hue (caution ramp, never ember). */
+.rdesk-strip.ag-card { padding: 1rem 1.1rem 0.95rem; }
+.rdesk-strip[data-armed='true'][data-clearance='local-only'] { border-color: rgba(47, 107, 91, 0.4); }
+.rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] { border-color: rgba(201, 163, 90, 0.55); }
+.rdesk-strip[data-armed='true'][data-clearance='public-web'] { border-color: var(--gold-deep); }
 
-.rdesk-strip-head { display: flex; align-items: baseline; gap: 0.6rem; }
-.rdesk-id { font-size: 0.95rem; color: var(--viz-ink); letter-spacing: 0.02em; }
-.rdesk-arm { margin-left: auto; background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.1rem 0.5rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--viz-idle); cursor: pointer; }
-.rdesk-strip[data-armed='true'] .rdesk-arm { color: var(--viz-ink); border-color: currentColor; }
-.rdesk-strip[data-armed='true'][data-clearance='local-only'] .rdesk-arm { color: var(--viz-patina); }
-.rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] .rdesk-arm { color: var(--viz-brass); }
-.rdesk-strip[data-armed='true'][data-clearance='public-web'] .rdesk-arm { color: var(--viz-ember); } /* KEEP-ember: clearance egress cue (matches the strip border above) */
+.rdesk-strip-head { display: flex; align-items: center; gap: 0.6rem; }
+.rdesk-id { font-family: var(--voice); font-weight: 500; font-size: 1rem; color: var(--ink); letter-spacing: 0; }
+/* Arm switch — a calm pill; resting stone, armed lifts to the clearance exposure hue. */
+.rdesk-arm { margin-left: auto; display: inline-flex; align-items: center; gap: 0.4rem; background: var(--vellum); border: 1px solid var(--hair); border-radius: var(--r-pill); padding: 0.25rem 0.7rem; font-family: var(--ui); font-size: 0.72rem; font-weight: 500; color: var(--stone); cursor: pointer; transition: color var(--t), border-color var(--t); }
+.rdesk-arm .dot { width: 0.45rem; height: 0.45rem; border-radius: 50%; background: var(--faint); }
+.rdesk-strip[data-armed='true'] .rdesk-arm { color: var(--ink); border-color: var(--hair); }
+.rdesk-strip[data-armed='true'][data-clearance='local-only'] .rdesk-arm { color: var(--viridian); }
+.rdesk-strip[data-armed='true'][data-clearance='local-only'] .rdesk-arm .dot { background: var(--viridian); }
+.rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] .rdesk-arm { color: var(--gold-deep); }
+.rdesk-strip[data-armed='true'][data-clearance='internal-tenant'] .rdesk-arm .dot { background: var(--gold); }
+.rdesk-strip[data-armed='true'][data-clearance='public-web'] .rdesk-arm { color: var(--gold-deep); }
+.rdesk-strip[data-armed='true'][data-clearance='public-web'] .rdesk-arm .dot { background: var(--gold-deep); }
 
-.rdesk-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; margin-top: 0.35rem; }
-.rdesk-kind { font-size: 0.8rem; color: var(--viz-ink); }
+.rdesk-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; margin-top: 0.5rem; }
+.rdesk-kind { font-family: var(--ui); font-size: 0.82rem; color: var(--ink-2); }
 .rdesk-clearance { display: inline-flex; align-items: center; gap: 0.45rem; }
-.rdesk-clearance-label { font-size: 0.62rem; color: var(--viz-ink-muted); text-transform: none; letter-spacing: 0.04em; }
-/* The ladder (.rdesk-ladder) + rungs (.rdesk-rung) now compose the shared SegmentedControl primitive
-   (.viz-seg / .viz-seg-opt--clearance, design-system.css §4) — layout + temperatures live there. */
+.rdesk-clearance-label { font-family: var(--ui); font-size: 0.66rem; color: var(--stone); text-transform: none; letter-spacing: 0; }
+/* The ladder (.rdesk-ladder) + rungs (.rdesk-rung) compose the shared SegmentedControl primitive. */
 
-/* WS3: the reach readout is now a row of editable fields (reads/pass + timeout) + a read-only tail. */
-.rdesk-reach { font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.45rem 0 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.9rem; }
+/* The reach readout: editable fields + a read-only tail (de-jargoned labels, VUX). */
+.rdesk-reach { font-family: var(--mono); font-size: 0.72rem; color: var(--stone); margin: 0.7rem 0 0; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.9rem; }
 .rdesk-reach-field .viz-field__input { width: 4.5rem; }
 .rdesk-reach-ro { align-self: center; }
 
-.rdesk-orders { margin-top: 0.55rem; }
-.rdesk-seg-label { font-size: 0.62rem; color: var(--viz-ink-muted); }
-/* The orders box (.rdesk-prompt), captioned fields (.rdesk-field / .rdesk-field-label) + inputs
-   (.rdesk-input) now compose the EditableField primitive (.viz-field*, design-system.css §6);
-   only surface deltas remain (top margin, flow gaps, the field min-width). */
+.rdesk-orders { margin-top: 0.7rem; }
+.rdesk-seg-label { font-family: var(--ui); font-size: 0.66rem; color: var(--stone); }
 .rdesk-prompt { margin-top: 0.25rem; }
 .rdesk-fields { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: end; margin-top: 0.5rem; }
 .rdesk-input { min-width: 12ch; }
@@ -1183,44 +1192,37 @@ option { background: var(--card); color: var(--fg); }
 
 .rdesk-config { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; margin-top: 0.7rem; }
 .rdesk-seg { display: inline-flex; align-items: center; gap: 0.4rem; }
-/* The segment group (.viz-seg) + options (.rdesk-seg-opt) compose the neutral SegmentedControl
-   primitive (.viz-seg-opt, design-system.css §4). */
 
-.rdesk-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.7rem; padding-top: 0.55rem; }
-/* Typed report — state-coded via a leading GLYPH flag + data-state, NOT by coloring the small body
-   text (§3/§6 + KB-Design-Lead #184): 0.82rem is normal-size text by WCAG, so oxide (3.96:1) can't
-   color it at AA. The text stays --viz-ink (4.5:1+); the state hue rides the glyph flag, which is a
-   graphic (≥3:1). So failed reads distinctly (oxide ✕) AND legibly, never as a calm empty. */
-.rdesk-report { font-size: 0.82rem; color: var(--viz-ink); }
-.rdesk-report-flag { font-family: var(--viz-font-numeric); color: var(--viz-ink-muted); }
-.rdesk-report[data-state='found'] .rdesk-report-flag { color: var(--viz-patina); }
-.rdesk-report[data-state='failed'] .rdesk-report-flag { color: var(--viz-oxide); }
-.rdesk-report[data-state='paused'] .rdesk-report-flag { color: var(--viz-brass); }
-/* Escalation deep-link — actionable "open review →" (brass = needs-your-review, accent on hover = interactive). */
-.rdesk-review-link { background: transparent; border: 0; padding: 0 0 0 0.5rem; font-size: 0.72rem; letter-spacing: 0.04em; color: var(--viz-brass); cursor: pointer; text-transform: none; }
-.rdesk-review-link:hover { color: var(--viz-accent); text-decoration: underline; } /* interactive hover → --viz-accent (ember reserved for "decide") */
+.rdesk-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 0.85rem; padding-top: 0.7rem; border-top: 1px solid var(--hair); }
+/* Typed report — state via a leading GLYPH flag + data-state, not by coloring the small body text
+   (#184): the text stays --ink (AA); the state hue rides the glyph (a graphic ≥3:1). Failed = oxide. */
+.rdesk-report { font-family: var(--ui); font-size: 0.82rem; color: var(--ink); }
+.rdesk-report-flag { font-family: var(--mono); color: var(--stone); }
+.rdesk-report[data-state='found'] .rdesk-report-flag { color: var(--viridian); }
+.rdesk-report[data-state='failed'] .rdesk-report-flag { color: var(--oxide); }
+.rdesk-report[data-state='paused'] .rdesk-report-flag { color: var(--gold); }
+/* Escalation deep-link — "open review →" (slate interactive; ember reserved for "decide"). */
+.rdesk-review-link { background: transparent; border: 0; padding: 0 0 0 0.5rem; font-family: var(--ui); font-size: 0.72rem; color: var(--slate); cursor: pointer; }
+.rdesk-review-link:hover { color: var(--viridian); text-decoration: underline; }
 .rdesk-run { margin-left: auto; }
-/* The dispatching/busy state now lives on the Button primitive (.viz-btn--busy, toggled in JS). */
 
-/* The confirm box (.rdesk-confirm / -msg / -go) composes the ConfirmInline primitive (.viz-confirm,
-   .viz-confirm__msg, .viz-btn--danger; design-system.css §5); only the top margin is a surface delta. */
-.rdesk-confirm { margin-top: 0.6rem; }
-.rdesk-status { margin: 0.4rem 0 0; font-size: 0.8rem; min-height: 1em; color: var(--viz-ink-muted); }
-/* WS1 #2: honest run-eligibility line — muted at-rest; a paused (won't-run) researcher reads slightly dimmer. */
-.rdesk-eligibility { margin: 0.3rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); }
+/* The confirm box composes the ConfirmInline primitive (.viz-confirm; design-system.css §5). */
+.rdesk-confirm { margin-top: 0.7rem; }
+.rdesk-status { margin: 0.4rem 0 0; font-family: var(--ui); font-size: 0.8rem; min-height: 1em; color: var(--stone); }
+.rdesk-eligibility { margin: 0.3rem 0 0; font-family: var(--ui); font-size: 0.78rem; color: var(--stone); }
 .rdesk-eligibility[data-will-run='false'] { font-style: italic; }
 
-/* Add-dock — named template tiles (glyph + label), not a <select>; the chosen tile lights accent (selected = interactive). */
-.rdesk-add { margin-top: 1.4rem; padding-top: 0.9rem; border-top: 1px solid var(--viz-rule); }
-.rdesk-add-head { display: block; font-size: 0.72rem; color: var(--viz-ink-muted); margin-bottom: 0.5rem; }
+/* Add-dock — named template tiles (glyph + label); the chosen tile lights slate (selected/interactive). */
+.rdesk-add { margin-top: 1.6rem; padding-top: 1rem; border-top: 1px solid var(--hair); }
+.rdesk-add-head { display: block; font-family: var(--ui); font-size: 0.72rem; color: var(--stone); margin-bottom: 0.5rem; }
 .rdesk-tiles { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.rdesk-tile { display: inline-flex; align-items: center; gap: 0.4rem; background: transparent; border: 1px solid var(--viz-rule); padding: 0.4rem 0.7rem; cursor: pointer; color: var(--viz-ink); }
-.rdesk-tile:hover { border-color: var(--viz-ink-muted); }
-.rdesk-tile[aria-pressed='true'] { border-color: var(--viz-accent); color: var(--viz-accent); } /* selected/interactive → --viz-accent (ember reserved for "decide") */
+.rdesk-tile { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.45rem 0.75rem; cursor: pointer; color: var(--ink); transition: border-color var(--t), color var(--t); }
+.rdesk-tile:hover { border-color: var(--slate); }
+.rdesk-tile[aria-pressed='true'] { border-color: var(--slate); color: var(--slate); }
 .rdesk-tile-glyph { font-size: 1rem; }
-.rdesk-tile-label { font-size: 0.7rem; }
-.rdesk-add-id { display: block; margin-top: 0.6rem; background: var(--viz-field); color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 0; padding: 0.35rem 0.5rem; min-width: 28ch; }
-.rdesk-add-status { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--viz-ink-muted); }
+.rdesk-tile-label { font-family: var(--ui); font-size: 0.72rem; }
+.rdesk-add-id { display: block; margin-top: 0.6rem; background: var(--linen); color: var(--ink); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.4rem 0.55rem; min-width: 28ch; }
+.rdesk-add-status { margin: 0.4rem 0 0; font-family: var(--ui); font-size: 0.8rem; color: var(--stone); }
 
 /* WORKIQ-UI — the m365/WorkIQ connector install/status card on the m365 strip. The connector CLI is the
    prerequisite the researcher reaches the tenant through; without it the wire has nothing to call (silent
