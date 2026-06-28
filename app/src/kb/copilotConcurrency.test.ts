@@ -2,6 +2,7 @@
 // holds even when many spawners (stages + jobs + researchers) contend at once — the safety bound
 // that makes raising per-stage caps safe. Deterministic: no copilot, just instrumented async work.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import os from 'node:os';
 import {
   Semaphore,
   withCopilotSlot,
@@ -32,6 +33,17 @@ async function peakConcurrency(n: number, gate: <T>(fn: () => Promise<T>) => Pro
   await Promise.all(Array.from({ length: n }, task));
   return peak;
 }
+
+describe('coresDerivedCeiling baseline (SCALE adaptive-default — SPEC-0048 batch-2)', () => {
+  it('is the AIMD seed = cores-1 bounded to [3, 16] (raised so real machines start higher)', () => {
+    const c = coresDerivedCeiling();
+    expect(c).toBeGreaterThanOrEqual(3); // floor: even a small box can fill a cap-3+ stage
+    expect(c).toBeLessThanOrEqual(16); // cap: a huge box still seeds sanely; AIMD climbs to MAX from here
+    // Within bounds it tracks the machine's real parallelism.
+    const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
+    expect(c).toBe(Math.max(3, Math.min(16, cores - 1)));
+  });
+});
 
 describe('Semaphore (copilot concurrency primitive)', () => {
   it('never lets in-flight exceed the ceiling under heavy contention', async () => {

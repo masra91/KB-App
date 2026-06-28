@@ -240,11 +240,12 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     expect(checked(root, 'ceiling-mode')).toBe('auto');
     expect((root.querySelector('#ceiling-manual-row') as HTMLElement).hidden).toBe(true);
     expect((root.querySelector('#scale-hint') as HTMLElement).hidden).toBe(true);
-    // Effective per-stage caps (resolveStageCaps): today's defaults.
-    expect(stepperValue('cap-decompose')).toBe('3');
-    expect(stepperValue('cap-claims')).toBe('3');
-    expect(stepperValue('cap-compose')).toBe('3');
-    expect(stepperValue('cap-archive')).toBe('3'); // INGEST-PERF item 3: Archive un-serialized (1→3)
+    // Effective per-stage caps (resolveStageCaps): today's defaults. SCALE adaptive-default (SPEC-0048
+    // batch-2) raised the cap-stages 3→4; Connect stays serial (1) by default.
+    expect(stepperValue('cap-decompose')).toBe('4');
+    expect(stepperValue('cap-claims')).toBe('4');
+    expect(stepperValue('cap-compose')).toBe('4');
+    expect(stepperValue('cap-archive')).toBe('4');
   });
 
   it('Connect is an editable cap now — not pinned/disabled, and a bump persists it (SCALE-5 unpin)', async () => {
@@ -311,13 +312,13 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     const { set } = setScaleApi({ stageCaps: { claims: 2 } });
     await mountSettings(root);
     await tick();
-    expect(stepperValue('cap-decompose')).toBe('3');
-    bump('cap-decompose', 1); // 3 → 4
+    expect(stepperValue('cap-decompose')).toBe('4'); // SCALE adaptive-default: cap-stage default 3→4
+    bump('cap-decompose', 1); // 4 → 5
     await tick();
-    expect(stepperValue('cap-decompose')).toBe('4');
+    expect(stepperValue('cap-decompose')).toBe('5');
     // Full settings sent; the prior claims override is merged, not clobbered; autonomy preserved.
     expect(set).toHaveBeenCalledWith(
-      expect.objectContaining({ stageCaps: { claims: 2, decompose: 4 }, autonomyDefault: 'guarded', devLogLevel: 'info' }),
+      expect.objectContaining({ stageCaps: { claims: 2, decompose: 5 }, autonomyDefault: 'guarded', devLogLevel: 'info' }),
     );
   });
 
@@ -348,7 +349,7 @@ describe('Settings · Scale (SPEC-0048 SCALE — stage-parallelism knobs)', () =
     await mountSettings(root);
     await tick();
     expect(root.querySelector('#scale-status')).toBeTruthy(); // card rendered, not a blank/crash
-    expect(stepperValue('cap-decompose')).toBe('3'); // garbled → default
+    expect(stepperValue('cap-decompose')).toBe('4'); // garbled → default (SCALE adaptive-default: 3→4)
     expect(stepperValue('cap-compose')).toBe('8'); // out-of-range → clamped to STAGE_CAP_MAX
   });
 

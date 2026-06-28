@@ -26,10 +26,17 @@ function resolveCeiling(): number {
  *  ceiling to `cores-1`, the real parallelism) so a cap-3 stage can fill its cap AND leave slots for
  *  downstream stages' reserved first slot. This is just the SEED/fixed-mode value; in Auto mode the AIMD
  *  controller (SCALE-7/8) climbs/backs off from here on real rate-limit feedback, so a too-high seed
- *  self-corrects rather than thrashing the CLI. Env + manual Settings overrides still win unchanged. */
+ *  self-corrects rather than thrashing the CLI. Env + manual Settings overrides still win unchanged.
+ *
+ *  SCALE adaptive-default (SPEC-0048 batch-2): raise the baseline again — `max(2,min(8,…))` still
+ *  under-served real machines (a 12–16-core dev/server box seeded the adaptive controller at only 8, then
+ *  climbed +1 every 8 successes — a slow ramp to its real headroom). Tie to `cores-1` bounded to [3,16]:
+ *  the floor of 3 lets even a small box fill a cap-3+ stage, and a real machine seeds the AIMD climb much
+ *  higher (still bounded by COPILOT_CEILING_MAX=32 and still halving on any rate-limit). Adaptive is ON by
+ *  default (Auto when no env/manual override), so this seed is where the self-tuning starts, not a cap. */
 export function coresDerivedCeiling(): number {
   const cores = typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length;
-  return Math.max(2, Math.min(8, cores - 1));
+  return Math.max(3, Math.min(16, cores - 1));
 }
 
 /** The env ceiling override (`KB_COPILOT_MAX_CONCURRENCY`) if a valid ≥1 int, else undefined. SCALE-1:

@@ -12,6 +12,14 @@ import {
   resolveCeilingWrite,
 } from './scaleConstants';
 
+describe('DEFAULT_STAGE_CAPS baseline (SCALE adaptive-default — SPEC-0048 batch-2)', () => {
+  it('pins the raised per-stage baselines: cap-stages at 4, Connect serial (1) by default', () => {
+    expect(DEFAULT_STAGE_CAPS).toEqual({ archive: 4, decompose: 4, connect: 1, claims: 4, compose: 4 });
+    // Every default stays within the sane per-stage bound.
+    for (const cap of Object.values(DEFAULT_STAGE_CAPS)) expect(cap).toBeLessThanOrEqual(STAGE_CAP_MAX);
+  });
+});
+
 describe('clampStageCap', () => {
   it('clamps a configured cap into [1, STAGE_CAP_MAX]', () => {
     expect(clampStageCap('decompose', 4)).toBe(4);

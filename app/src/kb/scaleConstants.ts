@@ -9,17 +9,19 @@ export const SCALE_STAGES = ['archive', 'decompose', 'connect', 'claims', 'compo
 export type ScaleStage = (typeof SCALE_STAGES)[number];
 
 /** Per-stage caps. Decompose/Claims/Compose ran the hardcoded `STAGE_CAP=3`; Connect & Archive ran
- *  serial (1). INGEST-PERF item 3: un-serialize Archive (1→3, matching decompose/claims) — its drain
- *  already processes each item in its own ephemeral worktree with per-source files (no shared-state
- *  collision, unlike the pre-SCALE-5 Connect shared-audit case), so cap>1 is safe and the raised global
- *  ceiling (item 2) supports it. Connect is left at 1 by default (its per-block resolve is the heaviest,
- *  cross-KB cognition); it remains overridable via Settings (SCALE-5). */
+ *  serial (1). INGEST-PERF item 3 un-serialized Archive (1→3); SCALE adaptive-default (SPEC-0048 batch-2)
+ *  raises the conservative baselines again — 3 was too low now that the adaptive ceiling (ON by default)
+ *  climbs into the teens on real machines, so a per-stage cap of 3 became the bottleneck. Bump
+ *  Archive/Decompose/Claims/Compose to 4 (each runs in its own ephemeral worktree with per-source files,
+ *  so cap>1 is collision-safe; the global ceiling still bounds the real total). Connect stays at 1 by
+ *  default — it's the heaviest cross-KB cognition (dedup/entity-resolution/linking) and a concurrent
+ *  default warrants an explicit policy call; it remains Settings-overridable (SCALE-5). */
 export const DEFAULT_STAGE_CAPS: Record<ScaleStage, number> = {
-  archive: 3,
-  decompose: 3,
+  archive: 4,
+  decompose: 4,
   connect: 1,
-  claims: 3,
-  compose: 3,
+  claims: 4,
+  compose: 4,
 };
 
 /** Sane per-stage cap bound — a stage running more than this many cognitions at once thrashes more
