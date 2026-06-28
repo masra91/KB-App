@@ -6,9 +6,9 @@
    clearance ladders, …) are built ON these, in their own surface files — NOT here (the boundary rule:
    reused by a 2nd surface → here; this-view's composition → the surface file).
 
-   Bundled faces: @fontsource Saira Condensed / IBM Plex Mono / IBM Plex Sans (self-hosted, imported in
-   renderer.ts — pinned, OFL, no CDN). The §4 shape-matched fallback stacks below mean a load miss
-   degrades gracefully without collapsing the identity. */
+   Bundled faces (SPEC-0057 Vellum §4): @fontsource Inter (interface) / Spectral (voice) / IBM Plex Mono
+   (data) (self-hosted, imported in renderer.ts — pinned, OFL, no CDN). The §4 fallback stacks below mean
+   a load miss degrades gracefully without collapsing the identity. */
 
 /* 1. Color tokens (§3) — Vellum brand palette (SPEC-0057 / brand/BRAND-GUIDELINES.md). The app skin is
    FIXED-LIGHT: the cream study IS the product; surfaces don't invert (no dark default, no
@@ -37,10 +37,16 @@
   /* Signature field gradient (brand §3): deep blue → slate → viridian → sprout, behind graphs/heroes. */
   --viz-field-gradient: linear-gradient(135deg, #1e3557 0%, #3a6e88 38%, #2f6b5b 72%, #3e9e82 100%);
 
-  /* 2. Type roles (§4) — bundled faces + shape-matched fallbacks (identity-preserving on a load miss). */
-  --viz-font-signage: 'Saira Condensed', 'Arial Narrow', sans-serif;
+  /* 2. Type roles (§4, Vellum brand §4) — bundled faces + fallbacks (identity-preserving on a load miss).
+     Voice = Spectral (names, idea titles, section heads, grounded quotes). Interface = Inter (buttons,
+     labels, nav, body — sentence case, never title case). Data = IBM Plex Mono (counts, confidence, hex,
+     timestamps). NOTE: --viz-font-signage now resolves to Inter (the old Saira Condensed instrument face
+     is retired); the `.viz-signage` UPPERCASE treatment is kept this slice and converts to sentence-case
+     + adopts --viz-font-voice for true headers in the screen rethemes (#403-406), per brand §4. */
+  --viz-font-voice: 'Spectral', Georgia, 'Times New Roman', serif;
+  --viz-font-signage: 'Inter', system-ui, sans-serif;
   --viz-font-numeric: 'IBM Plex Mono', ui-monospace, monospace;
-  --viz-font-body: 'IBM Plex Sans', system-ui, sans-serif;
+  --viz-font-body: 'Inter', system-ui, sans-serif;
 
   /* 3. Motion tokens (§5) — durations + easings; one reduced-motion reset (below) zeroes them all. */
   --viz-dur-index: 220ms;     /* the signature "it moved" index hop */
@@ -55,6 +61,7 @@
 
 /* Type-role utilities (apply the §4 roles without re-stating the stack). */
 .viz-signage { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; }
+.viz-voice { font-family: var(--viz-font-voice); } /* Spectral — names, idea titles, section heads, quotes (brand §4 voice) */
 .viz-numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* fixed-width so rolling counts never reflow */
 .viz-body { font-family: var(--viz-font-body); }
 

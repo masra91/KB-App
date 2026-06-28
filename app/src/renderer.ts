@@ -2,13 +2,17 @@
 // minimal UI, no framework. On launch it asks main for state and shows either the
 // Setup wizard (no KB yet — a full-screen pre-shell gate, SHELL-9) or the navigation
 // shell (KB loaded; Capture is the default view, SHELL-4).
-// Bundled design-system fonts (SPEC-0033 DESIGN-7) — self-hosted @fontsource faces (pinned, OFL, no
-// CDN) backing the `--viz-font-*` roles. Saira Condensed SemiBold (signage) + IBM Plex Mono 400/500
-// (tabular numerics) + IBM Plex Sans 400 (body). Imported before the design system so @font-face is live.
-import '@fontsource/saira-condensed/600.css';
+// Bundled design-system fonts (SPEC-0057 Vellum / SPEC-0033 DESIGN-7) — self-hosted @fontsource faces
+// (pinned, OFL, no CDN) backing the `--viz-font-*` roles. Brand §4: Inter (interface — body/labels/nav),
+// Spectral (voice — names, titles, section heads, quotes), IBM Plex Mono (data — counts/confidence/hex/
+// timestamps). Imported before the design system so @font-face is live. (Replaces Saira Condensed + Plex
+// Sans from the pre-brand instrument identity.)
+import '@fontsource/inter/400.css';
+import '@fontsource/inter/600.css';
+import '@fontsource/spectral/400.css';
+import '@fontsource/spectral/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
-import '@fontsource/ibm-plex-sans/400.css';
 import './shell/design-system.css'; // shared visual foundation — tokens/type-roles/primitives/motion
 import './shell/views/theLine.css'; // SPEC-0032 "The Line" surface — pipeline-visualization Status view
 import './shell/permissionGate.css'; // SPEC-0034 MACOS-7 "Asking for the keys" — folder-permission UX
