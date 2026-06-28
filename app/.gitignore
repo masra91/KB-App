@@ -101,6 +101,8 @@ test-results/
 
 # Live-run walkthrough screenshots — regenerated each run for DL/QD inspection (not baselines)
 e2e/walkthrough-shots/
+# e2e freshness marker — the git SHA the current build was produced from (globalSetup stale-build guard)
+.e2e-built-sha
 
 # SPEC-0042 EVAL — last-known-good baselines are gitignored, never promoted (EVAL-8)
 eval/baselines/
