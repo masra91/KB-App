@@ -113,6 +113,42 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
     });
   });
 
+  // UX v2 material adoption (DL-2 Agents contract; vellum-ux-v2-language §1/§3/§4). The visual is
+  // signed by DL-2 on a live walkthrough; these guard the DOM CONTRACT the v2 CSS hangs off (material
+  // classes + the Spectral voice hook) so a markup refactor can't silently drop the crafted depth.
+  describe('UX v2 material adoption (DL-2 contract)', () => {
+    it('wraps the group in a material card with paper-grain, scoped .agents-v2', async () => {
+      setApi(vi.fn(async () => AGENTS));
+      await mountAgents(root);
+      await tick();
+      const container = root.querySelector<HTMLElement>('.agents-v2')!;
+      expect(container).toBeTruthy();
+      expect(container.classList.contains('viz-card')).toBe(true); // raised material container (depth, not flat)
+      expect(container.classList.contains('viz-grain')).toBe(true); // vellum paper tooth
+    });
+
+    it('renders each agent as a hover-lift material card with a Spectral-voice head', async () => {
+      setApi(vi.fn(async () => AGENTS));
+      await mountAgents(root);
+      await tick();
+      for (const agent of Array.from(root.querySelectorAll<HTMLElement>('.agent'))) {
+        expect(agent.classList.contains('viz-card')).toBe(true);
+        expect(agent.classList.contains('viz-card--lift')).toBe(true); // hover-life (§3)
+      }
+      const label = root.querySelector<HTMLElement>('.agent[data-key="decompose"] .agent-label')!;
+      expect(label.classList.contains('viz-voice')).toBe(true); // Spectral head (§4), no emoji
+    });
+
+    it('keeps the material adoption on the empty + loading states (no flat .card fallback)', async () => {
+      setApi(vi.fn(async () => []));
+      await mountAgents(root);
+      await tick();
+      const container = root.querySelector<HTMLElement>('.agents-v2')!;
+      expect(container?.classList.contains('viz-card')).toBe(true);
+      expect(root.querySelector('.card')).toBeNull(); // the legacy flat card is fully retired here
+    });
+  });
+
   // SPEC-0048 — the global "Default model" picker over the live CLI catalog.
   describe('SPEC-0048 model picker', () => {
     const CATALOG: ModelCatalogView = {
