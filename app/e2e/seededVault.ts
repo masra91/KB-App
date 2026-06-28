@@ -3,11 +3,12 @@
 // The smoke fixtures (jobs/researchers.e2e.ts) seed a *minimal, empty* vault — enough to boot to the
 // shell, but the data-views (Explore/Health/Activity) then render their EMPTY states, so a screenshot
 // gate over them proves nothing. This fixture builds a tiny but REAL git-backed evergreen graph on
-// disk so every data-view renders genuine content:
-//   - Explore  → a real neighborhood graph (linked entities, asserted edges at confidence ≥ 0.7).
-//   - Health   → real findings (a deliberate orphan, a stub, and a dangling link).
+// disk so every data-view renders genuine, JUDGEABLE content (DL-2's seed-data spec):
+//   - Explore  → a focal "Project Atlas" node with a rich rail: 4 linked neighbors + 3 claims at
+//                varied confidence (0.9 / 0.65 / 0.4) so the confidence bars + a low-confidence note show.
+//   - Health   → an ok + warn + bad spread: healthy linked entities ("ok") plus a deliberate orphan,
+//                a dangling link, and a stub (the three structural-lint finding kinds).
 //   - Activity → a real audit feed (seeded JSONL events + a resolvable git HEAD).
-//   - Capture/Ask/Sources/Settings/Agents → boot against a configured, populated KB.
 //
 // It is built with the PRODUCTION renderers (renderEntityNode/renderClaimMd + the generated
 // link/claims blocks, same as app/test/recallVault.ts) so the views parse exactly what Connect/Claims
@@ -17,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { renderEntityNode, applyLinksBlock, type EntityNode } from '../src/kb/connectDoc';
-import { renderClaimMd, applyClaimsBlock } from '../src/kb/claimDoc';
+import { renderClaimMd, applyClaimsBlock, type ClaimBacklink } from '../src/kb/claimDoc';
 import type { ClaimDecision } from '../src/kb/claims';
 import { ulid } from '../src/kb/ulid';
 
@@ -29,6 +30,7 @@ export interface SeededVault {
 }
 
 const TS = '2026-06-01T00:00:00.000Z';
+const SOURCE_DIR = 'sources/2026/06/01/SRC1';
 
 function writeFile(root: string, rel: string, body: string): void {
   const abs = path.join(root, rel);
@@ -36,24 +38,24 @@ function writeFile(root: string, rel: string, body: string): void {
   fs.writeFileSync(abs, body);
 }
 
-// renderEntityNode emits `…---\n\n# <name>\n` with no prose body — every node would read as a stub
-// (<280-char body). Append real prose after the heading (before the generated link/claims blocks) so a
-// node clears Health's stub threshold; nodes left without prose stay deliberate stubs.
-function withProse(entityMd: string, prose: string): string {
-  return `${entityMd}\n${prose}\n`;
-}
-
 function entity(node: Partial<EntityNode> & Pick<EntityNode, 'kind' | 'name' | 'confidence'>): EntityNode {
   return {
     id: ulid(),
     aliases: [],
     tags: [`type/${node.kind}`],
-    derivedFrom: ['sources/2026/06/01/SRC1'],
+    derivedFrom: [SOURCE_DIR],
     resolvedFrom: [],
     createdAt: TS,
     updatedAt: TS,
     ...node,
   };
+}
+
+// renderEntityNode emits `…---\n\n# <name>\n` with no prose body — every node would read as a stub
+// (<280-char body). Append real prose after the heading (before the generated link/claims blocks) so a
+// node clears Health's stub threshold; a node left without prose stays a deliberate stub.
+function withProse(entityMd: string, prose: string): string {
+  return `${entityMd}\n${prose}\n`;
 }
 
 /**
@@ -76,79 +78,123 @@ export function seedWalkthroughVault(): SeededVault {
   writeFile(vault, '.kb/jobs/registry.json', JSON.stringify([], null, 2));
 
   // --- Source (immutable ground truth) ----------------------------------------------------------
-  const sourceDir = 'sources/2026/06/01/SRC1';
   writeFile(
     vault,
-    `${sourceDir}/source.md`,
-    '---\nid: SRC1\n---\n\nAda Lovelace worked on the Analytical Engine and is regarded as the first computer programmer. Charles Babbage designed it.\n',
+    `${SOURCE_DIR}/source.md`,
+    '---\nid: SRC1\n---\n\nProject Atlas is the FY26 cross-team knowledge initiative, led with the Finance Team against the Q3 Budget. Ada Lovelace and Steve Park are the leads.\n',
   );
 
-  // --- Entities: a connected pair (Ada ↔ Engine) so Explore shows a real graph ------------------
+  // --- Rel-paths ---------------------------------------------------------------------------------
+  const atlasRel = 'entities/project/project-atlas.md';
   const adaRel = 'entities/person/ada-lovelace.md';
-  const engineRel = 'entities/concept/analytical-engine.md';
-  const claimRel = 'claims/person/ada-lovelace.md';
+  const financeRel = 'entities/org/finance-team.md';
+  const budgetRel = 'entities/concept/q3-budget.md';
+  const steveRel = 'entities/person/steve-park.md';
 
-  let adaMd = withProse(
-    renderEntityNode(
-      entity({ kind: 'person', name: 'Ada Lovelace', confidence: 0.92, aliases: ['Ada', 'Lovelace'], tags: ['type/person', 'mathematician'] }),
-    ),
-    'Ada Lovelace (1815–1852) was an English mathematician known for her work on Charles Babbage’s ' +
-      'proposed Analytical Engine. She recognised that the machine had applications beyond pure calculation, ' +
-      'and published the first algorithm intended to be carried out by such a machine — for which she is often ' +
-      'regarded as the first computer programmer. Her notes on the engine remain a landmark in computing history.',
+  // --- Helper: render a claim file + return its backlink row for the entity's claims block -------
+  let claimSeq = 0;
+  const claim = (subjectRel: string, c: ClaimDecision): ClaimBacklink => {
+    const claimRel = `claims/project/project-atlas-${++claimSeq}.md`;
+    writeFile(vault, claimRel, renderClaimMd(c, { id: ulid(), subject: subjectRel, derivedFrom: SOURCE_DIR, createdAt: TS }));
+    return { claimPath: claimRel, statement: c.statement, status: c.status, confidence: c.confidence };
+  };
+
+  // --- FOCAL node: Project Atlas (top confidence → Explore's default center) ---------------------
+  // 4 linked neighbors + 3 claims at varied confidence so the focal rail shows confidence bars + a
+  // low-confidence (hypothesis) note (DL-2 rubric).
+  let atlasMd = withProse(
+    renderEntityNode(entity({ kind: 'project', name: 'Project Atlas', confidence: 0.95, tags: ['type/project', 'initiative'] })),
+    'Project Atlas is the FY26 cross-team knowledge initiative, consolidating how the Finance Team plans and ' +
+      'reports against the Q3 Budget. It is led by Ada Lovelace with Steve Park, and is the focal program that ' +
+      'the surrounding people, org, and concept entities all connect into. The initiative spans data capture, ' +
+      'recall, and synthesis across the organisation.',
   );
-  adaMd = applyLinksBlock(adaMd, [{ targetRel: engineRel }]);
-  adaMd = applyClaimsBlock(adaMd, [
-    { claimPath: claimRel, statement: 'Ada Lovelace is regarded as the first computer programmer.', status: 'fact', confidence: 0.8 },
+  atlasMd = applyLinksBlock(atlasMd, [{ targetRel: adaRel }, { targetRel: financeRel }, { targetRel: budgetRel }, { targetRel: steveRel }]);
+  atlasMd = applyClaimsBlock(atlasMd, [
+    claim(atlasRel, { statement: 'Project Atlas is the FY26 cross-team knowledge initiative.', status: 'fact', confidence: 0.9, mentions: ['FY26 cross-team knowledge initiative'], relatesTo: ['Finance Team'] }),
+    claim(atlasRel, { statement: 'Project Atlas is likely to absorb the legacy Finance reporting workflow.', status: 'interpretation', confidence: 0.65, mentions: ['Finance Team'], relatesTo: ['Finance Team'] }),
+    claim(atlasRel, { statement: 'Project Atlas may expand to the EU region in Q4.', status: 'hypothesis', confidence: 0.4, mentions: [], relatesTo: ['Q3 Budget'] }),
   ]);
-  writeFile(vault, adaRel, adaMd);
+  writeFile(vault, atlasRel, atlasMd);
 
-  let engineMd = withProse(
-    renderEntityNode(entity({ kind: 'concept', name: 'Analytical Engine', confidence: 0.85 })),
-    'The Analytical Engine was a proposed mechanical general-purpose computer designed by Charles Babbage. ' +
-      'It introduced an arithmetic logic unit, control flow via conditional branching and loops, and integrated ' +
-      'memory — making it the first design for a Turing-complete machine. Though never built in Babbage’s lifetime, ' +
-      'it directly anticipated the architecture of the modern digital computer.',
+  // --- Linked neighbors (all "ok": prose + a resolved link back to Atlas) ------------------------
+  const linkedNeighbor = (rel: string, node: Parameters<typeof entity>[0], prose: string, extraLinks: { targetRel: string }[] = []): void => {
+    let md = withProse(renderEntityNode(entity(node)), prose);
+    md = applyLinksBlock(md, [{ targetRel: atlasRel }, ...extraLinks]);
+    writeFile(vault, rel, md);
+  };
+  // Prose for the "ok" neighbors is kept comfortably over Health's 280-char stub threshold so they read
+  // as healthy (NOT thin-page findings) — only the deliberate stub below should appear under THIN PAGES.
+  linkedNeighbor(
+    adaRel,
+    { kind: 'person', name: 'Ada Lovelace', confidence: 0.92, aliases: ['Ada', 'Lovelace'], tags: ['type/person', 'mathematician'] },
+    'Ada Lovelace leads Project Atlas. A mathematician by background, she frames the initiative around making the ' +
+      'organisation’s knowledge graph genuinely queryable rather than merely stored, and personally owns the recall and ' +
+      'synthesis workstreams across the program. She works closely with the Finance Team to ground the initiative in the ' +
+      'real reporting needs behind the Q3 Budget, and partners with Steve Park on bringing source material into the vault.',
   );
-  engineMd = applyLinksBlock(engineMd, [{ targetRel: adaRel }]);
-  writeFile(vault, engineRel, engineMd);
+  linkedNeighbor(
+    financeRel,
+    { kind: 'org', name: 'Finance Team', confidence: 0.8, tags: ['type/org'] },
+    'The Finance Team is the primary stakeholder of Project Atlas. They own the Q3 Budget that the initiative reports ' +
+      'against, and are the first group whose planning and reporting workflow Atlas consolidates. Their requirements set ' +
+      'the initial scope of the program, and their reviewers validate that what Atlas surfaces matches the figures of ' +
+      'record. As the initiative matures, the team expects to retire several spreadsheets in favour of the shared graph.',
+  );
+  linkedNeighbor(
+    budgetRel,
+    { kind: 'concept', name: 'Q3 Budget', confidence: 0.75, tags: ['type/concept'] },
+    'The Q3 Budget is the financial plan Project Atlas reports against. It is the shared reference the Finance Team and ' +
+      'the initiative leads use to scope the FY26 workstreams and to decide what gets built first. It connects the people ' +
+      'and org entities in this neighborhood to a concrete artifact, and is the figure of record against which the ' +
+      'initiative’s claims about spend, savings, and forecast are checked for the cross-team reporting cadence.',
+  );
+  // Steve Park is "ok" (prose over the threshold + a resolved link to Atlas) but ALSO carries the
+  // deliberate DANGLING link, so he is the source of the single dead-link finding.
+  let steveMd = withProse(
+    renderEntityNode(entity({ kind: 'person', name: 'Steve Park', confidence: 0.7, tags: ['type/person'] })),
+    'Steve Park co-leads Project Atlas with Ada Lovelace, focused on the data-capture workstream and the connectors ' +
+      'that bring source material into the vault for the rest of the initiative to build on. He owns the intake side of ' +
+      'the program — wiring sources in, watching ingestion health, and making sure the graph stays fed — and pairs with ' +
+      'the Finance Team to prioritise which reporting sources land first against the Q3 Budget for FY26 planning.',
+  );
+  steveMd = applyLinksBlock(steveMd, [{ targetRel: atlasRel }, { targetRel: 'entities/concept/nonexistent-thing.md' }]); // dangling → Health dead-link finding
+  writeFile(vault, steveRel, steveMd);
 
   // --- Deliberate Health findings ---------------------------------------------------------------
-  // (a) Dangling link: Babbage links to an entity that doesn't exist → a dead-link finding.
-  let babbageMd = renderEntityNode(entity({ kind: 'person', name: 'Charles Babbage', confidence: 0.78 }));
-  babbageMd = applyLinksBlock(babbageMd, [{ targetRel: 'entities/concept/difference-engine.md' }]);
-  writeFile(vault, 'entities/person/charles-babbage.md', babbageMd);
-
-  // (b) Orphan + stub: no links in or out, and a body well under the 280-char stub threshold.
-  const orphanMd = renderEntityNode(entity({ kind: 'concept', name: 'Orphaned Idea', confidence: 0.6 }));
-  writeFile(vault, 'entities/concept/orphaned-idea.md', orphanMd);
-
-  // --- Claim (grounds Ada; gives Explore a claim to surface) ------------------------------------
-  const claim: ClaimDecision = {
-    statement: 'Ada Lovelace is regarded as the first computer programmer.',
-    status: 'fact',
-    confidence: 0.8,
-    mentions: ['first computer programmer'],
-    relatesTo: ['Analytical Engine'],
-  };
-  writeFile(vault, claimRel, renderClaimMd(claim, { id: ulid(), subject: adaRel, derivedFrom: sourceDir, createdAt: TS }));
+  // Orphan: prose (so NOT a stub) but no links in or out → an orphan-only finding.
+  writeFile(
+    vault,
+    'entities/concept/loose-idea.md',
+    withProse(
+      renderEntityNode(entity({ kind: 'concept', name: 'Loose Idea', confidence: 0.6, tags: ['type/concept'] })),
+      'A standalone note that never got connected to anything — it has real, substantial prose but no links in or out, ' +
+        'so it sits disconnected from the rest of the graph. It is exactly the kind of dangling thought Health surfaces ' +
+        'as an orphan: worth keeping, but a candidate to reconnect into the neighborhood so it stops floating on its own. ' +
+        'Because it carries enough body, it reads as an ORPHAN only — not also a thin-page stub — which is the point.',
+    ),
+  );
+  // Stub: a short body (well under the 280-char threshold) but linked (to Ada) so it is NOT an orphan.
+  let tinyMd = renderEntityNode(entity({ kind: 'person', name: 'Tiny Entry', confidence: 0.55, tags: ['type/person'] }));
+  tinyMd = applyLinksBlock(withProse(tinyMd, 'A barely-there note.'), [{ targetRel: adaRel }]);
+  writeFile(vault, 'entities/person/tiny-entry.md', tinyMd);
 
   // --- Audit feed (so Activity renders events, not its empty state) -----------------------------
   const audit = (actor: string, eventType: string, subjects: Record<string, string>, payload: Record<string, unknown>, ts: string): string =>
     JSON.stringify({ ts, actor, eventType, subjects, payload, runId: 'walkthrough-seed' });
   writeFile(
     vault,
-    `${sourceDir}/audit.jsonl`,
+    `${SOURCE_DIR}/audit.jsonl`,
     [
-      audit('archivist', 'archived', { sourceId: 'SRC1' }, { title: 'Ada Lovelace & the Analytical Engine' }, '2026-06-01T12:00:00.000Z'),
-      audit('connect', 'connected', { entityId: 'ada' }, { edges: 1 }, '2026-06-01T12:01:00.000Z'),
-      audit('claims', 'claimed', { claimId: 'ada-claim' }, { confidence: 0.8 }, '2026-06-01T12:02:00.000Z'),
+      audit('archivist', 'archived', { sourceId: 'SRC1' }, { title: 'Project Atlas kickoff brief' }, '2026-06-01T12:00:00.000Z'),
+      audit('connect', 'connected', { entityId: 'project-atlas' }, { edges: 4 }, '2026-06-01T12:01:00.000Z'),
+      audit('claims', 'claimed', { claimId: 'project-atlas-1' }, { confidence: 0.9 }, '2026-06-01T12:02:00.000Z'),
     ].join('\n') + '\n',
   );
   writeFile(
     vault,
     '.kb/audit.jsonl',
-    audit('panel', 'recall', {}, { question: 'Who invented the Analytical Engine?' }, '2026-06-01T12:05:00.000Z') + '\n',
+    audit('panel', 'recall', {}, { question: 'What is Project Atlas?' }, '2026-06-01T12:05:00.000Z') + '\n',
   );
 
   // --- Make it a real git repo (Activity reads git HEAD; SETUP-3 = git from the start) ----------
