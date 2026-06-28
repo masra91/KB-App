@@ -257,6 +257,18 @@ jobs:
         run: npm run package
       - name: Playwright e2e — packaged boot smoke (TEST-4)
         run: npm run test:e2e
+      # CORRECTIVE SWARM gate-of-record: publish the live-run walkthrough screenshots (every view,
+      # light+dark, on the seeded vault — walkthrough.e2e.ts) as a per-OS artifact, so DL/QD/PM can
+      # pull the packaged-app renders (macOS AND Windows) straight from a CI run for the visual sign,
+      # without a local `npm run walkthrough`. `if: always()` so the shots survive a smoke failure
+      # (a stuck/broken view is exactly what we want to SEE); `ignore` so it never reds the job.
+      - name: Upload live-run walkthrough screenshots (DL/QD visual inspection)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: walkthrough-shots-${{ matrix.os }}
+          path: app/e2e/walkthrough-shots/
+          if-no-files-found: ignore
 
   # Visual-snapshot baseline generator (SPEC-0033 §6 / DESIGN-9 HYBRID gate). The WS2 design-system
   # snapshot (e2e/designSystem.e2e.ts, #233) compares the packaged app's render against a *-linux.png
