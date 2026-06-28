@@ -13,6 +13,9 @@ import type {
   TodayActivityItem,
   TodayStation,
 } from './types';
+import type { ActivityFeedEntry } from './activityDigest';
+import type { HealthProjection, HealthDimensionKey } from './healthProjection';
+import type { AuditActor } from './audit';
 
 /** The precise upstream fields Today needs — mapped from existing projections by the main-side wiring. */
 export interface TodayInputs {
@@ -147,4 +150,50 @@ export function compactAgo(ms: number): string {
 
 function isNonEmpty(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
+}
+
+// ── Composition helpers (map upstream projection reads → TodayInputs fields) ──────────────────────────
+// These are the genuinely-new slice-2 mapping logic; the main-side wiring calls them + assembles the rest
+// (conversion/connections/stations/reviews/contradictions) into `TodayInputs` before `buildTodayProjection`.
+
+/** Map an audit actor → the Today activity kind (drives the feed-row glyph; DL-1's CSS maps kind→glyph). */
+export function activityKind(actor: AuditActor | string): TodayActivityItem['kind'] {
+  switch (actor) {
+    case 'compose':
+    case 'output':
+      return 'composed';
+    case 'connect':
+      return 'connected';
+    case 'claims':
+      return 'extracted';
+    case 'archivist':
+    case 'archive':
+      return 'captured';
+    default:
+      return 'other';
+  }
+}
+
+/** Map the curated activity feed → `TodayInputs.activity` (newest-first, capped). The entry `summary` is
+ *  the human one-liner (already names its subject), so `ref` is left for the view; kind drives the glyph;
+ *  `agoMs` is the entry's representative-event age. Malformed `ts` → 0 age (ENG-15/16, no NaN). */
+export function todayActivityFromFeed(
+  entries: ActivityFeedEntry[],
+  nowMs: number,
+  cap = MAX_ACTIVITY,
+): TodayInputs['activity'] {
+  return (entries ?? []).slice(0, cap).map((e) => {
+    const t = Date.parse(e?.ts ?? '');
+    return { kind: activityKind(e?.actor), text: typeof e?.summary === 'string' ? e.summary : '', agoMs: Number.isFinite(t) ? Math.max(0, nowMs - t) : 0 };
+  });
+}
+
+/** Map the Health projection's dimensions → `TodayInputs.health` counts (the glance reads the SAME
+ *  dangling/orphans/thin DEV-2 computes; `buildTodayProjection` re-derives the identical severity). */
+export function todayHealthFromProjection(health: HealthProjection | null | undefined): TodayInputs['health'] {
+  const count = (key: HealthDimensionKey): number => {
+    const dim = health?.dimensions?.find((d) => d.key === key);
+    return safeCount(dim?.count);
+  };
+  return { dangling: count('dangling'), orphans: count('orphans'), thin: count('thin') };
 }
