@@ -10,7 +10,7 @@ import type { AgentView, ModelCatalogView } from '../../kb/types';
 // Mounted as the **Librarians** section of the Agents hub (SPEC-0053 WS-E) — the hub owns the group
 // header/naming, so this section drops its own page-title h1 and renders the librarian list directly.
 export async function mountAgents(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card"><p class="agent-note">Loading…</p></div>`;
+  container.innerHTML = `<div class="agents-v2 viz-card viz-grain"><p class="agent-note">Loading…</p></div>`;
   await render(container);
   const timer = setInterval(() => {
     if (!document.contains(container)) {
@@ -44,10 +44,10 @@ async function render(container: HTMLElement): Promise<void> {
   }
   const header = `<p class="agent-note">The librarian agents that run your pipeline.</p>`;
   if (agents.length === 0) {
-    container.innerHTML = `<div class="card">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
+    container.innerHTML = `<div class="agents-v2 viz-card viz-grain">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
     return;
   }
-  container.innerHTML = `<div class="card">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map((a) => agentItem(a, catalog)).join('')}</ul></div>`;
+  container.innerHTML = `<div class="agents-v2 viz-card viz-grain">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map((a) => agentItem(a, catalog)).join('')}</ul></div>`;
   wireModelPicker(container);
   wireAgentPickers(container);
 }
@@ -136,9 +136,9 @@ function wireAgentPickers(container: HTMLElement): void {
 
 function agentItem(a: AgentView, catalog: ModelCatalogView | null): string {
   return `
-    <li class="agent" data-key="${esc(a.key)}">
+    <li class="agent viz-card viz-card--lift" data-key="${esc(a.key)}">
       <div class="agent-head">
-        <span class="agent-label">${esc(a.label)}</span>
+        <span class="agent-label viz-voice">${esc(a.label)}</span>
         <span class="agent-status viz-chip status-${esc(a.status)}">${esc(a.status)}</span>
       </div>
       <p class="agent-role">${esc(a.role)}</p>

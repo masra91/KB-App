@@ -701,15 +701,15 @@ button:disabled {
    One "Agents" surface; two groups framed inward (Librarians + their Schedules) vs outward (Researchers).
    Group headers carry the naming + the inward/outward descriptor; each group body is an existing view. */
 .agents-hub { padding: 0.25rem 0; }
-.agents-hub-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
+.agents-hub-title { font-family: var(--viz-font-voice); font-size: 1.5rem; margin: 0; color: var(--viz-ink); } /* v2: Spectral voice head */
 .agents-hub-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1.2rem; max-width: 64ch; }
 .agents-group { margin: 0 0 1.6rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--viz-rule); }
-.agents-group-head { display: block; font-size: 0.95rem; letter-spacing: 0.04em; color: var(--viz-ink); margin: 0; }
+.agents-group-head { display: block; font-family: var(--viz-font-voice); font-weight: 600; font-size: 1.05rem; letter-spacing: 0; color: var(--viz-ink); margin: 0; } /* v2: Spectral, sentence case */
 .agents-group-why { color: var(--viz-ink-muted); font-size: 0.8rem; margin: 0.2rem 0 0.8rem; max-width: 68ch; }
 .agents-group-why strong { color: var(--viz-ink); font-weight: 600; }
 /* Schedules nests under Librarians — a quieter, indented sub-band. */
 .agents-subgroup { margin: 1rem 0 0; padding: 0 0 0 0.8rem; border-left: 1px dashed var(--viz-rule); }
-.agents-subgroup-head { display: block; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--viz-ink-muted); margin: 0; }
+.agents-subgroup-head { display: block; font-family: var(--viz-font-voice); font-size: 0.92rem; letter-spacing: 0; color: var(--viz-ink-muted); margin: 0; } /* v2: Spectral, sentence case (was uppercase signage) */
 .agents-subgroup-why { color: var(--viz-ink-muted); font-size: 0.74rem; margin: 0.1rem 0 0.5rem; max-width: 64ch; }
 .agents-section { margin: 0; }
 
@@ -775,16 +775,21 @@ button:disabled {
    the canonical hue tokens — never a hard-coded hex (was #7ad17a/#2f5c2f). State also reads via the
    text label (never color-alone, §3 DESIGN-4). Secondary text on --viz-ink-muted (was legacy .muted). */
 .agent-list, .source-slots { list-style: none; padding: 0; margin: 1rem 0 0; display: flex; flex-direction: column; gap: 0.6rem; }
-.agent { border: 1px solid var(--viz-rule); border-radius: 8px; padding: 0.75rem; }
+/* UX v2 (DL-2 Agents adoption): each agent is a raised material card (.viz-card .viz-card--lift in the
+   markup) — depth + hover-life carry it, so this rule is layout-only (no border/radius/bg of its own;
+   that would fight the card chrome). */
+.agent { padding: 0.85rem 1rem; }
 .agent-head { display: flex; align-items: center; gap: 0.5rem; }
-.agent-label { font-weight: 600; }
-/* Layout only — shape/signage/border/muted color come from .viz-chip (design-system.css). */
+/* v2: card head in the Spectral voice (.viz-voice in the markup), ink, a touch larger than body. */
+.agent-label { font-family: var(--viz-font-voice); font-weight: 600; font-size: 1.02rem; color: var(--viz-ink); }
+/* Layout only — shape/signage/muted base from .viz-chip (design-system.css). */
 .agent-status { margin-left: auto; }
-/* State tokens (§4): running → ember, idle → idle, blocked → brass, error → oxide. The hue colors the
-   glyph/label + ties the border via currentColor (≥3:1). Exception: oxide MUST NOT color small text
-   (contract §2) → error carries the hue on the BORDER only, label stays --viz-ink-muted. */
+/* State tokens (§4 / DL-2 v2): running → sprout, idle/paused → patina (settled), blocked → brass,
+   error → oxide. NO ember (reserved for "needs your decision"). The hue colors the glyph/label + ties
+   the border via currentColor (≥3:1). Exception: oxide MUST NOT color small text (contract §2) → error
+   carries the hue on the BORDER only, label stays --viz-ink-muted. */
 .agent-status.status-running { color: var(--viz-state-running); border-color: currentColor; }
-.agent-status.status-idle { color: var(--viz-state-idle); }
+.agent-status.status-idle { color: var(--viz-state-settled); border-color: currentColor; }
 .agent-status.status-blocked { color: var(--viz-state-blocked); border-color: currentColor; }
 .agent-status.status-error { border-color: var(--viz-state-error); }
 .agent-role { margin: 0.35rem 0 0.5rem; font-size: 0.9rem; color: var(--viz-ink-muted); }
@@ -801,12 +806,22 @@ button:disabled {
 
 /* SPEC-0048 — the global "Default model" picker control (Design-Lead visual). */
 .model-control { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.3rem 0 0.9rem; }
-.model-label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
+/* v2 (DL-2): control label in Inter, sentence case — was uppercase signage. */
+.model-label { font-family: var(--viz-font-body); letter-spacing: 0; font-size: 0.72rem; color: var(--viz-ink-muted); }
 .model-runs { font-family: var(--viz-font-numeric); font-size: 0.72rem; color: var(--viz-ink-muted); margin: 0.1rem 0 0; }
 /* Stale-model note — #184 a11y: label reads AA in `--viz-ink`; the caution hue rides a small
    aria-hidden brass glyph (DL-1's inline glyph variant), not the text. */
 .model-stale { font-family: var(--viz-font-body); font-size: 0.72rem; color: var(--viz-ink); margin: 0.1rem 0 0; }
 .model-stale-mark { color: var(--viz-brass); margin-right: 0.3rem; }
+
+/* === Agents v2 — UX v2 material adoption (DL-2 contract; vellum-ux-v2-language §1/§3/§4) ===========
+   The group container is a raised material card with a faint paper-grain (.viz-card .viz-grain in the
+   markup); agent rows are .viz-card--lift cards inside it (above). Scoped under .agents-v2 so nothing
+   bleeds into the shared .path / other surfaces (mirrors the .settings-v2 / .src-v2 precedent). No
+   design-system.css token edits — pure adoption. */
+.agents-v2 { padding: 1.5rem 1.6rem; }
+/* model ids + resolved + instruction pointers → IBM Plex Mono, the data face (§4). */
+.agents-v2 .path { font-family: var(--viz-font-numeric); color: var(--viz-ink-muted); }
 .source-slots li { padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 8px; }
 /* (.autonomy-row + its scoped <select> were retired in the WS3 migration — Settings' autonomy/dev-log
    controls are SegmentedControls now, laid out by .settings-control above.) */
