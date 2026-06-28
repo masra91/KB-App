@@ -7,6 +7,7 @@ import { createNavModel, type NavView } from './navModel';
 import {
   NAV_VIEWS,
   DEFAULT_VIEW_ID,
+  VIEW_TODAY,
   VIEW_CAPTURE,
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
@@ -22,6 +23,7 @@ import { esc } from './html';
 import { navIcon } from './icons';
 import { NAVIGATE_EVENT, type NavigateDetail } from './nav';
 import { reviewBadgeText, reviewBadgeAria } from './reviewBadge';
+import { mountToday } from './views/todayView';
 import { mountCapture } from './views/captureView';
 import { mountReviews } from './views/reviewsView';
 import { mountActivity } from './views/activityView';
@@ -72,6 +74,7 @@ let navHandler: ((e: Event) => void) | null = null;
 
 export function mountShell(root: HTMLElement, vaultPath: string, name: string): void {
   const mounts: Record<string, MountFn> = {
+    [VIEW_TODAY]: mountToday,
     [VIEW_CAPTURE]: (c) => mountCapture(c, vaultPath, name),
     [VIEW_REVIEWS]: mountReviews,
     [VIEW_ACTIVITY]: mountActivity,

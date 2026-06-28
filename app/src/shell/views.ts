@@ -6,6 +6,7 @@
 import type { NavView } from './navModel';
 
 /** Stable view ids — referenced by the shell's mount map and by tests. */
+export const VIEW_TODAY = 'today'; // SPEC-0058 — the v2 command-center home (default on launch)
 export const VIEW_CAPTURE = 'capture';
 export const VIEW_REVIEWS = 'reviews';
 export const VIEW_ACTIVITY = 'activity';
@@ -27,9 +28,11 @@ export const VIEW_SETTINGS = 'settings';
 export const GROUP_MANAGE = 'Manage';
 
 /**
- * The v1 views, in rail order. Capture is first and is the default on launch (SHELL-4):
- * launch always lands on Capture, not the last-open view — a deliberate behavior recorded
- * in SPEC-0017 §5. Reviews is the "needs you" queue (SPEC-0018 REVIEW-10); Activity is the
+ * The views, in rail order. Today is first and is the default on launch (SPEC-0058, amending SHELL-4):
+ * the v2 "command-center home" greets the Principal with a glanceable state-of-the-library, so launch
+ * lands on Today, not the last-open view (the deliberate "always a fixed home on launch" behavior of
+ * SPEC-0017 §5 is preserved — only the home itself moves from Capture to Today). Capture stays second.
+ * Reviews is the "needs you" queue (SPEC-0018 REVIEW-10); Activity is the
  * read-only audit observatory (SPEC-0029 AUDIT-9, a top-level sibling next to Reviews); Ask is
  * grounded recall (SPEC-0026). The Control Panel (SPEC-0027) adds a "Manage" section of sibling
  * views — Jobs, Agents, Researchers, Sources, Settings — to observe + configure the machine;
@@ -41,6 +44,7 @@ export const GROUP_MANAGE = 'Manage';
  */
 export const NAV_VIEWS: NavView[] = [
   // icon = a key into the inline line-icon set (shell/icons.ts), NOT an emoji — UX v2 monochrome rail glyphs.
+  { id: VIEW_TODAY, label: 'Today', icon: 'today' },
   { id: VIEW_CAPTURE, label: 'Capture', icon: 'capture' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: 'reviews' },
   { id: VIEW_ACTIVITY, label: 'Activity', icon: 'activity' },
@@ -53,5 +57,5 @@ export const NAV_VIEWS: NavView[] = [
   { id: VIEW_SETTINGS, label: 'Settings', icon: 'settings', group: GROUP_MANAGE },
 ];
 
-/** The view active on launch (SHELL-4). */
-export const DEFAULT_VIEW_ID = VIEW_CAPTURE;
+/** The view active on launch (SPEC-0058 — the Today home, amending SHELL-4's Capture default). */
+export const DEFAULT_VIEW_ID = VIEW_TODAY;

@@ -1,0 +1,209 @@
+// @vitest-environment happy-dom
+//
+// SPEC-0058 STATE-7 — the UX v2 Today command-center home (happy-dom; IPC mocked). Asserts the surface
+// renders from ONE maintained `kb:getTodayProjection` read (no live scan), the `status` faces
+// (warming/error/thrown), the greeting comma rule, The Line station-state language, the four stats, the
+// activity feed (with ref highlighting), the ONE ember "needs you" surface + its calm rest state, the
+// health glance, the deep-link navigation (kb:navigate), and per-row partial-data isolation (ENG-15/16).
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mountToday } from './todayView';
+import { NAVIGATE_EVENT, type NavigateDetail } from '../nav';
+import type { KbApi, TodayProjection, TodayProjectionView } from '../../kb/types';
+
+function projection(over: Partial<TodayProjection> = {}): TodayProjection {
+  return {
+    greeting: { salutation: 'Good morning', name: 'Mason' },
+    subtitle: 'Your library is quiet and current — 3 things moved while you were away.',
+    line: {
+      meta: '2 in flight · last composed 6m ago',
+      stations: [
+        { name: 'Capture', stage: 'capture', state: 'idle', glyph: '○', count: 214 },
+        { name: 'Decompose', stage: 'decompose', state: 'running', glyph: '▣', count: 2 },
+        { name: 'Connect', stage: 'connect', state: 'blocked', glyph: '◐', count: 1 },
+        { name: 'Compose', stage: 'compose', state: 'error', glyph: '✕', count: 0 },
+      ],
+    },
+    stats: [
+      { key: 'sources', label: 'Sources', value: 214, delta: { dir: 'up', text: '+6 today' } },
+      { key: 'claims', label: 'Claims', value: 1847, delta: { dir: 'up', text: '+38 today' } },
+      { key: 'entities', label: 'Entities', value: 392, delta: { dir: 'flat', text: 'stable' } },
+      { key: 'connections', label: 'Connections', value: 1204, delta: { dir: 'up', text: '+21 today' } },
+    ],
+    activity: [
+      { kind: 'composed', text: 'Composed a page for [[Project Atlas]] from 14 claims', ref: 'Project Atlas', when: '6m' },
+      { kind: 'extracted', text: 'Extracted 38 claims from standup-notes.md', when: '41m' },
+    ],
+    decisions: [
+      { kind: 'contradiction', title: 'A contradiction surfaced', body: 'Sources disagree. Pick the canonical claim.', action: 'Resolve', targetView: 'reviews' },
+    ],
+    health: [
+      { key: 'dangling', label: 'Dangling links', sub: 'Links to nothing', value: '0', status: 'ok' },
+      { key: 'orphans', label: 'Orphans', sub: 'Unlinked sources', value: '3', status: 'warn' },
+      { key: 'thin', label: 'Thin stubs', sub: 'Entities with <2 claims', value: '11', status: 'warn' },
+    ],
+    ...over,
+  };
+}
+
+/** A `ready` envelope over the given projection (the default happy path). */
+function ready(over: Partial<TodayProjection> = {}): TodayProjectionView {
+  return { status: 'ready', data: projection(over), builtAt: '2026-06-28T08:00:00Z', stale: false };
+}
+
+let getTodayProjection: ReturnType<typeof vi.fn>;
+let reportRendererError: ReturnType<typeof vi.fn>;
+
+function setApi(): void {
+  (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
+    getTodayProjection: getTodayProjection as unknown as KbApi['getTodayProjection'],
+    reportRendererError: reportRendererError as unknown as KbApi['reportRendererError'],
+  };
+}
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+beforeEach(() => {
+  getTodayProjection = vi.fn(async () => ready());
+  reportRendererError = vi.fn(async () => {});
+  setApi();
+});
+afterEach(() => {
+  document.body.innerHTML = '';
+  vi.restoreAllMocks();
+});
+
+async function mount(): Promise<HTMLElement> {
+  const c = document.createElement('div');
+  document.body.appendChild(c);
+  await mountToday(c);
+  await flush();
+  return c;
+}
+
+describe('Today v2 — command-center home (SPEC-0058 STATE-7)', () => {
+  it('reads the maintained projection once (one read, no live scan)', async () => {
+    await mount();
+    expect(getTodayProjection).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the greeting with the name comma + the subtitle', async () => {
+    const c = await mount();
+    const greet = c.querySelector('.today-greet')?.textContent ?? '';
+    expect(greet).toContain('Good morning');
+    expect(greet).toContain(', Mason');
+    expect(c.querySelector('.today-sub')?.textContent).toContain('quiet and current');
+  });
+
+  it('omits the comma when no name is set', async () => {
+    getTodayProjection = vi.fn(async () => ready({ greeting: { salutation: 'Good evening' } }));
+    setApi();
+    const c = await mount();
+    const greet = c.querySelector('.today-greet')?.textContent ?? '';
+    expect(greet.trim()).toBe('Good evening');
+    expect(c.querySelector('.today-greet-name')).toBeNull();
+  });
+
+  it('renders The Line with one station per stage, carrying state + glyph (state never colour-alone)', async () => {
+    const c = await mount();
+    const stations = Array.from(c.querySelectorAll('.today-station'));
+    expect(stations).toHaveLength(4);
+    expect(c.querySelector('.today-line-meta')?.textContent).toContain('in flight');
+    const running = c.querySelector('.today-station[data-state="running"]');
+    expect(running?.querySelector('.today-station-glyph')?.textContent).toBe('▣');
+    expect(c.querySelector('.today-station[data-state="error"]')).toBeTruthy();
+    // a zero-count station rests as "—"
+    expect(c.querySelector('.today-station[data-state="error"] .today-station-count')?.textContent).toBe('—');
+  });
+
+  it('renders the four stat cards with values + deltas', async () => {
+    const c = await mount();
+    const stats = Array.from(c.querySelectorAll('.today-stat'));
+    expect(stats).toHaveLength(4);
+    // value is grouped with thousands separators
+    expect(c.querySelector('.today-stats')?.textContent).toContain('1,847');
+    expect(c.querySelector('.today-stat-d[data-dir="flat"]')?.textContent).toContain('stable');
+  });
+
+  it('renders the activity feed, highlighting [[refs]] and showing the age', async () => {
+    const c = await mount();
+    const rows = Array.from(c.querySelectorAll('.today-feed-row'));
+    expect(rows).toHaveLength(2);
+    expect(c.querySelector('.today-src')?.textContent).toBe('Project Atlas');
+    expect(c.querySelector('.today-feed-when')?.textContent).toBe('6m');
+  });
+
+  it('renders the needs-you decision (the one ember surface) and navigates on its CTA', async () => {
+    const c = await mount();
+    const card = c.querySelector('.today-decide[data-kind="contradiction"]');
+    expect(card).toBeTruthy();
+    expect(c.querySelector('.today-needs')?.classList.contains('is-active')).toBe(true);
+    let target: string | null = null;
+    const handler = (e: Event): void => {
+      target = (e as CustomEvent<NavigateDetail>).detail.view;
+    };
+    document.addEventListener(NAVIGATE_EVENT, handler);
+    c.querySelector<HTMLButtonElement>('.today-go')?.click();
+    document.removeEventListener(NAVIGATE_EVENT, handler);
+    expect(target).toBe('reviews');
+  });
+
+  it('shows the calm (non-ember) rest state when nothing needs you', async () => {
+    getTodayProjection = vi.fn(async () => ready({ decisions: [] }));
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.today-decide')).toBeNull();
+    expect(c.querySelector('.today-rest')?.textContent).toContain('Nothing needs you');
+    expect(c.querySelector('.today-needs')?.classList.contains('is-active')).toBe(false);
+  });
+
+  it('renders the health glance rows with their severity', async () => {
+    const c = await mount();
+    expect(c.querySelectorAll('.today-hrow')).toHaveLength(3);
+    expect(c.querySelector('.today-hrow[data-status="ok"]')).toBeTruthy();
+    expect(c.querySelectorAll('.today-hrow[data-status="warn"]')).toHaveLength(2);
+  });
+
+  it('deep-links via the panel "View all" / "Full report" links', async () => {
+    const c = await mount();
+    const targets: string[] = [];
+    const handler = (e: Event): void => void targets.push((e as CustomEvent<NavigateDetail>).detail.view);
+    document.addEventListener(NAVIGATE_EVENT, handler);
+    Array.from(c.querySelectorAll<HTMLButtonElement>('.today-panel-link')).forEach((b) => b.click());
+    document.removeEventListener(NAVIGATE_EVENT, handler);
+    expect(targets).toContain('activity');
+    expect(targets).toContain('health');
+  });
+
+  it('shows the calm warming face (not the error face) while the projection warms, then auto-rechecks', async () => {
+    getTodayProjection = vi.fn(async () => ({ status: 'warming' as const, data: null, builtAt: null, stale: false }));
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-warming')).toBeTruthy();
+    expect(c.querySelector('.load-error')).toBeNull();
+  });
+
+  it('shows the honest error face on a genuine error status (never a stuck spinner)', async () => {
+    getTodayProjection = vi.fn(async () => ({ status: 'error' as const, data: null, builtAt: null, stale: false }));
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-error')).toBeTruthy();
+    expect(c.querySelector('.load-warming')).toBeNull();
+  });
+
+  it('degrades to the error face (and un-swallows) when the IPC throws', async () => {
+    getTodayProjection = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    setApi();
+    const c = await mount();
+    expect(c.querySelector('.load-error')).toBeTruthy();
+    expect(reportRendererError).toHaveBeenCalled();
+  });
+
+  it('isolates partial data — a missing activity ref / empty feed never throws', async () => {
+    getTodayProjection = vi.fn(async () => ready({ activity: [{ kind: 'other', text: 'Did a thing', when: 'now' }], decisions: [] }));
+    setApi();
+    const c = await mount();
+    expect(c.querySelectorAll('.today-feed-row')).toHaveLength(1);
+    expect(c.querySelector('.today-src')).toBeNull(); // no [[ref]] in the text
+  });
+});

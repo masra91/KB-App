@@ -14,7 +14,9 @@ const review = (id: string): ReviewSummary => ({ id, question: 'q', detail: 'd',
 function setApi(listReviews: KbApi['listReviews']): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     listReviews,
-    // Capture (the default view) polls pipelineStatus on mount; stub it so the shell mounts cleanly.
+    // Today (the default view, SPEC-0058) reads getTodayProjection on mount; stub a calm warming so the
+    // shell mounts cleanly. pipelineStatus is kept for the Capture view (mounted on nav).
+    getTodayProjection: vi.fn(async () => ({ status: 'warming' as const, data: null, builtAt: null, stale: false })),
     pipelineStatus: vi.fn(async () => ({ queueDepth: 0, processing: null, lastArchived: null, updatedAt: null })),
     capture: vi.fn(),
   };

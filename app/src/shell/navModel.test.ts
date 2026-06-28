@@ -6,6 +6,7 @@ import {
   NAV_VIEWS,
   DEFAULT_VIEW_ID,
   GROUP_MANAGE,
+  VIEW_TODAY,
   VIEW_CAPTURE,
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
@@ -27,6 +28,7 @@ const sample: NavView[] = [
 describe('NAV_VIEWS registry (SHELL-3)', () => {
   it('registers the top-level views then the Manage section, in rail order (Manage = SPEC-0027 PANEL-1)', () => {
     expect(NAV_VIEWS.map((v) => v.id)).toEqual([
+      VIEW_TODAY,
       VIEW_CAPTURE,
       VIEW_REVIEWS,
       VIEW_ACTIVITY,
@@ -60,11 +62,11 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
   });
 });
 
-describe('default view (SHELL-4)', () => {
-  it('Capture is the default on launch', () => {
-    expect(DEFAULT_VIEW_ID).toBe(VIEW_CAPTURE);
+describe('default view (SPEC-0058, amending SHELL-4)', () => {
+  it('Today is the default on launch (the v2 command-center home)', () => {
+    expect(DEFAULT_VIEW_ID).toBe(VIEW_TODAY);
     const model = createNavModel(NAV_VIEWS, DEFAULT_VIEW_ID);
-    expect(model.getActive().id).toBe(VIEW_CAPTURE);
+    expect(model.getActive().id).toBe(VIEW_TODAY);
   });
 
   it('defaults to the first view when no defaultId is given', () => {
