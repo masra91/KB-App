@@ -143,11 +143,14 @@ ul.checks li {
 }
 
 /* Non-blocking caution (e.g. a TCC-protected vault path, BUG #56) — louder than .muted,
-   not a hard stop like .error. */
+   not a hard stop like .error. Vellum caution language (#184 + SPEC-0057 dark): hue rides the
+   --viz-brass border + a faint brass wash (≥3:1 graphic); the readable label stays --viz-ink (AA),
+   never the brass. Role-token-based → adapts to dark "night-study" for free (was a hardcoded amber
+   light-island that didn't flip). The ⚠️ glyph in the markup keeps it non-color-alone. */
 .warning {
-  color: #8a6d00;
-  background: #fff8e1;
-  border: 1px solid #f0d98c;
+  color: var(--viz-ink);
+  background: color-mix(in srgb, var(--viz-brass) 10%, transparent);
+  border: 1px solid var(--viz-brass);
   border-radius: 6px;
   padding: 0.5rem 0.7rem;
   font-size: 0.9rem;
