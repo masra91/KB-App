@@ -105,6 +105,8 @@ describe('healthPanel — buildHealthReport', () => {
     const r = await buildHealthReport(tools);
     expect(r.thin.map((t) => t.name)).toEqual(['Stub']);
     expect(r.counts.thin).toBe(1);
+    // the prose char count rides along for the "stub · N chars" defect text (frontmatter/heading stripped)
+    expect(r.thin[0].chars).toBe('too short'.length);
   });
 
   it('treats a heading-only node with empty generated blocks as thin (machinery is not content)', async () => {

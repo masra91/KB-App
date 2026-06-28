@@ -16,6 +16,7 @@ export interface HealthFinding {
   id: string;
   name: string;
   kind: string;
+  chars?: number; // prose length — set for thin/stub findings (drives the "stub · N chars" defect text)
 }
 
 /** A dead/dangling link: an entity's outgoing `[[target]]` that resolves to no known entity node. */
@@ -118,7 +119,10 @@ export async function buildHealthReport(tools: RecallTools): Promise<HealthRepor
     for (const r of resolvedOut) inboundCount.set(r, (inboundCount.get(r) ?? 0) + 1);
 
     // Stub/thin: only assessable when the node is readable; a heading-only / empty-block node is thin.
-    if (md !== null && bodyProse(md).length < THIN_BODY_CHARS) thin.push(toFinding(e));
+    if (md !== null) {
+      const proseLen = bodyProse(md).length;
+      if (proseLen < THIN_BODY_CHARS) thin.push({ ...toFinding(e), chars: proseLen });
+    }
   }
 
   // Orphan (HEALTH §3): a node with 0 resolved inbound AND 0 resolved outbound links.

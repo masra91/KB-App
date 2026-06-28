@@ -541,31 +541,36 @@ button:disabled {
 .explore-neighbors-empty { color: var(--viz-ink-muted); max-width: 56ch; }
 .explore-neighbors-empty p { margin: 0.3rem 0 0; font-size: 0.85rem; }
 
-/* --- Health view: structural-lint readout (SPEC-0035 HEALTH) --- */
+/* --- Health view: structural-lint instrument panel (SPEC-0035 HEALTH; DL-2 anatomy) ---
+   Three gauge groups hung off the shared spine; severity = hue on a graphic (tick + count chip),
+   never on the entity-name text (#184): brass = attention (issues), patina = settled (clean). */
 .health { padding: 0.25rem 0; }
 .health-title { font-size: 1.4rem; margin: 0; color: var(--viz-ink); }
 .health-sub { color: var(--viz-ink-muted); margin: 0.25rem 0 1rem; max-width: 64ch; }
-/* The calm one-line readout (§5): patina (steady/good) when clean, plain ink with metrics otherwise. */
-.health-summary { margin: 0 0 1.1rem; padding: 0.5rem 0 0.6rem 0.9rem; border-left: 2px solid var(--viz-rule); color: var(--viz-ink); }
-.health-summary--clean { border-left-color: var(--viz-patina); color: var(--viz-ink-muted); }
-.health-scanned { color: var(--viz-ink-muted); }
-.health-allclear { color: var(--viz-ink-muted); max-width: 60ch; }
-.health-section { margin: 0 0 1.2rem; }
-.health-section-head { display: block; font-size: 0.82rem; color: var(--viz-ink); margin: 0 0 0.15rem; }
-.health-section-why { color: var(--viz-ink-muted); font-size: 0.78rem; margin: 0 0 0.5rem; max-width: 64ch; }
-.health-finding-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.health-scanning { color: var(--viz-ink-muted); }
+/* Top summary instrument-strip — total reading across the three classes. */
+.health-summary { padding: 0.5rem 0 0.6rem 0.9rem; margin: 0 0 1rem; color: var(--viz-ink); display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; }
+.health-scanned { color: var(--viz-ink-muted); font-size: 0.8rem; }
+/* The gauge reading: a leading tick + the count, colored by .viz-state-blocked / .viz-state-settled. */
+.health-tick { font-size: 0.8rem; }
+.health-count { font-size: 0.95rem; font-weight: 600; }
+/* A gauge group on the spine, separated by a structural rule (not card chrome). */
+.health-group { padding: 0.7rem 0 0.8rem 0.9rem; margin: 0; }
+.health-group-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.health-group-label { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--viz-ink); }
+.health-group-head .health-tick { margin-left: auto; } /* push the gauge to the right edge */
+.health-group-why { color: var(--viz-ink-muted); font-size: 0.76rem; margin: 0.1rem 0 0.5rem; max-width: 64ch; }
+.health-healthy { margin: 0.2rem 0 0; font-size: 0.82rem; display: flex; align-items: baseline; gap: 0.4rem; } /* color from .viz-state-settled */
+.health-row-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
 .health-open { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
 .health-open:hover { border-left-color: var(--viz-ember); background: var(--viz-rule); }
-.health-finding-name { color: var(--viz-ink); }
+.health-finding-name { color: var(--viz-ink); } /* name stays ink — never the severity hue (#184) */
 .health-open:hover .health-finding-name { color: var(--viz-ember); }
+.health-untitled { color: var(--viz-ink-muted); font-style: italic; }
 .health-kind { color: var(--viz-ink-muted); }
-.health-hint { color: var(--viz-ink-muted); font-size: 0.72rem; font-style: italic; }
-.health-edge { color: var(--viz-idle); }
-/* A dead-link target: brass (uncertain/broken) + struck, so the "this points to nothing" reads at a glance. */
-.health-dead-target { color: var(--viz-brass); text-decoration: line-through; text-decoration-thickness: 1px; }
-.health-open-mark { margin-left: auto; color: var(--viz-ember); font-size: 0.72rem; }
+.health-defect { color: var(--viz-ink-muted); font-size: 0.74rem; margin-left: auto; } /* the specific defect, muted */
 .health-more { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--viz-ink-muted); font-style: italic; }
-.health-footnote { margin: 0.6rem 0 0; font-size: 0.76rem; color: var(--viz-ink-muted); font-style: italic; max-width: 64ch; }
+.health-footnote { margin: 0.8rem 0 0; font-size: 0.76rem; color: var(--viz-ink-muted); font-style: italic; max-width: 64ch; }
 
 /* --- Control Panel: Manage section + Jobs view (SPEC-0027) --- */
 .sidebar .nav-group {

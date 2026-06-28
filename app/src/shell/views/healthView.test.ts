@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 //
-// SPEC-0035 HEALTH — the Health view, component tier (happy-dom; IPC mocked). Asserts the calm summary
-// readout, the dead-links / orphans / thin-pages sections, click-through (openCitation), the "+N more"
-// overflow, the all-clear empty state, ENG-15/16 partial-data render safety, and load resilience.
+// SPEC-0035 HEALTH — the Health view, component tier (happy-dom; IPC mocked). Asserts the gauge-group
+// instrument anatomy (DL-2): the top summary strip, three always-present groups with per-group healthy
+// lines, the specific defect text per class, severity-as-graphic (#184: hue on the tick/count, not the
+// name), click-through (openCitation), "+N more", ENG-15/16 partial-data safety, and load resilience.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mountHealth } from './healthView';
 import type { KbApi } from '../../kb/types';
@@ -12,7 +13,7 @@ function report(over: Partial<HealthReport> = {}): HealthReport {
   return {
     scanned: 10,
     orphans: [{ rel: 'entities/x/lonely.md', id: 'l', name: 'Lonely', kind: 'concept' }],
-    thin: [{ rel: 'entities/x/stub.md', id: 's', name: 'Stub', kind: 'person' }],
+    thin: [{ rel: 'entities/x/stub.md', id: 's', name: 'Stub', kind: 'person', chars: 42 }],
     dangling: [{ from: 'entities/person/ada.md', fromName: 'Ada Lovelace', target: 'entities/ghost/missing.md' }],
     counts: { orphans: 1, thin: 1, dangling: 1 },
     ...over,
@@ -47,26 +48,47 @@ async function mount(): Promise<HTMLElement> {
   return c;
 }
 
-describe('Health view — readout (HEALTH-8)', () => {
-  it('renders the calm summary line with the three metrics + scanned count', async () => {
+describe('Health view — gauge-group readout (HEALTH-8, DL-2 anatomy)', () => {
+  it('renders the top summary strip with the total + scanned count', async () => {
     const c = await mount();
     const sum = c.querySelector('.health-summary')?.textContent ?? '';
-    expect(sum).toMatch(/1 dead link/);
-    expect(sum).toMatch(/1 orphan/);
-    expect(sum).toMatch(/1 thin page/);
+    expect(sum).toMatch(/3 structural issues/);
+    expect(sum).toMatch(/scanned/);
     expect(sum).toMatch(/10 entities/);
   });
 
-  it('renders a section per issue kind with its findings', async () => {
+  it('always renders the three gauge groups (never a blank panel), each with its label + count', async () => {
     const c = await mount();
-    const heads = Array.from(c.querySelectorAll('.health-section-head')).map((h) => h.textContent?.trim());
-    expect(heads.some((h) => h?.startsWith('Dead links'))).toBe(true);
-    expect(heads.some((h) => h?.startsWith('Orphans'))).toBe(true);
-    expect(heads.some((h) => h?.startsWith('Thin pages'))).toBe(true);
-    expect(c.querySelector('.health-finding--dangling .health-dead-target')?.textContent).toBe('entities/ghost/missing.md');
-    expect(Array.from(c.querySelectorAll('.health-finding-name')).map((n) => n.textContent)).toEqual(
-      expect.arrayContaining(['Ada Lovelace', 'Lonely', 'Stub']),
-    );
+    const groups = Array.from(c.querySelectorAll('.health-group'));
+    expect(groups).toHaveLength(3);
+    expect(Array.from(c.querySelectorAll('.health-group-label')).map((l) => l.textContent)).toEqual(['Dead links', 'Orphans', 'Thin pages']);
+  });
+
+  it('renders the specific defect text per issue class', async () => {
+    const c = await mount();
+    const defects = Array.from(c.querySelectorAll('.health-defect')).map((d) => d.textContent);
+    expect(defects).toContain('→ entities/ghost/missing.md (no node)'); // dead link
+    expect(defects).toContain('0 in · 0 out'); // orphan
+    expect(defects).toContain('stub · 42 chars'); // thin (uses the panel's char count)
+  });
+
+  it('severity is hue on the graphic, not the name (#184): tick/count carry the state class, name does not', async () => {
+    const c = await mount();
+    const orphanGroup = Array.from(c.querySelectorAll('.health-group')).find((g) => g.querySelector('.health-group-label')?.textContent === 'Orphans')!;
+    expect(orphanGroup.querySelector('.health-count')?.classList.contains('viz-state-blocked')).toBe(true); // issues → brass
+    const name = orphanGroup.querySelector('.health-finding-name')!;
+    expect(name.classList.contains('viz-state-blocked')).toBe(false);
+    expect(name.classList.contains('viz-state-settled')).toBe(false); // name stays plain ink
+  });
+
+  it('a clean group shows a patina healthy line, not a blank section', async () => {
+    healthReport = vi.fn(async () => report({ dangling: [], counts: { orphans: 1, thin: 1, dangling: 0 } }));
+    setApi();
+    const c = await mount();
+    const deadGroup = Array.from(c.querySelectorAll('.health-group')).find((g) => g.querySelector('.health-group-label')?.textContent === 'Dead links')!;
+    const healthy = deadGroup.querySelector('.health-healthy')!;
+    expect(healthy.textContent).toMatch(/no dead links/i);
+    expect(healthy.classList.contains('viz-state-settled')).toBe(true); // patina = settled/ok
   });
 
   it('clicking a finding opens the node via openCitation (leads back to reading)', async () => {
@@ -84,16 +106,16 @@ describe('Health view — readout (HEALTH-8)', () => {
     expect(c.querySelector('.health-more')?.textContent).toContain('+8 more');
   });
 
-  it('the all-clear state reads calm, not a wall of red (no empty sections)', async () => {
+  it('the all-clear state: summary reads clear + every group shows its healthy line (no issue rows)', async () => {
     healthReport = vi.fn(async () => report({ orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }));
     setApi();
     const c = await mount();
-    expect(c.querySelector('.health-summary--clean')?.textContent).toMatch(/all clear/i);
-    expect(c.querySelector('.health-allclear')).not.toBeNull();
-    expect(c.querySelectorAll('.health-section')).toHaveLength(0);
+    expect(c.querySelector('.health-summary')?.textContent).toMatch(/all clear/i);
+    expect(c.querySelectorAll('.health-healthy')).toHaveLength(3);
+    expect(c.querySelectorAll('.health-row')).toHaveLength(0);
   });
 
-  it('partial data: a finding missing name/kind renders without breaking siblings (ENG-15/16)', async () => {
+  it('partial data: a finding missing a name renders an "(untitled)" fallback without breaking siblings (ENG-15/16)', async () => {
     healthReport = vi.fn(async () =>
       report({
         orphans: [
@@ -107,8 +129,8 @@ describe('Health view — readout (HEALTH-8)', () => {
     );
     setApi();
     const c = await mount();
-    expect(c.querySelectorAll('.health-finding')).toHaveLength(2); // both render, no crash
-    expect(c.querySelector('.health-open[data-rel="entities/x/partial.md"]')).not.toBeNull();
+    expect(c.querySelectorAll('.health-row')).toHaveLength(2); // both render, no crash
+    expect(c.querySelector('.health-open[data-rel="entities/x/partial.md"] .health-untitled')?.textContent).toBe('(untitled)');
   });
 
   it('degrades to a retryable error when the scan IPC fails (no endless spinner)', async () => {
