@@ -17,8 +17,19 @@ import {
 import type { IntakeConnectorView, IntakeConnectorConfigPatch, WatchFolderView } from '../../kb/types';
 import type { IntakeConnectorConfig } from '../../kb/intakeConnectors';
 
-/** A glyph per connector type — never the dev slug; the typeLabel carries the words. */
-const TYPE_GLYPH: Record<string, string> = { rss: '📰', 'm365-mail': '✉' };
+/** A tokenized type mark per connector type (UX v2 §4 / #184): a small hue-carrying glyph, NOT an emoji —
+ *  the hue reads the connector family, the typeLabel carries the words (label stays ink). */
+const TYPE_MARK: Record<string, string> = { rss: '◈', 'm365-mail': '◇', folder: '▣' };
+function typeMark(type: string): string {
+  return `<span class="src-mark src-mark--${esc(type in TYPE_MARK ? type : 'other')}" aria-hidden="true">${TYPE_MARK[type] ?? '◌'}</span>`;
+}
+
+/** The armed-state switch (UX v2 §4 / #184): a hue-carrying dot + a sentence-case INK label — replaces the
+ *  old UPPERCASE `◉ ENABLED` / `○ PAUSED`. sprout=active/watching, accent=enabled-idle, idle=paused. */
+function armSwitch(cls: string, armed: boolean, active: boolean, label: string): string {
+  const tone = armed ? (active ? 'src-arm-dot--active' : 'src-arm-dot--on') : 'src-arm-dot--off';
+  return `<button type="button" class="rdesk-arm ${cls} src-arm viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}"><span class="src-arm-dot ${tone}" aria-hidden="true">●</span> ${esc(label)}</button>`;
+}
 
 /** Principal-facing labels for a watched-folder's last event (never the raw audit slug). */
 const WATCH_OUTCOME_LABELS: Record<string, string> = {
@@ -31,10 +42,13 @@ function watchOutcomeLabel(kind: string): string {
   return WATCH_OUTCOME_LABELS[kind] ?? kind.replace(/-/g, ' ');
 }
 
-const HEADER = `<h1 class="rdesk-title viz-signage">Sources</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
+// UX v2 (SPEC-0058): Spectral head (viz-voice), sentence-case copy. The `src-v2` marker scopes every
+// material/voice override to Sources only — the shared `rdesk-*` manage-view language (also rendered by
+// Researchers inside the Agents hub) is NOT restyled globally, so this can't bleed into another surface.
+const HEADER = `<h1 class="rdesk-title src-title viz-voice">Sources</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
 
 export async function mountSources(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="rdesk viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;
+  container.innerHTML = `<div class="rdesk viz-surface src-v2">${HEADER}<p class="viz-body">Loading…</p></div>`;
   await render(container);
 }
 
@@ -65,14 +79,14 @@ async function render(container: HTMLElement): Promise<void> {
       ? `<ul class="rdesk-roster">${folders.map(watchStrip).join('')}</ul>`
       : emptyState({ compact: true, title: 'No watched folders yet.', body: 'Add one below — files dropped in are kept verbatim as sources.' });
 
-  container.innerHTML = `<div class="rdesk viz-surface">${HEADER}
-    <section class="src-section">
-      <h2 class="src-section-head viz-signage">Feeds</h2>
+  container.innerHTML = `<div class="rdesk viz-surface src-v2">${HEADER}
+    <section class="src-section viz-card viz-grain">
+      <h2 class="src-section-head viz-voice">Feeds</h2>
       ${feeds}
       ${addDock()}
     </section>
-    <section class="src-section">
-      <h2 class="src-section-head viz-signage">Watched folders</h2>
+    <section class="src-section viz-card viz-grain">
+      <h2 class="src-section-head viz-voice">Watched folders</h2>
       ${watched}
       ${watchAddDock()}
     </section>
@@ -129,10 +143,10 @@ function strip(c: IntakeConnectorView): string {
     <li class="rdesk-strip viz-no-chrome viz-spine" data-id="${esc(c.id)}" data-armed="${armed ? 'true' : 'false'}">
       <div class="rdesk-strip-head">
         <span class="rdesk-id viz-numeric">${esc(c.id)}</span>
-        <button type="button" class="rdesk-arm intake-arm viz-signage viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}">${armed ? '◉ ENABLED' : '○ PAUSED'}</button>
+        ${armSwitch('intake-arm', armed, false, armed ? 'Enabled' : 'Paused')}
       </div>
       <div class="rdesk-identity">
-        <span class="rdesk-kind viz-signage">${esc(TYPE_GLYPH[c.type] ?? '🔌')} ${esc(c.typeLabel)}</span>
+        <span class="rdesk-kind src-kind">${typeMark(c.type)} ${esc(c.typeLabel)}</span>
       </div>
       <div class="rdesk-orders">
         <div class="rdesk-fields">
@@ -170,11 +184,11 @@ function strip(c: IntakeConnectorView): string {
  *  connector; enabling it later is the gated step (enabling starts an outbound pull). */
 function addDock(): string {
   const tiles = INTAKE_CONNECTOR_CATALOG.map(
-    (o) => `<button type="button" class="rdesk-tile viz-no-chrome viz-focusable" data-type="${esc(o.type)}" title="${esc(o.description)}"><span class="rdesk-tile-glyph">${esc(TYPE_GLYPH[o.type] ?? '🔌')}</span><span class="rdesk-tile-label viz-signage">${esc(o.label)}</span></button>`,
+    (o) => `<button type="button" class="rdesk-tile viz-no-chrome viz-focusable" data-type="${esc(o.type)}" title="${esc(o.description)}"><span class="rdesk-tile-glyph">${typeMark(o.type)}</span><span class="rdesk-tile-label">${esc(o.label)}</span></button>`,
   ).join('');
   return `
     <div class="rdesk-add">
-      <span class="rdesk-add-head viz-signage">Add a feed</span>
+      <span class="rdesk-add-head viz-voice">Add a feed</span>
       <div class="rdesk-tiles" role="group" aria-label="Feed templates">${tiles}</div>
       <input class="intake-add-id rdesk-add-id viz-body viz-focusable" type="text" placeholder="Name it (e.g. Hacker News)" aria-label="feed name" />
       <p class="intake-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
@@ -383,16 +397,16 @@ function watchReportLine(w: WatchFolderView): string {
 
 function watchStrip(w: WatchFolderView): string {
   const armed = w.enabled;
-  const armLabel = armed ? (w.watching ? '◉ WATCHING' : '◉ ENABLED') : '○ PAUSED';
+  const armLabel = armed ? (w.watching ? 'Watching' : 'Enabled') : 'Paused';
   const ignore = w.ignoreGlobs.length ? ` · ignoring ${esc(w.ignoreGlobs.join(', '))}` : '';
   return `
     <li class="rdesk-strip viz-no-chrome viz-spine" data-watch-id="${esc(w.id)}" data-armed="${armed ? 'true' : 'false'}">
       <div class="rdesk-strip-head">
         <span class="rdesk-id viz-numeric">${esc(w.label)}</span>
-        <button type="button" class="rdesk-arm watch-arm viz-signage viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}">${armLabel}</button>
+        ${armSwitch('watch-arm', armed, w.watching, armLabel)}
       </div>
       <div class="rdesk-identity">
-        <span class="rdesk-kind viz-signage">📂 <span class="path">${esc(w.folderPath)}</span></span>
+        <span class="rdesk-kind src-kind">${typeMark('folder')} <span class="path">${esc(w.folderPath)}</span></span>
       </div>
       <div class="rdesk-config">
         <span class="rdesk-reach-ro viz-body">scope ${esc(w.scope)} · ${esc(w.sensitivity)}${ignore}</span>
@@ -425,9 +439,9 @@ function watchStrip(w: WatchFolderView): string {
 function watchAddDock(): string {
   return `
     <div class="rdesk-add">
-      <span class="rdesk-add-head viz-signage">Watch a folder</span>
+      <span class="rdesk-add-head viz-voice">Watch a folder</span>
       <div class="rdesk-tiles" role="group" aria-label="Add a watched folder">
-        <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">📂</span><span class="rdesk-tile-label viz-signage">Choose a folder…</span></button>
+        <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">${typeMark('folder')}</span><span class="rdesk-tile-label">Choose a folder…</span></button>
       </div>
       <p class="watch-add-hint rdesk-add-hint viz-body">A watched folder <strong>drains like an inbox</strong> — after each file is brought in, the original moves to “.kb-processed/” inside the folder (a copy is kept in your KB first; files are never deleted), so the folder empties. Switch any folder to <em>leave originals in place</em> to keep the source untouched.</p>
       <p class="watch-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>

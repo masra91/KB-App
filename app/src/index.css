@@ -876,11 +876,40 @@ option { background: var(--card); color: var(--fg); }
 .rdesk-workiq-detail { font-size: 0.72rem; color: var(--viz-ink-muted); }
 .rdesk-workiq-detail[hidden], .rdesk-workiq-action[hidden] { display: none; }
 
-/* Sources view (SPEC-0027 PANEL-4) — two sections (Feeds · Watched folders) over the shared rdesk
-   strip layout. Only the section divider is Sources-specific; everything else reuses the WS2 primitives. */
-.src-section { margin-top: 1.6rem; }
-.src-section:first-of-type { margin-top: 0.6rem; }
-.src-section-head { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--viz-ink-muted); margin: 0 0 0.8rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--viz-rule); }
+/* Sources view — UX v2 material adoption (SPEC-0058 / vellum-ux-v2-language §1/§4/§5). ALL rules are
+   scoped under `.src-v2` so the SHARED `rdesk-*` manage-view language (also rendered by Researchers inside
+   the Agents hub — DEV-4's lane) is NEVER restyled globally; this can't bleed into another surface. The
+   move: card the two groups (depth, not the old flat ruled read), Spectral heads, Inter sentence case,
+   Plex-Mono data, tokenized type marks + a hue-dot armed switch (no emoji, no UPPERCASE, #184). Color
+   discipline: NO ember here (no decisions on this screen); accent=interactive, sprout=active, idle=paused. */
+.src-v2 .src-title { font-size: 1.5rem; color: var(--viz-ink); letter-spacing: 0; line-height: 1.15; }
+/* Group sections become real raised CARDS (.viz-card + .viz-grain from #453) instead of flat dividers. */
+.src-v2 .src-section { margin-top: 1.3rem; padding: 1.05rem 1.3rem 1.3rem; }
+.src-v2 .src-section:first-of-type { margin-top: 1.1rem; }
+/* Spectral head, sentence case (overrides the old uppercase ruled caption). */
+.src-v2 .src-section-head { font-size: 1.08rem; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--viz-ink); margin: 0 0 0.9rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--viz-rule); }
+/* Tokenized type mark (#184) — a hue-carrying glyph, never an emoji; the LABEL stays ink. Rationed:
+   accent (interactive family) for feeds/mail, patina (settled) for a watched folder. */
+.src-v2 .src-mark { font-family: var(--viz-font-numeric); font-size: 0.9em; margin-right: 0.2rem; }
+.src-v2 .src-mark--rss, .src-v2 .src-mark--m365-mail { color: var(--viz-accent); }
+.src-v2 .src-mark--folder { color: var(--viz-patina); }
+.src-v2 .src-mark--other { color: var(--viz-ink-muted); }
+/* The identity kind line — Inter sentence case, ink (was uppercase signage). */
+.src-v2 .src-kind { font-family: var(--viz-font-body); font-size: 0.92rem; color: var(--viz-ink); display: inline-flex; align-items: baseline; gap: 0.1rem; }
+/* Armed switch — a hue dot + sentence-case ink label (replaces UPPERCASE `◉ ENABLED`/`○ PAUSED`). The
+   non-color signal is the WORD; the dot adds the hue (paused=idle, enabled=accent, watching/active=sprout). */
+.src-v2 .src-arm { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--viz-font-body); text-transform: none; letter-spacing: 0; font-size: 0.82rem; color: var(--viz-ink); background: transparent; border: 0; cursor: pointer; padding: 0.1rem 0.2rem; }
+.src-v2 .src-arm:hover, .src-v2 .src-arm:focus-visible { color: var(--viz-accent); }
+.src-v2 .src-arm-dot { font-size: 0.62em; line-height: 1; }
+.src-v2 .src-arm-dot--off { color: var(--viz-idle); }
+.src-v2 .src-arm-dot--on { color: var(--viz-accent); }
+.src-v2 .src-arm-dot--active { color: var(--viz-sprout); }
+/* Add-dock head → Spectral too (matches the section heads' voice). */
+.src-v2 .rdesk-add-head { font-family: var(--viz-font-voice); text-transform: none; letter-spacing: 0; font-size: 0.95rem; color: var(--viz-ink); }
+/* Tile label → Inter sentence case (was uppercase signage). */
+.src-v2 .rdesk-tile-label { font-family: var(--viz-font-body); text-transform: none; letter-spacing: 0; }
+/* All data stays Plex-Mono (ids, the watched path). */
+.src-v2 .rdesk-id, .src-v2 .path { font-family: var(--viz-font-numeric); }
 
 /* 5. Activity feed — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §2). Repointed off the legacy
    palette (--bg/--card/--fg/--muted/--accent/--border) onto the WS2 --viz-* tokens so the view reads as

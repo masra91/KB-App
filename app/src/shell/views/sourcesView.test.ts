@@ -67,10 +67,27 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(strip).toBeTruthy();
     expect(strip.querySelector('.rdesk-id')!.textContent).toBe('news');
     expect(strip.querySelector('.rdesk-kind')!.textContent).toContain('RSS / Atom feed');
-    expect(strip.querySelector('.intake-arm')!.textContent).toContain('PAUSED');
+    expect(strip.querySelector('.intake-arm')!.textContent).toContain('Paused'); // UX v2 §4: sentence-case ink label + hue dot (was UPPERCASE ◉/○)
     expect((strip.querySelector('.intake-feedurl') as HTMLInputElement).value).toBe('https://example.com/feed.xml');
     expect(strip.querySelector('.intake-schedule[role="radiogroup"]')).toBeTruthy();
     expect(c.querySelector('select')).toBeNull(); // WS2: segmented control, never a native select
+  });
+
+  it('UX v2 (SPEC-0058): material-carded sections + tokenized marks, no emoji glyphs leaked (#184)', async () => {
+    const c = await mount();
+    // scoped material marker present (so the shared rdesk-* language isn't restyled globally)
+    expect(c.querySelector('.rdesk.src-v2')).toBeTruthy();
+    // sections are real cards (foundation material), not flat dividers
+    const sections = Array.from(c.querySelectorAll('.src-section'));
+    expect(sections.length).toBe(2);
+    expect(sections.every((s) => s.classList.contains('viz-card') && s.classList.contains('viz-grain'))).toBe(true);
+    // type marks are tokenized (hue-class), and the armed switch carries a hue dot — both aria-hidden
+    expect(c.querySelector('.src-mark--rss')).toBeTruthy();
+    expect(c.querySelector('.intake-arm .src-arm-dot')).toBeTruthy();
+    // NO raw emoji glyphs anywhere in the rendered Sources view (the v2 tokenization, #184) — the marks
+    // are GEOMETRIC symbols (◈/▣/●), never pictographic emoji. Guards the specific removed glyphs + the
+    // emoji pictographic blocks (not the geometric U+25xx symbol block the tokenized marks legitimately use).
+    expect(/[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F0FF}]|📰|📂|✉|🔌/u.test(c.textContent ?? '')).toBe(false);
   });
 
   it('shows both Feeds + Watched-folders sections, each with live rows', async () => {
@@ -81,7 +98,7 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     const watch = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
     expect(watch).toBeTruthy();
     expect(watch.textContent).toContain('/Users/me/KB-Inbox');
-    expect(watch.querySelector('.watch-arm')!.textContent).toContain('WATCHING'); // enabled + watching
+    expect(watch.querySelector('.watch-arm')!.textContent).toContain('Watching'); // enabled + watching (UX v2 §4 sentence-case)
     expect(watch.textContent).toContain('brought in a file'); // typed lastEvent, no raw slug
   });
 
