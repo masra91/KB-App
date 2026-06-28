@@ -101,7 +101,6 @@ vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 import { registerIpc, initPipeline } from './ipc';
 import { createKb } from '../kb/vault';
 import { computeGraphProjection } from '../kb/graphProjection';
-import { makeReadOnlyTools } from '../kb/recallTools';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { setQuickCaptureAgent } from './quickCaptureService';
 import type { QuickCaptureAgent, SelectionRead } from './quickCaptureAgent';
@@ -707,7 +706,7 @@ describe('SPEC-0058 STATE-2 — kb:exploreProjection over the maintained graph s
     await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'ada.md'), ada, 'utf8');
     await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'steve.md'), steve, 'utf8');
     // Compute a REAL graph projection (the same one the background store would maintain) and seed it as current().
-    const graph = await computeGraphProjection(makeReadOnlyTools(vaultDir));
+    const graph = await computeGraphProjection(vaultDir);
     state.graphProjection = { data: graph, builtAt: '2026-06-28T00:00:00.000Z', stale: false };
   }
 

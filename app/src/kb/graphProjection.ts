@@ -14,6 +14,9 @@
 // Health (STATE-3, DEV-2) derives from read-only. The generic ProjectionStore backbone + envelope +
 // invalidation + push + persistence are the CORE's (DEV-5, STATE-1/6/7/8/11/12) — this module is a PURE
 // function `(RecallTools) → GraphProjection` plus its read adapter, plugged into that store as `compute`.
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { makeReadOnlyTools } from './recallTools';
 import type { RecallTools, EntityHit, ClaimHit, LinkHit, GrepHit } from './recall';
 
 /** A precomputed, serializable snapshot of the evergreen knowledge graph (STATE-2). Carries exactly what
@@ -47,14 +50,17 @@ function extractWikilinks(md: string): string[] {
 }
 
 /**
- * Compute the graph projection from a live read-only tool surface (STATE-2). Runs the expensive work ONCE
- * (off the render path, on the projection store's cadence / canonical-advance): reads every entity node and
- * claim once, then precomputes each entity's incoming backlinks by the SAME literal-`[[rel]]` test the live
- * `linkTraversal` uses — so the projection-backed neighborhood is byte-identical to the live one, minus the
- * per-mount cost. `now` is injectable for deterministic tests.
+ * Compute the graph projection from the evergreen vault `root` (STATE-2). Runs the expensive work ONCE
+ * (off the render path, on the store's cadence / canonical-advance): reads every entity node + claim once
+ * for the served data, then precomputes each entity's incoming backlinks by the SAME literal-`[[rel]]` test
+ * the live `linkTraversal` uses, over the SAME source set — so a projection-backed read is byte-identical to
+ * the live one, minus the per-mount cost. `now` is injectable for deterministic tests.
  */
-export async function computeGraphProjection(tools: RecallTools, now: () => string = () => new Date().toISOString()): Promise<GraphProjection> {
-  // One scan of all entities (the same call Explore/Health make), held as the projection's entity set.
+export async function computeGraphProjection(root: string, now: () => string = () => new Date().toISOString()): Promise<GraphProjection> {
+  root = path.resolve(root);
+  const tools = makeReadOnlyTools(root);
+
+  // One scan of all (parsing) entities (the same call Explore/Health make), held as the projection's entity set.
   const entities = await tools.entityLookup({ query: '', limit: ENTITY_SCAN_LIMIT });
 
   // Read each entity node once (its md serves predicates for Explore + link/thin scan for Health).
@@ -64,31 +70,21 @@ export async function computeGraphProjection(tools: RecallTools, now: () => stri
     if (typeof md === 'string') entityMd[e.rel] = md;
   }
 
-  // Gather every claim once (subject-keyed reads stay O(1) later); read each claim's md too so backlink
-  // inversion can see claim→entity links (the live `incoming` scans entities AND claims).
   const claims = await collectAllClaims(tools, entities);
-  const claimMd: Record<string, string> = {};
-  for (const c of claims) {
-    const md = await tools.readNode({ rel: c.rel });
-    if (typeof md === 'string') claimMd[c.rel] = md;
-  }
 
-  // PRECOMPUTE backlinks: for each entity, every entity/claim file whose body literally contains `[[rel]]`
-  // (mirrors recallTools.linkTraversal's incoming test exactly — including its piped-link asymmetry). The
-  // O(N·(N+M)) cost lives HERE, once per refresh, not on every Explore load.
+  // PRECOMPUTE backlinks against the SAME source set the live `linkTraversal.incoming` walks: EVERY `.md`
+  // under entities/+claims/, read RAW (not just the parsed entities/claims). This is the QD fast-follow on
+  // #468: a `[[validEntity]]` inside a MALFORMED entity (skipped by `entityLookup`) or an ORPHAN claim
+  // (subject merged away, so `claimsForEntity` never returns it) is an incoming backlink the live walk counts
+  // — the projection must too, or it diverges on a large/merged vault. (Consumers `buildNeighborhood`/
+  // `buildHealthReport` happen to filter non-entity sources, so #468's rendered output was already correct;
+  // this makes the raw `linkTraversal` adapter faithful, the right invariant for a drop-in tool surface.)
+  // The O(N·(N+M)) cost lives HERE, once per refresh, never on the render path.
+  const sourceFiles = await readAllGraphFiles(root);
   const backlinks: Record<string, LinkHit[]> = {};
-  const files: Array<{ rel: string; md: string }> = [
-    ...Object.entries(entityMd).map(([rel, md]) => ({ rel, md })),
-    ...Object.entries(claimMd).map(([rel, md]) => ({ rel, md })),
-  ];
   for (const e of entities) {
     const target = `[[${e.rel}]]`;
-    const hits: LinkHit[] = [];
-    for (const f of files) {
-      if (f.rel === e.rel) continue;
-      if (f.md.includes(target)) hits.push({ from: f.rel, to: e.rel });
-    }
-    backlinks[e.rel] = hits;
+    backlinks[e.rel] = sourceFiles.filter((f) => f.rel !== e.rel && f.md.includes(target)).map((f) => ({ from: f.rel, to: e.rel }));
   }
 
   // Cited sources: read each unique `derivedFrom` source dir's source.md once (for citation titles).
@@ -101,6 +97,44 @@ export async function computeGraphProjection(tools: RecallTools, now: () => stri
   }
 
   return { entities, entityMd, backlinks, claims, sourceMd, builtAt: now() };
+}
+
+/** Read EVERY `.md` under `entities/` + `claims/` raw (rel + content) — the backlink-source SUPERSET the
+ *  live `linkTraversal.incoming` walks, INCLUDING files that don't parse as a valid entity/claim. Mirrors
+ *  recallTools' private walkFiles + readFile; unreadable files are skipped (best-effort), exactly like live. */
+async function readAllGraphFiles(root: string): Promise<Array<{ rel: string; md: string }>> {
+  const out: Array<{ rel: string; md: string }> = [];
+  for (const dir of ['entities', 'claims']) {
+    for (const rel of await walkMdFiles(root, dir)) {
+      try {
+        out.push({ rel, md: await fs.readFile(path.join(root, rel), 'utf8') });
+      } catch {
+        /* unreadable — skip, like live */
+      }
+    }
+  }
+  return out;
+}
+
+/** Recursively list `.md` rel-paths under `root/dir` (skips dotdirs; a missing dir → []). Mirrors the
+ *  private `walkFiles` in recallTools so the backlink-source set matches the live scan exactly. */
+async function walkMdFiles(root: string, dir: string): Promise<string[]> {
+  const out: string[] = [];
+  async function rec(d: string): Promise<void> {
+    let entries: import('node:fs').Dirent[];
+    try {
+      entries = await fs.readdir(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory() && !e.name.startsWith('.')) await rec(full);
+      else if (e.isFile() && e.name.endsWith('.md')) out.push(path.relative(root, full));
+    }
+  }
+  await rec(path.join(root, dir));
+  return out;
 }
 
 /** The same generous entity cap the live read surface uses (recallTools/explorePanel ENTITY_SCAN_LIMIT). */

@@ -15,7 +15,6 @@ import path from 'node:path';
 import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
 import { createProjectionStore, type ProjectionStore, type Projection } from './projectionStore';
 import { computeGraphProjection, type GraphProjection } from '../kb/graphProjection';
-import { makeReadOnlyTools } from '../kb/recallTools';
 import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
@@ -778,7 +777,7 @@ async function saveGraphProjection(vaultPath: string, graph: GraphProjection): P
  *  never the `staging` worktree mid-write). Null when no KB is open. */
 async function computeGraph(): Promise<GraphProjection | null> {
   if (!active) return null;
-  return computeGraphProjection(makeReadOnlyTools(active.vaultPath));
+  return computeGraphProjection(active.vaultPath);
 }
 
 /** The maintained graph projection (SPEC-0058 STATE-2). Started/stopped with the stage sweeps. */
