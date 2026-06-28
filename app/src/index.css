@@ -480,119 +480,71 @@ dl.settings dd {
 /* active/in-progress backing-off → --viz-sprout (was ember; ember is "needs your decision" only). */
 .scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
 
-/* Reviews view — the "needs you" queue (SPEC-0018 REVIEW-10). UX v2 (SPEC-0058): lifted off the legacy
-   `.card`/`--border`/`--accent` chrome onto v2 material, scoped under `.reviews-v2`. Per DL-2's contract,
-   Reviews is the ONE peripheral screen where EMBER is correct — an open review IS a "needs your decision"
-   cue, so each item wears an ember left-spine. The empty state stays calm (no ember). Heads = Spectral. */
-.reviews-v2 { padding: 1rem 1.25rem 2rem; }
-.reviews-v2 .reviews-title { font-size: 1.5rem; color: var(--viz-ink); letter-spacing: 0; line-height: 1.15; margin: 0; }
-.reviews-v2 .reviews-sub, .reviews-v2 .muted { color: var(--viz-ink-muted); }
-ul.review-list {
-  list-style: none;
-  padding: 0;
-  margin: 1rem 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-}
-/* Warming skeleton (SPEC-0060 VUX-13): placeholder card shapes shown while the review projection is
-   still building on a cold launch — a calm opacity pulse (no spinner, no wrong-empty), in the same v2
-   card metrics so the real list lands with no layout jump. Tokens only (themeCohesion guard). The spine
-   is neutral --viz-rule here, NOT ember — there's no decision to make yet. */
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Reviews view — VELLUM v3 (SPEC-0060 VUX-1/VUX-13). The "needs you" queue (SPEC-0018 REVIEW-10), on
+   the warm-vellum tokens (retires --viz-*). Reviews is the ONE surface where EMBER is correct — an open
+   review IS a "needs your decision" cue, so each card wears an ember wash + border; the kicker rides
+   gold-deep/ember. errors=oxide, caution=gold. The empty state stays calm (no ember). Reading-measure
+   column. VUX-13: a warming skeleton (loom status + shimmer), never a 2s blank. Light-only (§2). */
+.reviews-v2 { max-width: 47rem; margin: 0 auto; padding: 0.5rem 0.25rem 3rem; }
+.reviews-v2 .reviews-title { font-family: var(--voice); font-weight: 500; font-size: 1.6rem; color: var(--ink); letter-spacing: 0.01em; line-height: 1.15; margin: 0; }
+.reviews-v2 .reviews-sub { font-family: var(--ui); font-size: 0.85rem; color: var(--stone); margin: 0.3rem 0 0; }
+.reviews-v2 .muted { color: var(--stone); }
+ul.review-list { list-style: none; padding: 0; margin: 1.1rem 0 0; display: flex; flex-direction: column; gap: 1rem; }
+
+/* Warming skeleton (VUX-13): a loom status + shimmer card shapes while the projection builds — calm
+   "preparing", never a spinner, never a wrong-empty. Neutral hair (no ember — no decision to make yet). */
 .rev-skeleton-list { pointer-events: none; }
-.reviews-v2 li.rev-skeleton-card {
-  background: var(--viz-panel);
-  border: 0.5px solid var(--viz-rule);
-  border-left: 2px solid var(--viz-rule);
-  border-radius: var(--viz-r-card);
-  box-shadow: var(--viz-shadow-card);
-  padding: 0.95rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-.rev-skeleton {
-  display: block;
-  height: 0.7rem;
-  border-radius: 4px;
-  background: var(--viz-rule);
-  animation: rev-skeleton-pulse 1.4s ease-in-out infinite;
-}
-.rev-skeleton-line { width: 78%; }
-.rev-skeleton-line--short { width: 44%; }
+.rev-skel-status { display: flex; align-items: center; gap: 0.5rem; margin: 0.2rem 0 0.2rem; font-family: var(--ui); font-size: 0.8rem; color: var(--stone); }
+.reviews-v2 li.rev-skeleton-card { background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: 0.65rem; }
+.rev-skeleton { display: block; height: 0.75rem; border-radius: 5px; background: linear-gradient(100deg, var(--parchment) 30%, rgba(255, 255, 255, 0.6) 50%, var(--parchment) 70%); background-size: 220% 100%; animation: rev-shimmer 1.5s ease-in-out infinite; }
+.rev-skeleton-line { width: 80%; }
+.rev-skeleton-line--short { width: 46%; }
 .rev-skeleton-line--sub { width: 32%; height: 0.6rem; }
 .reviews-v2 .rev-skeleton-sub { margin-top: 1rem; }
-@keyframes rev-skeleton-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 0.85; } }
+@keyframes rev-shimmer { 0% { background-position: 120% 0; } 100% { background-position: -120% 0; } }
 @media (prefers-reduced-motion: reduce) { .rev-skeleton { animation: none; } }
-/* A review item is a real raised CARD with an EMBER decision-cue spine (the one sanctioned ember on the
-   peripheral screens — it means "this needs your decision", language §4 / DL-1's Today decision cue). */
+
+/* A review card — the EMBER decision surface (the one sanctioned ember in v3): an ember wash + border
+   marks "this needs your decision". Hover lifts. */
 .reviews-v2 li.review {
-  background: var(--viz-panel);
-  border: 0.5px solid var(--viz-rule);
-  border-left: 2px solid var(--viz-ember);
-  border-radius: var(--viz-r-card);
-  box-shadow: var(--viz-shadow-card);
-  padding: 0.95rem 1.1rem;
+  background: linear-gradient(180deg, rgba(200, 116, 60, 0.05), rgba(200, 116, 60, 0.015)), var(--linen);
+  border: 1px solid rgba(200, 116, 60, 0.22);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
+  padding: 1.15rem 1.3rem 1.05rem;
+  transition: transform var(--t), box-shadow var(--t);
 }
-.reviews-v2 .review-q {
-  font-weight: 600;
-  font-size: 1rem;
-  color: var(--viz-ink);
-}
-.review-detail {
-  margin: 0.5rem 0;
-}
-.reviews-v2 .review-detail summary {
-  cursor: pointer;
-  color: var(--viz-accent);
-  font-size: 0.9rem;
-}
-.review-detail p {
-  margin: 0.4rem 0 0;
-  font-size: 0.92rem;
-}
-/* WS2 PR3: the note is the EditableField primitive (.viz-field__input--multiline) and Confirm/Reject
-   are the Button primitive (.viz-btn[--primary]) — design-system.css owns their styling now. Only the
-   field-wrapper spacing + the action-row layout remain here. */
-.review-note-field {
-  display: flex;
-  margin: 0.5rem 0;
-}
-.review-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-/* REVIEW-16 disambiguation candidate rows — visual tokens come from the viz primitives (.viz-spine
-   left rule, .viz-signage name label, .viz-body gloss, .viz-btn--ghost link); only layout lives here. */
-ul.review-candidates {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.review-candidate {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.15rem 0.6rem;
-  padding: 0.3rem 0 0.3rem 0.65rem; /* left pad clears the .viz-spine rule */
-}
-.review-candidate-name {
-  flex: 0 0 auto;
-  font-size: 0.74rem;
-  color: var(--viz-ink-muted);
-}
-.review-candidate-gloss {
-  flex: 1 1 12rem;
-  font-size: 0.95rem;
-}
-.review-candidate-open {
-  flex: 0 0 auto;
-  font-size: 0.85rem;
-  white-space: nowrap;
-}
+.reviews-v2 li.review:hover { transform: translateY(-1px); box-shadow: var(--shadow-raise); }
+/* Kicker — the ember "needs you" eyebrow. */
+.review-kicker { display: flex; align-items: center; gap: 0.45rem; margin-bottom: 0.55rem; font-family: var(--ui); font-weight: 600; font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--gold-deep); }
+.review-kicker .glyph { color: var(--ember); font-style: normal; }
+.reviews-v2 .review-q { font-family: var(--voice); font-weight: 500; font-size: 1.15rem; line-height: 1.4; color: var(--ink); letter-spacing: -0.005em; margin: 0 0 0.25rem; }
+/* "Why this matters" context disclosure — slate toggle, vellum body box. */
+.review-detail { margin: 0.85rem 0 0; }
+.reviews-v2 .review-detail summary { cursor: pointer; display: inline-flex; align-items: center; gap: 0.4rem; font-family: var(--ui); font-weight: 500; font-size: 0.8rem; color: var(--slate); list-style: none; }
+.reviews-v2 .review-detail summary::-webkit-details-marker { display: none; }
+.reviews-v2 .review-detail summary:hover { color: var(--deep); }
+.review-detail p { margin: 0.6rem 0 0; font-family: var(--ui); font-size: 0.86rem; line-height: 1.6; color: var(--ink-2); }
+.review-detail .muted { color: var(--stone); }
+/* The note — a dashed v3 affordance (the gold quote mark signals "becomes a source"). */
+.review-note-field { display: flex; margin: 0.85rem 0 0; }
+.review-actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 1rem; }
+/* Confirm = viridian (the resolving action); Reject = a calm outline. Overrides the .viz-btn base,
+   scoped to Reviews (no design-system.css edit). */
+.reviews-v2 .review-confirm.viz-btn { background: var(--viridian); border-color: var(--viridian); color: #f6f2e6; border-radius: var(--r-pill); text-transform: none; letter-spacing: 0; font-weight: 600; }
+.reviews-v2 .review-confirm.viz-btn:hover, .reviews-v2 .review-confirm.viz-btn:focus-visible { background: #2a5f50; border-color: #2a5f50; color: #f6f2e6; }
+.reviews-v2 .review-reject.viz-btn { background: transparent; border-color: var(--hair); color: var(--ink-2); border-radius: var(--r-pill); text-transform: none; letter-spacing: 0; }
+.reviews-v2 .review-reject.viz-btn:hover, .reviews-v2 .review-reject.viz-btn:focus-visible { border-color: var(--stone); color: var(--ink); background: var(--linen); }
+/* An async-answer failure banner — oxide rides the glyph only (#184); the message stays readable ink. */
+.review-error { margin: 0 0 0.6rem; font-family: var(--ui); font-size: 0.82rem; color: var(--ink); }
+.review-error-glyph { color: var(--oxide); margin-right: 0.3rem; }
+/* REVIEW-16 disambiguation candidate cards — linen cards, one per candidate to tell apart. */
+ul.review-candidates { list-style: none; padding: 0; margin: 0.85rem 0 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.review-candidate { display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 0.7rem; background: var(--linen); border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0.6rem 0.75rem; }
+.review-candidate-name { flex: 0 0 auto; font-family: var(--ui); font-size: 0.66rem; letter-spacing: 0.04em; text-transform: uppercase; color: var(--stone); }
+.review-candidate-gloss { flex: 1 1 12rem; font-family: var(--ui); font-size: 0.9rem; color: var(--ink); }
+.review-candidate-open { flex: 0 0 auto; font-size: 0.82rem; white-space: nowrap; }
 button:disabled {
   opacity: 0.5;
   cursor: default;

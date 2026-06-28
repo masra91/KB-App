@@ -78,7 +78,7 @@ function paintSkeleton(container: HTMLElement): void {
   container.innerHTML = `
     <div class="${V2}" aria-busy="true">
       ${V2_HEAD}
-      <p class="viz-body reviews-sub rev-skeleton-sub" aria-hidden="true"><span class="rev-skeleton rev-skeleton-line rev-skeleton-line--sub"></span></p>
+      <div class="rev-skel-status" aria-hidden="true"><span class="vmark loom"></span> Reading your vault…</div>
       <ul class="review-list rev-skeleton-list">${row}${row}</ul>
     </div>`;
 }
@@ -228,9 +228,13 @@ function reviewItemHtml(r: ReviewSummary): string {
   const err = failedIds.has(r.id)
     ? `<p class="review-error viz-body" role="alert"><span class="review-error-glyph viz-state-error" aria-hidden="true">✕</span> ${esc(failedIds.get(r.id))}</p>`
     : '';
+  // v3 ember kicker — the sanctioned "needs your decision" cue. Derived from the data shape (a
+  // candidate set = a tell-apart/merge review), never an invented field.
+  const kicker = r.candidates?.length ? 'Tell these apart' : 'Needs your decision';
   return `
       <li class="review" data-id="${esc(r.id)}">
         ${err}
+        <div class="review-kicker"><span class="glyph" aria-hidden="true">◆</span> ${kicker}</div>
         <div class="review-q">${esc(scrubUlids(r.question))}</div>
         ${candidatesBlock(r)}
         <details class="review-detail">
