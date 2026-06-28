@@ -12,6 +12,7 @@ import os from 'node:os';
 import { appendAuditEvent } from './audit';
 import { orient, buildOrientedQuery, chooseAngle, clampAngle, ORIENT_ANGLE_MAX_CHARS, type NeighborhoodReader } from './researchOrient';
 import { sensitivityAllowsOrientRead } from './sensitivity';
+import { writeLedger } from './researchLedger';
 import { MAX_OUTBOUND_CONTEXT_CHARS } from './researchRun';
 import type { ResearcherConfig, ResearchRequest } from './researchers';
 
@@ -111,6 +112,38 @@ describe('cross-run facet rotation (RESEARCH-QUALITY) — two runs on the same e
       expect(r2.angle).toContain('headquarters or location');
       // The egress-facing artifact actually differs — that's the diversity the Principal asked for.
       expect(buildOrientedQuery(req, r1.angle)).not.toBe(buildOrientedQuery(req, r2.angle));
+    });
+  });
+});
+
+describe('RMEM (SPEC-0054) — the DURABLE run-ledger drives orient (don\'t repeat, resume)', () => {
+  const gap = { present: [] as string[], missing: ['founding date', 'headquarters or location', 'leadership'] };
+  const reqFor = (): ResearchRequest => ({ ...reqOf('Acme Corp'), by: { stage: 'enrich', entityId: 'ent-acme' }, gap });
+
+  it('RMEM-3: a pre-seeded ledger (no audit) makes orient SKIP a covered facet and rotate', async () => {
+    await withTemp(async (root) => {
+      // Seed ONLY the durable ledger (no researcher audit events at all) — proving the ledger is first-class,
+      // not a derivation of the audit. The seeded run drilled `founding date`.
+      await writeLedger(root, { researcherId: 'web-1', runs: [{ target: 'Acme Corp', entityId: 'ent-acme', gapFacet: 'founding date', angle: 're Acme Corp: founding date', harvested: ['SRC1'], outcome: 'finding', ts: Date.parse('2026-02-01T00:00:00.000Z') }] });
+      const res = await orient(root, web({ egressTier: 'local-only', orientBudget: 5 }), reqFor(), { readNeighborhood: reader({ found: false }), gate: sensitivityAllowsOrientRead, now: () => '2026-02-02T00:00:00.000Z' });
+      expect(res.angle).not.toContain('founding date'); // the covered facet is skipped
+      expect(res.angle).toContain('headquarters or location'); // rotated to the next missing facet
+    });
+  });
+
+  it('RMEM-4/6: orient resumes the frontier from the ledger; the oriented query carries only the gap facet (no raw KB)', async () => {
+    await withTemp(async (root) => {
+      await writeLedger(root, { researcherId: 'web-1', runs: [
+        { target: 'Acme Corp', entityId: 'ent-acme', gapFacet: 'founding date', angle: 're Acme Corp: founding date', harvested: ['SRC1'], outcome: 'finding', ts: Date.parse('2026-02-01T00:00:00.000Z') },
+        { target: 'Acme Corp', entityId: 'ent-acme', gapFacet: 'headquarters or location', angle: 're Acme Corp: headquarters or location', harvested: ['SRC2'], outcome: 'no-finding', ts: Date.parse('2026-02-01T01:00:00.000Z') },
+      ] });
+      const res = await orient(root, web({ egressTier: 'local-only', orientBudget: 5 }), reqFor(), { readNeighborhood: reader({ found: false }), gate: sensitivityAllowsOrientRead, now: () => '2026-02-02T00:00:00.000Z' });
+      expect(res.angle).toContain('leadership'); // the last un-drilled frontier facet — resumes where it stopped
+      // RMEM-6 / D6a: the egress query is the request + the bounded gap steer only — never harvested KB content.
+      const q = buildOrientedQuery(reqFor(), res.angle);
+      expect(q).toContain('leadership');
+      expect(q).not.toContain('SRC1');
+      expect(q).not.toContain('SRC2');
     });
   });
 });

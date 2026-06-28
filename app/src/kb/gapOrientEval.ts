@@ -63,3 +63,46 @@ export function queryDiversity(queries: readonly string[]): QueryDiversity {
   const distinct = new Set(norm).size;
   return { total: norm.length, distinct, ratio: norm.length === 0 ? 0 : distinct / norm.length };
 }
+
+/** One run scored for gap-closure (RMEM-5): the facet the run pursued, the target's MISSING facets at the
+ *  time of the run, and the facets already covered by prior runs. A run *closes* the gap iff it pursued a
+ *  genuinely-missing, not-yet-covered facet (it fills a real hole) rather than re-asserting a known fact. */
+export interface GapClosureSample {
+  pursuedFacet: string;
+  missingBefore: readonly string[];
+  alreadyCovered: readonly string[];
+}
+
+export interface GapClosure {
+  /** Runs that pursued a facet (the denominator — a cold run with no facet can't close a gap). */
+  total: number;
+  /** Of those, how many filled a still-missing, not-yet-covered facet. */
+  closed: number;
+  /** `closed / total` in [0,1]; 0 when `total` is 0. */
+  rate: number;
+}
+
+const norm = (s: string): string => s.trim().toLowerCase();
+
+/** Does a run close the gap — pursue a still-missing facet it hasn't already covered (RMEM-5)? */
+export function runClosesGap(sample: GapClosureSample): boolean {
+  const f = norm(sample.pursuedFacet);
+  if (f.length === 0) return false;
+  const missing = sample.missingBefore.map(norm);
+  const covered = sample.alreadyCovered.map(norm);
+  return missing.includes(f) && !covered.includes(f);
+}
+
+/**
+ * Gap-CLOSURE rate over a researcher's run sequence (RMEM-5, the "fit + fill" outcome). RESEARCH-QUALITY's
+ * {@link queryDiversity} proves runs DIFFER; this proves they FILL — each run targets a real, still-open gap
+ * facet rather than re-asserting known facts. With the ledger-backed rotation, successive runs drain the
+ * missing set (high closure); the dead rail (re-issuing the same first facet) closes the gap ONCE then
+ * re-asserts it every run after → rate collapses toward `1/total`. A cold run (no facet) doesn't count.
+ */
+export function gapClosureRate(samples: readonly GapClosureSample[]): GapClosure {
+  const scorable = samples.filter((s) => norm(s.pursuedFacet).length > 0);
+  const total = scorable.length;
+  const closed = scorable.filter(runClosesGap).length;
+  return { total, closed, rate: total === 0 ? 0 : closed / total };
+}

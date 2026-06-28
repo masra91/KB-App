@@ -72,3 +72,30 @@ the KB (fills real gaps) and never repeats a prior run.
 ## 5. Out of scope
 - Cross-researcher shared memory (each researcher's ledger is its own in v1).
 - Proactive "research everything sparse" sweeps beyond the existing trigger cadence.
+
+## 6. Delivery slices
+- **Slice-A — the durable run-ledger + eval (this PR).** A first-class per-researcher ledger
+  (`researchLedger.ts` → `.kb/research/<id>/ledger.json`) the run phase writes on every pass (RMEM-2);
+  orient consults it (authoritative over the audit-derived notebook) to skip covered tuples + resume the
+  frontier (RMEM-3/4); reset/replay overlay semantics — survives restart + replay, a deleted researcher
+  leaves no graveyard (RMEM-7); the `gapClosureRate` metric (RMEM-5); egress posture guard (RMEM-6).
+- **Slice-B (deferred).** RMEM-8 manage-view run-history surface; RMEM-1 *relationship*-gaps (today
+  `enrichGap` derives missing *facets* only — relationship-gap detection is the follow-up).
+
+## 7. Changelog
+- 2026-06-28 — **Slice-A implemented** (KB-Developer-2). New `researchLedger.ts`: a durable, first-class
+  per-researcher run-ledger (target × gap-facet × angle × harvested × outcome), bounded + self-healing,
+  living under `.kb/research/<id>/` (neither gitignored nor in the replay clean-scope → survives restart +
+  replay as a re-applied overlay, RMEM-2/7). `researchRun` records a run on every pass (finding/no-finding/
+  failed); `researchOrient` reads the ledger and unions its covered-angles (RMEM-3 exclusion — a *failed*
+  pass doesn't suppress a retry; stale facets re-open) + frontier (RMEM-4 resume) with the audit-derived
+  notebook, so rotation is now ledger-backed. `deleteResearcher` clears `.kb/research/<id>/` (RMEM-7 no
+  graveyard; ground truth — sources/findings + audit — untouched). New `gapClosureRate`/`runClosesGap`
+  metric in `gapOrientEval` (RMEM-5): proves runs FILL the gap (drain the missing set), not just differ —
+  the dead rail (re-asserting the first facet) collapses to `1/total`. Egress unchanged (RMEM-6): orient
+  steers with the gap descriptor + run metadata only, never raw KB content (tested: the oriented query
+  carries the facet, never harvested source ids). `Verify` graduates to `test:` for RMEM-2/3/4/5/6/7.
+  **Deferred:** RMEM-1 relationship-gaps + RMEM-8 run-history UI (Slice-B). **Design note (D):** RMEM-2
+  "survives reset" vs RMEM-7 "reset clears cleanly" resolved as the **directives-style overlay** — the
+  ledger survives restart + the replay-rebuild (re-applied, not re-derived-as-evidence), while an explicit
+  researcher delete clears it cleanly. Tunable by KB-Lead.

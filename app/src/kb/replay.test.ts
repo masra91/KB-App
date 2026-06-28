@@ -109,6 +109,28 @@ describe.skipIf(!gitAvailable)('Full Replay — purge + epoch reset on staging, 
     }
   });
 
+  it('RMEM-7: the researcher run-ledger is a re-applied overlay — it SURVIVES a full replay (not purged as evidence)', async () => {
+    const dir = await makeTempDir();
+    try {
+      const root = path.join(dir, 'vault');
+      const stagingWt = await seedDecomposed(root);
+      const lock = new Mutex();
+      const { writeLedger, readLedger } = await import('./researchLedger');
+      // Seed a durable run-ledger on staging (where the replay purge runs).
+      await writeLedger(stagingWt, { researcherId: 'web-1', runs: [{ target: 'Acme Corp', entityId: 'ent-acme', gapFacet: 'founding date', angle: 're Acme Corp: founding date', harvested: ['SRC1'], outcome: 'finding', ts: 1 }] });
+
+      await runFullReplay(root, stagingWt, lock, { replayId: 'TESTEPOCH-RMEM' });
+
+      // The ledger is NOT in the replay purge/clean scope → run-memory persists across the rebuild (RMEM-2/7):
+      // the researcher still knows it drilled `founding date`, so it won't repeat post-replay.
+      const ledger = await readLedger(stagingWt, 'web-1');
+      expect(ledger.runs).toHaveLength(1);
+      expect(ledger.runs[0]).toMatchObject({ gapFacet: 'founding date', outcome: 'finding' });
+    } finally {
+      await rmTempDir(dir);
+    }
+  });
+
   it('re-derives after replay: decomposing the re-queued source yields a fresh candidate (REPLAY-9)', async () => {
     const dir = await makeTempDir();
     try {
