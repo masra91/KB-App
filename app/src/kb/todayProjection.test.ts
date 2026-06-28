@@ -2,10 +2,11 @@
 // logic: salutation-by-hour, stat deltas (up/flat), the honest line-meta, decision ordering + rest state,
 // health thresholds, compact relative-time, activity cap, and ENG-15/16 coalescing of garbage numerics.
 import { describe, it, expect } from 'vitest';
-import { buildTodayProjection, salutationFor, compactAgo, activityKind, todayActivityFromFeed, todayHealthFromProjection, countConnections, type TodayInputs } from './todayProjection';
+import { buildTodayProjection, salutationFor, compactAgo, activityKind, todayActivityFromFeed, todayHealthFromProjection, countConnections, assembleTodayProjection, type TodayInputs, type TodaySources } from './todayProjection';
 import type { ActivityFeedEntry } from './activityDigest';
 import type { HealthProjection } from './healthProjection';
 import type { GraphProjection } from './graphProjection';
+import type { PipelineStatusView } from './types';
 
 function inputs(over: Partial<TodayInputs> = {}): TodayInputs {
   return {
@@ -198,5 +199,41 @@ describe('countConnections (graph backlinks → the Connections stat)', () => {
     expect(countConnections(null)).toBe(0);
     expect(countConnections({} as unknown as GraphProjection)).toBe(0);
     expect(countConnections({ backlinks: { 'e/a.md': 'bad' as unknown as [] } } as unknown as GraphProjection)).toBe(0);
+  });
+});
+
+describe('assembleTodayProjection (compose maintained reads → the full projection)', () => {
+  const sources = (over: Partial<TodaySources> = {}): TodaySources => ({
+    status: { conversion: { captured: 214, candidates: 30, entities: 392, claims: 1847, promoted: 6 } } as unknown as PipelineStatusView,
+    graph: { backlinks: { a: [{ from: 'x', to: 'a' }], b: [{ from: 'y', to: 'b' }, { from: 'z', to: 'b' }] } } as unknown as GraphProjection,
+    health: { status: 'ready', dimensions: [{ key: 'dangling', count: 0, severity: 'ok' }, { key: 'orphans', count: 0, severity: 'ok' }, { key: 'thin', count: 11, severity: 'warn' }] } as unknown as HealthProjection,
+    activity: [{ id: 'r', ts: '2026-06-27T11:54:00.000Z', actor: 'compose', summary: 'Composed a page', eventCount: 1, events: [] } as ActivityFeedEntry],
+    stations: [{ name: 'Capture', count: 214, state: 'done' }, { name: 'Compose', count: null, state: 'idle' }],
+    openReviews: 2,
+    contradictions: 1,
+    inFlight: 2,
+    lastComposedAgoMs: 6 * 60_000,
+    movedRecently: 3,
+    ...over,
+  });
+  const EVENING = Date.parse('2026-06-27T23:48:00');
+
+  it('maps every section from the maintained reads into the locked contract shape', () => {
+    const p = assembleTodayProjection(sources(), EVENING);
+    expect(p.greeting).toEqual({ salutation: 'Good evening' }); // name omitted (v1)
+    expect(p.stats.map((s) => [s.key, s.value])).toEqual([['sources', 214], ['claims', 1847], ['entities', 392], ['connections', 3]]); // connections = 3 backlinks
+    expect(p.health.find((h) => h.key === 'thin')).toMatchObject({ value: '11', status: 'warn' });
+    expect(p.activity[0]).toMatchObject({ kind: 'composed', text: 'Composed a page' });
+    expect(p.decisions.map((d) => d.kind)).toEqual(['contradiction', 'review']); // 1 contradiction + 2 reviews
+    expect(p.line.stations).toHaveLength(2); // injected, passed through
+    expect(p.line.meta).toBe('2 in flight · last composed 6m ago');
+  });
+
+  it('a warming/empty backend (null status/graph/health) assembles a calm, non-crashing projection', () => {
+    const p = assembleTodayProjection(sources({ status: null, graph: null, health: null, activity: [], stations: [], openReviews: 0, contradictions: 0, inFlight: 0, lastComposedAgoMs: null, movedRecently: 0 }), EVENING);
+    expect(p.stats.every((s) => s.value === 0)).toBe(true);
+    expect(p.health.every((h) => h.status === 'ok')).toBe(true);
+    expect(p.decisions).toEqual([]); // calm rest state
+    expect(p.line.meta).toBe('nothing in flight · nothing composed yet');
   });
 });

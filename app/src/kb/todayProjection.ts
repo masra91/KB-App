@@ -17,6 +17,7 @@ import type { ActivityFeedEntry } from './activityDigest';
 import type { HealthProjection, HealthDimensionKey } from './healthProjection';
 import type { AuditActor } from './audit';
 import type { GraphProjection } from './graphProjection';
+import type { PipelineStatusView } from './types';
 
 /** The precise upstream fields Today needs — mapped from existing projections by the main-side wiring. */
 export interface TodayInputs {
@@ -45,6 +46,49 @@ export interface TodayInputs {
 }
 
 const MAX_ACTIVITY = 5;
+
+/** The maintained-projection reads the main-side `computeTodayProjection` gathers (off the render path)
+ *  + feeds to {@link assembleTodayProjection}. `stations` is pre-built by the caller (reusing the Status
+ *  view's station logic keeps both Lines identical) so this stays decoupled from where that logic lives. */
+export interface TodaySources {
+  status: PipelineStatusView | null; // conversion (sources/claims/entities) + inFlight
+  graph: GraphProjection | null; // → Connections (countConnections)
+  health: HealthProjection | null; // → dangling/orphans/thin
+  activity: ActivityFeedEntry[]; // curated feed (newest-first)
+  stations: TodayStation[]; // pre-built Line ribbon (injected)
+  openReviews: number;
+  contradictions: number;
+  inFlight: number; // total items in flight
+  lastComposedAgoMs: number | null;
+  movedRecently: number; // recent completions (drives the subtitle)
+  todayDeltas?: { sources: number; claims: number; entities: number; connections: number }; // "+N today"; v1 defers to 0
+}
+
+/** Compose the maintained-projection reads → the full Today projection (STATE-7: one read, exact shape).
+ *  PURE: maps each source through the typed helpers (no live vault scan — every source is already a
+ *  maintained projection / cached read). `nowMs` injected. The main-side wiring gathers `sources` from
+ *  the maintained stores (`statusStore`/`graphProjectionForActive`/`reviewStore`/…) and calls this. */
+export function assembleTodayProjection(sources: TodaySources, nowMs: number): TodayProjection {
+  const conv = sources.status?.conversion;
+  const inputs: TodayInputs = {
+    counts: {
+      sources: safeCount(conv?.captured),
+      claims: safeCount(conv?.claims),
+      entities: safeCount(conv?.entities),
+      connections: countConnections(sources.graph),
+    },
+    todayDeltas: sources.todayDeltas ?? { sources: 0, claims: 0, entities: 0, connections: 0 },
+    stations: sources.stations,
+    inFlight: safeCount(sources.inFlight),
+    lastComposedAgoMs: sources.lastComposedAgoMs,
+    activity: todayActivityFromFeed(sources.activity, nowMs),
+    openReviews: safeCount(sources.openReviews),
+    contradictions: safeCount(sources.contradictions),
+    health: todayHealthFromProjection(sources.health),
+    movedRecently: safeCount(sources.movedRecently),
+  };
+  return buildTodayProjection(inputs, nowMs);
+}
 
 /** Build the Today projection from composed inputs at `nowMs` (injected so it's clock-free/testable). */
 export function buildTodayProjection(inputs: TodayInputs, nowMs: number): TodayProjection {
