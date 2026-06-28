@@ -53,7 +53,7 @@ import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
 import { recallEffortLevers } from '../kb/recallConstants';
-import { saveConversation, listConversations, loadConversation } from './conversationStore';
+import { saveConversation, listConversations, loadConversation, deleteConversation } from './conversationStore';
 import type { Conversation, ConversationTurn, ConversationSummary } from '../kb/conversation';
 import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
@@ -486,6 +486,9 @@ export function registerIpc(): void {
   });
   ipcMain.handle('kb:loadConversation', async (_e, id: unknown): Promise<Conversation | null> => {
     return typeof id === 'string' ? loadConversation(id) : null;
+  });
+  ipcMain.handle('kb:deleteConversation', async (_e, id: unknown): Promise<{ ok: boolean }> => {
+    return typeof id === 'string' ? deleteConversation(id) : { ok: false };
   });
 
   // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian. The renderer hands us the

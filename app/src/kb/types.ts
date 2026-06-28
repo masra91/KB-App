@@ -801,6 +801,8 @@ export interface KbApi {
   saveConversation(req: { turns: ConversationTurn[]; id?: string; title?: string }): Promise<{ id: string }>;
   listConversations(): Promise<ConversationSummary[]>;
   loadConversation(id: string): Promise<Conversation | null>;
+  // Past-chats per-row remove. ULID-contained; idempotent (ok:true whether removed or already absent).
+  deleteConversation(id: string): Promise<{ ok: boolean }>;
   // SPEC-0026 ASK-14: open a citation's canonical target in Obsidian (obsidian:// deep-link). The
   // renderer passes the citation's vault-relative `ref`; main resolves + contains it, then opens it.
   openCitation(ref: string): Promise<OpenCitationResult>;

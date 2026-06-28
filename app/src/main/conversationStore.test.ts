@@ -20,7 +20,7 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { saveConversation, listConversations, loadConversation, type ConversationTurn } from './conversationStore';
+import { saveConversation, listConversations, loadConversation, deleteConversation, type ConversationTurn } from './conversationStore';
 
 function result(question: string, answer: string): AskResult {
   return { question, answer, citations: [{ kind: 'claim', ref: 'claims/x.md', label: 'Ada' }], grounded: true, toolCalls: 3, truncated: false };
@@ -109,5 +109,32 @@ describe('conversationStore (VUX-11 past-chats / save-chat)', () => {
     expect(await loadConversation('../../etc/passwd')).toBeNull();
     expect(await loadConversation('not-a-ulid')).toBeNull();
     expect(await loadConversation('')).toBeNull();
+  });
+
+  it('delete removes a conversation from the list + load (the Past-chats per-row remove)', async () => {
+    const { id: keep } = await saveConversation([turn('keep', 'a')], { newId: () => ulid(1) });
+    const { id: drop } = await saveConversation([turn('drop', 'b')], { newId: () => ulid(2) });
+    expect((await listConversations()).map((s) => s.title).sort()).toEqual(['drop', 'keep']);
+    expect(await deleteConversation(drop)).toEqual({ ok: true });
+    expect((await listConversations()).map((s) => s.title)).toEqual(['keep']); // only the dropped one gone
+    expect(await loadConversation(drop)).toBeNull();
+    expect(await loadConversation(keep)).not.toBeNull(); // sibling untouched
+  });
+
+  it('delete is idempotent — ok:true whether the file was there or already absent', async () => {
+    const id = ulid();
+    expect(await deleteConversation(id)).toEqual({ ok: true }); // never existed → still ok (the row is gone)
+    await saveConversation([turn('x', 'a')], { id });
+    expect(await deleteConversation(id)).toEqual({ ok: true }); // existed → removed
+    expect(await deleteConversation(id)).toEqual({ ok: true }); // again → still ok
+  });
+
+  it('CONTAINMENT: delete rejects a crafted non-ULID id (ok:false, no unlink outside conversations/)', async () => {
+    const outside = path.join(state.userData, 'keep-me.json');
+    await fs.writeFile(outside, '{}');
+    expect(await deleteConversation('../keep-me')).toEqual({ ok: false });
+    expect(await deleteConversation('not-a-ulid')).toEqual({ ok: false });
+    expect(await deleteConversation('')).toEqual({ ok: false });
+    expect(await fs.readFile(outside, 'utf8')).toBe('{}'); // the outside file is untouched
   });
 });

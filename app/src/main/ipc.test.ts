@@ -377,6 +377,14 @@ describe('SPEC-0060 VUX-11 — kb:saveConversation / listConversations / loadCon
     expect(await invoke('kb:loadConversation', '../kb-app.config')).toBeNull();
     expect(await invoke('kb:loadConversation', 'not-a-ulid')).toBeNull();
   });
+
+  it('delete removes a thread through the IPC layer; a crafted id is rejected (ok:false)', async () => {
+    const { id } = await invoke<{ id: string }>('kb:saveConversation', { turns: [turn('q', 'a')] });
+    expect(await invoke<unknown[]>('kb:listConversations')).toHaveLength(1);
+    expect(await invoke('kb:deleteConversation', id)).toEqual({ ok: true });
+    expect(await invoke<unknown[]>('kb:listConversations')).toHaveLength(0);
+    expect(await invoke('kb:deleteConversation', '../kb-app.config')).toEqual({ ok: false }); // contained
+  });
 });
 
 describe('SPEC-0026 ASK-14 — kb:openCitation opens an Obsidian deep-link', () => {
