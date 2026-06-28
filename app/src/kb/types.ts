@@ -232,11 +232,17 @@ export interface TodayGreeting {
   name?: string; // the Principal's name when set; the view omits the comma when absent
 }
 
-/** One pipeline-ribbon station ("The Line"): a named stage + its in-flight/queue count + lit state. */
+/** One pipeline-ribbon station ("The Line"). A slim subset of the Status view's `StationModel`, built
+ *  from the SAME lifted `buildStations` (SPEC-0058 "one Line, one truth", DL-1) — so Today's ribbon is
+ *  byte-identical to Status's. `state` is the native stage liveness (NOT a remapped done/active/idle;
+ *  an already-passed station reads `idle`). The view renders the same station-state language as Status
+ *  (running=sprout/breathe · blocked=brass · error=oxide · idle=neutral; state never colour-alone, #184). */
 export interface TodayStation {
-  name: string; // Capture · Archive · Decompose · Connect · Claims · Compose
-  count: number | null; // items at this stage now (null → the "—" rest state)
-  state: 'done' | 'active' | 'idle';
+  name: string; // human stage label (stageDisplayName) — Capture · Archiving · Decompose · Connect · …
+  stage: string; // canonical stage id (the lowercase routing id; display uses `name`)
+  state: 'idle' | 'running' | 'blocked' | 'error';
+  glyph: string; // the state glyph (○ idle · ▣ running · ◐ blocked · ✕ error)
+  count: number; // items at this station now = queued + inProgress
 }
 
 /** One headline stat card with a today-delta. */
