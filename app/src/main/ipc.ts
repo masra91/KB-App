@@ -45,6 +45,7 @@ import {
   resumeActive,
   quiesceStatusForActive,
   isActiveQuiescing,
+  graphProjectionForActive,
 } from './pipeline';
 import { getQuickCaptureAgent } from './quickCaptureService';
 import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from './quickCaptureScreenshot';
@@ -53,7 +54,8 @@ import { recall } from '../kb/recall';
 import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
-import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
+import { makeProjectionTools } from '../kb/graphProjection';
+import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood, type ExploreProjection } from '../kb/explorePanel';
 import { buildHealthReport } from '../kb/healthPanel';
 import { toHealthProjection, type HealthProjection } from '../kb/healthProjection';
 import { readContradictionDirectives } from '../kb/directives';
@@ -513,10 +515,36 @@ export function registerIpc(): void {
   // SPEC-0039 EXPLORE: the read-only entity-neighborhood view. Reads the EVERGREEN graph at the active
   // vault root (like recall/ask, NOT the staging worktree — EXPLORE-3: canonical state only), via the
   // read-only recall tools — so it's read-only by construction (EXPLORE-1: no write path here).
+  //
+  // SPEC-0058 STATE-2: prefer the MAINTAINED graph projection — `makeProjectionTools` serves the exact
+  // read-only surface from the in-memory snapshot (zero fs, O(degree) backlinks; byte-identical per
+  // #457's equivalence), killing the per-mount O(N²) walk that failed to load. Until the projection's
+  // first build, fall back to the live scan (a cold-start path #451's warming/timeout guard covers).
+  const exploreReadTools = (root: string) => {
+    const p = graphProjectionForActive();
+    return p ? makeProjectionTools(p.data) : makeReadOnlyTools(root);
+  };
+
   ipcMain.handle('kb:exploreEntities', async (): Promise<ExploreEntityRef[]> => {
     const cfg = await readAppConfig();
     if (!cfg.activeVaultPath) return [];
-    return listExploreEntities(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)));
+    return listExploreEntities(exploreReadTools(path.resolve(cfg.activeVaultPath)));
+  });
+
+  // SPEC-0058 STATE-2: the single Explore read — `{status, data:{neighborhood, entities}, builtAt, stale}`
+  // from the maintained graph projection (DL-1's render contract). `status` is FIRST-CLASS: `warming` while
+  // the projection is still building (the view shows a calm "warming the graph…", never the alarming error
+  // face — STATE-9/10), `ready` once built. ONE read serves everything Explore draws; zero render-path walk.
+  ipcMain.handle('kb:exploreProjection', async (_e, focus?: unknown): Promise<ExploreProjection> => {
+    const cfg = await readAppConfig();
+    const projection = cfg.activeVaultPath ? graphProjectionForActive() : null;
+    if (!projection) return { status: 'warming', data: null, builtAt: null, stale: false };
+    const root = path.resolve(cfg.activeVaultPath!);
+    const tools = makeProjectionTools(projection.data);
+    const f = typeof focus === 'string' && focus.length > 0 ? focus : undefined;
+    const contradictions = await readContradictionDirectives(root); // small + read-tolerant (CONTRA-6/7)
+    const [neighborhood, entities] = await Promise.all([buildNeighborhood(tools, f, undefined, contradictions), listExploreEntities(tools)]);
+    return { status: 'ready', data: { neighborhood, entities }, builtAt: projection.builtAt, stale: projection.stale };
   });
 
   ipcMain.handle('kb:exploreNeighborhood', async (_e, focus?: unknown): Promise<ExploreNeighborhood> => {
@@ -528,7 +556,7 @@ export function registerIpc(): void {
     // root like the rest of Explore) so the center's open-contradiction flag + per-claim "disputed" badge
     // surface in the read view. The store is small + read-tolerant (a missing file → no flags).
     const contradictions = await readContradictionDirectives(root);
-    return buildNeighborhood(makeReadOnlyTools(root), f, undefined, contradictions);
+    return buildNeighborhood(exploreReadTools(root), f, undefined, contradictions);
   });
 
   // SPEC-0035 HEALTH: deterministic, read-only structural-lint scan (orphans / dangling links / thin

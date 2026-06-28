@@ -5,7 +5,7 @@
 // TYPE-ONLY imports so the renderer/preload get one import surface (`../../kb/types`) without
 // pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
 // type` is erased at build time.
-import type { ExploreEntityRef, ExploreNeighborhood } from './explorePanel';
+import type { ExploreEntityRef, ExploreNeighborhood, ExploreProjection } from './explorePanel';
 import type { HealthProjection } from './healthProjection';
 import type { SchedulePreset, AutonomyPosture, Facing } from './jobs';
 import type { WorkDepthConfig } from './workDepth';
@@ -834,6 +834,9 @@ export interface KbApi {
   // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).
   exploreEntities(): Promise<ExploreEntityRef[]>;
   exploreNeighborhood(focus?: string): Promise<ExploreNeighborhood>;
+  // SPEC-0058 STATE-2: the single Explore read — {status, data:{neighborhood, entities}, builtAt, stale}
+  // from the maintained graph projection (warming|ready; the view switches on status, no live walk).
+  exploreProjection(focus?: string): Promise<ExploreProjection>;
   // SPEC-0035 HEALTH + SPEC-0058 STATE-3: the maintained Health PROJECTION (DL-2's render contract) — the
   // structural-lint glance (orphans / dead links / thin stubs) the view draws from one read, severity baked in.
   healthReport(): Promise<HealthProjection>;

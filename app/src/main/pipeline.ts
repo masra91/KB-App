@@ -14,6 +14,8 @@ import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createStatusSnapshotStore, type StatusSnapshotStore } from './statusSnapshot';
 import { createProjectionStore, type ProjectionStore, type Projection } from './projectionStore';
+import { computeGraphProjection, type GraphProjection } from '../kb/graphProjection';
+import { makeReadOnlyTools } from '../kb/recallTools';
 import { createCoalescingPromoter, type CoalescingPromoter } from '../kb/coalescingPromoter';
 import { Orchestrator, readQueue } from '../kb/orchestrator';
 import { makeCopilotDecider } from '../kb/copilotAgent';
@@ -154,6 +156,7 @@ function startActiveStages(a: ActivePipeline): void {
   a.watch.start(); // SPEC-0037: live folder watchers (startup reconcile + chokidar stable-file events)
   statusStore.start(); // OBS-24: maintain the status snapshot off the render path (seed from persisted, then live)
   reviewStore.start(); // SHELL-12: maintain the review-queue projection off the render path
+  graphStore.start(); // SPEC-0058 STATE-2: maintain the graph projection (Explore/Health) off the render path
 }
 
 /** Stop every stage's sweep loop (shutdown, vault switch, or pre-replay pause). */
@@ -170,6 +173,7 @@ function stopAllStages(a: ActivePipeline): void {
   a.promoter.stop(); // STAGING-12: cancel a pending promotion timer (no promotes while drains are stopped)
   statusStore.stop(); // OBS-24: halt the background status refresh (retains the in-memory snapshot)
   reviewStore.stop(); // SHELL-12: halt the review-queue projection refresh (retains the in-memory projection)
+  graphStore.stop(); // SPEC-0058 STATE-2: halt the graph projection refresh (retains the in-memory projection)
 }
 
 // ── SPEC-0045 QUIESCE — graceful shutdown (drain, don't kill) ───────────────────────────────────
@@ -734,6 +738,71 @@ export function reviewProjectionForActive(): Projection<ReviewSummary[]> | null 
  *  remove reconciles against fresh data. Mirrors `refreshStatusSnapshot`. Never on the render path. */
 export function refreshReviewProjection(): Promise<void> {
   return reviewStore.refreshNow();
+}
+
+// ── SPEC-0058 STATE-2: the maintained GRAPH projection ───────────────────────────────────────────
+// The shared knowledge-graph snapshot Explore + Health (+ Today) read INSTANTLY off the render path —
+// killing the per-mount live `entities/`+`claims/` walk (Explore's O(N+M) backlink scan, Health's
+// O(2N) re-walk) that made those views fail to load on a cold/large vault (the packaged P0). The
+// expensive `computeGraphProjection` (one O(N+E) pass, precomputed backlinks; #457) runs on the
+// background cadence; the render path serves the last-known-good snapshot, persisted for instant cold
+// start (STATE-11). This instantiates DEV-3's STATE-2 compute on the existing SHELL-12 backbone (same
+// store `statusStore`/`reviewStore` use); the CORE's STATE-6 canonical-advance invalidation + STATE-8
+// push + STATE-12 formal `status` field layer ADDITIVELY onto this same instance (DEV-5) — no rebuild.
+const GRAPH_REFRESH_MS = 5000; // richer compute than status/reviews → a calmer backstop cadence
+
+/** Where the last-known-good graph projection is persisted (gitignored cache; never promoted). */
+function graphProjectionPath(vaultPath: string): string {
+  return path.join(vaultPath, '.kb', 'cache', 'graph-projection.json');
+}
+
+/** Load the persisted last-known-good graph projection (sync — a one-time read at activation, so launch
+ *  paints Explore/Health instantly). Any error (missing/corrupt) → null. */
+function loadGraphProjection(vaultPath: string): GraphProjection | null {
+  try {
+    return JSON.parse(readFileSync(graphProjectionPath(vaultPath), 'utf8')) as GraphProjection;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist `graph` as the new last-known-good (best-effort, off the render path). */
+async function saveGraphProjection(vaultPath: string, graph: GraphProjection): Promise<void> {
+  const file = graphProjectionPath(vaultPath);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(graph), 'utf8');
+}
+
+/** The graph-projection compute (background cadence): one precomputed-backlink pass over the EVERGREEN
+ *  graph at the active vault root (STATE-7 — the settled main tree, like the rest of Explore/recall,
+ *  never the `staging` worktree mid-write). Null when no KB is open. */
+async function computeGraph(): Promise<GraphProjection | null> {
+  if (!active) return null;
+  return computeGraphProjection(makeReadOnlyTools(active.vaultPath));
+}
+
+/** The maintained graph projection (SPEC-0058 STATE-2). Started/stopped with the stage sweeps. */
+const graphStore: ProjectionStore<GraphProjection> = createProjectionStore<GraphProjection>({
+  compute: computeGraph,
+  intervalMs: GRAPH_REFRESH_MS,
+  load: () => (active ? loadGraphProjection(active.vaultPath) : null),
+  save: (graph) => {
+    if (active) void saveGraphProjection(active.vaultPath, graph).catch(() => {});
+  },
+  onError: (err) => active?.log.child({ scope: 'graph' }).warn('graph.projection-refresh-failed', { err }),
+});
+
+/** The render-path graph read (SPEC-0058 STATE-2): the background-maintained last-known-good projection,
+ *  INSTANT — no git/fs/compute, so an Explore/Health read can never block on the backend. Null until the
+ *  first snapshot is computed/loaded (the IPC layer maps that to a calm `warming` status). */
+export function graphProjectionForActive(): Projection<GraphProjection> | null {
+  return active ? graphStore.current() : null; // no active KB → null (don't serve a closed vault's graph)
+}
+
+/** Post-mutation refresh seam (mirrors `refreshReviewProjection`): re-read the graph + push. DEV-5's
+ *  STATE-6 layer will also drive this off the canonical advance. Never on the render path. */
+export function refreshGraphProjection(): Promise<void> {
+  return graphStore.refreshNow();
 }
 
 /**

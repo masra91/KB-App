@@ -30,6 +30,7 @@ const state = vi.hoisted(() => ({
   screenshot: { status: 'unsupported', image: null } as { status: string; image: { handle: string; name: string } | null },
   screenshotBytes: null as Uint8Array | null, // what consumeScreenshotHandle returns for a valid handle
   clipboardImage: null as { handle: string; name: string } | null,
+  graphProjection: null as null | { data: unknown; builtAt: string; stale: boolean }, // SPEC-0058 STATE-2 graph store
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -76,6 +77,7 @@ vi.mock('./pipeline', () => ({
   activePipeline: () => state.orch,
   activeStagingRoot: (): string | null => state.stagingRoot,
   reviewProjectionForActive: (): null => null, // SHELL-12: kb:listReviews now reads the maintained projection
+  graphProjectionForActive: () => state.graphProjection, // SPEC-0058 STATE-2: the maintained graph projection (or null = warming)
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
   pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
@@ -98,6 +100,8 @@ vi.mock('../kb/recall', () => ({ recall: mocks.recall }));
 
 import { registerIpc, initPipeline } from './ipc';
 import { createKb } from '../kb/vault';
+import { computeGraphProjection } from '../kb/graphProjection';
+import { makeReadOnlyTools } from '../kb/recallTools';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { setQuickCaptureAgent } from './quickCaptureService';
 import type { QuickCaptureAgent, SelectionRead } from './quickCaptureAgent';
@@ -122,6 +126,7 @@ beforeEach(async () => {
   state.screenshot = { status: 'unsupported', image: null };
   state.screenshotBytes = null;
   state.clipboardImage = null;
+  state.graphProjection = null;
   setQuickCaptureAgent(null); // SPEC-0038: reset the QCAP agent singleton between tests (no cross-leak)
   mocks.startPipeline.mockClear();
   mocks.pipelineControl.mockClear();
@@ -684,5 +689,58 @@ describe('SPEC-0058 slice-0 — Explore + Health evergreen-graph read path (REAL
     expect(await invoke<unknown[]>('kb:exploreEntities')).toEqual([]);
     expect(await invoke<{ found: boolean }>('kb:exploreNeighborhood')).toMatchObject({ found: false });
     expect(await invoke<{ scanned: number }>('kb:healthReport')).toMatchObject({ scanned: 0 });
+  });
+});
+
+// SPEC-0058 STATE-2 — the MAINTAINED graph projection at the IPC: kb:exploreProjection serves
+// {status, data:{neighborhood, entities}, builtAt, stale} from the in-memory snapshot (no live walk),
+// and the migrated handlers read the projection when it's built. Through the REAL registerIpc handlers,
+// with a REAL computed projection (computeGraphProjection over a real vault) as the store's current() —
+// not a faked stub of the data: the handler's assembly (makeProjectionTools + buildNeighborhood) runs on
+// real graph data. The store's maintenance/persistence is proven separately (projectionStore + #457 tests).
+describe('SPEC-0058 STATE-2 — kb:exploreProjection over the maintained graph store (REAL handler)', () => {
+  async function seedAndProject(): Promise<void> {
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'Graph KB', initGitIfNeeded: true });
+    const ada = '---\nid: 01ADA\nkind: person\nname: Ada Lovelace\ntags: ["type/person"]\n---\n# Ada Lovelace\nWorked with [[entities/person/steve.md]].\n';
+    const steve = '---\nid: 01STEVE\nkind: person\nname: Steve\ntags: ["type/person"]\n---\n# Steve\n';
+    await fs.mkdir(path.join(vaultDir, 'entities', 'person'), { recursive: true });
+    await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'ada.md'), ada, 'utf8');
+    await fs.writeFile(path.join(vaultDir, 'entities', 'person', 'steve.md'), steve, 'utf8');
+    // Compute a REAL graph projection (the same one the background store would maintain) and seed it as current().
+    const graph = await computeGraphProjection(makeReadOnlyTools(vaultDir));
+    state.graphProjection = { data: graph, builtAt: '2026-06-28T00:00:00.000Z', stale: false };
+  }
+
+  it('returns a calm WARMING status (not an error face) when the projection has not built yet', async () => {
+    await invoke<CreateKbResult>('kb:create', { path: vaultDir, name: 'Graph KB', initGitIfNeeded: true });
+    state.graphProjection = null; // store.current() === null → still warming
+    const res = await invoke<{ status: string; data: unknown }>('kb:exploreProjection', 'Ada Lovelace');
+    expect(res.status).toBe('warming');
+    expect(res.data).toBeNull();
+  });
+
+  it('serves the full Explore read (neighborhood + entities) from the maintained projection, no live walk', async () => {
+    await seedAndProject();
+    const res = await invoke<{
+      status: string;
+      builtAt: string;
+      stale: boolean;
+      data: { neighborhood: { found: boolean; center?: { name: string }; neighbors: { name: string }[] }; entities: { name: string }[] };
+    }>('kb:exploreProjection', 'Ada Lovelace');
+    expect(res.status).toBe('ready');
+    expect(res.builtAt).toBe('2026-06-28T00:00:00.000Z');
+    expect(res.stale).toBe(false);
+    expect(res.data.neighborhood.found).toBe(true);
+    expect(res.data.neighborhood.center?.name).toBe('Ada Lovelace');
+    expect(res.data.neighborhood.neighbors.map((n) => n.name)).toContain('Steve'); // precomputed backlink resolved
+    expect(res.data.entities.map((e) => e.name).sort()).toEqual(['Ada Lovelace', 'Steve']);
+  });
+
+  it('the migrated kb:exploreNeighborhood reads the projection when built (same result as the live walk)', async () => {
+    await seedAndProject();
+    const nb = await invoke<{ found: boolean; center?: { name: string }; neighbors: { name: string }[] }>('kb:exploreNeighborhood', 'Ada Lovelace');
+    expect(nb.found).toBe(true);
+    expect(nb.center?.name).toBe('Ada Lovelace');
+    expect(nb.neighbors.map((n) => n.name)).toContain('Steve');
   });
 });
