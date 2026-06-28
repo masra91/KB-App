@@ -54,13 +54,23 @@ function num(v: unknown, fallback = 0): number {
   return typeof v === 'number' ? v : fallback;
 }
 
-/** A short, readable label for the subject an event is about. */
+/**
+ * Shorten a raw opaque id (a 26-char ULID) for inline display so it never wraps mid-token in a feed
+ * row and collide with the timestamp (DL-2 Activity contract: "never raw unbounded inline text"). Only
+ * touches long, purely-alphanumeric ids (ULIDs); human-ish labels with spaces/pipes (`person|atlas`,
+ * a name) and short ids (`Atlas`, `E1`) pass through unchanged.
+ */
+export function shortRef(s: string): string {
+  return s.length > 16 && /^[0-9A-Za-z]+$/.test(s) ? `${s.slice(0, 8)}…` : s;
+}
+
+/** A short, readable label for the subject an event is about (raw ULIDs shortened — see shortRef). */
 function subjectLabel(event: AuditEvent): string {
   const s = event.subjects;
-  if (s.entityId) return s.entityId;
-  if (s.sourceId) return s.sourceId;
-  if (s.claimId) return s.claimId;
-  if (s.jobId) return s.jobId;
+  if (s.entityId) return shortRef(s.entityId);
+  if (s.sourceId) return shortRef(s.sourceId);
+  if (s.claimId) return shortRef(s.claimId);
+  if (s.jobId) return shortRef(s.jobId);
   if (s.blockKey) return s.blockKey;
   return 'an item';
 }

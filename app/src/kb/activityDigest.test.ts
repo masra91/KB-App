@@ -1,7 +1,7 @@
 // Curation engine (SPEC-0029 AUDIT-5). Deterministic templates per event-type + run-grouping; the
 // raw events ride along each feed entry for drill-down.
 import { describe, it, expect } from 'vitest';
-import { digestEvent, buildFeed } from './activityDigest';
+import { digestEvent, buildFeed, shortRef } from './activityDigest';
 import type { AuditEvent, AuditActor } from './audit';
 
 let line = 0;
@@ -17,6 +17,21 @@ function ev(actor: AuditActor, eventType: string, over: Partial<AuditEvent> = {}
     ...(over.model ? { model: over.model } : {}),
   };
 }
+
+describe('shortRef — raw ULID shortening (Activity v2; never raw unbounded inline text)', () => {
+  it('shortens a long opaque ULID but leaves names / piped keys / short ids intact', () => {
+    expect(shortRef('01KW6CW289ZZZZZZZZZZZZZZZZ')).toBe('01KW6CW2…'); // 26-char ULID → prefix…
+    expect(shortRef('Atlas')).toBe('Atlas'); // short id untouched
+    expect(shortRef('E1')).toBe('E1');
+    expect(shortRef('person|atlas')).toBe('person|atlas'); // block key (has a pipe) untouched
+  });
+
+  it('a digest summary inlines the SHORTENED id, so it can never wrap mid-token into the timestamp', () => {
+    const s = digestEvent(ev('enrich', 'signal', { subjects: { entityId: '01KW6CW289ZZZZZZZZZZZZZZZZ' } }));
+    expect(s).toBe('Enrich noted a signal on 01KW6CW2…');
+    expect(s).not.toContain('01KW6CW289ZZZZZZZZZZZZZZZZ'); // the full unbounded ULID is gone
+  });
+});
 
 describe('digestEvent — deterministic templates (AUDIT-5 / AUTO-9)', () => {
   it('renders a human-friendly line per headline event-type', () => {
