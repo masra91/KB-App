@@ -14,11 +14,14 @@
   justify-content: center;
 }
 
-/* Progress rail — one dot per step; current = ember, done = patina, upcoming = idle/rule. */
-.setup-rail { display: flex; gap: 0.5rem; align-items: center; }
-.setup-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: transparent; border: 1px solid var(--viz-rule); transition: background var(--viz-dur-state) var(--viz-ease-state), border-color var(--viz-dur-state) var(--viz-ease-state); }
+/* Progress rail — one dot per step. State is carried by SHAPE + SIZE, not hue alone (DL-2 a11y /
+   #184 "never color-alone"): upcoming = small hollow ring, done = filled patina, current = filled
+   ember, enlarged, with a halo ring — so the active step is legible without distinguishing ember
+   from patina (color-blind safe). Position is also conveyed by the heading + progressbar aria-value. */
+.setup-rail { display: flex; gap: 0.6rem; align-items: center; }
+.setup-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: transparent; border: 1px solid var(--viz-rule); transition: background var(--viz-dur-state) var(--viz-ease-state), border-color var(--viz-dur-state) var(--viz-ease-state), transform var(--viz-dur-state) var(--viz-ease-state); }
 .setup-dot--done { background: var(--viz-patina); border-color: var(--viz-patina); }
-.setup-dot--on { background: var(--viz-ember); border-color: var(--viz-ember); }
+.setup-dot--on { background: var(--viz-ember); border-color: var(--viz-ember); transform: scale(1.4); box-shadow: 0 0 0 2px var(--viz-field), 0 0 0 3px var(--viz-ember); } /* enlarged + halo ring = non-color position cue */
 
 .setup-title { font-size: 1.6rem; margin: 0; color: var(--viz-ink); }
 .setup-lead { color: var(--viz-ink-muted); margin: 0; line-height: 1.5; }
@@ -47,4 +50,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .setup-dot { transition: none; }
+  .setup-dot--on { transform: scale(1.4); } /* keep the static size/halo cue; only the transition is dropped */
 }
