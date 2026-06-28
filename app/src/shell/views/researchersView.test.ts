@@ -63,12 +63,12 @@ describe('Field Desk — render (RESEARCH-15)', () => {
     expect(c.querySelectorAll('.rdesk-rung[aria-checked="true"]')).toHaveLength(1);
   });
 
-  it('a disabled researcher reads PAUSED; the strip carries its clearance + armed state for styling', async () => {
+  it('a disabled researcher reads Paused; the strip carries its clearance + armed state for styling', async () => {
     const c = await mount();
     const strip = c.querySelector('.rdesk-strip')!;
     expect(strip.getAttribute('data-armed')).toBe('false');
     expect(strip.getAttribute('data-clearance')).toBe('public-web');
-    expect(c.querySelector('.rdesk-arm')?.textContent).toContain('PAUSED');
+    expect(c.querySelector('.rdesk-arm')?.textContent).toContain('Paused');
   });
 
   it('shows the empty state + the add dock when there are no researchers', async () => {

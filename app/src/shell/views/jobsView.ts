@@ -82,10 +82,10 @@ function jobItem(j: JobView): string {
     : 'Never run';
 
   return `
-    <li class="job viz-no-chrome viz-spine" data-id="${esc(j.id)}" data-type="${esc(j.type)}" data-armed="${j.enabled ? 'true' : 'false'}">
+    <li class="job ag-card" data-id="${esc(j.id)}" data-type="${esc(j.type)}" data-armed="${j.enabled ? 'true' : 'false'}">
       <div class="job-head">
         <span class="job-label">${esc(j.label)}</span>${badge}
-        <button type="button" class="job-enabled viz-signage viz-focusable" role="switch" aria-checked="${j.enabled ? 'true' : 'false'}">${j.enabled ? '◉ ENABLED' : '○ PAUSED'}</button>
+        <button type="button" class="job-enabled viz-focusable" role="switch" aria-checked="${j.enabled ? 'true' : 'false'}"><span class="dot" aria-hidden="true"></span>${j.enabled ? 'Enabled' : 'Paused'}</button>
       </div>
       <p class="job-desc viz-body">${esc(j.description)}</p>
       <div class="job-controls">

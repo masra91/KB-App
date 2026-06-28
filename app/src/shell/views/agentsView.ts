@@ -1,25 +1,30 @@
-// Agents view (SPEC-0027 PANEL-3) — lists the librarian/stage agents with status + key config
-// (model, instruction pointer). v1 is **observe-only** (safe knobs / authoring deferred, PANEL §6).
-// Thin DOM over the typed IPC (`listAgents`); the catalog + live status live in the main process.
-// PANEL-9: a light poll keeps running/idle status fresh (updated in place to avoid flicker); it stops
-// when the view is detached. Degrades to a friendly message when no KB / IPC fails (PANEL-9).
+// Agents view (SPEC-0027 PANEL-3 · SPEC-0060 VUX-1) — the Librarians section of the Agents hub: the
+// built-in librarian agents that run your pipeline, with live status + their model. v1 is **observe-only**
+// (safe knobs / authoring deferred, PANEL §6) — the one interactive knob is the per-agent model picker
+// (SPEC-0048). Thin DOM over the typed IPC (`listAgents`); the catalog + live status live in the main
+// process. PANEL-9: a light poll keeps running/idle status fresh (updated in place to avoid flicker); it
+// stops when the view is detached. Degrades to a friendly message when no KB / IPC fails (PANEL-9).
+//
+// v3: each librarian is a `.ag-card` (avatar · name/role · state pill) on the warm-vellum tokens; a live
+// agent flies the LOOM mark (continuous work), an idle one a calm dot. The model is a quiet per-card
+// "Advanced" disclosure (rarely needed). NO ember — agent activity is not a decision (sprout=active,
+// slate=interactive). Status-first: the live `status` field drives the pill, no render-path vault scan.
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import type { AgentView, ModelCatalogView } from '../../kb/types';
 
 // Mounted as the **Librarians** section of the Agents hub (SPEC-0053 WS-E) — the hub owns the group
-// header/naming, so this section drops its own page-title h1 and renders the librarian list directly.
+// header/naming, so this section renders the librarian grid (the global default-model control above it).
 export async function mountAgents(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="agents-v2 viz-card viz-grain"><p class="agent-note">Loading…</p></div>`;
+  container.innerHTML = `<p class="ag-loading viz-body">Loading…</p>`;
   await render(container);
   const timer = setInterval(() => {
     if (!document.contains(container)) {
       clearInterval(timer);
       return;
     }
-    // Skip the status IPC when the Agents view isn't the one showing (the shell mounts once + toggles
-    // `.hidden`, so the container stays in the DOM) or the window is backgrounded — don't poll status
-    // no one is looking at.
+    // Skip the status IPC when the Agents view isn't showing (the shell mounts once + toggles `.hidden`,
+    // so the container stays in the DOM) or the window is backgrounded — don't poll status no one sees.
     if (container.classList.contains('hidden') || document.hidden) return;
     void refreshStatus(container);
   }, 5000);
@@ -42,39 +47,38 @@ async function render(container: HTMLElement): Promise<void> {
   } catch {
     catalog = null;
   }
-  const header = `<p class="agent-note">The librarian agents that run your pipeline.</p>`;
   if (agents.length === 0) {
-    container.innerHTML = `<div class="agents-v2 viz-card viz-grain">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
+    container.innerHTML = `<p class="ag-empty viz-body">No librarians to show — open a knowledge base.</p>`;
     return;
   }
-  container.innerHTML = `<div class="agents-v2 viz-card viz-grain">${header}${modelControlHtml(catalog)}<ul class="agent-list">${agents.map((a) => agentItem(a, catalog)).join('')}</ul></div>`;
+  container.innerHTML = `${modelControlHtml(catalog)}<div class="ag-grid">${agents.map((a) => agentCard(a, catalog)).join('')}</div>`;
   wireModelPicker(container);
   wireAgentPickers(container);
 }
 
 /** SPEC-0048 — the global "Default model" picker (the MUST): a styled native `<select>` over the live
- *  CLI catalog + a quiet "runs as: ‹resolved›" caption + a BRASS note when the persisted pick is stale
+ *  CLI catalog + a quiet "runs as: ‹resolved›" caption + a GOLD note when the persisted pick is stale
  *  (no longer in the catalog). Null-tolerant (ENG-15/16): a missing/empty catalog degrades to a
  *  resolved-only readout (no dropdown) rather than throwing. */
 function modelControlHtml(catalog: ModelCatalogView | null): string {
-  if (!catalog) return ''; // no catalog data → omit the control (the agent rows still show the model)
+  if (!catalog) return ''; // no catalog data → omit the control (the agent cards still show the model)
   const accepted = Array.isArray(catalog.accepted) ? catalog.accepted : [];
   const configured = catalog.configured ?? '';
   const resolved = catalog.resolved || '—';
   // The CLI couldn't be probed → can't offer a fresh list; show the resolved readout only.
   if (accepted.length === 0) {
-    return `<div class="model-control"><span class="model-label">Default model</span>` +
+    return `<div class="ag-modelbar"><span class="model-label">Default model</span>` +
       `<p class="model-runs">runs as: <span class="path">${esc(resolved)}</span></p></div>`;
   }
   const options = [`<option value=""${configured ? '' : ' selected'}>Auto (in-app default)</option>`]
     .concat(accepted.map((m) => `<option value="${esc(m)}"${m === configured ? ' selected' : ''}>${esc(m)}</option>`))
     .join('');
-  // #184 a11y: the note text reads AA in --viz-ink; the brass needs-you hue rides the aria-hidden
-  // ◆ mark (.model-stale-mark), not the label — never oxide (this is a caution, not an error).
+  // #184 a11y: the note text reads AA in --ink; the gold needs-you hue rides the aria-hidden ◆ mark
+  // (.model-stale-mark), not the label — never oxide (this is a caution, not an error).
   const stale = catalog.staleConfigured
     ? `<p class="model-stale" role="status"><span class="model-stale-mark" aria-hidden="true">◆</span>${esc(configured)} isn't available on this CLI — running ${esc(resolved)}.</p>`
     : '';
-  return `<div class="model-control">
+  return `<div class="ag-modelbar">
     <label class="model-label" for="model-default">Default model</label>
     <select id="model-default" class="viz-select model-select">${options}</select>
     <p class="model-runs">runs as: <span class="path">${esc(resolved)}</span></p>
@@ -83,8 +87,7 @@ function modelControlHtml(catalog: ModelCatalogView | null): string {
 }
 
 /** Wire the global picker: on change, persist via `setModel` (validated server-side) and update the
- *  "runs as" caption + clear the stale note in place. Re-renders on a rejected pick (shouldn't happen —
- *  options are catalog-valid — but keeps the view honest if the catalog shifted mid-session). */
+ *  "runs as" caption + clear the stale note in place. Re-renders on a rejected pick. */
 function wireModelPicker(container: HTMLElement): void {
   const select = container.querySelector<HTMLSelectElement>('#model-default');
   if (!select) return;
@@ -94,9 +97,8 @@ function wireModelPicker(container: HTMLElement): void {
     void window.kbApi
       .setModel(id.length > 0 ? id : null)
       .then((res) => {
-        const runs = container.querySelector<HTMLElement>('.model-control .model-runs .path');
+        const runs = container.querySelector<HTMLElement>('.ag-modelbar .model-runs .path');
         if (runs) runs.textContent = res.resolved;
-        // A successful set clears any prior stale note (the pick is now valid + applied).
         if (res.ok) container.querySelector('.model-stale')?.remove();
       })
       .catch((): void => {
@@ -109,8 +111,7 @@ function wireModelPicker(container: HTMLElement): void {
 }
 
 /** SPEC-0048 — wire the per-agent pickers: on change, persist via `setAgentModel(key, id)` (validated
- *  server-side) and update THAT agent's "runs as" caption in place. A delegated listener so it survives
- *  the row set; `''` clears the agent's override (→ global default). */
+ *  server-side) and update THAT agent's "runs as" caption in place. `''` clears the override. */
 function wireAgentPickers(container: HTMLElement): void {
   for (const select of Array.from(container.querySelectorAll<HTMLSelectElement>('.agent-model-select'))) {
     select.addEventListener('change', () => {
@@ -121,7 +122,7 @@ function wireAgentPickers(container: HTMLElement): void {
       void window.kbApi
         .setAgentModel(key, id.length > 0 ? id : null)
         .then((res) => {
-          const runs = container.querySelector<HTMLElement>(`.agent[data-key="${key}"] .agent-model-runs .path`);
+          const runs = container.querySelector<HTMLElement>(`.ag-card[data-key="${key}"] .agent-model-runs .path`);
           if (runs) runs.textContent = res.resolved;
         })
         .catch((): void => {
@@ -134,25 +135,48 @@ function wireAgentPickers(container: HTMLElement): void {
   }
 }
 
-function agentItem(a: AgentView, catalog: ModelCatalogView | null): string {
+/** A librarian as a v3 card: monogram avatar · name + role · live state pill · the model disclosure. */
+function agentCard(a: AgentView, catalog: ModelCatalogView | null): string {
+  const monogram = esc((a.label.trim()[0] ?? '·').toUpperCase());
   return `
-    <li class="agent viz-card viz-card--lift" data-key="${esc(a.key)}">
-      <div class="agent-head">
-        <span class="agent-label viz-voice">${esc(a.label)}</span>
-        <span class="agent-status viz-chip status-${esc(a.status)}">${esc(a.status)}</span>
+    <article class="ag-card" data-key="${esc(a.key)}">
+      <div class="ag-chead">
+        <div class="ag-av lib" aria-hidden="true">${monogram}</div>
+        <div class="ag-idblock">
+          <div class="ag-name">${esc(a.label)}</div>
+          <div class="ag-kind">${esc(a.role)}</div>
+        </div>
+        ${statePill(a.status)}
       </div>
-      <p class="agent-role">${esc(a.role)}</p>
-      <dl class="agent-meta">
-        <dt>Model</dt><dd>${agentModelCell(a, catalog)}</dd>
-        <dt>Instructions</dt><dd><span class="path">${esc(a.instructions)}</span></dd>
-      </dl>
-    </li>`;
+      <div class="ag-foot">
+        <span class="ag-last"><span class="path">${esc(a.instructions)}</span></span>
+      </div>
+      ${modelDisclosure(a, catalog)}
+    </article>`;
+}
+
+/** The live state pill (status-first, PANEL-9): running flies the continuous LOOM mark; idle is a calm
+ *  dot. Two states only — that's all `AgentView.status` carries; nothing invented. NO ember. */
+function statePill(status: AgentView['status']): string {
+  if (status === 'running') {
+    return `<span class="ag-state run"><span class="vmark loom" aria-hidden="true"></span> Running</span>`;
+  }
+  return `<span class="ag-state on"><span class="dot" aria-hidden="true"></span> Idle</span>`;
+}
+
+/** The per-agent model — a quiet "Advanced" disclosure (rarely needed; PANEL is observe-first). Holds the
+ *  SPEC-0048 picker over the live catalog, or the plain resolved-model text when deterministic / no
+ *  catalog (ENG-15/16). */
+function modelDisclosure(a: AgentView, catalog: ModelCatalogView | null): string {
+  return `<details class="ag-adv">
+    <summary><span class="chev" aria-hidden="true">›</span> Model <span class="sub">${esc(a.model)}</span></summary>
+    <div class="ag-adv-body">${agentModelCell(a, catalog)}</div>
+  </details>`;
 }
 
 /** SPEC-0048 — the per-agent Model cell: a `.viz-select` over the live catalog (first option "Use
- *  default (‹global›)" so clearing an override is obvious; the agent's configured pick selected) + a
- *  "runs as: ‹resolved›" caption. ENG-15/16 degradation: a deterministic agent, or a missing/empty
- *  catalog, falls back to the plain resolved-model text — never a broken control. */
+ *  default (‹global›)") + a "runs as: ‹resolved›" caption. ENG-15/16 degradation: a deterministic agent,
+ *  or a missing/empty catalog, falls back to the plain resolved-model text — never a broken control. */
 function agentModelCell(a: AgentView, catalog: ModelCatalogView | null): string {
   const accepted = catalog && Array.isArray(catalog.accepted) ? catalog.accepted : [];
   if (a.model === 'deterministic' || accepted.length === 0) return `<span class="agent-model-text">${esc(a.model)}</span>`;
@@ -164,7 +188,7 @@ function agentModelCell(a: AgentView, catalog: ModelCatalogView | null): string 
     `<span class="model-runs agent-model-runs">runs as: <span class="path">${esc(a.model)}</span></span>`;
 }
 
-/** PANEL-9: refresh only the status badges in place (no full re-render → no flicker). */
+/** PANEL-9: refresh only the state pills in place (no full re-render → no flicker, picker focus kept). */
 async function refreshStatus(container: HTMLElement): Promise<void> {
   let agents: AgentView[];
   try {
@@ -173,12 +197,7 @@ async function refreshStatus(container: HTMLElement): Promise<void> {
     return; // leave the last-known status
   }
   for (const a of agents) {
-    const el = container.querySelector<HTMLElement>(`.agent[data-key="${a.key}"] .agent-status`);
-    if (el) {
-      el.textContent = a.status;
-      // Keep the blessed .viz-chip primitive on the in-place status refresh (PANEL-9) — a bare
-      // `agent-status status-*` here would strip the chip styling on the first poll.
-      el.className = `agent-status viz-chip status-${a.status}`;
-    }
+    const el = container.querySelector<HTMLElement>(`.ag-card[data-key="${a.key}"] .ag-state`);
+    if (el) el.outerHTML = statePill(a.status);
   }
 }

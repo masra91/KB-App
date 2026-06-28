@@ -132,7 +132,7 @@ function reachReadout(r: ResearcherView): string {
   // numeric fields. Coalesce so a malformed row degrades to blanks (still wireable + still Retire-able —
   // PANEL-11's "remove a misconfigured entity") instead of THROWING inside the roster `.map` and blanking
   // the whole list (the ENG-16 `title:null` class). Production rows arrive complete via buildResearcherViews.
-  const tools = (r.allowedTools ?? []).length ? r.allowedTools.join(' · ') : 'template default';
+  const tools = (r.allowedTools ?? []).length ? r.allowedTools.join(' · ') : 'default';
   const timeoutMin = typeof r.timeoutMs === 'number' && Number.isFinite(r.timeoutMs) ? Math.max(1, Math.round(r.timeoutMs / 60_000)) : '';
   const maxCalls = r.budget?.maxToolCalls ?? '';
   const maxDepth = r.budget?.maxDepth ?? '';
@@ -140,19 +140,19 @@ function reachReadout(r: ResearcherView): string {
   return `
     <div class="rdesk-reach viz-numeric">
       <label class="viz-field rdesk-reach-field">
-        <span class="viz-field__label">reads / pass</span>
+        <span class="viz-field__label">Searches per run</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxcalls viz-focusable" min="${MIN_TOOL_CALLS}" max="${MAX_TOOL_CALLS}" step="1" value="${maxCalls}" aria-label="Max retrieval calls per pass" />
       </label>
       <label class="viz-field rdesk-reach-field">
-        <span class="viz-field__label">orient / pass</span>
+        <span class="viz-field__label">Local reads per run</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-orient viz-focusable" min="${MIN_ORIENT_BUDGET}" max="${MAX_ORIENT_BUDGET}" step="1" value="${orient}" aria-label="Local orient/awareness reads per pass (non-egress)" />
       </label>
       <label class="viz-field rdesk-reach-field">
-        <span class="viz-field__label">timeout (min)</span>
+        <span class="viz-field__label">Gives up after (min)</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-timeout viz-focusable" min="${Math.ceil(MIN_SESSION_TIMEOUT_MS / 60_000)}" max="${Math.round(MAX_SESSION_TIMEOUT_MS / 60_000)}" step="1" value="${timeoutMin}" aria-label="Session timeout in minutes" />
       </label>
       <label class="viz-field rdesk-reach-field">
-        <span class="viz-field__label">depth ≤</span>
+        <span class="viz-field__label">Max depth</span>
         <input type="number" class="viz-field__input viz-field__input--numeric researcher-maxdepth viz-focusable" min="${MIN_MAX_DEPTH}" max="${MAX_MAX_DEPTH}" step="1" value="${maxDepth}" aria-label="Max research chain depth" />
       </label>
       <span class="rdesk-reach-ro">tools: ${esc(tools)}</span>
@@ -169,10 +169,10 @@ function strip(r: ResearcherView): string {
     r.template === 'm365' ? field('tenant', 'researcher-tenant', r.tenantId, 'your-org.onmicrosoft.com') : '',
   ].join('');
   return `
-    <li class="rdesk-strip viz-no-chrome viz-spine" data-id="${esc(r.id)}" data-clearance="${esc(r.egressTier)}" data-armed="${armed ? 'true' : 'false'}">
+    <li class="rdesk-strip ag-card" data-id="${esc(r.id)}" data-clearance="${esc(r.egressTier)}" data-armed="${armed ? 'true' : 'false'}">
       <div class="rdesk-strip-head">
         <span class="rdesk-id viz-numeric">${esc(r.id)}</span>
-        <button type="button" class="rdesk-arm viz-signage viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}">${armed ? '◉ ENABLED' : '○ PAUSED'}</button>
+        <button type="button" class="rdesk-arm viz-focusable" role="switch" aria-checked="${armed ? 'true' : 'false'}"><span class="dot" aria-hidden="true"></span>${armed ? 'Enabled' : 'Paused'}</button>
       </div>
       <div class="rdesk-identity">
         <span class="rdesk-kind viz-signage" title="${esc(templateDesc(r.template))}">${esc(KIND_GLYPH[r.template])} ${esc(templateLabel(r.template))}</span>
@@ -319,7 +319,7 @@ function wireWorkIq(container: HTMLElement): void {
  *  researcher; arming it later is the gated step. */
 function addDock(): string {
   const tiles = RESEARCHER_TEMPLATE_OPTIONS.map(
-    (o) => `<button type="button" class="rdesk-tile viz-no-chrome viz-focusable" data-template="${esc(o.template)}" title="${esc(o.description)}"><span class="rdesk-tile-glyph">${esc(KIND_GLYPH[o.template])}</span><span class="rdesk-tile-label viz-signage">${esc(o.label)}</span></button>`,
+    (o) => `<button type="button" class="rdesk-tile viz-no-chrome viz-focusable" data-template="${esc(o.template)}" title="${esc(o.description)}"><span class="rdesk-tile-glyph">${esc(KIND_GLYPH[o.template])}</span><span class="rdesk-tile-label">${esc(o.label)}</span></button>`,
   ).join('');
   return `
     <div class="rdesk-add">
