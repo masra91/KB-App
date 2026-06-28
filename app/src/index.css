@@ -1,30 +1,18 @@
+/* Shell chrome — FIXED-LIGHT Vellum cream (SPEC-0057 brand §3: "the app skin is fixed-light; surfaces
+   don't invert; the cream study is the product"). This SUPERSEDES #214's OS-dark-mode tracking
+   (Principal-confirmed 06-28): no dark default, no prefers-color-scheme override — the shell is always
+   cream, matching the --viz-* foundation so chrome + panels read as ONE cream surface. Values mirror the
+   design-system tokens (--viz-field/--viz-panel/--viz-ink/--viz-rule/--viz-accent/--viz-oxide). */
 :root {
-  color-scheme: light dark;
-  --bg: #1e1e22;
-  --card: #26262b;
-  --fg: #e8e8ea;
-  --muted: #9a9aa2;
-  --accent: #6c8cff;
-  --border: #36363c;
-  --error: #ff6b6b;
-  --hover: rgba(255, 255, 255, 0.06); /* raised/hover wash — flips with the scheme below */
-}
-
-/* Light mode (theme cohesion): the app shell was dark-only while the VIZ surfaces (Field Desk /
-   The Line, design-system.css) already followed `prefers-color-scheme` — so in OS Light mode the
-   chrome stayed dark behind paper panels. Give the shell a matching paper palette so the WHOLE app
-   tracks the OS: cohesive paper (light) or graphite (dark). Values align with the VIZ light tokens
-   (--viz-field #f4f1ea, --viz-ink #1c1b18, --viz-rule #cfc9bc) so chrome + panels read as one surface. */
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f1ea;
-    --card: #fff;
-    --fg: #1c1b18;
-    --muted: #6a6557;
-    --border: #cfc9bc;
-    --error: #b02a18;
-    --hover: rgba(0, 0, 0, 0.05);
-  }
+  color-scheme: light; /* fixed-light — never auto-dark */
+  --bg: #f4efe3;        /* Vellum cream — matches --viz-field */
+  --card: #fbf7ec;      /* Linen — matches --viz-panel */
+  --fg: #2b2f36;        /* Slate Ink — matches --viz-ink */
+  --muted: #6a6456;     /* Stone — matches --viz-ink-muted */
+  --accent: #3a6e88;    /* Slate Blue — the Vellum interactive accent (--viz-accent); NOT the framework indigo */
+  --border: #e0d6be;    /* Hairline — matches --viz-rule */
+  --error: #a8432a;     /* deep brick — matches --viz-oxide */
+  --hover: rgba(0, 0, 0, 0.05); /* raised/hover wash on the cream ground */
 }
 
 * {
