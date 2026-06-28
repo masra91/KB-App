@@ -12,7 +12,7 @@
 // a neighbor's own links without changing focus (EXPLORE-7, lazy-fetched + cached). The expand reveal
 // uses a CSS animation that degrades to instant under prefers-reduced-motion (EXPLORE-13), the same
 // reduced-motion discipline as the rest of The Line.
-import { esc } from '../html';
+import { esc, emptyState } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import type { ExploreClaim, ExploreContradiction, ExploreEntityRef, ExploreNeighbor, ExploreNeighborhood } from '../../kb/explorePanel';
 
@@ -87,7 +87,10 @@ function paint(container: HTMLElement, state: ExploreState): void {
   if (!cache) return;
   const { nb, entities } = cache;
   const inner = !nb.found
-    ? `<p class="explore-empty viz-body">No entities yet. As you capture and the pipeline connects them, your knowledge graph appears here to explore.</p>`
+    ? emptyState({
+        title: 'No entities yet.',
+        body: 'As you capture and the pipeline connects them, your knowledge graph appears here to explore.',
+      })
     : `${searchBar(entities)}${trailBar(state)}${centerCard(nb)}${neighborsBlock(nb, state)}`;
   container.innerHTML = `<div class="explore viz-surface">${HEADER}${inner}</div>`;
   wire(container, state);

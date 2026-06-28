@@ -264,7 +264,10 @@ describe('Explore view — empty + sparse states (EXPLORE-11)', () => {
     exploreEntities = vi.fn(async () => []);
     setApi();
     const c = await mount();
-    expect(c.querySelector('.explore-empty')).not.toBeNull();
+    // #404 retheme: the full-view empty now renders via the shared branded `.viz-empty` hero (emptyState()).
+    const empty = c.querySelector('.viz-empty');
+    expect(empty).not.toBeNull();
+    expect(c.querySelector('.viz-empty__title')?.textContent).toBe('No entities yet.');
     expect(c.querySelector('.explore-center')).toBeNull();
   });
 
