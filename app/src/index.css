@@ -157,46 +157,53 @@ ul.checks li {
   margin: 0.5rem 0;
 }
 
-/* --- Simple Capture panel (SPEC-0013) — WS3 migration onto The Line (DESIGN-LEGACY-VIEWS §6). The
-   textarea is the blessed EditableField multiline primitive (.viz-field__input--multiline,
-   design-system.css), wrapped in a .viz-field with a real .viz-field__label (placeholder ≠ an
-   accessible name, §6 a11y). Secondary text on --viz-ink-muted (was legacy .muted); the dropzone is an
-   announced, reachable region (role/aria-label/tabindex). No bespoke textarea chrome — it would
-   out-specify and override the primitive. No new tokens/components (DESIGN-7). --- */
-.capture-field { display: flex; flex-direction: column; width: 100%; margin-top: 1rem; gap: 0.3rem; }
-.capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; font-family: var(--viz-font-signage); letter-spacing: 0.02em; color: var(--viz-ink-muted); font-size: 0.9rem; }
-.capture-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
+/* --- Capture (SPEC-0013) at Vellum UX v2 (SPEC-0058 STATE content view, KB-Design-Lead-2's render
+   contract). A centered, airy composer on the textured cream ground; the composer is a raised material
+   `.viz-card` (#453 depth/grain). The textarea is the blessed `.viz-field__input--multiline` primitive,
+   named by the Spectral head (aria-label, §6 a11y). Colour discipline (DL-2): NO ember (input view) —
+   `--viz-accent` = interactive (focus ring + the dropzone drag-over wash), `--viz-sprout` = queued/
+   processing/captured, `--viz-oxide` only on a TRUE capture error. #184: hue rides a glyph, never text. --- */
+.capture-v2 { max-width: 44rem; margin: 0 auto; padding: 1.5rem 1rem 2rem; }
+.capture-head { text-align: center; margin: 0.5rem 0 1.25rem; }
+.capture-title { font-size: 1.6rem; margin: 0; color: var(--viz-ink); } /* .viz-voice → Spectral, sentence-case */
+.capture-sub { color: var(--viz-ink-muted); margin: 0.35rem auto 0; max-width: 52ch; }
+.capture-composer { padding: 1.1rem 1.2rem 1rem; } /* `.viz-card` supplies the depth/grain/radius */
+.capture-composer .viz-field__input--multiline { width: 100%; min-height: 7rem; resize: vertical; }
+.capture-controls { display: flex; align-items: center; gap: 1rem; margin-top: 0.85rem; flex-wrap: wrap; }
+.capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--viz-ink-muted); font-size: 0.84rem; }
+.capture-toggle input { accent-color: var(--viz-accent); } /* tokenized checkbox — checked = accent, not OS-blue */
+/* The primary CTA reads as primary (DL-2 polish): a FILLED, sentence-case action, not the default
+   outlined-uppercase `.viz-btn`. Uses `--viz-accent` — the system's documented "primary emphasis" token
+   (sprout is reserved for state) — scoped to Capture so the global `.viz-btn--primary` is untouched. */
+.capture-submit { margin-left: auto; background: var(--viz-accent); border-color: var(--viz-accent); color: #fff; text-transform: none; letter-spacing: 0.01em; font-family: var(--viz-font-body); font-weight: 500; padding: 0.4rem 1.1rem; }
+.capture-submit:hover, .capture-submit.is-hover { background: color-mix(in srgb, var(--viz-accent) 86%, black); border-color: color-mix(in srgb, var(--viz-accent) 86%, black); color: #fff; }
+/* Dropzone — a material dashed region that hover-lifts; drag-over = `--viz-accent` wash (interactive
+   affordance, DL-2's ruling: NOT sprout/ember). */
+.capture-dropzone { margin-top: 0.9rem; padding: 1.1rem; border: 1px dashed var(--viz-rule); border-radius: var(--r-card, 10px); text-align: center; color: var(--viz-ink-muted); font-size: 0.85rem; transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease; }
+.capture-dropzone:hover { transform: translateY(-1px); border-color: var(--viz-ink-muted); }
+.capture-dropzone.over { border-color: var(--viz-accent); background: color-mix(in srgb, var(--viz-accent) 8%, transparent); color: var(--viz-ink); }
+.capture-dropzone-glyph { color: var(--viz-accent); margin-right: 0.35rem; }
+/* Staged manifest — material rows, Plex-Mono filename + size, per-item remove. */
+.capture-staged { list-style: none; padding: 0; margin: 0.7rem 0 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.capture-staged-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.35rem 0.4rem; border-bottom: 0.5px solid var(--viz-rule); font-size: 0.8rem; }
+.capture-staged-row:last-child { border-bottom: none; }
+.capture-staged-name { color: var(--viz-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capture-size { color: var(--viz-ink-muted); }
-/* Large-capture caution (RICHIN-11) — #184 a11y: the label reads AA in `--viz-ink`; the caution hue
-   rides the inline `⚠️` glyph already in the markup (DL-1's glyph variant — it's inline, not a block). */
+.capture-staged-rm { margin-left: auto; }
+/* Large-capture caution (RICHIN-11) — #184: the label reads AA in `--viz-ink`; the hue rides the brass ◆ glyph. */
 .capture-flag { color: var(--viz-ink); }
-.capture-flag-mark { color: var(--viz-brass); margin-right: 0.3rem; } /* monochrome brass caution mark (mirrors .model-stale-mark) — hue rides the glyph, label reads AA */
-
-.dropzone {
-  margin-top: 0.75rem;
-  padding: 1rem;
-  border: 1px dashed var(--viz-rule);
-  border-radius: 8px;
-  text-align: center;
-  color: var(--viz-ink-muted);
-  font-size: 0.9rem;
-}
-
-.dropzone.over {
-  border-color: var(--viz-accent); /* interactive drag-over highlight → --viz-accent (ember reserved for "decide") */
-  color: var(--viz-ink);
-}
-
-ul.staged {
-  list-style: none;
-  padding: 0;
-  margin: 0.5rem 0 0;
-}
-
-ul.staged li {
-  font-size: 0.88rem;
-  padding: 0.25rem 0;
-}
+.capture-flag-mark { color: var(--viz-brass); margin-right: 0.2rem; }
+/* The calm note — a tokenized state glyph (sprout/brass/oxide); hue on the glyph, text stays ink-muted (#184). */
+.capture-note { margin: 0.7rem 0 0; color: var(--viz-ink-muted); font-size: 0.84rem; line-height: 1.45; min-height: 1.2em; }
+.capture-note-glyph { margin-right: 0.3rem; }
+.capture-note--ok .capture-note-glyph { color: var(--viz-sprout); }
+.capture-note--caution .capture-note-glyph { color: var(--viz-brass); }
+.capture-note--error .capture-note-glyph { color: var(--viz-oxide); }
+/* Pipeline queue readout — a tokenized glyph + a Plex-Mono count; sprout when there's queued/processing work. */
+.capture-queue { text-align: center; margin: 1rem 0 0; color: var(--viz-ink-muted); font-size: 0.8rem; }
+.capture-queue-glyph { margin-right: 0.3rem; }
+.capture-queue--active, .capture-queue--active .capture-queue-glyph { color: var(--viz-sprout); }
+@media (prefers-reduced-motion: reduce) { .capture-dropzone { transition: none; } .capture-dropzone:hover { transform: none; } }
 
 button.link {
   appearance: none;
