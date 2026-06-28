@@ -92,7 +92,7 @@ export function buildReflectPrompt(ctx: ReflectContext): string {
   );
   const journalLines = ctx.journalNotes.length > 0 ? ctx.journalNotes.map((j) => `  - ${j}`) : ['  (first run / none)'];
   return [
-    'You are the KB-App Reflect librarian doing one RUMINATION pass over a BOUNDED slice of the KB',
+    'You are the Vellum Reflect librarian doing one RUMINATION pass over a BOUNDED slice of the KB',
     '(NOT the whole KB). Look ONLY at the working set below and find what the forward pipeline missed',
     'or what has gone stale: missed claims, missing/lost connections, emergent topics (recurring',
     'themes with no node yet), stale derived metadata (tags), and low-traction topics.',

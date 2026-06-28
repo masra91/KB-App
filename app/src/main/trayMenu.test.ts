@@ -10,7 +10,7 @@ const labels = (t: MenuItemConstructorOptions[]): string[] =>
 
 const ACTIONS: MenuItemConstructorOptions[] = [
   { label: 'Quick Capture  (⌥Space)', click: () => {} },
-  { label: 'Show KB-App', click: () => {} },
+  { label: 'Show Vellum', click: () => {} },
 ];
 
 describe('buildTrayTemplate (QCAP-14 tray menu composition)', () => {
@@ -24,19 +24,19 @@ describe('buildTrayTemplate (QCAP-14 tray menu composition)', () => {
 
   it('orders sections: status · ─ · actions · ─ · Quit (Quit last, role=quit)', () => {
     const t = buildTrayTemplate({ statusLines: ['◐ Running — ~5 waiting'], actionItems: ACTIONS });
-    expect(labels(t)).toEqual(['◐ Running — ~5 waiting', '─', 'Quick Capture  (⌥Space)', 'Show KB-App', '─', 'quit']);
+    expect(labels(t)).toEqual(['◐ Running — ~5 waiting', '─', 'Quick Capture  (⌥Space)', 'Show Vellum', '─', 'quit']);
   });
 
   it('preserves DEV-1 action items verbatim and in order', () => {
     const t = buildTrayTemplate({ statusLines: [], actionItems: ACTIONS });
     const actionLabels = t.filter((i) => i.type !== 'separator' && i.role !== 'quit').map((i) => i.label);
-    expect(actionLabels).toEqual(['Quick Capture  (⌥Space)', 'Show KB-App']);
+    expect(actionLabels).toEqual(['Quick Capture  (⌥Space)', 'Show Vellum']);
   });
 
   it('no status (idle/headless/empty) → no leading separator before the actions', () => {
     const t = buildTrayTemplate({ statusLines: [], actionItems: ACTIONS });
     expect(t[0].label).toBe('Quick Capture  (⌥Space)'); // actions lead; no orphan rule on top
-    expect(labels(t)).toEqual(['Quick Capture  (⌥Space)', 'Show KB-App', '─', 'quit']);
+    expect(labels(t)).toEqual(['Quick Capture  (⌥Space)', 'Show Vellum', '─', 'quit']);
   });
 
   it('DEV-2 QUIESCE-6 hook items drop in between actions and Quit, behind their own separator', () => {
@@ -46,7 +46,7 @@ describe('buildTrayTemplate (QCAP-14 tray menu composition)', () => {
       '○ Idle — all caught up',
       '─',
       'Quick Capture  (⌥Space)',
-      'Show KB-App',
+      'Show Vellum',
       '─',
       'Prepare for shutdown',
       '─',

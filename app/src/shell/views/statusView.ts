@@ -283,7 +283,7 @@ export function alarmHtml(v: PipelineStatusView, nowMs: number = Date.now()): st
   if (v.recentErrors.some((e) => isPermissionDeniedError(e.message) && isFreshError(e.ts, nowMs))) {
     return `<div class="line-alarm line-alarm-blocked" role="alert">
       <span class="line-alarm-glyph line-alarm-glyph-blocked" aria-hidden="true">⚠</span>
-      <span class="line-alarm-text viz-body">KB-App can’t write to your vault folder — access is turned off, so the pipeline is stalled until you allow it. <button type="button" class="viz-btn viz-focusable line-open-settings" data-act="open-settings">Open System Settings</button></span>
+      <span class="line-alarm-text viz-body">Vellum can’t write to your vault folder — access is turned off, so the pipeline is stalled until you allow it. <button type="button" class="viz-btn viz-focusable line-open-settings" data-act="open-settings">Open System Settings</button></span>
     </div>`;
   }
   if (v.lock.stuck) {

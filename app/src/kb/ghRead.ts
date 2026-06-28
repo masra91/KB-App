@@ -3,7 +3,7 @@
 // deny-by-default rigor as the local git layer (codeGit), plus a repo/host allowlist and BYOA auth.
 //
 // SECURITY (mirrors codeGit; KB-QD's 2b gate):
-//   - BYOA (RESEARCH-9): `gh` owns its own auth (`gh auth login` / `GH_TOKEN`). KB-App stores NO
+//   - BYOA (RESEARCH-9): `gh` owns its own auth (`gh auth login` / `GH_TOKEN`). Vellum stores NO
 //     secrets and never injects credentials; if `gh` is absent or unauthed we GRACEFULLY DEGRADE
 //     (a typed `gh-unavailable` outcome the cognition turns into a no-finding + a "configure gh" hint),
 //     never a crash.

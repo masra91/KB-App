@@ -53,6 +53,7 @@ import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood } from '../kb/explorePanel';
+import { buildHealthReport, type HealthReport } from '../kb/healthPanel';
 import { resolveContainedRel } from '../kb/pathContainment';
 import { obsidianOpenUri } from '../kb/citationLink';
 import { locateSourceRef } from '../kb/sourceOpen';
@@ -245,7 +246,7 @@ export function registerIpc(): void {
       // #56 / MACOS-7: a folder-permission denial (TCC not granted) must route to the Blocked recovery,
       // never surface the raw `Operation not permitted` to the user (no dev jargon, no silent stall).
       if (isPermissionDeniedError(err)) {
-        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+        return { ...NO_PIPELINE, blocked: true, message: 'Vellum can’t write to your vault folder — access is turned off.' };
       }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }
@@ -276,7 +277,7 @@ export function registerIpc(): void {
       return { ok: true, ids: out.ids, captureBatch: out.captureBatch, committed: out.committed, message: `Captured ${out.ids.length} item(s).` };
     } catch (err) {
       if (isPermissionDeniedError(err)) {
-        return { ...NO_PIPELINE, blocked: true, message: 'KB-App can’t write to your vault folder — access is turned off.' };
+        return { ...NO_PIPELINE, blocked: true, message: 'Vellum can’t write to your vault folder — access is turned off.' };
       }
       return { ...NO_PIPELINE, message: err instanceof Error ? err.message : String(err) };
     }
@@ -511,6 +512,14 @@ export function registerIpc(): void {
     if (!cfg.activeVaultPath) return { found: false, claims: [], neighbors: [], shown: 0, total: 0 };
     const f = typeof focus === 'string' && focus.length > 0 ? focus : undefined;
     return buildNeighborhood(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)), f);
+  });
+
+  // SPEC-0035 HEALTH: deterministic, read-only structural-lint scan (orphans / dangling links / thin
+  // stubs) over the EVERGREEN graph at the active vault root — no model calls, no fixes (v1 passive).
+  ipcMain.handle('kb:healthReport', async (): Promise<HealthReport> => {
+    const cfg = await readAppConfig();
+    if (!cfg.activeVaultPath) return { scanned: 0, orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } };
+    return buildHealthReport(makeReadOnlyTools(path.resolve(cfg.activeVaultPath)));
   });
 
   // SPEC-0027 PANEL-2/6/7: the Control Panel's Jobs view — list manageable jobs, persist config

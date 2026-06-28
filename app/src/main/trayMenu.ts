@@ -16,7 +16,7 @@ const separator = (): MenuItemConstructorOptions => ({ type: 'separator' });
 export function buildTrayTemplate(opts: {
   /** The QCAP-14 read-only status readout lines (from `trayStatusModel`); empty → no status section. */
   statusLines: string[];
-  /** The capture action items (DEV-1: Quick Capture · Hotkey-unavailable · Enable-selection · Show KB-App). */
+  /** The capture action items (DEV-1: Quick Capture · Hotkey-unavailable · Enable-selection · Show Vellum). */
   actionItems: MenuItemConstructorOptions[];
   /** Optional appended items (DEV-2's QUIESCE-6 "Prepare for shutdown / Resume"); empty when unused. */
   extraItems?: MenuItemConstructorOptions[];
@@ -29,6 +29,6 @@ export function buildTrayTemplate(opts: {
     ...opts.actionItems,
     ...(extra.length ? [separator(), ...extra] : []),
     separator(),
-    { label: 'Quit KB-App', role: 'quit' },
+    { label: 'Quit Vellum', role: 'quit' },
   ];
 }

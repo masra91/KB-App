@@ -1,0 +1,54 @@
+/* SPEC-0009 SETUP — guided first-run flow (model → seed → tour). Built on the WS2 design system
+   ("The Line"): tokens + viz-* primitives carry colour/type/controls; this only does layout +
+   the step-rail dots + tour cards. No new colours — only --viz-* tokens (light + dark via the
+   token block in design-system.css). Honours prefers-reduced-motion. */
+
+.setup-guided {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100vh;
+  justify-content: center;
+}
+
+/* Progress rail — one dot per step. State is carried by SHAPE + SIZE, not hue alone (DL-2 a11y /
+   #184 "never color-alone"): upcoming = small hollow ring, done = filled patina, current = filled
+   ember, enlarged, with a halo ring — so the active step is legible without distinguishing ember
+   from patina (color-blind safe). Position is also conveyed by the heading + progressbar aria-value. */
+.setup-rail { display: flex; gap: 0.6rem; align-items: center; }
+.setup-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: transparent; border: 1px solid var(--viz-rule); transition: background var(--viz-dur-state) var(--viz-ease-state), border-color var(--viz-dur-state) var(--viz-ease-state), transform var(--viz-dur-state) var(--viz-ease-state); }
+.setup-dot--done { background: var(--viz-patina); border-color: var(--viz-patina); }
+.setup-dot--on { background: var(--viz-ember); border-color: var(--viz-ember); transform: scale(1.4); box-shadow: 0 0 0 2px var(--viz-field), 0 0 0 3px var(--viz-ember); } /* enlarged + halo ring = non-color position cue */
+
+.setup-title { font-size: 1.6rem; margin: 0; color: var(--viz-ink); }
+.setup-lead { color: var(--viz-ink-muted); margin: 0; line-height: 1.5; }
+.setup-body { display: flex; flex-direction: column; gap: 0.75rem; }
+.setup-note { color: var(--viz-ink-muted); font-size: 0.85rem; margin: 0; }
+.setup-field { width: 100%; }
+.setup-field .viz-select { width: 100%; margin-top: 0.2rem; }
+
+/* The path/model chip mirrors the rest of the app (monospace, ember-ish ink). */
+.setup-guided .path { font-family: var(--viz-font-numeric); color: var(--viz-ember); }
+
+.setup-samples { margin: 0; padding-left: 1.1rem; color: var(--viz-ink); display: flex; flex-direction: column; gap: 0.2rem; }
+
+/* Tour — flat, ruled cards (no UI-kit chrome): glyph + title + body. */
+.setup-tour { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+.setup-tour-card { display: flex; gap: 0.75rem; align-items: flex-start; padding: 0.6rem 0; border-bottom: 1px solid var(--viz-rule); }
+.setup-tour-card:last-child { border-bottom: none; }
+.setup-tour-glyph { font-family: var(--viz-font-signage); color: var(--viz-ember); font-size: 1.2rem; line-height: 1.4; flex: 0 0 1.4rem; text-align: center; }
+.setup-tour-title { display: block; color: var(--viz-ink); font-size: 0.95rem; }
+.setup-tour-body { margin: 0.1rem 0 0; color: var(--viz-ink-muted); font-size: 0.85rem; line-height: 1.45; }
+
+/* Actions row — primary action trails right; Skip/Back lead. */
+.setup-actions { display: flex; gap: 0.6rem; align-items: center; margin-top: 0.4rem; }
+.setup-actions .setup-next, .setup-actions .setup-finish { margin-left: auto; }
+.setup-actions .setup-back + .setup-finish { margin-left: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-dot { transition: none; }
+  .setup-dot--on { transform: scale(1.4); } /* keep the static size/halo cue; only the transition is dropped */
+}

@@ -16,11 +16,17 @@ export interface ArchiveDecision {
   scope: string;
   sensitivity: string;
   /** How the sensitivity label was assigned (SENSE-8 provenance). A connector-declared default is a
-   *  high-confidence `connector` signal (SENSE-5); the bare fallback is `default` (SENSE-2). */
+   *  high-confidence `connector` signal (SENSE-5); the bare fallback is `default` (SENSE-2); `classifier`
+   *  is the SENSE-4 agentic/heuristic classifier (Slice 2). */
   sensitivityBy: SensitivityBy;
   /** When the label was assigned (SENSE-7 §7 `sensitivityMeta.at`). Set for a Principal override so the
    *  override time survives a Replay re-archive; absent → the renderer uses `archivedAt`. */
   sensitivityAt?: string;
+  /** The classifier's confidence (SPEC-0043 §7) — present only when `sensitivityBy === 'classifier'`. */
+  sensitivityConfidence?: number;
+  /** A sub-threshold label the classifier leaned toward (SENSE-4) — present only while a Review suggestion
+   *  is open; routes the uncertain case to Review. Cleared by a Principal override. */
+  sensitivitySuggested?: string;
   /** Provenance of the decision itself — see AgentTrace (ORCH-16). */
   agent?: AgentTrace;
 }

@@ -6,6 +6,7 @@
 // pulling those modules' runtime deps (node:fs / simple-git) into the renderer bundle — `import
 // type` is erased at build time.
 import type { ExploreEntityRef, ExploreNeighborhood } from './explorePanel';
+import type { HealthReport } from './healthPanel';
 import type { SchedulePreset, AutonomyPosture, Facing } from './jobs';
 import type { WorkDepthConfig } from './workDepth';
 import type { EgressTier, ResearcherTemplate } from './researchers';
@@ -765,6 +766,9 @@ export interface KbApi {
   // entity + its bounded 1-hop neighborhood (click-through to a node's page reuses `openCitation`).
   exploreEntities(): Promise<ExploreEntityRef[]>;
   exploreNeighborhood(focus?: string): Promise<ExploreNeighborhood>;
+  // SPEC-0035 HEALTH: a deterministic, read-only structural-lint scan of the canonical graph —
+  // orphans, dangling/dead links, sparse/thin stubs. v1 is passive (surfaces findings; no fixes).
+  healthReport(): Promise<HealthReport>;
 }
 
 /** The curated Activity feed + its window-cap signal. Consumers key off `total`/`truncated`, NOT

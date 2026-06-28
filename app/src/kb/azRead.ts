@@ -3,7 +3,7 @@
 // HOST-ALLOWLISTED org URL (the remote-egress scoping KB-QD flagged for 2b).
 //
 // SECURITY (mirrors ghRead/codeGit):
-//   - BYOA (RESEARCH-9): `az` owns its own auth (`az login` / `az devops login` with a PAT). KB-App
+//   - BYOA (RESEARCH-9): `az` owns its own auth (`az login` / `az devops login` with a PAT). Vellum
 //     stores NO secrets + injects none; az absent/unauthed → typed `az-unavailable` graceful-degrade
 //     (the cognition turns it into a no-finding + "configure az" hint), never a crash.
 //   - STRUCTURED OPERATIONS, not arbitrary az — a fixed GET-only set (pr list / show). No raw

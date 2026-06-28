@@ -136,7 +136,7 @@ export function classifyIndexLock(inp: ClassifyInputs): LockVerdict {
     if (ageMs > 2 * inp.meta.timeoutMs) {
       return { action: 'clear', reason: `gate-2: sidecar age ${ageMs}ms > 2×timeout ${inp.meta.timeoutMs}ms (pid ${inp.meta.pid}, op=${inp.meta.op})` };
     }
-    // pid alive AND within age → a genuinely live op is in flight (another KB-App instance) → keep.
+    // pid alive AND within age → a genuinely live op is in flight (another Vellum instance) → keep.
     return { action: 'keep', reason: `gate-2: sidecar pid ${inp.meta.pid} alive within age (${ageMs}ms ≤ 2×${inp.meta.timeoutMs}ms)` };
   }
 

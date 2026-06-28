@@ -146,6 +146,20 @@ switching UI, full Copilot SDK integration/auth. Detection only here.
 - 2026-05-30 — SETUP-1 graduated `none-yet → test:` — the Playwright e2e smoke
   (`app/e2e/smoke.e2e.ts`) drives the built app with clean userData and asserts the first-run
   Setup wizard renders. Green locally (macOS) + CI (opt-in `e2e` job, macOS + Windows).
+- 2026-06-28 — **guided first-run** added (extends SETUP-1's "guides through setup"). After the vault
+  step (pick/create → git → Copilot → scaffold + first commit, all unchanged), the app now walks the
+  Principal through three short, **skippable** steps on the WS2 design system (`shell/setupFlow.ts` +
+  `setupFlow.css`) before handing off to the shell: **(1) Model** — pick a default agent model over the
+  live SPEC-0048 catalog (`getModelCatalog`/`setModel`), or keep the recommended default; **(2) Sample
+  seed** — OPTIONAL: push a few brand-neutral sample notes through the **real `kb:capture` pipeline**
+  (dogfood, no bespoke seeder) so the KB isn't empty, or start pristine; **(3) Tour** — a 4-card
+  orientation (Capture / Reviews / Manage / Ask). Every step **degrades, never blocks** (a failed/hung
+  model fetch or a failed seed surfaces a calm note and Continue still works — the SETUP-4 ethos), and
+  the flow runs **only in the create path** so a returning launch never re-onboards (SETUP-6 preserved).
+  The TCC-gated path (MACOS-7) runs the guided steps only after the folder grant. Tests:
+  `app/src/shell/setupFlow.test.ts` (happy-dom) — step progression + rail, model persist/skip/degrade,
+  seed-through-capture/skip/failure-non-blocking, tour + `onDone` handoff, Back nav. Gate: DL-2 visual +
+  QD-2 code.
 - 2026-06-02 — SETUP-2/6 graduated `none-yet → test:` under the SPEC-0012 harness.
   SETUP-2: `app/src/main/ipc.test.ts` (mocked electron — `ipcMain`/`dialog`/`BrowserWindow`
   + real `createKb` in a temp git repo) proves the picked folder flows through `kb:pickFolder`

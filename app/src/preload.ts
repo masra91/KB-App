@@ -64,6 +64,7 @@ const kbApi: KbApi = {
   getSourceSensitivities: (sourceIds) => ipcRenderer.invoke('kb:getSourceSensitivities', sourceIds),
   exploreEntities: () => ipcRenderer.invoke('kb:exploreEntities'),
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
+  healthReport: () => ipcRenderer.invoke('kb:healthReport'),
 };
 
 contextBridge.exposeInMainWorld('kbApi', kbApi);

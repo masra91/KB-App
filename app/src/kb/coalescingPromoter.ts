@@ -1,7 +1,7 @@
-// STAGING-12 — coalesce/throttle promotion to `main` so KB-App is a good citizen of the LIVE Obsidian
+// STAGING-12 — coalesce/throttle promotion to `main` so Vellum is a good citizen of the LIVE Obsidian
 // vault. `main` IS the directory Obsidian has open; today the pipeline promotes on EVERY drain
 // (~14–46s), and Obsidian's file-watcher re-indexes on every write → indexing/nav/file-load HANG and
-// never settle until KB-App is quit. The fix: drains don't promote directly — they `request()` a
+// never settle until Vellum is quit. The fix: drains don't promote directly — they `request()` a
 // promotion, and the actual `promote()` runs in **infrequent batched bursts**:
 //   - debounced by a QUIESCENT window (promote only once the drains go quiet for `quiescentMs`), so a
 //     burst of drains coalesces into ONE commit; AND

@@ -109,7 +109,7 @@ export async function ensureGitIdentity(git: SimpleGit): Promise<void> {
   }
   if (!email) {
     await git.addConfig('user.email', 'kb-app@localhost');
-    await git.addConfig('user.name', 'KB-App');
+    await git.addConfig('user.name', 'Vellum');
   }
 }
 
@@ -124,19 +124,19 @@ async function writeIfAbsent(file: string, content: string): Promise<void> {
 function readmeFor(cfg: VaultConfig): string {
   return `# ${cfg.name}
 
-This is a **KB-App** knowledge base — the durable, git-versioned home for your
+This is a **Vellum** knowledge base — the durable, git-versioned home for your
 sources, entities, and synthesis outputs.
 
 - \`sources/\`  — immutable primary & secondary sources (ground truth; never edited)
 - \`entities/\` — the versioned knowledge graph (concepts, events, people, …)
 - \`outputs/\`  — synthesis outputs (reports, answers), tagged as derived
-- \`.kb/\`      — KB-App configuration
+- \`.kb/\`      — Vellum configuration
 
-Managed by KB-App. You can also open this folder directly in Obsidian.
+Managed by Vellum. You can also open this folder directly in Obsidian.
 `;
 }
 
-const VAULT_GITIGNORE = `# KB-App — ignore rebuildable / derived caches (not ground truth)
+const VAULT_GITIGNORE = `# Vellum — ignore rebuildable / derived caches (not ground truth)
 .kb/cache/
 .DS_Store
 `;
