@@ -17,6 +17,7 @@ import { deterministicDecider, type ArchivistDecider } from './archivist';
 import { renderSourceMd, bodyFor } from './sourceDoc';
 import { readSensitivityOverrides } from './sensitivityOverride';
 import { applyClassification, classifierInputFrom, type SensitivityClassifier } from './sensitivityClassifier';
+import { extractMediaText, isExtractableMedia, resolveMediaMimeType, type MediaExtractOptions } from './mediaExtract';
 import { captureToInbox, readCapturedMeta, normalizeInbox, type CapturePayload, type CaptureOutcome } from './ingest';
 import { Mutex } from './stageLock';
 import { withConcurrentAdvance, DEFAULT_STAGE_CAP, type PrepareContext } from './canonicalAdvance';
@@ -68,6 +69,7 @@ export async function archiveOne(
   lock: Mutex = new Mutex(),
   span: ActiveSpan = noopActiveSpan,
   classify?: SensitivityClassifier,
+  mediaExtract?: MediaExtractOptions,
 ): Promise<string> {
   root = path.resolve(root);
   const destRel = path.join('sources', dateShard(id), id);
@@ -80,7 +82,26 @@ export async function archiveOne(
     const baseDecision = await decider(meta, { span });
     // The source body, read once at the ingest boundary (before the rename) — used both for the classifier
     // (SENSE-4, content in hand) and as the rendered source.md body, so we never read the bytes twice.
-    const textContent = meta.kind === 'text' ? await fs.readFile(path.join(unitDir, meta.raw), 'utf8') : null;
+    let textContent = meta.kind === 'text' ? await fs.readFile(path.join(unitDir, meta.raw), 'utf8') : null;
+    // SPEC-0052 MEDIA: a non-text (file) media source — PDF / image — gets a TEXT body extracted via the
+    // Copilot multimodal path, woven into `textContent` HERE (before the rename, before the classifier) so
+    // (a) the source is no longer a dead `![[raw.pdf]]` embed and flows decompose/claims, and (b) SENSE
+    // classifies it on real content for free. FAIL-LOUD but non-blocking: any failure leaves `textContent`
+    // null (→ embed-only body; the original binary is still preserved, MEDIA-4) and is recorded on the
+    // source's audit (surfaced, never silent, MEDIA-5/6/7), never crashing the archive (binary not lost).
+    let mediaOutcome: { ok: boolean; reason?: string; error?: string; chars?: number } | undefined;
+    if (textContent === null && mediaExtract && meta.kind === 'file' && isExtractableMedia(meta.mimeType, meta.raw)) {
+      const mime = resolveMediaMimeType(meta.mimeType, meta.raw)!; // defined: isExtractableMedia was true
+      const data = new Uint8Array(await fs.readFile(path.join(unitDir, meta.raw)));
+      const res = await extractMediaText(data, mime, meta.originalName ?? meta.raw, mediaExtract);
+      if (res.ok) {
+        textContent = res.text.length > 0 ? res.text : null; // empty transcription → keep embed-only (honest)
+        mediaOutcome = { ok: true, chars: res.text.length };
+      } else if ('reason' in res) {
+        // non-strict tsconfig: narrow the failure variant via the in-operator, not `!res.ok`.
+        mediaOutcome = { ok: false, reason: res.reason, error: res.error };
+      }
+    }
     // SENSE-4 Slice 2: classify sensitivity at the ingest boundary, but ONLY when no higher-priority signal
     // (connector default / pending Principal override) already set the label — `applyClassification` enforces
     // that. A confident `shareable` verdict re-opens public-web research egress (SENSE-9); a sub-threshold
@@ -120,7 +141,7 @@ export async function archiveOne(
     const { agent, ...coreDecision } = decision;
     await fs.appendFile(
       path.join(dest, 'audit.jsonl'),
-      JSON.stringify({ action: 'archived', id, archivedAt, decision: coreDecision, agent: agent ?? { via: 'deterministic' } }) + '\n',
+      JSON.stringify({ action: 'archived', id, archivedAt, decision: coreDecision, agent: agent ?? { via: 'deterministic' }, ...(mediaOutcome ? { media: mediaOutcome } : {}) }) + '\n',
       'utf8',
     );
 
@@ -176,6 +197,7 @@ export class Orchestrator {
   private readonly log: DevLog;
   private readonly tracer: Tracer;
   private readonly classify?: SensitivityClassifier;
+  private readonly mediaExtract?: MediaExtractOptions;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private draining = false;
   private pending = false;
@@ -198,6 +220,7 @@ export class Orchestrator {
     log: DevLog = noopDevLog,
     tracer: Tracer = noopTracer,
     classify?: SensitivityClassifier,
+    mediaExtract?: MediaExtractOptions,
   ) {
     this.root = path.resolve(root);
     this.decider = decider;
@@ -207,6 +230,7 @@ export class Orchestrator {
     this.log = log.child({ scope: 'archive' });
     this.tracer = tracer;
     this.classify = classify; // SENSE-4 Slice 2: optional ingest-boundary sensitivity classifier
+    this.mediaExtract = mediaExtract; // SPEC-0052 MEDIA: optional PDF/image text extraction at archive
   }
 
   /** Live-set the per-stage concurrency cap (SPEC-0048 SCALE-4): the new value is read on the NEXT
@@ -300,7 +324,7 @@ export class Orchestrator {
         await Promise.all(
           batch.map((id) => {
             const span = this.tracer.start(STAGE_RUN_OP, { stage: 'archive', itemId: id });
-            return archiveOne(this.root, id, this.decider, this.lock, span, this.classify).then(
+            return archiveOne(this.root, id, this.decider, this.lock, span, this.classify, this.mediaExtract).then(
               () => {
                 span.end('ok');
                 this.lastArchived = id;
