@@ -10,7 +10,7 @@
 // NB: imports here are TYPE-ONLY from kb/types (erased at build) — the renderer must not pull the
 // audit domain modules' node:fs/simple-git runtime deps (STACK-6). The actor filter options are
 // derived from the loaded data, not imported from AUDIT_ACTORS (a runtime value).
-import { esc } from '../html';
+import { esc, emptyState } from '../html';
 import { withTimeout } from '../loadGuard';
 import { formatTimestamp } from '../formatTime';
 import { stageDisplayName } from '../stageLabels';
@@ -210,7 +210,9 @@ export function bodyHtml(s: BodyState): string {
   // #145: a failed/timed-out load is retryable, never an infinite spinner. The view's header +
   // controls stay mounted around this body, so a button here (not a full renderLoadError) suffices.
   if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="viz-btn viz-btn--sm viz-focusable load-retry" data-act="retry-load">Retry</button></p>`;
-  if (s.entries.length === 0) return `<p class="activity-note activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
+  // Empty BY DESIGN (no activity yet) → the branded .viz-empty primitive (#406). A load FAILURE above
+  // stays on the retry path (#160) — distinct from this calm idle empty.
+  if (s.entries.length === 0) return emptyState({ title: 'No activity yet.', body: 'Once your KB starts processing, what it does shows up here.' });
   const note = s.truncated
     ? `<p class="activity-note activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
     : `<p class="activity-note activity-count">${s.total} event${s.total === 1 ? '' : 's'}.</p>`;

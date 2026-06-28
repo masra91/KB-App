@@ -77,11 +77,13 @@ describe('Activity feed (AUDIT-5)', () => {
     expect(c.querySelector('.activity-truncation')?.textContent).toContain('most recent of 500');
   });
 
-  it('shows an empty state when there is no activity', async () => {
+  it('shows the branded empty state (#406 .viz-empty) when there is no activity', async () => {
     activityFeed = vi.fn(async () => feed([]));
     setApi();
     const c = await mount();
-    expect(c.querySelector('.activity-empty')).not.toBeNull();
+    const empty = c.querySelector('.viz-empty');
+    expect(empty).not.toBeNull();
+    expect(empty?.querySelector('.viz-empty__title')?.textContent).toBe('No activity yet.');
   });
 
   // ENG-15/16: a legacy/partial audit entry (null actor, missing `events`/`provenance`/`payload`) must
