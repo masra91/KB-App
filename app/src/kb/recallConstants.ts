@@ -61,3 +61,33 @@ export function resolveRecallMaxToolCallsWrite(prior: number | undefined, incomi
   if (incoming === null) return undefined;
   return clampRecallMaxToolCalls(incoming);
 }
+
+// --- Effort (SPEC-0060 VUX-11): the Ask "Quick vs Considered" depth toggle ---
+
+/** The Ask effort level (the v3 "recall settings on Ask" IA-lock). `quick` = a fast, shallow lookup;
+ *  `considered` = the full configured/graph-scaled depth (the prior default). The copilot CLI exposes
+ *  ONLY `--model` (reasoning effort is model-side — see copilotModel.ts), so effort is expressed
+ *  HONESTLY through recall's own depth levers — the retrieval hop budget + the interactive time budget —
+ *  NOT a fake model swap (no recall-quick/-considered model exists in the catalog). */
+export type RecallEffort = 'quick' | 'considered';
+
+/** Quick's fixed shallow ceilings: the floor hop budget (a few targeted lookups) + the 60s floor time
+ *  budget. A quick answer trades multi-hop depth for latency the human feels immediately. */
+export const RECALL_EFFORT_QUICK = { maxToolCalls: RECALL_BUDGET.BASE, sessionBudgetMs: RECALL_BUDGET_MS_MIN } as const;
+
+/**
+ * Map an Ask effort onto concrete recall depth levers, RELATIVE to the caller's configured `considered`
+ * baseline (pure; renderer-safe). `quick` forces the floor hop budget + the 60s floor time (never
+ * EXCEEDING the baseline, so a tightly-configured instance stays tight); `considered`/`undefined` pass
+ * the baseline through unchanged (full back-compat — a request with no effort behaves exactly as before).
+ */
+export function recallEffortLevers(
+  effort: RecallEffort | undefined,
+  base: { maxToolCalls?: number; sessionBudgetMs: number },
+): { maxToolCalls?: number; sessionBudgetMs: number } {
+  if (effort !== 'quick') return base; // 'considered' or undefined → the configured baseline (unchanged)
+  return {
+    maxToolCalls: Math.min(base.maxToolCalls ?? RECALL_BUDGET.MAX, RECALL_EFFORT_QUICK.maxToolCalls),
+    sessionBudgetMs: Math.min(base.sessionBudgetMs, RECALL_EFFORT_QUICK.sessionBudgetMs),
+  };
+}

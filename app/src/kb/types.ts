@@ -374,11 +374,16 @@ export interface ComposeBacklogResult {
 // import surface. (types.ts stays electron/obsidian-free, STACK-6 — recall.ts is pure kb domain.)
 export type { AskResult, Citation, RecallTurn } from './recall';
 import type { AskResult, RecallTurn } from './recall';
+import type { RecallEffort } from './recallConstants';
+export type { RecallEffort };
 
 /** A recall request from the Ask view: an NL question + the in-session history (ASK-8). */
 export interface AskRequest {
   question: string;
   history?: RecallTurn[];
+  /** SPEC-0060 VUX-11: the Ask "Quick vs Considered" depth toggle. Omitted ⇒ `considered` (the prior
+   *  full-depth default), so existing callers and saved threads are unaffected. */
+  effort?: RecallEffort;
 }
 
 /** Result of saving a recall answer as a KB Output (ASK-6). `rel` is the Output's repo path on success. */

@@ -52,6 +52,7 @@ import { getQuickCaptureAgent } from './quickCaptureService';
 import { captureScreenshot, consumeScreenshotHandle, clipboardImageHandle } from './quickCaptureScreenshot';
 import { noteRendererError } from './telemetry';
 import { recall } from '../kb/recall';
+import { recallEffortLevers } from '../kb/recallConstants';
 import { resolveCopilotModel } from '../kb/copilotModel';
 import { copilotScaleRuntime } from '../kb/copilotConcurrency';
 import { makeReadOnlyTools } from '../kb/recallTools';
@@ -451,9 +452,14 @@ export function registerIpc(): void {
     // forward the optional retrieval tool-call override (`undefined` ⇒ recall's graph-size-scaled
     // default applies — see `recallBudget`; a set value wins as `opts.maxToolCalls`).
     const { recallBudgetMs, recallMaxToolCalls } = await getActiveInstanceSettings();
+    // SPEC-0060 VUX-11: the Ask "Quick vs Considered" toggle modulates recall DEPTH honestly — Quick
+    // forces the floor hop + 60s time budget for a fast shallow lookup; Considered (the default when no
+    // effort is sent) keeps the Principal-configured / graph-scaled depth. No fake model swap (the CLI
+    // tiers by `--model` only, and no recall-quick/-considered model exists) — see recallEffortLevers.
+    const { maxToolCalls, sessionBudgetMs } = recallEffortLevers(req.effort, { maxToolCalls: recallMaxToolCalls ?? undefined, sessionBudgetMs: recallBudgetMs });
     // ORCH-16: pin the model recall's SDK session runs on, same as the enrich deciders — prod
     // otherwise passed no model and the SDK inherited `~/.copilot/settings.json` (model-pin gap).
-    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs: recallBudgetMs, maxToolCalls: recallMaxToolCalls ?? undefined, model: resolveCopilotModel(undefined, 'recall') });
+    return recall(path.resolve(cfg.activeVaultPath), { question: req.question, history: req.history }, { cliPath, sessionBudgetMs, maxToolCalls, model: resolveCopilotModel(undefined, 'recall') });
   });
 
   // SPEC-0026 ASK-6: save a grounded recall answer as an inert KB Output (outputs/recall/<id>.md,
