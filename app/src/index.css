@@ -300,10 +300,14 @@ body.shell-active #app {
 
 .nav-icon {
   width: 1.2rem;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem; /* sets the 1em inline line-icon size */
   color: var(--viz-idle);
   transition: color var(--viz-dur-quick) var(--viz-ease-out), transform var(--viz-dur-quick) var(--viz-ease-out);
 }
+.nav-icon svg { display: block; } /* inline line glyph; inherits currentColor → gilds gold on hover/active */
 .nav-label { flex: 1 1 auto; }
 
 /* Faint fractal-lattice watermark, low in the rail (gold, very low opacity; ambient drift). */
