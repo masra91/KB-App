@@ -240,10 +240,71 @@ body.shell-active #app {
   height: 100vh;
 }
 
-.shell {
-  display: flex;
-  height: 100vh;
+/* ============================================================================================
+   VELLUM v3 SHELL (SPEC-0060) — the load-bearing chrome: a top bar (⌘K search · per-view contextual
+   filter slot · Quick-add) over a body of [reordered rail | scroll host]. The warm v2 rail is carried
+   forward (it is already the Vellum language); v3 adds the top bar, the brand-diamond motion, the "you"
+   identity card, and removes the global 34rem width clamp (VUX-2). Built to the vellum-v3.html mock.
+   Light is the default; a compact dark-survival mirror (below) keeps the opt-in night-study toggle (#478)
+   from breaking the new chrome until the v3 dark pass (SPEC-0060 §2 defers the full dark design). */
+.win { display: flex; flex-direction: column; height: 100vh; }
+.body { flex: 1 1 auto; display: flex; min-height: 0; position: relative; z-index: 1; }
+
+/* Top bar — themed warm (not aqua): global search · contextual filter slot · Quick-add. */
+.bar {
+  flex: 0 0 3.1rem; display: flex; align-items: center; gap: 0.8rem; padding: 0 0.9rem;
+  background: linear-gradient(180deg, #f3ead6, #e9dec6);
+  border-bottom: 0.5px solid var(--hair); position: relative; z-index: 6;
 }
+.topsearch {
+  appearance: none; flex: 1 1 auto; max-width: 27.5rem; display: flex; align-items: center; gap: 0.55rem;
+  background: var(--linen); border: 0.5px solid var(--hair); border-radius: var(--r-chip);
+  padding: 0.5rem 0.75rem; color: var(--faint); font: inherit; font-size: 0.78rem; cursor: text; text-align: left;
+  transition: var(--t);
+}
+.topsearch:hover { border-color: #d2c7a8; color: var(--stone); }
+.topsearch:focus-visible { outline: none; box-shadow: var(--ring); border-color: var(--viridian); color: var(--stone); }
+.topsearch svg { width: 0.95rem; height: 0.95rem; color: var(--gold-deep); flex: none; }
+.topsearch .ts-ph { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topsearch .kbd { margin-left: auto; font-family: var(--mono); font-size: 0.68rem; color: #9a927e; border: 0.5px solid var(--hair); border-radius: 5px; padding: 0.05rem 0.35rem; background: var(--linen); }
+/* Per-view contextual filter slot — populated by each view via setTopbarContext (empty until a view fills it). */
+.topctx { display: flex; align-items: center; gap: 0.45rem; min-width: 0; overflow: hidden; }
+.topctx:empty { display: none; }
+.topchip { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; color: var(--stone); border: 0.5px solid var(--hair); background: var(--linen); border-radius: var(--r-chip); padding: 0.35rem 0.65rem; white-space: nowrap; flex: none; }
+.topchip svg { width: 0.85rem; height: 0.85rem; color: var(--gold-deep); }
+.topspacer { flex: 1 1 auto; }
+.quickadd {
+  flex: none; display: inline-flex; align-items: center; gap: 0.45rem; font-family: var(--ui); font-size: 0.8rem;
+  font-weight: 600; color: #fff; cursor: pointer; border: 0.5px solid #296253; border-radius: var(--r-chip);
+  padding: 0.45rem 0.85rem; background: linear-gradient(180deg, var(--viridian-2), var(--viridian));
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset, 0 8px 18px -10px rgba(47, 107, 91, 0.6);
+  transition: transform var(--t), box-shadow var(--t), filter var(--t);
+}
+.quickadd svg { width: 1rem; height: 1rem; color: #e2f2eb; }
+.quickadd:hover { transform: translateY(-1px); filter: brightness(1.03); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3) inset, 0 12px 24px -10px rgba(47, 107, 91, 0.7); }
+.quickadd:focus-visible { outline: none; box-shadow: var(--ring); }
+
+/* "You" identity card (SPEC-0060 §7, VUX-21) — the rail's first-class self, at the foot of the rail. */
+.user { margin-top: auto; display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem; border-radius: 11px; border: 0.5px solid var(--hair); background: #fbf6ea; cursor: default; transition: var(--t); }
+.user:hover { box-shadow: var(--shadow-card); transform: translateY(-1px); }
+.user-ini { width: 1.9rem; height: 1.9rem; flex: none; border-radius: 9px; background: radial-gradient(circle at 40% 35%, var(--viridian-2), #1e5443); color: #fff; display: flex; align-items: center; justify-content: center; border: 0.5px solid rgba(201, 163, 90, 0.5); }
+.user-ini svg { width: 1rem; height: 1rem; }
+.user-id { min-width: 0; }
+.user-id b { display: block; font-size: 0.78rem; font-weight: 500; color: var(--ink); }
+.user-id span { display: block; font-size: 0.66rem; color: var(--stone); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Dark SURVIVAL for the new v3 chrome (NOT the deferred v3 dark design pass, SPEC-0060 §2): the v3 tokens
+   are light literals, so the new top bar + "you" card would read light-on-dark under the opt-in #478
+   toggle. These few overrides keep them legible in dark (the rail + content already support dark via the
+   --viz-* re-point); the full v3 night-study language forks later. data-theme (never prefers-color-scheme,
+   themeCohesion). */
+:root[data-theme='dark'] .bar { background: linear-gradient(180deg, #1c2c35, #16242d); border-bottom-color: #2c4150; }
+:root[data-theme='dark'] .topsearch { background: #1b2b34; border-color: #2c4150; }
+:root[data-theme='dark'] .topsearch:hover { background: #1b2b34; border-color: #3a5366; }
+:root[data-theme='dark'] .topsearch .kbd { background: #16242d; border-color: #2c4150; }
+:root[data-theme='dark'] .topchip { background: #1b2b34; border-color: #2c4150; color: #cfc7b5; }
+:root[data-theme='dark'] .user { background: #1b2b34; border-color: #2c4150; }
+:root[data-theme='dark'] .user-id b { color: #ece4d2; }
 
 /* UX v2 sidebar (vellum-ux-v2-language "Shell language") — a gradient rail with the Vellum wordmark +
    crystalline glyph, grouped nav, a GOLD inset active accent (not a solid-blue fill), hover-life, and a
@@ -321,19 +382,25 @@ body.shell-active #app {
 .sidebar-wmark { position: absolute; left: -2.5rem; bottom: 4.5rem; opacity: 0.1; pointer-events: none; color: var(--viz-brass); animation: viz-drift var(--viz-dur-field) ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .sidebar-wmark { animation: none; } }
 
+/* Scroll host (the view region). v3 VUX-2: the global 34rem width clamp is REMOVED — spatial views adapt
+   to the window and reading views keep their own comfortable column (each view owns its width now; the v2
+   `.content .view{max-width:34rem}` that suffocated every view is gone). A transitional padding keeps
+   not-yet-rebuilt views off the edges until each is migrated to its own v3 layout. */
 .content {
   flex: 1 1 auto;
-  overflow: auto;
-  padding: 2rem;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1.6rem 2rem;
 }
 
 .content .view {
   width: 100%;
-  max-width: 34rem;
 }
+/* Per-view churn-in: a brief settle when a view becomes active (paired with the brand-diamond churn). */
+.content .view:not(.hidden) { animation: shellFadein 0.34s var(--e-out); }
+@keyframes shellFadein { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .content .view:not(.hidden) { animation: none; } }
 
 .view.hidden {
   display: none;

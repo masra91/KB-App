@@ -15,3 +15,21 @@ export interface NavigateDetail {
 export function navigateTo(view: string): void {
   document.dispatchEvent(new CustomEvent<NavigateDetail>(NAVIGATE_EVENT, { detail: { view } }));
 }
+
+// --- SPEC-0060 VUX-3: the top bar's per-view contextual filter slot ---
+// The v3 top bar carries a per-view filter slot (`#topctx`). The shell owns the slot + clears it on every
+// view change; a view fills it on activation by calling `setTopbarContext(html)` (its own trusted filter
+// markup — NOT user data). This is the decoupled seam (mirrors navigateTo): views stay ignorant of the
+// shell. Each view rebuilt in v3 populates its own filters; until then the slot renders empty (no chrome).
+export const TOPBAR_CONTEXT_EVENT = 'kb:topbar-context';
+
+/** Detail payload of a `kb:topbar-context` event — the view's contextual-filter HTML (trusted, code-supplied). */
+export interface TopbarContextDetail {
+  html: string;
+}
+
+/** Set the top bar's contextual filter slot to `html` (the calling view's own trusted markup). A no-op if
+ *  no shell is mounted. The shell clears the slot on each view change, so a view re-sets it on activation. */
+export function setTopbarContext(html: string): void {
+  document.dispatchEvent(new CustomEvent<TopbarContextDetail>(TOPBAR_CONTEXT_EVENT, { detail: { html } }));
+}

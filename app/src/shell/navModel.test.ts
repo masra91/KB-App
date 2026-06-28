@@ -10,12 +10,11 @@ import {
   VIEW_CAPTURE,
   VIEW_REVIEWS,
   VIEW_ACTIVITY,
-  VIEW_STATUS,
   VIEW_ASK,
   VIEW_EXPLORE,
   VIEW_HEALTH,
   VIEW_AGENTS,
-  VIEW_SOURCES,
+  VIEW_CONNECTORS,
   VIEW_SETTINGS,
 } from './views';
 
@@ -26,20 +25,22 @@ const sample: NavView[] = [
 ];
 
 describe('NAV_VIEWS registry (SHELL-3)', () => {
-  it('registers the top-level views then the Manage section, in rail order (Manage = SPEC-0027 PANEL-1)', () => {
+  it('registers the v3 rail order then the Manage section (SPEC-0060 VUX-4: Status dissolved, Sources→Connectors)', () => {
     expect(NAV_VIEWS.map((v) => v.id)).toEqual([
       VIEW_TODAY,
+      VIEW_ASK,
       VIEW_CAPTURE,
       VIEW_REVIEWS,
-      VIEW_ACTIVITY,
-      VIEW_STATUS,
-      VIEW_ASK,
       VIEW_EXPLORE,
+      VIEW_ACTIVITY,
       VIEW_HEALTH,
       VIEW_AGENTS,
-      VIEW_SOURCES,
+      VIEW_CONNECTORS,
       VIEW_SETTINGS,
     ]);
+    // Status is DISSOLVED from the rail (its diagnostics fold into Today/Health); no Sources rail entry.
+    expect(NAV_VIEWS.some((v) => v.id === 'status')).toBe(false);
+    expect(NAV_VIEWS.some((v) => v.id === 'sources')).toBe(false);
   });
 
   it('every view has a non-empty label (SHELL-3)', () => {
@@ -52,7 +53,7 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
 
   it('the Control Panel views form a contiguous "Manage" group; Settings sits under it (PANEL-1)', () => {
     const manage = NAV_VIEWS.filter((v) => v.group === GROUP_MANAGE).map((v) => v.id);
-    expect(manage).toEqual([VIEW_AGENTS, VIEW_SOURCES, VIEW_SETTINGS]); // SPEC-0053 WS-E: Jobs+Researchers folded into the Agents hub
+    expect(manage).toEqual([VIEW_AGENTS, VIEW_CONNECTORS, VIEW_SETTINGS]); // SPEC-0060: Sources→Connectors (Jobs/Researchers already folded into Agents)
     // Top-level views (Capture/Reviews/Activity/Ask) carry no group.
     expect(NAV_VIEWS.find((v) => v.id === VIEW_CAPTURE)?.group).toBeUndefined();
     expect(NAV_VIEWS.find((v) => v.id === VIEW_ACTIVITY)?.group).toBeUndefined();

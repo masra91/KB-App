@@ -22,38 +22,42 @@ export const VIEW_JOBS = 'jobs';
 export const VIEW_AGENTS = 'agents';
 export const VIEW_RESEARCHERS = 'researchers';
 export const VIEW_SOURCES = 'sources';
+// SPEC-0060 VUX-4 — "Sources" becomes "Connectors" (guided connect-a-source). The rail route is
+// `connectors`; the view rebuild (warm connect-a-source cards) is its own per-view PR — until then the
+// shell aliases `connectors` → the existing Sources mount, so the rename is real with no dead route.
+export const VIEW_CONNECTORS = 'connectors';
 export const VIEW_SETTINGS = 'settings';
 
 /** The rail section heading the Control Panel views sit under (SPEC-0027 PANEL-1). */
 export const GROUP_MANAGE = 'Manage';
 
 /**
- * The views, in rail order. Today is first and is the default on launch (SPEC-0058, amending SHELL-4):
- * the v2 "command-center home" greets the Principal with a glanceable state-of-the-library, so launch
- * lands on Today, not the last-open view (the deliberate "always a fixed home on launch" behavior of
- * SPEC-0017 §5 is preserved — only the home itself moves from Capture to Today). Capture stays second.
- * Reviews is the "needs you" queue (SPEC-0018 REVIEW-10); Activity is the
- * read-only audit observatory (SPEC-0029 AUDIT-9, a top-level sibling next to Reviews); Ask is
- * grounded recall (SPEC-0026). The Control Panel (SPEC-0027) adds a "Manage" section of sibling
- * views — Jobs, Agents, Researchers, Sources, Settings — to observe + configure the machine;
- * Settings moves under Manage (elevated from the display-only stub, SHELL-7 → PANEL-5).
+ * The views, in rail order — the SPEC-0060 v3 IA (VUX-4), "reach-for-most first". Today (the home,
+ * default on launch — SPEC-0058, amending SHELL-4's Capture default; the "always a fixed home on launch"
+ * behavior of SPEC-0017 §5 is preserved, only the home moved) · Ask · Capture · Reviews · Explore ·
+ * Activity · Health — then a "Manage" section: Agents · Connectors · Settings.
  *
- * The SHELL-3 "neutral placeholder" was a v1 scaffold proving the shell carries more than one view;
- * it's retired now that the real view set (Capture/Reviews/Activity/Ask + the Manage section) proves
- * that directly — no dead "Coming soon" item in the rail (SPEC-0017 SHELL-3 amended).
+ * v3 IA moves (locked, SPEC-0060 §4):
+ * - **Status DISSOLVED** — no standalone Status/"the Line" rail view. "What's moving" becomes a slim
+ *   flow-strip on Today; deep diagnostics fold into Health; stuck items route to Reviews. `VIEW_STATUS`
+ *   + its mount are retained for back-compat deep-links, but it is NOT a rail entry.
+ * - **Sources → Connectors** — the rail entry is now `connectors` (the Sources mount is aliased until
+ *   the Connectors view rebuild lands as its own PR). Watched-folders move into Settings (view content).
+ * - Jobs/Researchers remain folded into the Agents hub (SPEC-0053 WS-E); their ids are deep-link-only.
+ *
+ * No dead "Coming soon" rail item (SPEC-0017 SHELL-3 amended) — every entry mounts a real view.
  */
 export const NAV_VIEWS: NavView[] = [
-  // icon = a key into the inline line-icon set (shell/icons.ts), NOT an emoji — UX v2 monochrome rail glyphs.
+  // icon = a key into the inline line-icon set (shell/icons.ts), NOT an emoji — v3 monochrome rail glyphs.
   { id: VIEW_TODAY, label: 'Today', icon: 'today' },
+  { id: VIEW_ASK, label: 'Ask', icon: 'ask' },
   { id: VIEW_CAPTURE, label: 'Capture', icon: 'capture' },
   { id: VIEW_REVIEWS, label: 'Reviews', icon: 'reviews' },
-  { id: VIEW_ACTIVITY, label: 'Activity', icon: 'activity' },
-  { id: VIEW_STATUS, label: 'Status', icon: 'status' },
-  { id: VIEW_ASK, label: 'Ask', icon: 'ask' },
   { id: VIEW_EXPLORE, label: 'Explore', icon: 'explore' },
+  { id: VIEW_ACTIVITY, label: 'Activity', icon: 'activity' },
   { id: VIEW_HEALTH, label: 'Health', icon: 'health' },
   { id: VIEW_AGENTS, label: 'Agents', icon: 'agents', group: GROUP_MANAGE },
-  { id: VIEW_SOURCES, label: 'Sources', icon: 'sources', group: GROUP_MANAGE },
+  { id: VIEW_CONNECTORS, label: 'Connectors', icon: 'connectors', group: GROUP_MANAGE },
   { id: VIEW_SETTINGS, label: 'Settings', icon: 'settings', group: GROUP_MANAGE },
 ];
 

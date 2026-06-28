@@ -307,3 +307,57 @@
   /* covers ::before/::after too — the ambient-drift thread/field textures animate on pseudos. */
   .viz-surface, .viz-surface *, .viz-surface *::before, .viz-surface *::after { animation: none !important; transition: none !important; }
 }
+
+/* ==============================================================================================
+   VELLUM v3 (SPEC-0060) — the single cross-cutting language token system. The unprefixed warm-vellum
+   palette carried from the `vellum-v3.html` prototype; this is the DESTINATION that retires the
+   instrument-panel `--viz-*` names (VUX-1) — the shell adopts it now, views migrate one-per-PR. Values
+   are identical to the warm --viz-* set (one language, two name-sets during migration), kept literal so
+   the v3 layer stands on its own. Light is the fixed default (dark deferred per SPEC-0060 §2).
+   ============================================================================================== */
+:root {
+  --vellum: #f4efe3; --linen: #fbf7ec; --parchment: #ece4d2; /* grounds */
+  --viridian: #2f6b5b; --viridian-2: #3e9e82; --deep: #1e3557; --slate: #3a6e88; --mist: #bfd7e6;
+  --gold: #c9a35a; --gold-deep: #a8823c; --sprout: #3e9e82;
+  --ember: #c8743c; --oxide: #a8432a;
+  --ink: #2b2f36; --ink-2: #4a4e55; --stone: #6a6456; --faint: #9a927e; --hair: #e0d6be;
+  --voice: 'Spectral', Georgia, 'Times New Roman', serif;
+  --ui: 'Inter', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 1px 2px rgba(30, 53, 71, 0.05), 0 10px 24px -16px rgba(20, 40, 55, 0.3);
+  --shadow-raise: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 2px 6px rgba(30, 53, 71, 0.07), 0 22px 44px -22px rgba(20, 40, 55, 0.42);
+  --shadow-win: 0 2px 0 rgba(255, 255, 255, 0.6) inset, 0 40px 90px -30px rgba(16, 34, 48, 0.55);
+  --ring: 0 0 0 3px rgba(47, 107, 91, 0.16);
+  --r-win: 16px; --r-card: 13px; --r-chip: 9px; --r-pill: 22px;
+  --e-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --e-spring: cubic-bezier(0.34, 1.56, 0.46, 1);
+  --t: 0.18s var(--e-out);
+}
+
+/* ==============================================================================================
+   VELLUM v3 — the two motion signatures (SPEC-0060 §5, VUX-6).
+   • LOOM  (.vmark.loom / .is-working) — CONTINUOUS work: an endless outward pulse. "It is humming."
+     A stage actively running, ongoing background work.
+   • CHURN (.vmark.churn / .is-thinking) — EPISODIC thinking/preparing: a gyroscopic flip. "It is
+     getting your answer / building this page." A fetch, a view warming on load, a view change.
+   The same two ideas drive the brand diamond at logo scale (.dmk). All transform/opacity only.
+   ============================================================================================== */
+.vmark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--sprout); flex: none; vertical-align: middle; position: relative; }
+.vmark.loom::after { content: ""; position: absolute; inset: 0; border-radius: 50%; animation: vLoomRing 1.9s var(--e-out) infinite; }
+@keyframes vLoomRing { 0% { box-shadow: 0 0 0 0 rgba(62, 158, 130, 0.5); } 70% { box-shadow: 0 0 0 7px rgba(62, 158, 130, 0); } 100% { box-shadow: 0 0 0 0 rgba(62, 158, 130, 0); } }
+.vmark.churn { background: var(--gold); animation: vChurnDot 1.3s ease-in-out infinite; }
+@keyframes vChurnDot { 0%, 100% { opacity: 0.5; transform: scale(0.82); } 50% { opacity: 1; transform: scale(1.12); } }
+
+/* Brand diamond at logo scale — churns briefly while a view warms (.is-thinking), looms while working
+   (.is-working). The shell toggles .is-thinking on every view change. */
+.dmk { display: inline-block; line-height: 0; }
+.dmk svg { display: block; }
+.dmk.is-thinking .d-mid { transform-origin: center; animation: dChurn 2.6s var(--e-out) infinite; }
+.dmk.is-working .d-core { transform-origin: center; animation: dLoom 2.8s var(--e-out) infinite; }
+@keyframes dChurn { 0% { transform: rotate(0) scale(1); } 50% { transform: rotate(180deg) scale(0.86); } 100% { transform: rotate(360deg) scale(1); } }
+@keyframes dLoom { 0% { opacity: 0.35; transform: scale(0.6); } 60% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.35; transform: scale(0.6); } }
+
+/* Reduced-motion: both signatures collapse to a calm static mark (state still reads via colour + glyph). */
+@media (prefers-reduced-motion: reduce) {
+  .vmark, .vmark.loom::after, .vmark.churn, .dmk .d-mid, .dmk .d-core { animation: none !important; }
+}
