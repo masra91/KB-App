@@ -81,6 +81,8 @@ describe('Activity feed (AUDIT-5)', () => {
       expect(heads[0].querySelector('.activity-gl')?.classList.contains('gl--claim')).toBe(true);
       expect(heads[1].querySelector('.activity-gl')?.classList.contains('gl--capture')).toBe(true);
       expect(c.querySelector('.activity-gl')?.getAttribute('aria-hidden')).toBe('true');
+      // the tile renders the shared icons.ts line-icon SVG (navIcon), not an emoji/char
+      expect(c.querySelector('.activity-gl svg')).not.toBeNull();
     });
 
     it('structurally prevents the id↔timestamp overlap: .activity-ft shrinks, .activity-fw is its own fixed slot', async () => {

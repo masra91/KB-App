@@ -15,6 +15,17 @@ describe('glyphFor — kind/hue typing (#184 hue-on-tile)', () => {
     expect(glyphFor('decompose').cls).toBe('gl--decompose'); // neutral (ink-muted) per DL-2's table, not accent
   });
 
+  it('returns the shared icons.ts line-icon KEY per kind (rendered via navIcon, DL-1 #466 set)', () => {
+    expect(glyphFor('claims').icon).toBe('quote');
+    expect(glyphFor('connect').icon).toBe('link');
+    expect(glyphFor('enrich').icon).toBe('sparkles');
+    expect(glyphFor('compose').icon).toBe('book');
+    expect(glyphFor('output').icon).toBe('arrow-up-circle');
+    expect(glyphFor('researcher').icon).toBe('search');
+    expect(glyphFor('decompose').icon).toBe('split');
+    expect(glyphFor('claims', 'claims:setaside').icon).toBe('alert-triangle'); // failed
+  });
+
   it('a FAILED event-type wins → oxide tile, overriding the actor kind (honest failure)', () => {
     expect(glyphFor('claims', 'claims:setaside').cls).toBe('gl--failed');
     expect(glyphFor('connect', 'resolve-failed').cls).toBe('gl--failed');
@@ -33,7 +44,7 @@ describe('glyphFor — kind/hue typing (#184 hue-on-tile)', () => {
   it('ENG-15/16: an unknown/missing actor degrades to the neutral `event` tile, never throws', () => {
     expect(glyphFor(undefined).cls).toBe('gl--event');
     expect(glyphFor('totally-unknown-actor').cls).toBe('gl--event');
-    expect(typeof glyphFor(undefined).glyph).toBe('string');
+    expect(typeof glyphFor(undefined).icon).toBe('string');
   });
 });
 

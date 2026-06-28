@@ -15,6 +15,7 @@ import { withTimeout } from '../loadGuard';
 import { formatTimestamp, relativeCompact } from '../formatTime';
 import { stageDisplayName } from '../stageLabels';
 import { glyphFor } from './activityGlyph';
+import { navIcon } from '../icons';
 import type { ActivityFeedEntry, AuditEvent, Lineage, ActivityFilter, AuditActor, SourceSensitivity } from '../../kb/types';
 
 // View-local, ephemeral state (the shell mounts once + toggles visibility).
@@ -41,7 +42,7 @@ export function mountActivity(container: HTMLElement): void {
   loading = true;
   errorMsg = '';
   container.innerHTML = `
-    <div class="card activity-view">
+    <div class="activity-view viz-card viz-grain">
       <h1 class="activity-title viz-voice">Activity</h1>
       <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
@@ -260,7 +261,7 @@ export function entryHtml(e: ActivityFeedEntry, open: boolean): string {
     <li class="activity-entry${open ? ' open' : ''}">
       <div class="activity-entry-row">
         <button class="activity-entry-head viz-focusable" data-act="toggle" data-id="${esc(e.id)}" aria-expanded="${open}">
-          <span class="activity-gl gl ${g.cls}" title="${esc(stageDisplayName(e.actor))}" aria-hidden="true">${esc(g.glyph)}</span>
+          <span class="activity-gl gl ${g.cls}" title="${esc(stageDisplayName(e.actor))}" aria-hidden="true">${navIcon(g.icon)}</span>
           <span class="activity-ft ft">
             <span class="activity-verb">${esc(verb)}</span>${body ? ` <span class="activity-detail">${esc(body)}</span>` : ''}${e.eventCount > 1 ? ` <span class="activity-evcount">${e.eventCount} events</span>` : ''}
           </span>

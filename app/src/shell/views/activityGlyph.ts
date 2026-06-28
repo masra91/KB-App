@@ -29,8 +29,9 @@ export type ActivityKind =
 
 interface GlyphDescriptor {
   kind: ActivityKind;
-  /** Restrained placeholder glyph (DL-2's table swaps in here). */
-  glyph: string;
+  /** The shared `icons.ts` line-icon KEY for this kind — rendered via `navIcon(icon)` into the tile
+   *  (currentColor, so it takes the tile hue). DL-1's #466 set per DL-2's table. */
+  icon: string;
   /** CSS modifier class (`.gl--<kind>`) carrying the hue token in index.css. */
   cls: string;
 }
@@ -56,21 +57,25 @@ const ACTOR_KIND: Record<string, ActivityKind> = {
   replay: 'replay',
 };
 
-const GLYPH: Record<ActivityKind, string> = {
-  capture: '⤓',
-  decompose: '⑂',
-  connect: '◇',
-  claim: '·',
-  enrich: '✦',
-  compose: '¶',
-  promote: '↑',
-  research: '⌕',
-  reflect: '↻',
-  recall: '?',
-  config: '≡',
-  replay: '↺',
-  failed: '!',
-  event: '•',
+// kind → shared `icons.ts` line-icon key (DL-1's #466 set, DL-2's table). The 9 specified kinds map to
+// their authored glyphs; the neutral kinds reuse the closest existing nav icon (recall→ask speech-bubble,
+// config→settings gear, reflect/replay/event→activity heartbeat). `navIcon` returns '' for an unknown
+// key, so any miss degrades to a bare (still hue-bordered) tile rather than breaking.
+const ICON: Record<ActivityKind, string> = {
+  capture: 'capture',
+  decompose: 'split',
+  connect: 'link',
+  claim: 'quote',
+  enrich: 'sparkles',
+  compose: 'book',
+  promote: 'arrow-up-circle',
+  research: 'search',
+  failed: 'alert-triangle',
+  reflect: 'activity',
+  recall: 'ask',
+  config: 'settings',
+  replay: 'activity',
+  event: 'activity',
 };
 
 /** Does this event-type read as a FAILURE? (→ oxide tile, overriding the kind hue.) */
@@ -85,7 +90,7 @@ export function isFailedEvent(eventType: string | undefined): boolean {
  * missing/unknown actor degrades to the neutral `event` tile rather than throwing.
  */
 export function glyphFor(actor: string | undefined, eventType?: string): GlyphDescriptor {
-  if (isFailedEvent(eventType)) return { kind: 'failed', glyph: GLYPH.failed, cls: 'gl--failed' };
+  if (isFailedEvent(eventType)) return { kind: 'failed', icon: ICON.failed, cls: 'gl--failed' };
   const kind = (actor && ACTOR_KIND[actor]) || 'event';
-  return { kind, glyph: GLYPH[kind], cls: `gl--${kind}` };
+  return { kind, icon: ICON[kind], cls: `gl--${kind}` };
 }
