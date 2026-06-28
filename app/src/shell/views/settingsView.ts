@@ -11,6 +11,7 @@
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import { mountAboutPanel } from '../aboutPanel';
+import { readStoredTheme, setTheme, type Theme } from '../theme';
 import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
 // SPEC-0048 SCALE Settings (Scale card). Imported from the PURE `scaleConstants` (no node import) so
 // the renderer bundle never pulls the node-only `instanceConfig` (the renderer→node-builtin boundary).
@@ -126,6 +127,9 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     const recallDepthMode = recallDepthOverride === undefined ? 'auto' : 'manual';
     const recallDepthValue = recallDepthOverride ?? RECALL_DEPTH_MANUAL_SEED;
 
+    // SPEC-0058 theme-toggle (Appearance card): the persisted Light/Dark choice (default light).
+    const currentTheme = readStoredTheme();
+
     container.innerHTML = `
       <div class="settings-v2 viz-surface">
       <div class="card">
@@ -139,6 +143,14 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <ul class="checks">
           ${copilotLine}
         </ul>
+      </div>
+      <div class="card">
+        <h2>Appearance</h2>
+        <p class="settings-note">Choose how Vellum looks. <strong>Light</strong> is the default cream study; <strong>Dark</strong> is the night-study variant. Your choice is remembered across launches.</p>
+        <div class="settings-control">
+          <span class="viz-field__label" id="theme-label">Theme</span>
+          <span class="viz-seg" role="radiogroup" aria-labelledby="theme-label" id="theme-select">${segOpt('light', 'Light', currentTheme)}${segOpt('dark', 'Dark', currentTheme)}</span>
+        </div>
       </div>
       <div class="card">
         <h2>Autonomy</h2>
@@ -220,6 +232,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>`;
 
     container.querySelector<HTMLButtonElement>('#about-link')?.addEventListener('click', () => mountAboutPanel());
+    wireTheme(container);
     wireAutonomy(container, settings);
     wireVerbosity(container, settings);
     wireScale(container, settings);
@@ -229,7 +242,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     void wireQuiesce(container);
   } catch {
     // #145: failed/timed-out load → a retryable error, never an infinite spinner.
-    renderLoadError(container, '<h1>⚙️ Settings</h1>', () => void mountSettings(container));
+    renderLoadError(container, '<h1 class="settings-title viz-voice">Settings</h1>', () => void mountSettings(container));
   }
 }
 
@@ -329,6 +342,19 @@ function wireAutonomy(container: HTMLElement, settings: InstanceSettings): void 
   go.addEventListener('click', () => {
     confirm.hidden = true;
     void apply('autonomous');
+  });
+}
+
+/** Wire the Appearance Light/Dark toggle (SPEC-0058 theme-toggle). Benign + INSTANT (no confirm, no IPC):
+ *  it flips the document `data-theme` and persists to localStorage on the spot — the user sees the theme
+ *  change immediately as they pick. v1 is Light/Dark; System/`auto` is DL-1's separate foundation layer. */
+function wireTheme(container: HTMLElement): void {
+  const group = container.querySelector<HTMLElement>('#theme-select');
+  if (!group) return;
+  wireSegmentedRadio(group, (value) => {
+    const theme: Theme = value === 'dark' ? 'dark' : 'light';
+    setTheme(theme); // apply to <html data-theme> + persist — instant, no reload
+    setSegChecked(group, theme); // reflect the new selection (aria-checked + roving tab stop)
   });
 }
 

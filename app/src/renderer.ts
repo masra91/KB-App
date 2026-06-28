@@ -29,6 +29,12 @@ import { mountShowcase } from './shell/views/showcaseView';
 import { mountQuickCaptureSheet } from './qcap/qcapSheet';
 import { mountPermissionGate, icloudNoteHtml } from './shell/permissionGate';
 import { isLocalTccProtected, isICloudVault } from './kb/permissions';
+import { initTheme } from './shell/theme';
+
+// SPEC-0058 theme-toggle: apply the persisted (or default-light) theme BEFORE any UI paints, so a
+// dark-mode user never sees a light→dark flash on launch. Setup, the permission gate, and the shell all
+// inherit it. Pure attribute set — honors the themeCohesion invariant (no prefers-color-scheme touch).
+initTheme();
 
 const root = document.getElementById('app')!;
 

@@ -62,6 +62,31 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
     expect(/[\u{1F300}-\u{1FAFF}]|⚙️|✅|⚠️/u.test(root.textContent ?? '')).toBe(false);
   });
 
+  it('SPEC-0058 theme-toggle: an Appearance Light/Dark control flips data-theme + persists, instantly', async () => {
+    const store = new Map<string, string>(); // happy-dom localStorage is partial across versions
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k), clear: () => store.clear() },
+    });
+    document.documentElement.removeAttribute('data-theme');
+    setApi('guarded');
+    await mountSettings(root);
+    await tick();
+    // The Appearance segmented control renders with Light selected by default.
+    const group = root.querySelector('#theme-select')!;
+    expect(group).toBeTruthy();
+    expect(group.querySelector('[role="radio"][data-value="light"]')?.getAttribute('aria-checked')).toBe('true');
+    // Picking Dark flips the root data-theme + persists — no IPC, no confirm, instant.
+    (group.querySelector('[role="radio"][data-value="dark"]') as HTMLButtonElement).click();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(window.localStorage.getItem('vellum.theme')).toBe('dark');
+    expect(group.querySelector('[role="radio"][data-value="dark"]')?.getAttribute('aria-checked')).toBe('true');
+    // Back to Light.
+    (group.querySelector('[role="radio"][data-value="light"]') as HTMLButtonElement).click();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+    document.documentElement.removeAttribute('data-theme'); // clean up the shared root for sibling tests
+  });
+
   it('→ Autonomous confirms before persisting (PANEL-7)', async () => {
     const { set } = setApi('guarded');
     await mountSettings(root);
