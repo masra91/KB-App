@@ -51,6 +51,17 @@ describe('Settings · Autonomy default (SPEC-0027 PANEL-5/7)', () => {
     expect(checked(root, 'autonomy-default')).toBe('guarded');
   });
 
+  it('UX v2 (SPEC-0058): scoped v2 material surface, Spectral head, no ⚙️ emoji', async () => {
+    setApi('guarded');
+    await mountSettings(root);
+    await tick();
+    expect(root.querySelector('.settings-v2.viz-surface')).toBeTruthy(); // scoped material marker
+    expect(root.querySelector('.settings-title.viz-voice')?.textContent).toBe('Settings'); // Spectral head, de-emoji'd
+    expect(root.querySelector('.card')).toBeTruthy(); // sections still cards (now v2 material via scope)
+    // no raw emoji in the rendered Settings (⚙️ head + ✅/⚠️ Copilot mark tokenized to a hue dot, #184)
+    expect(/[\u{1F300}-\u{1FAFF}]|⚙️|✅|⚠️/u.test(root.textContent ?? '')).toBe(false);
+  });
+
   it('→ Autonomous confirms before persisting (PANEL-7)', async () => {
     const { set } = setApi('guarded');
     await mountSettings(root);

@@ -67,7 +67,7 @@ const STAGE_LABELS: Record<ScaleStage, string> = {
 };
 
 export async function mountSettings(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card"><h1>⚙️ Settings</h1><p class="settings-note">Loading…</p></div>`;
+  container.innerHTML = `<div class="settings-v2 viz-surface"><div class="card"><h1 class="settings-title viz-voice">Settings</h1><p class="settings-note">Loading…</p></div></div>`;
 
   // Settings must never error the shell. Any IPC failure (incl. a #145 hang — withTimeout bounds
   // every await below) degrades to a friendly, retryable message.
@@ -81,8 +81,10 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     if (vaultPath) {
       try {
         const ins = await withTimeout(window.kbApi.inspect(vaultPath));
-        const mark = ins.copilot.available ? '✅' : '⚠️';
-        copilotLine = `<li>${mark} Copilot — <span class="settings-note">${esc(ins.copilot.detail)}</span></li>`;
+        // UX v2 (#184): a tokenized hue-dot, not an emoji — sprout when ready, brass (caution) when not.
+        // The hue rides the aria-hidden dot; the label stays ink (state also reads via the detail text).
+        const dot = `<span class="settings-status-dot ${ins.copilot.available ? 'settings-status-dot--ok' : 'settings-status-dot--warn'}" aria-hidden="true">●</span>`;
+        copilotLine = `<li class="settings-copilot">${dot} Copilot — <span class="settings-note">${esc(ins.copilot.detail)}</span></li>`;
       } catch {
         // Leave the fallback line.
       }
@@ -125,8 +127,9 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     const recallDepthValue = recallDepthOverride ?? RECALL_DEPTH_MANUAL_SEED;
 
     container.innerHTML = `
+      <div class="settings-v2 viz-surface">
       <div class="card">
-        <h1>⚙️ Settings</h1>
+        <h1 class="settings-title viz-voice">Settings</h1>
         <dl class="settings">
           <dt>Knowledge Base</dt>
           <dd>${esc(name)}</dd>
@@ -213,7 +216,8 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <button id="resume-btn" type="button" class="viz-btn viz-focusable" hidden>Resume</button>
         <p id="quiesce-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>
-      <p class="settings-footer"><button type="button" id="about-link" class="viz-btn viz-btn--ghost viz-focusable">About Vellum</button></p>`;
+      <p class="settings-footer"><button type="button" id="about-link" class="viz-btn viz-btn--ghost viz-focusable">About Vellum</button></p>
+      </div>`;
 
     container.querySelector<HTMLButtonElement>('#about-link')?.addEventListener('click', () => mountAboutPanel());
     wireAutonomy(container, settings);
