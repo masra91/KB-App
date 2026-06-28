@@ -58,6 +58,28 @@
   --viz-dur-state: 240ms;     /* state-change crossfades */
   --viz-ease-index: cubic-bezier(0.2, 0.8, 0.2, 1); /* ease-out w/ a hint of stepper-seat overshoot */
   --viz-ease-state: ease-in-out;
+
+  /* 4. UX v2 material & depth (vellum-ux-v2-language §1 "Depth & material") — the move that kills the
+     flat dev-tool read: a systematic 3-level elevation = a warm inner TOP-light (rgba white inset) + a
+     long, COOL blue-tinted shadow (rgba 20,40,55). Depth, not borders, gives the crafted feel.
+     Applied to CONTAINERS via .viz-card / .viz-raise (the flat ruled instruments + .viz-no-chrome stay). */
+  --viz-shadow-card: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 1px 2px rgba(30, 53, 71, 0.05), 0 10px 24px -16px rgba(20, 40, 55, 0.3);
+  --viz-shadow-raise: 0 1px 0 rgba(255, 255, 255, 0.85) inset, 0 2px 6px rgba(30, 53, 71, 0.07), 0 22px 44px -22px rgba(20, 40, 55, 0.42);
+  --viz-shadow-win: 0 2px 0 rgba(255, 255, 255, 0.6) inset, 0 40px 90px -30px rgba(16, 34, 48, 0.55);
+  --viz-ring: 0 0 0 3px rgba(47, 107, 91, 0.16); /* focus halo — viridian, soft */
+  --viz-sheen: radial-gradient(circle, rgba(201, 163, 90, 0.1), transparent 70%); /* rationed gold hover bloom */
+
+  /* geometry — rounded, crafted (the ship's flat 0-radius instruments read as a terminal) */
+  --viz-r-win: 16px; --viz-r-card: 13px; --viz-r-chip: 9px; --viz-r-pill: 22px;
+
+  /* v2 motion — a calm ease-out + a gentle spring (node-grow, stepper seat); --viz-dur-quick = the hover tick */
+  --viz-ease-out: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --viz-ease-spring: cubic-bezier(0.34, 1.56, 0.46, 1);
+  --viz-dur-quick: 0.18s;
+  --viz-dur-field: 48s; /* v2 ambient field drift — slower, calmer than the 24s thread */
+
+  /* paper-grain — a faint fractal-noise multiply layer for the vellum tooth (applied via .viz-grain::after) */
+  --viz-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
 }
 /* Light is the DEFAULT identity (brand §3 — "the cream study is the product"); there is no
    prefers-color-scheme auto-switch on :root. Dark is an OPT-IN "night-study" variant, activated only
@@ -85,6 +107,13 @@
   --viz-deep: #1c3441;    /* depth anchor / graph vignette center */
   --viz-mist: #5e93b4;    /* gradient light end — mid-blue on dark */
   --viz-field-gradient: linear-gradient(135deg, #15252f 0%, #1c3441 45%, #1e4a39 100%); /* in-world, darker than light's */
+  /* depth on the night ground: the warm inner top-light softens (a thin parchment edge, not white), the
+     cool drop-shadow deepens. Same 3-level scale, re-pointed so cards read as raised on dark too. */
+  --viz-shadow-card: 0 1px 0 rgba(236, 228, 210, 0.06) inset, 0 1px 2px rgba(0, 0, 0, 0.25), 0 10px 24px -16px rgba(0, 0, 0, 0.55);
+  --viz-shadow-raise: 0 1px 0 rgba(236, 228, 210, 0.09) inset, 0 2px 6px rgba(0, 0, 0, 0.3), 0 22px 44px -22px rgba(0, 0, 0, 0.66);
+  --viz-shadow-win: 0 1px 0 rgba(236, 228, 210, 0.05) inset, 0 40px 90px -30px rgba(0, 0, 0, 0.7);
+  --viz-ring: 0 0 0 3px rgba(94, 147, 180, 0.28); /* focus halo — lifted slate on dark */
+  --viz-sheen: radial-gradient(circle, rgba(201, 163, 90, 0.16), transparent 70%); /* gold bloom glows harder on dark */
 }
 
 /* Type-role utilities (apply the §4 roles without re-stating the stack). */
@@ -98,6 +127,31 @@
 .viz-ruled { border: 0; border-top: 1px solid var(--viz-rule); }   /* a structural rule, not a card edge */
 .viz-spine { border-left: 2px solid var(--viz-rule); }             /* the spine stations/strips hang off */
 .viz-no-chrome { border-radius: 0; box-shadow: none; background: transparent; } /* kill UI-kit card tells */
+
+/* UX v2 MATERIAL primitives (vellum-ux-v2-language §1/§3) — the crafted-depth layer the MVP lacked.
+   These COEXIST with the flat instruments above: use .viz-card for a real raised CONTAINER (a panel,
+   a stat, a feed), keep .viz-no-chrome / .viz-ruled where the structure should read as a ruled line.
+   Depth = the cool 3-level shadow scale + warm inner top-light; never a heavy 1px box border. */
+.viz-card {
+  background: var(--viz-panel);
+  border: 0.5px solid var(--viz-rule);
+  border-radius: var(--viz-r-card);
+  box-shadow: var(--viz-shadow-card);
+}
+/* Hover-life (§3): a card that reacts — lifts, blooms a long shadow + a rationed gold radial sheen.
+   Opt-in via .viz-card--lift so static cards don't all wiggle. Transform/shadow only (VIZ-9 safe). */
+.viz-card--lift { transition: transform var(--viz-dur-quick) var(--viz-ease-out), box-shadow var(--viz-dur-quick) var(--viz-ease-out), border-color var(--viz-dur-quick) var(--viz-ease-out); position: relative; }
+.viz-card--lift:hover { transform: translateY(-3px); box-shadow: var(--viz-shadow-raise); border-color: #d6cbad; }
+.viz-card--lift::before { content: ""; position: absolute; right: -14px; top: -14px; width: 54px; height: 54px; border-radius: 50%; background: var(--viz-sheen); opacity: 0; transition: opacity 0.3s var(--viz-ease-out); pointer-events: none; }
+.viz-card--lift:hover::before { opacity: 1; }
+/* Floating control (chips/legend/zoom over a graph) — translucent linen + blur + card depth. */
+.viz-float { background: rgba(251, 247, 236, 0.92); border: 0.5px solid var(--viz-rule); border-radius: var(--viz-r-chip); box-shadow: var(--viz-shadow-card); backdrop-filter: blur(4px); }
+:root[data-theme='dark'] .viz-float { background: rgba(30, 51, 64, 0.92); }
+/* Paper-grain tooth — a faint fractal-noise multiply layer. Apply to a positioned container; it lays a
+   non-interactive ::after over the element. Calm, static (no motion). */
+.viz-grain { position: relative; }
+.viz-grain::after { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; mix-blend-mode: multiply; background-image: var(--viz-grain); }
+:root[data-theme='dark'] .viz-grain::after { opacity: 0.35; mix-blend-mode: soft-light; } /* grain reads lighter on the night ground */
 /* `.is-hover` / `.is-focus` are STATIC force-hooks (DESIGN-SHOWCASE §3): they share each interaction
    pseudo's exact rule so the showcase gallery can pin :hover/:focus-visible in a snapshot without real
    interaction. No new styling — they alias the pseudo. (Harmless on feature surfaces; only the gallery sets them.) */
