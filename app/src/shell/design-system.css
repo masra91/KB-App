@@ -26,6 +26,7 @@
   --viz-idle: #6a6456;      /* Stone — at-rest / neutral */
   --viz-ember: #c8743c;     /* Ember — RESERVED "needs your decision" cue (brand §3); the one attention hue */
   --viz-sprout: #3e9e82;    /* Sprout — active / in-progress / motion ONLY (brand: idle/pending stay neutral) */
+  --viz-accent: #3a6e88;   /* Slate Blue — INTERACTIVE accent: focus ring / hover / selected / primary emphasis (brand supporting; in the signature gradient). Distinct from --viz-patina settled-green so 'interactive' never reads as 'state'. */
   --viz-patina: #2f6b5b;    /* Viridian — settled / promoted / primary brand green */
   --viz-brass: #c9a35a;     /* Gilded Gold — rationed accent: lines, nodes, one highlight (brand §3) */
   --viz-oxide: #a8432a;     /* deep brick — error / set-aside. Derived: brand reserves Ember for decisions
@@ -73,7 +74,7 @@
 /* `.is-hover` / `.is-focus` are STATIC force-hooks (DESIGN-SHOWCASE §3): they share each interaction
    pseudo's exact rule so the showcase gallery can pin :hover/:focus-visible in a snapshot without real
    interaction. No new styling — they alias the pseudo. (Harmless on feature surfaces; only the gallery sets them.) */
-.viz-focusable:focus-visible, .viz-focusable.is-focus { outline: 2px solid var(--viz-ember); outline-offset: 1px; } /* never the framework indigo */
+.viz-focusable:focus-visible, .viz-focusable.is-focus { outline: 2px solid var(--viz-accent); outline-offset: 1px; } /* never the framework indigo */
 
 /* Select primitive (SPEC-0048) — a native <select> in the viz idiom for a DYNAMIC many-option list
    (the model catalog); .viz-seg stays for small bounded enums. Flat, ruled, mono, custom caret, ember
@@ -89,19 +90,19 @@
   background-position: right 0.5rem center, right 0.3rem center;
   background-size: 0.32rem 0.32rem; background-repeat: no-repeat;
 }
-.viz-select:hover { border-color: var(--viz-ember); }
-.viz-select:focus-visible { outline: 2px solid var(--viz-ember); outline-offset: 1px; }
+.viz-select:hover { border-color: var(--viz-accent); }
+.viz-select:focus-visible { outline: 2px solid var(--viz-accent); outline-offset: 1px; }
 
 /* Badge / chip base — uppercase signage, ruled, muted; state carried by glyph + hue + fill, never color alone (§3 DESIGN-4). */
 .viz-chip { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.7rem; border: 1px solid var(--viz-rule); padding: 0.05rem 0.4rem; color: var(--viz-ink-muted); }
 /* Button base — the only rounding allowed off-structure is a ≤4px button radius; hover/active tint with state hues, not blue. */
 .viz-btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.06em; background: transparent; color: var(--viz-ink); border: 1px solid var(--viz-rule); border-radius: 3px; padding: 0.25rem 0.7rem; cursor: pointer; }
-.viz-btn:hover, .viz-btn.is-hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-btn:hover, .viz-btn.is-hover { border-color: var(--viz-accent); color: var(--viz-accent); }
 .viz-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* State-semantics utilities (§3) — the canonical hue per state; pair with a glyph + fill at the call site. */
 .viz-state-idle { color: var(--viz-idle); }
-.viz-state-running { color: var(--viz-ember); }
+.viz-state-running { color: var(--viz-sprout); }
 .viz-state-blocked { color: var(--viz-brass); }
 .viz-state-settled { color: var(--viz-patina); }
 .viz-state-error { color: var(--viz-oxide); }
@@ -116,16 +117,16 @@
 /* --- Button variants (§3) — intent modifiers on the .viz-btn base above. ---------------------- */
 .viz-btn--sm { font-size: 0.62rem; padding: 0.12rem 0.5rem; } /* dense instrument rows */
 .viz-btn--primary { border-color: var(--viz-ink-muted); }     /* the one emphasized action in a group */
-.viz-btn--primary:hover, .viz-btn--primary.is-hover { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-btn--primary:hover, .viz-btn--primary.is-hover { border-color: var(--viz-accent); color: var(--viz-accent); }
 /* danger — destructive: oxide BORDER, label stays --viz-ink (contract §2: oxide never colors normal text). */
 .viz-btn--danger { border-color: var(--viz-oxide); }
 .viz-btn--danger:hover, .viz-btn--danger.is-hover { color: var(--viz-oxide); border-color: var(--viz-oxide); }
 /* ghost — low-emphasis / inline (was button.link): muted label, no border, ember on hover. */
 .viz-btn--ghost { border-color: transparent; padding-left: 0; padding-right: 0; color: var(--viz-ink-muted); }
-.viz-btn--ghost:hover, .viz-btn--ghost.is-hover { color: var(--viz-ember); }
+.viz-btn--ghost:hover, .viz-btn--ghost.is-hover { color: var(--viz-accent); }
 /* busy / dispatching — opacity-only ember breathe (§3 states; VIZ-9). Reduced-motion zeroes it (below),
    and busy still reads via the ember hue + a static label, so nothing is lost. */
-.viz-btn--busy { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-ember); border-color: var(--viz-ember); }
+.viz-btn--busy { animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; color: var(--viz-sprout); border-color: var(--viz-sprout); }
 
 /* --- SegmentedControl (§4) — a spatial exposure/choice scale; a role=radiogroup of ghosted segments,
    ZERO radius (a ruled register, not a pill toggle). Replaces native <select> for small bounded enums.
@@ -139,7 +140,7 @@
    position + label so it reads without color (§4 a11y). Higher specificity overrides the neutral fill. */
 .viz-seg-opt--clearance[aria-checked='true'][data-temp='local-only'] { background: var(--viz-patina); border-color: var(--viz-patina); color: var(--viz-field); }
 .viz-seg-opt--clearance[aria-checked='true'][data-temp='internal-tenant'] { background: var(--viz-brass); border-color: var(--viz-brass); color: var(--viz-field); }
-.viz-seg-opt--clearance[aria-checked='true'][data-temp='public-web'] { background: var(--viz-ember); border-color: var(--viz-ember); color: var(--viz-field); }
+.viz-seg-opt--clearance[aria-checked='true'][data-temp='public-web'] { background: var(--viz-ember); border-color: var(--viz-ember); color: var(--viz-field); } /* KEEP-ember: clearance "exposure" temp = conscious-egress cue; revisit in researchers retheme */
 /* disabled — the group dims to 0.5 (§4). Disable each segment (`<button disabled>`); mirrors .viz-btn:disabled. */
 .viz-seg-opt:disabled { opacity: 0.5; cursor: default; }
 
@@ -151,7 +152,7 @@
 .viz-stepper { display: inline-flex; align-items: stretch; gap: 2px; }
 .viz-stepper__btn { appearance: none; font: inherit; font-family: var(--viz-font-signage); background: transparent; border: 1px solid var(--viz-rule); border-radius: 0; color: var(--viz-ink); width: 1.5rem; line-height: 1.2; padding: 0.05rem 0; cursor: pointer; text-align: center; }
 /* hover tints EMBER (§6, matches .viz-btn) — no grey fill (KB-Design-Lead visual gate). */
-.viz-stepper__btn:hover:not(:disabled) { border-color: var(--viz-ember); color: var(--viz-ember); }
+.viz-stepper__btn:hover:not(:disabled) { border-color: var(--viz-accent); color: var(--viz-accent); }
 .viz-stepper__btn:disabled { opacity: 0.4; cursor: default; }
 /* the value is a NUMBER → mono numeric face (§4: all counts → IBM Plex Mono), not signage. */
 /* Fixed-width value so − and + never jitter as the digit-count changes (3→10→32) — Design-Lead. */
@@ -174,11 +175,11 @@
 .viz-field { display: inline-flex; flex-direction: column; gap: 0.15rem; }
 .viz-field__label { font-family: var(--viz-font-signage); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.62rem; color: var(--viz-ink-muted); }
 .viz-field__input { background: var(--viz-field); color: var(--viz-ink); border: 0; border-bottom: 1px solid var(--viz-rule); border-radius: 0; padding: 0.2rem 0.1rem; font: inherit; }
-.viz-field__input:focus-visible, .viz-field__input.is-focus { border-bottom-color: var(--viz-ember); }
+.viz-field__input:focus-visible, .viz-field__input.is-focus { border-bottom-color: var(--viz-accent); }
 .viz-field__input--numeric { font-family: var(--viz-font-numeric); font-variant-numeric: tabular-nums; } /* tabular figures (EFFORT, #208) */
 /* multiline (the standing-orders box) — full ruled border + vertical resize, ember border on focus. */
 .viz-field__input--multiline { display: block; width: 100%; border: 1px solid var(--viz-rule); padding: 0.5rem 0.6rem; resize: vertical; }
-.viz-field__input--multiline:focus-visible, .viz-field__input--multiline.is-focus { border-color: var(--viz-ember); }
+.viz-field__input--multiline:focus-visible, .viz-field__input--multiline.is-focus { border-color: var(--viz-accent); }
 /* invalid — oxide BOTTOM-RULE/border (≥3:1 graphic); the message + value text stay --viz-ink (§2). */
 .viz-field__input--invalid, .viz-field__input--invalid.viz-field__input--multiline { border-bottom-color: var(--viz-oxide); border-color: var(--viz-oxide); }
 /* disabled — dims to 0.5 (§6); mirrors .viz-btn:disabled. */
