@@ -19,7 +19,9 @@ import type { JobView, JobConfigPatch } from '../../kb/types';
 const POSTURE_OPTIONS = ['guarded', 'autonomous'] as const;
 const POSTURE_LABEL: Record<string, string> = { guarded: 'Guarded', autonomous: 'Autonomous' };
 
-const HEADER = `<h1 class="job-title viz-signage">Jobs</h1><p class="job-sub viz-body">Recurring background tasks that keep your KB healthy. Changes apply without a restart.</p>`;
+// Mounted as the **Schedules** section (nested under Librarians) of the Agents hub (SPEC-0053 WS-E):
+// the hub owns the "Schedules" group header/naming, so this section drops its own page-title h1.
+const HEADER = `<p class="job-sub viz-body">Recurring background tasks that keep your KB healthy. Changes apply without a restart.</p>`;
 
 export async function mountJobs(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="jobs-view viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;

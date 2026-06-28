@@ -14,6 +14,9 @@ export const VIEW_ASK = 'ask';
 export const VIEW_EXPLORE = 'explore'; // SPEC-0039 — read-only entity-neighborhood graph view
 export const VIEW_HEALTH = 'health'; // SPEC-0035 — read-only structural-health lint readout
 // Control Panel — the "Manage" section of sibling views (SPEC-0027 PANEL-1).
+// SPEC-0053 WS-E: the former Jobs + Agents + Researchers rail items are consolidated into one **Agents
+// hub** (`VIEW_AGENTS`) framed by direction (Librarians inward + their Schedules; Researchers outward).
+// `VIEW_JOBS`/`VIEW_RESEARCHERS` ids are retained (deep-link/back-compat) but no longer rail entries.
 export const VIEW_JOBS = 'jobs';
 export const VIEW_AGENTS = 'agents';
 export const VIEW_RESEARCHERS = 'researchers';
@@ -44,9 +47,7 @@ export const NAV_VIEWS: NavView[] = [
   { id: VIEW_ASK, label: 'Ask', icon: '💬' },
   { id: VIEW_EXPLORE, label: 'Explore', icon: '🗺️' },
   { id: VIEW_HEALTH, label: 'Health', icon: '🩺' },
-  { id: VIEW_JOBS, label: 'Jobs', icon: '🛠️', group: GROUP_MANAGE },
   { id: VIEW_AGENTS, label: 'Agents', icon: '🤖', group: GROUP_MANAGE },
-  { id: VIEW_RESEARCHERS, label: 'Researchers', icon: '🔬', group: GROUP_MANAGE },
   { id: VIEW_SOURCES, label: 'Sources', icon: '🔌', group: GROUP_MANAGE },
   { id: VIEW_SETTINGS, label: 'Settings', icon: '⚙️', group: GROUP_MANAGE },
 ];

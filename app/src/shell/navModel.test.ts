@@ -13,9 +13,7 @@ import {
   VIEW_ASK,
   VIEW_EXPLORE,
   VIEW_HEALTH,
-  VIEW_JOBS,
   VIEW_AGENTS,
-  VIEW_RESEARCHERS,
   VIEW_SOURCES,
   VIEW_SETTINGS,
 } from './views';
@@ -36,9 +34,7 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
       VIEW_ASK,
       VIEW_EXPLORE,
       VIEW_HEALTH,
-      VIEW_JOBS,
       VIEW_AGENTS,
-      VIEW_RESEARCHERS,
       VIEW_SOURCES,
       VIEW_SETTINGS,
     ]);
@@ -54,7 +50,7 @@ describe('NAV_VIEWS registry (SHELL-3)', () => {
 
   it('the Control Panel views form a contiguous "Manage" group; Settings sits under it (PANEL-1)', () => {
     const manage = NAV_VIEWS.filter((v) => v.group === GROUP_MANAGE).map((v) => v.id);
-    expect(manage).toEqual([VIEW_JOBS, VIEW_AGENTS, VIEW_RESEARCHERS, VIEW_SOURCES, VIEW_SETTINGS]);
+    expect(manage).toEqual([VIEW_AGENTS, VIEW_SOURCES, VIEW_SETTINGS]); // SPEC-0053 WS-E: Jobs+Researchers folded into the Agents hub
     // Top-level views (Capture/Reviews/Activity/Ask) carry no group.
     expect(NAV_VIEWS.find((v) => v.id === VIEW_CAPTURE)?.group).toBeUndefined();
     expect(NAV_VIEWS.find((v) => v.id === VIEW_ACTIVITY)?.group).toBeUndefined();

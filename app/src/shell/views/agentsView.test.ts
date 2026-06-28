@@ -37,7 +37,7 @@ describe('Agents view (SPEC-0027 PANEL-3)', () => {
     setApi(vi.fn(async () => AGENTS));
     await mountAgents(root);
     await tick();
-    expect(root.querySelector('h1')?.textContent).toContain('Agents');
+    expect(root.querySelector('.agent-note')?.textContent).toContain('librarian'); // section sub-note (hub owns the title — WS-E)
     expect(root.querySelectorAll('.agent')).toHaveLength(2);
     const decompose = root.querySelector('.agent[data-key="decompose"]')!;
     expect(decompose.querySelector('.agent-status')?.textContent).toBe('running');

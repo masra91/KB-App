@@ -53,9 +53,22 @@ An LLM agent working in or with the KB. Agents may have specialized roles (defin
 later). *(The KB-Architect is one such agent.)*
 
 ### Librarian
-A class of agent responsible for **storing and curating** information, **enriching
-or researching** topics, and **answering questions**. Librarians may be further
-specialized. *(A specialization of Agent.)*
+A class of agent that works **inside** your KB — the pipeline workers that **store and
+curate** information, **enrich** topics, and **answer questions** (archivist, decompose,
+connect, claims, reflect, ask). Built in → **disable-only** (not removable). *(A
+specialization of Agent. In the UI, "Agents → Librarians" — SPEC-0053.)*
+
+### Researcher
+A class of agent that reaches **outside** your KB — outward, **egress-gated** agents
+(Web / Code / M365·WorkIQ) that fetch external corroboration and bring back cited
+sources. User-added → **removable** (with a destructive-action confirm). *(A
+specialization of Agent, distinct from Librarian by direction — outward vs inward.
+SPEC-0053 / SPEC-0028.)*
+
+### Schedules
+**When** recurring librarian work runs (e.g. Reflect rumination) — a cadence + autonomy
+posture on an autonomous task. Formerly surfaced as **"Jobs"**; renamed **Schedules** and
+nested under Librarians in the Agents hub. *(SPEC-0053; the engine is SPEC-0023.)*
 
 ### Entity
 An entry in the KB — e.g. a concept, an event, … *(definition trails off in source;
@@ -162,11 +175,16 @@ Whether a piece of derived knowledge is a `fact`, an `interpretation`, or a
       *derive from* sources. Never collapsed.
 - [x] **Derived artifacts** — resolved: added as a glossary term (per SPEC-0005),
       distinct from Entity and Source.
-- [ ] **Researcher** is used informally under "secondary source" — is it a distinct
-      role/agent specialization, or just a Librarian doing research?
+- [x] **Researcher** — resolved (SPEC-0053): a **distinct** agent specialization, separated
+      from Librarian by **direction** (outward/egress-gated vs inward pipeline work). Added as a
+      glossary term.
 - [ ] Is there a term for the **vault / store** (the durable file substrate) vs.
       the KB-as-whole-system?
 
 ## 6. Changelog
 
+- 2026-06-27 — **SPEC-0053 WS-E naming** (AGENTSIA-6): framed **Librarian** as inward
+  (built-in, disable-only); added **Researcher** (outward, egress-gated, removable) and
+  **Schedules** (formerly "Jobs", nested under Librarians) as terms; resolved the open
+  "is Researcher distinct?" question (yes — by direction). Mirrors the Agents-hub IA.
 - 2026-05-30 — created (draft). Captured initial terminology from the Principal.

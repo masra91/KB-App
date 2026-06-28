@@ -7,8 +7,10 @@ import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import type { AgentView, ModelCatalogView } from '../../kb/types';
 
+// Mounted as the **Librarians** section of the Agents hub (SPEC-0053 WS-E) — the hub owns the group
+// header/naming, so this section drops its own page-title h1 and renders the librarian list directly.
 export async function mountAgents(container: HTMLElement): Promise<void> {
-  container.innerHTML = `<div class="card"><h1>🤖 Agents</h1><p class="agent-note">Loading…</p></div>`;
+  container.innerHTML = `<div class="card"><p class="agent-note">Loading…</p></div>`;
   await render(container);
   const timer = setInterval(() => {
     if (!document.contains(container)) {
@@ -29,7 +31,7 @@ async function render(container: HTMLElement): Promise<void> {
     // #145: bound the wait so a hung `listAgents` shows a retryable error, never an infinite spinner.
     agents = await withTimeout(window.kbApi.listAgents());
   } catch {
-    renderLoadError(container, '<h1>🤖 Agents</h1>', () => void render(container));
+    renderLoadError(container, '', () => void render(container));
     return;
   }
   // SPEC-0048: the model picker's data — best-effort, isolated so a probe miss (or an older client
@@ -40,7 +42,7 @@ async function render(container: HTMLElement): Promise<void> {
   } catch {
     catalog = null;
   }
-  const header = `<h1>🤖 Agents</h1><p class="agent-note">The librarian agents that run your pipeline.</p>`;
+  const header = `<p class="agent-note">The librarian agents that run your pipeline.</p>`;
   if (agents.length === 0) {
     container.innerHTML = `<div class="card">${header}<p class="agent-note">No agents to show — open a Knowledge Base.</p></div>`;
     return;

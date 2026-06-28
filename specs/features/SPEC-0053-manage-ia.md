@@ -58,19 +58,29 @@ WS3 legacy-view cleanup): no native `<select>`, no hard-coded hex (Agents' runni
 ## 4. Requirements (must unless noted) — `Verify: none-yet → test:`
 - **AGENTSIA-1** The Manage section communicates the **three distinct kinds** (system pipeline
   workers vs outward researchers vs schedules) via labels + a one-line descriptor per section, so a
-  first-time user can tell them apart without opening each. `Verify: none-yet → test:`
+  first-time user can tell them apart without opening each. `Verify: agentsHubView.test (group heads + inward/outward descriptors + Schedules-under-Librarians)`
 - **AGENTSIA-2** Naming is resolved per the chosen fork (default C: Agents→Librarians,
   Jobs→Schedules, Researchers unchanged) and applied consistently in nav, headers, and copy.
-  `Verify: none-yet → test:`
-- **AGENTSIA-3** The IA structure matches the chosen fork (default C: separate sibling views;
-  B: one hub + sub-tabs). `Verify: none-yet → test:`
+  `Verify: agentsHubView.test (Librarians/Researchers/Schedules headers) + glossary (SPEC-0001)`
+- **AGENTSIA-3** The IA structure matches the chosen fork (**RESOLVED: one Agents hub** framed by
+  direction — Librarians [+Schedules] / Researchers). `Verify: agentsHubView.test + navModel.test (single VIEW_AGENTS hub; Jobs+Researchers no longer rail siblings)`
 - **AGENTSIA-4** All Manage views render on the **design system** — no native controls, no
-  hard-coded hex, tokens only; a11y labels present. `Verify: none-yet → test:` (overlaps WS3 cleanup)
+  hard-coded hex, tokens only; a11y labels present. `Verify: agentsHubView.test (hub composes no native <select>)` — *partial: the hub + sections compose viz primitives; the pre-existing SPEC-0048 model-picker `.viz-select` is preserved (no engine change, AGENTSIA-5) and is tracked under WS3 cleanup.*
 - **AGENTSIA-5** No behavioral/feature change to the underlying Agents/Researchers/Jobs engines —
-  this is IA + naming + styling only. `Verify: none-yet → test:`
+  this is IA + naming + styling only. `Verify: by construction — each section is the existing view mounted unchanged; its component tests (agentsView/jobsView/researchersView.test) pass intact`
 - **AGENTSIA-6** Any user-facing rename updates the glossary (SPEC-0001) so terminology stays
-  ratified and consistent across surfaces. `Verify: none-yet → test:`
+  ratified and consistent across surfaces. `Verify: SPEC-0001 glossary — Librarian (inward) + Researcher (outward) + Schedules (ex-Jobs) terms added`
 
 ## 5. Out of scope
 - New agent/researcher/job capabilities (covered by their own specs).
 - The deeper Control-Panel knobs (scale caps, model picker) — SPEC-0048.
+
+## 6. Changelog
+- 2026-06-27 — **built** by KB-Developer-4 (solo, after the paired DEV-6 half went unresponsive ~25m;
+  declared full footprint on #control). One **Agents hub** (`agentsHubView`) composes the existing
+  Agents/Jobs/Researchers views as in-place sections under two direction-framed groups — **Librarians**
+  (inward; built-in→disable-only) with **Schedules** (ex-"Jobs") nested, and **Researchers** (outward;
+  user-added→removable); nav consolidated (single `VIEW_AGENTS` rail item replacing the three Manage
+  siblings); glossary (SPEC-0001) updated. IA + naming + composition only — **no engine change**: each
+  section is the existing view mounted unchanged (its component tests pass intact), so a section that
+  fails to load is isolated and the hub still renders. Gates: QD-2 code + DL-2 visual.
