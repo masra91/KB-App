@@ -172,7 +172,11 @@ ul.checks li {
 .capture-controls { display: flex; align-items: center; gap: 1rem; margin-top: 0.85rem; flex-wrap: wrap; }
 .capture-toggle { display: flex; align-items: center; gap: 0.5rem; margin: 0; color: var(--viz-ink-muted); font-size: 0.84rem; }
 .capture-toggle input { accent-color: var(--viz-accent); } /* tokenized checkbox — checked = accent, not OS-blue */
-.capture-submit { margin-left: auto; }
+/* The primary CTA reads as primary (DL-2 polish): a FILLED, sentence-case action, not the default
+   outlined-uppercase `.viz-btn`. Uses `--viz-accent` — the system's documented "primary emphasis" token
+   (sprout is reserved for state) — scoped to Capture so the global `.viz-btn--primary` is untouched. */
+.capture-submit { margin-left: auto; background: var(--viz-accent); border-color: var(--viz-accent); color: #fff; text-transform: none; letter-spacing: 0.01em; font-family: var(--viz-font-body); font-weight: 500; padding: 0.4rem 1.1rem; }
+.capture-submit:hover, .capture-submit.is-hover { background: color-mix(in srgb, var(--viz-accent) 86%, black); border-color: color-mix(in srgb, var(--viz-accent) 86%, black); color: #fff; }
 /* Dropzone — a material dashed region that hover-lifts; drag-over = `--viz-accent` wash (interactive
    affordance, DL-2's ruling: NOT sprout/ember). */
 .capture-dropzone { margin-top: 0.9rem; padding: 1.1rem; border: 1px dashed var(--viz-rule); border-radius: var(--r-card, 10px); text-align: center; color: var(--viz-ink-muted); font-size: 0.85rem; transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease; }
