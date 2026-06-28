@@ -58,9 +58,9 @@ produces them (so the directive lands in the **same commit** as the answer/corre
 | **merge** / **distinct** (consolidation) | **pair** of block identities | ad-hoc "these two SEPARATE entities are / are not the same" | Reflect (`reflectJob`), SPEC-0051 orphan-linker | 2a ✅ |
 | **retract** | block identity + normalized statement | "this claim is wrong — suppress it" | Claims block-regen + Compose cited-claims | 2b ✅ |
 | **reattribute** | wrong-subject identity + statement (+ target) | "this claim is on the wrong subject (belongs to B)" | Claims block-regen + Compose (suppress-on-wrong-subject; surface-on-B is a follow-up) | 2c ✅ (v1) |
-| **guidance** | block identity (or global) | freeform durable steer for an entity | relevant stage prompt | 2c ▢ |
-| **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient (`enrichGap`) | 2c ▢ |
-| **revoke** | target directive id | cancels a prior directive | the directive reader (active-set) | 2c ▢ |
+| **guidance** | block identity (or global) | freeform durable steer for an entity | Compose entity-page prompt (`composeStage`) | 3 ✅ |
+| **enrich** | block identity | "keep enriching X toward Y" (ties to RESEARCH-24 gap, SPEC-0028) | Research orient (`enrichGap`) | 3 ▢ (folds into DEV-2 RESEARCH-24) |
+| **revoke** | `(family, targetKey)` | cancels a prior directive of any family (timestamp-ordered; re-assert un-revokes) | active-set readers + corrections (`isClaimSuppressedActive`) | 3 ✅ |
 
 ### 2.1 Stable keys
 
@@ -108,8 +108,16 @@ gate** in addition to QD-2.
   subject (shares `isClaimSuppressed` with retract) + records the corrected target (`toIdentity`,
   `reattributedTarget`). SURFACING the claim on the target entity is a documented FOLLOW-UP — it needs
   cross-entity claim injection that touches the CLAIMS-21 perf path; flagged for KB-Lead before building.
-- **Slice 2c guidance/enrich/revoke — ▢.** `enrich` folds into RESEARCH-24's gap payload (DEV-2 coord).
-- **Slice 3 (Rules surface + "correct this") — ▢.** QD-2 + Design-Lead visual.
+- **Slice 3 guidance + revoke — ✅.** `directives/guidance.jsonl` (freeform steer keyed on block identity
+  or `GLOBAL_GUIDANCE_KEY`, last-wins) consumed by Compose's entity-page prompt (`activeGuidanceForIdentity`
+  — emphasis/framing only, grounding stays absolute). `directives/revokes.jsonl` cancels a prior directive
+  of any family by `(family, targetKey)`, timestamp-ordered (`isDirectiveRevoked`; a later re-assertion
+  un-revokes); made functional on corrections via `isClaimSuppressedActive` (a revoked retract un-suppresses
+  at Claims block-regen + Compose). Both replay-survival tested. `recordGuidanceDirective`/
+  `recordRevokeDirective` are the seams the Rules-surface "correct this" UI calls. `enrich` still folds into
+  RESEARCH-24's gap payload (DEV-2 coord).
+- **Slice 3 (Rules surface + "correct this") — ▢.** Read-only "Rules" view over the active directives +
+  inline create affordances. QD-2 + Design-Lead visual. (Next PR; sequencing-checked vs the Explore/WS-E nav.)
 
 ## 6. Non-goals
 
