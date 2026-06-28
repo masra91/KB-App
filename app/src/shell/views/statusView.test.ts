@@ -488,6 +488,7 @@ describe('mountStatus (OBS-8/9 — live + read-only; VIZ-5 pivot)', () => {
     await Promise.resolve();
 
     expect(root.querySelector('.viz-surface.the-line')).not.toBeNull(); // reduced-motion root
+    expect(root.querySelector('.the-line.status-v2')).not.toBeNull(); // SPEC-0058 v2 material marker (scopes the pipeline/in-flight cards)
     expect(root.querySelector('.line-overall-stalled')).not.toBeNull();
     const head = root.querySelector<HTMLButtonElement>('.line-err-head');
     expect(head).not.toBeNull();
