@@ -1271,8 +1271,9 @@ option { background: var(--card); color: var(--fg); }
 .src-arm-dot--off { color: var(--faint); }
 .src-arm-dot--on { color: var(--slate); }
 .src-arm-dot--active { color: var(--sprout); }
-/* An armed connector card lifts its border to viridian (the "on" cue; no clearance ramp here). */
-.src-v2 .rdesk-strip.ag-card[data-armed='true'] { border-color: var(--viridian-2); }
+/* An armed connector/watched-folder card lifts its border to viridian (the "on" cue; no clearance ramp).
+   De-scoped (not .src-v2) so it also lights an armed watched folder in the Settings card (DL-1 #504). */
+.rdesk-strip.ag-card[data-armed='true'] { border-color: var(--viridian-2); }
 /* Add-dock head + tile label → v3 voice/ui sentence case. */
 .src-v2 .rdesk-add-head { font-family: var(--voice); text-transform: none; letter-spacing: 0; font-size: 0.95rem; color: var(--ink); }
 .src-v2 .rdesk-tile-label { font-family: var(--ui); text-transform: none; letter-spacing: 0; }
