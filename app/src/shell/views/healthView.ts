@@ -12,10 +12,11 @@
 // "couldn't scan — recheck". Thin DOM over the typed IPC; the transform is node-tested in `kb/healthProjection`.
 import { esc } from '../html';
 import { renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure, isWarming } from '../loadGuard';
-import { isDanglingFinding, type HealthProjection, type HealthDimension, type HealthDimensionFinding, type HealthSeverity } from '../../kb/healthProjection';
+import { isDanglingFinding, type HealthProjection, type HealthDimension, type ProjectedHealthFinding, type HealthSeverity } from '../../kb/healthProjection';
 import type { HealthFinding, DanglingLink } from '../../kb/healthPanel';
+import type { HealthFindingClass } from '../../kb/healthFindingKey';
 
-const HEADER = `<h1 class="health-title viz-voice">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Read-only; scanned without AI.</p>`;
+const HEADER = `<h1 class="health-title viz-voice">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Scanned without AI; fix or dismiss each one inline.</p>`;
 
 export async function mountHealth(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="health viz-surface">${HEADER}<p class="health-scanning viz-body">Scanning…</p></div>`;
@@ -91,35 +92,56 @@ function nameCell(name: string): string {
   return name && name.trim() ? `<span class="health-finding-name viz-body">${esc(name)}</span>` : `<span class="health-finding-name health-untitled viz-body">(untitled)</span>`;
 }
 
-/** An entity finding row (orphan / thin): clickable name → open the node + the specific defect (muted). */
-function findingRow(f: HealthFinding, defect: string): string {
+/** VUX-16 — the secondary action zone on a finding row: an optional non-destructive APPLY action
+ *  (relink / find-homes; slate, with a quiet line-glyph) + the always-present DISMISS (✕). These are
+ *  MAINTENANCE actions, never decisions — no ember anywhere (DL-1). `nodeRel` is what the apply IPC
+ *  operates on; `findingKey`/`kind` is what dismiss persists. A row-local status slot carries the
+ *  working (loom) / inline-oxide-error states the handlers toggle. */
+function actions(opts: { findingKey: string; kind: HealthFindingClass; apply?: { action: 'relink' | 'find-homes'; nodeRel: string; label: string; glyph: string } }): string {
+  const apply = opts.apply
+    ? `<button type="button" class="health-act health-act--${opts.apply.action} viz-focusable" data-action="${opts.apply.action}" data-rel="${esc(opts.apply.nodeRel)}"><span class="health-act-gl" aria-hidden="true">${opts.apply.glyph}</span>${esc(opts.apply.label)}</button>`
+    : '';
+  return `<span class="health-actions">
+            <span class="health-row-status" role="status" aria-live="polite"></span>
+            ${apply}
+            <button type="button" class="health-dismiss viz-focusable" data-key="${esc(opts.findingKey)}" data-kind="${esc(opts.kind)}" title="Dismiss — hide this finding (restorable later)" aria-label="Dismiss this finding">✕</button>
+          </span>`;
+}
+
+/** An entity finding row (orphan / thin): clickable name → open the node + the specific defect (muted),
+ *  then the secondary action zone. `find-homes` on an orphan; thin gets dismiss-only (enrich is held). */
+function findingRow(f: ProjectedHealthFinding & HealthFinding, cls: 'orphan' | 'thin', defect: string): string {
+  const apply = cls === 'orphan' ? { action: 'find-homes' as const, nodeRel: f.rel ?? '', label: 'Find homes', glyph: '⊕' } : undefined;
   return `
-        <li class="health-row">
+        <li class="health-row" data-finding-key="${esc(f.key)}">
           <button type="button" class="health-open viz-no-chrome viz-focusable" data-rel="${esc(f.rel ?? '')}" title="Open ${esc(f.name) || '(untitled)'}">
             ${nameCell(f.name)}
             <span class="health-kind viz-chip">${esc(f.kind ?? '')}</span>
             <span class="health-defect viz-body">${esc(defect)}</span>
           </button>
+          ${actions({ findingKey: f.key, kind: cls, apply })}
         </li>`;
 }
 
-/** A dead-link row: source entity (openable) → the unresolved target, the defect in muted (not error hue). */
-function danglingRow(d: DanglingLink): string {
+/** A dead-link row: source entity (openable) → the unresolved target, then Relink (re-resolve the source
+ *  node's links → the dead target drops) + dismiss. */
+function danglingRow(d: ProjectedHealthFinding & DanglingLink): string {
   return `
-        <li class="health-row">
+        <li class="health-row" data-finding-key="${esc(d.key)}">
           <button type="button" class="health-open viz-no-chrome viz-focusable" data-rel="${esc(d.from ?? '')}" title="Open ${esc(d.fromName) || '(untitled)'}">
             ${nameCell(d.fromName)}
             <span class="health-defect viz-body">→ ${esc(d.target ?? '')} (no node)</span>
           </button>
+          ${actions({ findingKey: d.key, kind: 'dangling', apply: { action: 'relink', nodeRel: d.from ?? '', label: 'Relink', glyph: '↻' } })}
         </li>`;
 }
 
 /** Render one finding — discriminating a dead-link from an entity finding (ENG-15/16: a malformed entry is
  *  degraded per-item via the nameCell fallback + `?? ''` guards, so one bad finding can't crash the glance). */
-function renderFinding(key: HealthDimension['key'], f: HealthDimensionFinding): string {
-  if (key === 'dangling' || isDanglingFinding(f)) return danglingRow(f as DanglingLink);
-  const ef = f as HealthFinding;
-  return key === 'thin' ? findingRow(ef, `stub · ${ef.chars ?? 0} chars`) : findingRow(ef, '0 in · 0 out');
+function renderFinding(key: HealthDimension['key'], f: ProjectedHealthFinding): string {
+  if (key === 'dangling' || isDanglingFinding(f)) return danglingRow(f as ProjectedHealthFinding & DanglingLink);
+  const ef = f as ProjectedHealthFinding & HealthFinding;
+  return key === 'thin' ? findingRow(ef, 'thin', `stub · ${ef.chars ?? 0} chars`) : findingRow(ef, 'orphan', '0 in · 0 out');
 }
 
 /** One dimension: DL-2's `.hrow` glance row (severity tile `.hi` + `.ht` title/desc + mono `.hn` count),
@@ -150,9 +172,29 @@ function rows(p: HealthProjection): string {
   return p.dimensions.map(dimensionRow).join('');
 }
 
-/** v1 is passive: name what's coming so the readout reads as honest, not broken. */
+/** Honest about what's wired: relink / find-homes / dismiss act now; merge + content repair are later. */
 function footnote(): string {
-  return `<p class="health-footnote viz-body">Read-only for now — automatic structural fixes and content repair (via Reflect) land in a later slice.</p>`;
+  return `<p class="health-footnote viz-body">Relink, find homes, and dismiss apply directly. Merging duplicates and content repair land in a later slice.</p>`;
+}
+
+/** Set a row's status slot to a calm WORKING (loom) state and disable its action buttons (DL-1: loom =
+ *  "it's humming"). Returns a restore fn that re-enables them (used on the error path). */
+function setRowWorking(row: HTMLElement, label: string): () => void {
+  const status = row.querySelector<HTMLElement>('.health-row-status');
+  const btns = Array.from(row.querySelectorAll<HTMLButtonElement>('.health-act, .health-dismiss'));
+  for (const b of btns) b.disabled = true;
+  if (status) status.innerHTML = `<span class="vmark loom" aria-hidden="true"></span> ${esc(label)}`;
+  return () => {
+    for (const b of btns) b.disabled = false;
+    if (status) status.textContent = '';
+  };
+}
+
+/** Show a calm inline (oxide) error on the row + re-enable (retryable) — never a banner (DL-1). */
+function setRowError(restore: () => void, row: HTMLElement, message: string): void {
+  restore();
+  const status = row.querySelector<HTMLElement>('.health-row-status');
+  if (status) status.innerHTML = `<span class="health-row-error viz-body">${esc(message)}</span>`;
 }
 
 function wire(container: HTMLElement): void {
@@ -161,6 +203,42 @@ function wire(container: HTMLElement): void {
     btn.addEventListener('click', () => {
       const rel = btn.dataset.rel;
       if (rel) void window.kbApi.openCitation(rel);
+    });
+  }
+  // VUX-16 APPLY (relink / find-homes): non-destructive, applies directly. Working (loom) → on ok re-scan
+  // (the fixed finding drops from the list + count — the "it moved" payoff); on error, inline oxide, retryable.
+  for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.health-act'))) {
+    btn.addEventListener('click', () => {
+      const row = btn.closest<HTMLElement>('.health-row');
+      const action = btn.dataset.action;
+      const nodeRel = btn.dataset.rel ?? '';
+      if (!row || (action !== 'relink' && action !== 'find-homes')) return;
+      const restore = setRowWorking(row, action === 'relink' ? 'Relinking…' : 'Finding homes…');
+      void window.kbApi
+        .healthRemediate({ action, nodeRel })
+        .then((res) => {
+          if (res?.ok) void render(container); // re-scan → the row resolves away (or stays if no change)
+          else setRowError(restore, row, res?.message || 'Couldn’t apply — try again.');
+        })
+        .catch(() => setRowError(restore, row, 'Couldn’t apply — try again.'));
+    });
+  }
+  // VUX-16 DISMISS (✕): immediate, non-destructive + restorable (DL-1 / #496 ruling — no confirm). On ok,
+  // re-scan so the dismissed finding drops from the list + count.
+  for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.health-dismiss'))) {
+    btn.addEventListener('click', () => {
+      const row = btn.closest<HTMLElement>('.health-row');
+      const findingKey = btn.dataset.key ?? '';
+      const kind = btn.dataset.kind ?? '';
+      if (!row || !findingKey) return;
+      const restore = setRowWorking(row, 'Dismissing…');
+      void window.kbApi
+        .dismissHealthFinding({ findingKey, kind })
+        .then((res) => {
+          if (res?.ok) void render(container);
+          else setRowError(restore, row, res?.message || 'Couldn’t dismiss — try again.');
+        })
+        .catch(() => setRowError(restore, row, 'Couldn’t dismiss — try again.'));
     });
   }
 }

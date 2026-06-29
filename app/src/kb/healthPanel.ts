@@ -9,24 +9,12 @@
 // The scan reads each entity node **once** and derives the whole-graph adjacency from its outgoing
 // `[[wikilinks]]` (inbound = the reverse) — O(N) reads, never the O(N²) of per-node backlink walks.
 import type { RecallTools, EntityHit } from './recall';
-import { blockKey } from './connect';
 import { isHealthFindingDismissed, type HealthDismissalDirective } from './directives';
-
-/** The three structural finding classes (HEALTH §3) — the dismiss key + the remediation actions key off these. */
-export type HealthFindingClass = 'orphan' | 'thin' | 'dangling';
-
-/** A content-STABLE key for a finding (NOT a ULID): `<class>:<kind>|<normalizedName>` for an entity finding,
- *  `dangling:<fromName>→<target>` for a dead link. Stable across re-derive/replay so a dismissal (and a
- *  future remediation record) re-matches the same finding after the entity's ULID is reborn (SPEC-0050 lesson). */
-export function healthFindingKey(cls: HealthFindingClass, f: HealthFinding | DanglingLink): string {
-  if (cls === 'dangling') {
-    const d = f as DanglingLink;
-    const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
-    return `dangling:${norm(d.fromName)}→${norm(d.target)}`;
-  }
-  const e = f as HealthFinding;
-  return `${cls}:${blockKey(e.kind, e.name)}`;
-}
+// The finding-key derivation lives in a PURE module (renderer-safe) so the renderer-reachable
+// `healthProjection.ts` can compute keys without dragging this node-side module (directives → node:fs)
+// into the browser bundle (#500). Re-exported here for the existing main-side import sites + tests.
+import { healthFindingKey, type HealthFindingClass } from './healthFindingKey';
+export { healthFindingKey, type HealthFindingClass };
 
 /** A flagged entity (orphan / thin) — enough to render a row + click-through, never a raw id. */
 export interface HealthFinding {
