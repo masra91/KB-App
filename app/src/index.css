@@ -1258,19 +1258,19 @@ option { background: var(--card); color: var(--fg); }
 .src-v2 .src-section-head { font-family: var(--voice); font-size: 1.05rem; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--ink); margin: 0 0 0.85rem; padding-bottom: 0.55rem; border-bottom: 1px solid var(--hair); }
 /* Tokenized type mark (#184) — a hue-carrying glyph, never an emoji; the LABEL stays ink. Rationed:
    slate (interactive family) for feeds/mail, viridian (settled) for a watched folder. */
-.src-v2 .src-mark { font-family: var(--mono); font-size: 0.9em; margin-right: 0.2rem; }
-.src-v2 .src-mark--rss, .src-v2 .src-mark--m365-mail { color: var(--slate); }
-.src-v2 .src-mark--folder { color: var(--viridian); }
-.src-v2 .src-mark--other { color: var(--stone); }
-.src-v2 .src-kind { font-family: var(--ui); font-size: 0.92rem; color: var(--ink); display: inline-flex; align-items: baseline; gap: 0.1rem; }
+.src-mark { font-family: var(--mono); font-size: 0.9em; margin-right: 0.2rem; }
+.src-mark--rss, .src-mark--m365-mail { color: var(--slate); }
+.src-mark--folder { color: var(--viridian); }
+.src-mark--other { color: var(--stone); }
+.src-kind { font-family: var(--ui); font-size: 0.92rem; color: var(--ink); display: inline-flex; align-items: baseline; gap: 0.1rem; }
 /* Armed switch — a hue dot + sentence-case ink label. The non-colour signal is the WORD; the dot adds
    the hue (paused=faint, enabled=slate, watching/active=sprout). */
-.src-v2 .src-arm { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--ui); text-transform: none; letter-spacing: 0; font-size: 0.82rem; color: var(--ink); background: transparent; border: 0; cursor: pointer; padding: 0.1rem 0.2rem; }
-.src-v2 .src-arm:hover, .src-v2 .src-arm:focus-visible { color: var(--slate); }
-.src-v2 .src-arm-dot { font-size: 0.62em; line-height: 1; }
-.src-v2 .src-arm-dot--off { color: var(--faint); }
-.src-v2 .src-arm-dot--on { color: var(--slate); }
-.src-v2 .src-arm-dot--active { color: var(--sprout); }
+.src-arm { display: inline-flex; align-items: center; gap: 0.35rem; font-family: var(--ui); text-transform: none; letter-spacing: 0; font-size: 0.82rem; color: var(--ink); background: transparent; border: 0; cursor: pointer; padding: 0.1rem 0.2rem; }
+.src-arm:hover, .src-arm:focus-visible { color: var(--slate); }
+.src-arm-dot { font-size: 0.62em; line-height: 1; }
+.src-arm-dot--off { color: var(--faint); }
+.src-arm-dot--on { color: var(--slate); }
+.src-arm-dot--active { color: var(--sprout); }
 /* An armed connector card lifts its border to viridian (the "on" cue; no clearance ramp here). */
 .src-v2 .rdesk-strip.ag-card[data-armed='true'] { border-color: var(--viridian-2); }
 /* Add-dock head + tile label → v3 voice/ui sentence case. */

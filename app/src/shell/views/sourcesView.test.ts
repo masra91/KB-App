@@ -79,9 +79,9 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     const c = await mount();
     // scoped material marker present (so the shared rdesk-* language isn't restyled globally)
     expect(c.querySelector('.rdesk.src-v2')).toBeTruthy();
-    // v3: sections are headed BANDS (the strips inside are the cards), not v2 viz-card section chrome
+    // v3: the Feeds section is a headed BAND (the strips inside are the cards), not v2 viz-card chrome
     const sections = Array.from(c.querySelectorAll('.src-section'));
-    expect(sections.length).toBe(2);
+    expect(sections.length).toBe(1); // Connectors = Feeds only (watched-folders moved to Settings)
     expect(sections.every((s) => !s.classList.contains('viz-card'))).toBe(true);
     expect(c.querySelector('.rdesk-strip.ag-card')).toBeTruthy(); // each connector is a v3 card
     // type marks are tokenized (hue-class), and the armed switch carries a hue dot — both aria-hidden
@@ -93,16 +93,12 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(/[\u{1F300}-\u{1FAFF}\u{1F000}-\u{1F0FF}]|📰|📂|✉|🔌/u.test(c.textContent ?? '')).toBe(false);
   });
 
-  it('shows both Feeds + Watched-folders sections, each with live rows', async () => {
+  it('Connectors = the Feeds section only — watched-folders moved to Settings (SPEC-0060 IA)', async () => {
     const c = await mount();
     const heads = Array.from(c.querySelectorAll('.src-section-head')).map((h) => h.textContent);
-    expect(heads).toEqual(['Feeds', 'Watched folders']);
-    // a real watched-folder strip renders (not a placeholder)
-    const watch = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
-    expect(watch).toBeTruthy();
-    expect(watch.textContent).toContain('/Users/me/KB-Inbox');
-    expect(watch.querySelector('.watch-arm')!.textContent).toContain('Watching'); // enabled + watching (UX v2 §4 sentence-case)
-    expect(watch.textContent).toContain('brought in a file'); // typed lastEvent, no raw slug
+    expect(heads).toEqual(['Feeds']); // no Watched-folders section here anymore
+    expect(c.querySelector('.rdesk-strip[data-watch-id]')).toBeNull(); // no watched-folder strips in Connectors
+    expect(c.querySelector('.watch-add-pick')).toBeNull();
   });
 
   it('enabling a paused feed asks to confirm (it starts an outbound pull), then applies on confirm', async () => {
@@ -227,125 +223,6 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     expect(c.querySelectorAll('.rdesk-strip[data-id]').length).toBe(2); // both rows rendered, neither crashed
     expect(c.querySelector('.rdesk-strip[data-id="legacy"] .intake-remove')).toBeTruthy();
     expect(c.querySelector('.rdesk-strip[data-id="news"] .intake-remove')).toBeTruthy();
-  });
-});
-
-describe('Sources view · Watched folders (WATCH-9)', () => {
-  it('toggling a watched folder applies directly (local read, no confirm)', async () => {
-    const c = await mount();
-    (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-arm') as HTMLButtonElement).click();
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', enabled: false }); // was enabled → toggled off
-  });
-
-  it('removing a watched folder confirms first, then calls removeWatchFolder', async () => {
-    const c = await mount();
-    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
-    (strip.querySelector('.watch-remove') as HTMLButtonElement).click();
-    await flush();
-    expect((strip.querySelector('.watch-confirm') as HTMLElement).hidden).toBe(false);
-    expect(removeWatchFolder).not.toHaveBeenCalled(); // gated
-    (strip.querySelector('.watch-confirm-go') as HTMLButtonElement).click();
-    await flush();
-    expect(removeWatchFolder).toHaveBeenCalledWith('inbox');
-  });
-
-  it('add-folder: OS picker → setWatchFolder with the slugified basename, PAUSED', async () => {
-    setWatchFolder = vi.fn(async () => [folder, { ...folder, id: 'newsletters', folderPath: '/Users/me/Newsletters', label: 'newsletters', enabled: false }]);
-    setApi();
-    const c = await mount();
-    (c.querySelector('.watch-add-pick') as HTMLButtonElement).click();
-    await flush();
-    expect(pickFolder).toHaveBeenCalled();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'newsletters', folderPath: '/Users/me/Newsletters', enabled: false });
-  });
-
-  it('SECURITY: a loop-guard-refused folder is surfaced cleanly (no client-side bypass) — the folder is NOT shown', async () => {
-    // The backend refuses an in-vault folder by NOT persisting it → returns a list without the new id.
-    pickFolder = vi.fn(async () => '/Users/me/MyVault/.kb'); // a path the backend loop-guard refuses
-    setWatchFolder = vi.fn(async () => [folder]); // unchanged list — the refused folder is absent
-    setApi();
-    const c = await mount();
-    (c.querySelector('.watch-add-pick') as HTMLButtonElement).click();
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalled(); // the client sent it to the guarded backend (no client bypass)
-    expect(c.querySelector('.watch-add-status')!.textContent).toMatch(/Couldn.t watch that folder.*inside your library/i);
-    expect(c.querySelector('.rdesk-strip[data-watch-id="kb"]')).toBeNull(); // the refused folder never renders
-  });
-
-  it('a failed listWatchFolders degrades just that section; Feeds still render', async () => {
-    listWatchFolders = vi.fn(async () => { throw new Error('boom'); });
-    setApi();
-    const c = await mount();
-    expect(c.querySelector('.rdesk-strip[data-id="news"]')).toBeTruthy(); // feeds still render
-    expect(c.textContent).toMatch(/Couldn.t load watched folders/);
-  });
-});
-
-describe('Sources view · Slice-2 per-folder rules (WATCH-12/14)', () => {
-  it('toggling "Include subfolders" applies directly — a local read, no confirm (WATCH-12)', async () => {
-    const c = await mount();
-    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
-    const rec = strip.querySelector('.watch-recursive') as HTMLButtonElement;
-    expect(rec.getAttribute('aria-checked')).toBe('false');
-    rec.click();
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', recursive: true }); // was off → on
-  });
-
-  it('the depth field is hidden until recursive, then visible; a change applies clamped to [0,32] (WATCH-12)', async () => {
-    // non-recursive → depth control hidden
-    let c = await mount();
-    expect((c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-depth-wrap') as HTMLElement).hidden).toBe(true);
-
-    // recursive folder → depth control visible + steers on change (clamped)
-    listWatchFolders = vi.fn(async () => [{ ...folder, recursive: true, maxDepth: 3 }]);
-    setApi();
-    c = await mount();
-    const wrap = c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-depth-wrap') as HTMLElement;
-    expect(wrap.hidden).toBe(false);
-    const depth = c.querySelector('.watch-depth') as HTMLInputElement;
-    depth.value = '99';
-    depth.dispatchEvent(new Event('change'));
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', maxDepth: 32 }); // clamped
-  });
-
-  it('WATCH-16: the add-folder flow makes drain-by-default clear (KB-Lead — files move at creation)', async () => {
-    const c = await mount();
-    const hint = c.querySelector('.watch-add-hint')!;
-    expect(hint.textContent).toMatch(/drains like an inbox/i);
-    expect(hint.textContent).toMatch(/\.kb-processed/);
-    expect(hint.textContent).toMatch(/never deleted/i);
-  });
-
-  it('WATCH-16: a folder DRAINS by default — the toggle reads "leave originals: off"', async () => {
-    const c = await mount();
-    const toggle = c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement;
-    expect(toggle.getAttribute('aria-checked')).toBe('false'); // leaveOriginals false → draining
-    expect(toggle.textContent).toMatch(/Leave originals in place: off/i);
-  });
-
-  it('WATCH-16: turning OFF "leave originals" CONFIRMS (it starts draining/relocating files), then applies consume:true', async () => {
-    listWatchFolders = vi.fn(async () => [{ ...folder, leaveOriginals: true }]); // currently copy mode
-    setApi();
-    const c = await mount();
-    const strip = c.querySelector('.rdesk-strip[data-watch-id="inbox"]')!;
-    (strip.querySelector('.watch-consume') as HTMLButtonElement).click();
-    await flush();
-    expect((strip.querySelector('.watch-consume-confirm') as HTMLElement).hidden).toBe(false);
-    expect(strip.querySelector('.watch-consume-confirm-msg')!.textContent).toMatch(/drain.*\.kb-processed.*never deleted/i);
-    expect(setWatchFolder).not.toHaveBeenCalled(); // gated
-    (strip.querySelector('.watch-consume-confirm-go') as HTMLButtonElement).click();
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: true }); // start draining
-  });
-
-  it('WATCH-16: turning ON "leave originals" applies directly — no confirm (stops moving files, safe)', async () => {
-    const c = await mount(); // base fixture drains (leaveOriginals:false) → click opts into copy
-    (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement).click();
-    await flush();
-    expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: false }); // leave originals
   });
 });
 
