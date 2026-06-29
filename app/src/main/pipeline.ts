@@ -282,7 +282,7 @@ export async function quiesceStatusForActive(): Promise<QuiesceStatus | null> {
     : safe
       ? 'Safe to shut down — all work finished.'
       : remaining === 0 && promotePending
-        ? 'Publishing the last changes to your vault…'
+        ? 'Publishing the last changes to your library…'
         : `Finishing up — ${remaining} item${remaining === 1 ? '' : 's'} remaining…`; // "items" matches Status/tray vocab (Design-Lead)
   return { quiescing, remaining, safe, detail };
 }

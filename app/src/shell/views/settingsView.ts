@@ -583,7 +583,7 @@ function wireRecall(container: HTMLElement, settings: InstanceSettings): void {
             setSegChecked(depthMode, 'auto');
             depthRow?.setAttribute('hidden', '');
             depthHint?.removeAttribute('hidden');
-            status.textContent = 'Search depth: scaled to the size of your Knowledge Base (applies to your next question).';
+            status.textContent = 'Search depth: scaled to the size of your library (applies to your next question).';
           },
           () => setSegChecked(depthMode, isManual ? 'manual' : 'auto'),
         );

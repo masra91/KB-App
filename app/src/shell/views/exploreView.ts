@@ -476,10 +476,10 @@ function toggleFilter(state: ExploreState, group: string, value: string): void {
  * — a failed fetch degrades to an "unavailable" cache entry rather than throwing (the row stays usable).
  */
 const CITE_STATUS: Record<string, string> = {
-  staging: 'That source is still processing — it’ll be in your vault shortly.',
-  missing: 'That source isn’t in your vault (it may have been removed).',
+  staging: 'That source is still processing — it’ll be in your library shortly.',
+  missing: 'That source isn’t in your library (it may have been removed).',
   'invalid-ref': 'That source link is invalid.',
-  'no-vault': 'No active vault — open a vault to view sources.',
+  'no-vault': 'No active library — open one to view sources.',
   'open-failed': 'Couldn’t open that source.',
 };
 
