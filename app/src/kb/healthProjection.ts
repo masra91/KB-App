@@ -9,8 +9,11 @@
 // maintained graph projection, STATE-2) is posted, the report is derived from THAT instead — this transform
 // and the whole view contract are unchanged (the read-layer swaps underneath). Holding that seam avoids
 // colliding with the shared graph-projection work.
-import { healthFindingKey } from './healthPanel';
-import type { HealthReport, HealthFinding, DanglingLink, HealthFindingClass } from './healthPanel';
+// Import the key from the PURE module (NOT healthPanel) so this renderer-reachable transform never pulls
+// healthPanel's node-side deps (directives → node:fs) into the browser bundle (#500). healthPanel types
+// are `import type` (erased), so they carry no runtime edge.
+import { healthFindingKey, type HealthFindingClass } from './healthFindingKey';
+import type { HealthReport, HealthFinding, DanglingLink } from './healthPanel';
 
 /** Whether the maintained projection is live, still indexing, or genuinely unavailable (STATE-9). `warming`
  *  renders a calm "still preparing…" (never the scary "app busy"); `unavailable` is the honest error face. */

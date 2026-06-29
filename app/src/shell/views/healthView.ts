@@ -13,7 +13,8 @@
 import { esc } from '../html';
 import { renderLoadError, renderWarming, loadGraphWithWarming, reportLoadFailure, isWarming } from '../loadGuard';
 import { isDanglingFinding, type HealthProjection, type HealthDimension, type ProjectedHealthFinding, type HealthSeverity } from '../../kb/healthProjection';
-import type { HealthFinding, DanglingLink, HealthFindingClass } from '../../kb/healthPanel';
+import type { HealthFinding, DanglingLink } from '../../kb/healthPanel';
+import type { HealthFindingClass } from '../../kb/healthFindingKey';
 
 const HEADER = `<h1 class="health-title viz-voice">Health</h1><p class="health-sub viz-body">Structural lint of your knowledge graph — orphans, dead links, and thin pages. Scanned without AI; fix or dismiss each one inline.</p>`;
 
