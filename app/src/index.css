@@ -427,58 +427,50 @@ dl.settings dd {
    legacy global .muted); a label + SegmentedControl share one baseline-aligned row (the autonomy +
    dev-log controls). The seg / confirm / button visuals come from the blessed primitives
    (design-system.css) — no new tokens/components (DESIGN-7). */
-.settings-note { color: var(--viz-ink-muted); font-size: 0.9rem; line-height: 1.45; }
-/* Settings view — UX v2 material adoption (SPEC-0058), scoped under `.settings-v2`. Lifts the legacy
-   `.card`/emoji chrome onto the #453 material: each section is a real raised card with grain, Spectral
-   heads, mono data (vault path / numbers), a tokenized Copilot status DOT (sprout=ready / brass=caution,
-   not ✅/⚠️ — #184). The theme-toggle + auto-update UI are a SEPARATE dev-paired surface (coordinated);
-   this PR is the material/voice layer + a clean seam for them. NO ember here (no decisions on Settings). */
-.settings-v2 { padding: 1rem 1.25rem 2rem; display: flex; flex-direction: column; gap: 1.1rem; }
+.settings-note { color: var(--stone); font-size: 0.9rem; line-height: 1.45; }
+/* ════════════════════════════════════════════════════════════════════════════════════════════════
+   Settings view — VELLUM v3 (SPEC-0060 VUX-1). The global-app preferences, migrated off --viz-* onto the
+   warm-vellum tokens. Scoped under `.settings-v2`. Each section stays a raised card (now v3 linen +
+   hairline + shadow); Spectral heads, mono data, a tokenized Copilot status dot (sprout=ready /
+   gold=caution, #184). Reclaimed centered column. NO ember (settings aren't decisions). Light-only (§2).
+   (Watched-folders fold in from Connectors as an immediate follow-on slice — kept in Connectors for now.) */
+.settings-v2 { max-width: 52rem; margin: 0 auto; padding: 1rem 0.5rem 2.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
 .settings-v2 .card {
-  background: var(--viz-panel);
-  border: 0.5px solid var(--viz-rule);
-  border-radius: var(--viz-r-card);
-  box-shadow: var(--viz-shadow-card);
+  background: var(--linen);
+  border: 1px solid var(--hair);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-card);
   padding: 1.1rem 1.3rem 1.3rem;
 }
-.settings-v2 .settings-title { font-size: 1.5rem; color: var(--viz-ink); letter-spacing: 0; line-height: 1.15; margin: 0 0 0.6rem; }
-.settings-v2 h2 { font-family: var(--viz-font-voice); font-size: 1.08rem; font-weight: 500; letter-spacing: 0; color: var(--viz-ink); margin: 0 0 0.5rem; }
+.settings-v2 .settings-title { font-family: var(--voice); font-weight: 500; font-size: 1.6rem; color: var(--ink); letter-spacing: 0.01em; line-height: 1.15; margin: 0 0 0.6rem; }
+.settings-v2 h2 { font-family: var(--voice); font-size: 1.08rem; font-weight: 500; letter-spacing: 0; color: var(--ink); margin: 0 0 0.5rem; }
 /* Vault path + the settings <dl> values stay Plex-Mono data. */
-.settings-v2 .settings dd, .settings-v2 .path { font-family: var(--viz-font-numeric); color: var(--viz-ink); }
-.settings-v2 .settings dt { color: var(--viz-ink-muted); }
+.settings-v2 .settings dd, .settings-v2 .path { font-family: var(--mono); color: var(--ink); }
+.settings-v2 .settings dt { color: var(--stone); }
 /* Tokenized Copilot status dot — hue on the dot, label ink (the detail text also carries the state). */
 .settings-v2 .settings-copilot { display: flex; align-items: baseline; gap: 0.4rem; }
 .settings-v2 .settings-status-dot { font-size: 0.7em; line-height: 1; }
-.settings-v2 .settings-status-dot--ok { color: var(--viz-sprout); }
-.settings-v2 .settings-status-dot--warn { color: var(--viz-brass); }
+.settings-v2 .settings-status-dot--ok { color: var(--sprout); }
+.settings-v2 .settings-status-dot--warn { color: var(--gold); }
 .settings-control { display: flex; align-items: center; gap: 0.6rem; margin: 0.6rem 0; flex-wrap: wrap; }
 /* A control toggled via the `hidden` attribute must hide — the display:flex above wins over the UA
    [hidden] rule (the ConfirmInline lesson), so restore display:none when hidden. */
 .settings-control[hidden] { display: none; }
 
-/* Scale card (SPEC-0048 SCALE). The per-stage rows put the stage label and its stepper on one line;
-   the pin note explains Connect's fixed 1; the hint is a brass-ruled heads-up (caution, not error). */
-.scale-stages-heading { margin: 0.8rem 0 0.2rem; font-weight: 600; color: var(--viz-ink); }
-/* Each cap row is a 2-col grid (label | stepper) so every stepper right-aligns into ONE column
-   regardless of label width — overrides the .settings-control flex (Design-Lead alignment ruling). */
+/* Scale card (SPEC-0048 SCALE). Per-stage rows put the stage label + its stepper on one line. */
+.scale-stages-heading { margin: 0.8rem 0 0.2rem; font-weight: 600; color: var(--ink); }
+/* Each cap row is a 2-col grid (label | stepper) so every stepper right-aligns into ONE column. */
 .scale-stage-row { display: grid; grid-template-columns: 1fr auto; align-items: center; margin: 0.35rem 0; }
-/* ASK-19 "Recall & Ask" card — the answer-time + search-depth steppers right-align into one column,
-   same 2-col grid as the Scale cap rows (Design-Lead's alignment ruling; a separate class because a
-   test counts the Scale card's rows exactly). */
+/* ASK-19 "Recall & Ask" card — same 2-col grid as the Scale cap rows. */
 .recall-budget-row { display: grid; grid-template-columns: 1fr auto; align-items: center; margin: 0.35rem 0; }
-/* The hint REASSURES ("none starves") → calm/informational, NOT caution. Brass = needs-you/caution
-   in our language; using it here cries wolf (the VIZ-10 principle, KB-Design-Lead's call). Neutral
-   structural rule; text stays ink-muted via .settings-note. A real low-ceiling contention warning,
-   if one ever lands, is what gets brass. */
-.scale-hint { border-left: 2px solid var(--viz-rule); padding-left: 0.6rem; }
-/* SCALE-7/8 throttled indicator — ink-muted "effective N of M" caption (NOT brass: transient
-   self-healing, informational, VIZ-10 cry-wolf rule). The sprout-breathe dot marks active backing-off;
-   the global reduced-motion reset (design-system.css) makes it static. display:flex overrides the UA
-   [hidden], so restore display:none when hidden. */
-.scale-throttle { display: flex; align-items: center; gap: 0.4rem; color: var(--viz-ink-muted); }
+/* The hint REASSURES ("none starves") → calm/informational, NOT caution (VIZ-10 cry-wolf rule). Neutral
+   structural rule; text stays stone via .settings-note. */
+.scale-hint { border-left: 2px solid var(--hair); padding-left: 0.6rem; }
+/* SCALE-7/8 throttled indicator — stone caption (NOT gold: transient self-healing, informational). The
+   sprout-breathe dot marks active backing-off; the global reduced-motion reset makes it static. */
+.scale-throttle { display: flex; align-items: center; gap: 0.4rem; color: var(--stone); }
 .scale-throttle[hidden] { display: none; }
-/* active/in-progress backing-off → --viz-sprout (was ember; ember is "needs your decision" only). */
-.scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--viz-sprout); animation: viz-breathe var(--viz-dur-breathe) ease-in-out infinite; }
+.scale-throttle__dot { flex: 0 0 auto; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--sprout); animation: viz-breathe 1.8s ease-in-out infinite; }
 
 /* ════════════════════════════════════════════════════════════════════════════════════════════════
    Reviews view — VELLUM v3 (SPEC-0060 VUX-1/VUX-13). The "needs you" queue (SPEC-0018 REVIEW-10), on

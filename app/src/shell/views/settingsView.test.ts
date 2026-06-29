@@ -5,6 +5,8 @@
 // applies directly, and that cancel reverts. (The store + resolver logic is node-tested in
 // instanceConfig.test.ts; Replay is covered by SPEC-0022's own tests.)
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountSettings } from './settingsView';
 import { LOAD_TIMEOUT_MS } from '../loadGuard';
 import type { KbApi, InstanceSettings, ScaleRuntime } from '../../kb/types';
@@ -681,5 +683,31 @@ describe('Settings · Prepare for shutdown (SPEC-0045 QUIESCE-1/3/5/6)', () => {
     expect(statusEl.textContent).not.toMatch(/✅|✔️/); // Design-Lead: monochrome voice, no colored emoji
     expect(statusEl.classList.contains('viz-state-settled')).toBe(true); // the settled state token instead
     expect((root.querySelector('#resume-btn') as HTMLElement).hidden).toBe(false);
+  });
+});
+
+// SPEC-0060 VUX-1: the Settings CSS block migrates off the instrument-panel --viz-* names onto the
+// warm-vellum v3 tokens. NO ember (settings aren't decisions). Guard on the CSS source.
+describe('VUX-1 v3 token migration (SPEC-0060 — Settings, off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Settings view — VELLUM v3'),
+    indexCss.indexOf('Reviews view — VELLUM v3'),
+  );
+
+  it('isolated the Settings v3 block', () => {
+    expect(block.length).toBeGreaterThan(400);
+  });
+
+  it('the v3 Settings block carries NO --viz-* tokens and NO ember', () => {
+    expect(block).not.toMatch(/var\(--viz-/);
+    expect(block).not.toMatch(/--ember|var\(--ember/);
+  });
+
+  it('uses v3 ground/ink + state tokens (ink/linen/sprout/gold)', () => {
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--linen\b/);
+    expect(block).toMatch(/var\(--sprout\b/); // copilot-ready dot
+    expect(block).toMatch(/var\(--gold\b/); // copilot-caution dot
   });
 });
