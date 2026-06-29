@@ -18,7 +18,7 @@ export function esc(s: string | null | undefined): string {
 
 /** Last path segment of a folder path, with a friendly fallback. */
 export function baseName(p: string): string {
-  return p.split(/[\\/]/).filter(Boolean).pop() ?? 'My KB';
+  return p.split(/[\\/]/).filter(Boolean).pop() ?? 'My Library';
 }
 
 /**

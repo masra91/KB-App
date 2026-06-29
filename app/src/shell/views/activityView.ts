@@ -48,7 +48,7 @@ export function mountActivity(container: HTMLElement): void {
   container.innerHTML = `
     <div class="activity-view">
       <h1 class="activity-title viz-voice">Activity</h1>
-      <p class="activity-note">What your knowledge base has been doing — and why. Read-only.</p>
+      <p class="activity-note">What your library has been doing — and why. Read-only.</p>
       <div class="activity-controls" id="activityControls"></div>
       <div class="activity-body" id="activityBody"></div>
       <div class="activity-lineage" id="activityLineage"></div>
@@ -221,7 +221,7 @@ export function bodyHtml(s: BodyState): string {
   // #145: a failed/timed-out load is retryable, never an infinite spinner. The view's header +
   // controls stay mounted around this body, so a button here (not a full renderLoadError) suffices.
   if (s.errorMsg) return `<p class="activity-error error">Couldn’t load activity: ${esc(s.errorMsg)} <button type="button" class="viz-btn viz-btn--sm viz-focusable load-retry" data-act="retry-load">Retry</button></p>`;
-  if (s.entries.length === 0) return `<p class="activity-note activity-empty">No activity yet — once your KB starts processing, what it does shows up here.</p>`;
+  if (s.entries.length === 0) return `<p class="activity-note activity-empty">No activity yet — once your library starts processing, what it does shows up here.</p>`;
   const note = s.truncated
     ? `<p class="activity-note activity-truncation">Showing the ${s.entries.length} most recent of ${s.total} events.</p>`
     : `<p class="activity-note activity-count">${s.total} event${s.total === 1 ? '' : 's'}.</p>`;

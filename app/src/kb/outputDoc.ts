@@ -51,7 +51,7 @@ export function buildRecallOutput(result: AskResult, id: string, nowIso: string)
   const title = titleFromQuestion(result.question);
   const banner = result.grounded
     ? `> Saved from a grounded recall on ${nowIso} — grounded against ${result.citations.length} citation${result.citations.length === 1 ? '' : 's'}.`
-    : `> ⚠️ Not grounded — inferred. Saved from a recall on ${nowIso}; no verified KB citations.`;
+    : `> ⚠️ Not grounded — inferred. Saved from a recall on ${nowIso}; no verified library citations.`;
   const evidence =
     result.citations.length > 0 ? `\n\n## Evidence\n${result.citations.map((c, i) => renderCitation(c, i + 1)).join('\n')}` : '';
 

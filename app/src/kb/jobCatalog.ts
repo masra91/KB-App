@@ -33,7 +33,7 @@ export const JOB_CATALOG: JobCatalogEntry[] = [
     type: REFLECT_JOB_TYPE,
     label: 'Reflect',
     description:
-      'Periodically reviews your KB for missed structure, connections, and stale topics, proposing ' +
+      'Periodically reviews your library for missed structure, connections, and stale topics, proposing ' +
       'improvements. Additive, high-confidence changes apply automatically; anything risky is sent to Reviews.',
     production: true,
     facing: 'internal', // JOBS-16: Reflect operates on the KB itself — no external egress

@@ -106,7 +106,7 @@ export async function loadGraphWithWarming<T>(
  * static header (not user data), so it is intentionally not escaped — same contract as {@link renderLoadError}.
  */
 export function renderWarming(container: HTMLElement, headerHtml: string, onRetry: () => void): void {
-  container.innerHTML = `<div class="card">${headerHtml}<p class="load-warming viz-body">Still preparing your knowledge graph — this can take a moment the first time on a large vault. <button type="button" class="btn load-retry">Retry</button></p></div>`;
+  container.innerHTML = `<div class="card">${headerHtml}<p class="load-warming viz-body">Still preparing your knowledge graph — this can take a moment the first time on a large library. <button type="button" class="btn load-retry">Retry</button></p></div>`;
   container.querySelector<HTMLButtonElement>('.load-retry')?.addEventListener('click', () => onRetry());
 }
 

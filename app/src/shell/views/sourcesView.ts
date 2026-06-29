@@ -45,7 +45,7 @@ function watchOutcomeLabel(kind: string): string {
 // UX v2 (SPEC-0058): Spectral head (viz-voice), sentence-case copy. The `src-v2` marker scopes every
 // material/voice override to Sources only — the shared `rdesk-*` manage-view language (also rendered by
 // Researchers inside the Agents hub) is NOT restyled globally, so this can't bleed into another surface.
-const HEADER = `<h1 class="rdesk-title src-title viz-voice">Connectors</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
+const HEADER = `<h1 class="rdesk-title src-title viz-voice">Connectors</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your library.</p>`;
 
 export async function mountSources(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="rdesk viz-surface src-v2">${HEADER}<p class="viz-body">Loading…</p></div>`;
@@ -340,7 +340,7 @@ function wire(container: HTMLElement, connectors: IntakeConnectorView[]): void {
     const removeConfirmGo = li.querySelector<HTMLButtonElement>('.intake-remove-confirm-go')!;
     const removeConfirmCancel = li.querySelector<HTMLButtonElement>('.intake-remove-confirm-cancel')!;
     removeBtn.addEventListener('click', () => {
-      removeConfirmMsg.textContent = `Remove “${current.label}”? Its configuration is forgotten and it stops pulling. Items already brought in — and its activity trail — stay in your KB.`;
+      removeConfirmMsg.textContent = `Remove “${current.label}”? Its configuration is forgotten and it stops pulling. Items already brought in — and its activity trail — stay in your library.`;
       removeConfirm.hidden = false;
     });
     removeConfirmGo.addEventListener('click', async () => {
@@ -443,7 +443,7 @@ function watchAddDock(): string {
       <div class="rdesk-tiles" role="group" aria-label="Add a watched folder">
         <button type="button" class="rdesk-tile watch-add-pick viz-no-chrome viz-focusable"><span class="rdesk-tile-glyph">${typeMark('folder')}</span><span class="rdesk-tile-label">Choose a folder…</span></button>
       </div>
-      <p class="watch-add-hint rdesk-add-hint viz-body">A watched folder <strong>drains like an inbox</strong> — after each file is brought in, the original moves to “.kb-processed/” inside the folder (a copy is kept in your KB first; files are never deleted), so the folder empties. Switch any folder to <em>leave originals in place</em> to keep the source untouched.</p>
+      <p class="watch-add-hint rdesk-add-hint viz-body">A watched folder <strong>drains like an inbox</strong> — after each file is brought in, the original moves to “.kb-processed/” inside the folder (a copy is kept in your library first; files are never deleted), so the folder empties. Switch any folder to <em>leave originals in place</em> to keep the source untouched.</p>
       <p class="watch-add-status rdesk-add-status viz-body" role="status" aria-live="polite"></p>
     </div>`;
 }
@@ -476,7 +476,7 @@ function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
       const result = await window.kbApi.setWatchFolder({ id, folderPath, enabled: false });
       if (!result.some((w) => w.id === id)) {
         // Loop-guard refused (e.g. a folder inside your KB) — surfaced, never silently dropped.
-        addStatus.textContent = `Couldn’t watch that folder — it can’t be inside your knowledge base (it would re-ingest itself).`;
+        addStatus.textContent = `Couldn’t watch that folder — it can’t be inside your library (it would re-ingest itself).`;
         return;
       }
       await render(container);
@@ -556,7 +556,7 @@ function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
     consumeEl?.addEventListener('click', () => {
       if (current.leaveOriginals) {
         // currently copy → turning "leave originals" OFF starts draining (moves future originals) → confirm.
-        consumeConfirmMsg.textContent = `Start draining “${current.folderPath}”? After each file is imported its original moves into “.kb-processed” inside the folder (a copy is kept in your KB first — files are never deleted), so the folder empties like an inbox.`;
+        consumeConfirmMsg.textContent = `Start draining “${current.folderPath}”? After each file is imported its original moves into “.kb-processed” inside the folder (a copy is kept in your library first — files are never deleted), so the folder empties like an inbox.`;
         consumeConfirm.hidden = false;
       } else {
         // currently draining → turning "leave originals" ON stops moving files (folder untouched) → safe, direct.
@@ -573,7 +573,7 @@ function wireWatch(container: HTMLElement, folders: WatchFolderView[]): void {
 
     // Remove — confirm (it stops watching + forgets the folder; the already-ingested sources stay).
     removeBtn.addEventListener('click', () => {
-      confirmMsg.textContent = `Stop watching “${current.folderPath}”? Files already brought in stay in your KB.`;
+      confirmMsg.textContent = `Stop watching “${current.folderPath}”? Files already brought in stay in your library.`;
       confirm.hidden = false;
     });
     confirmGo.addEventListener('click', async () => {

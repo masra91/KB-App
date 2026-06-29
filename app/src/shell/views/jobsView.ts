@@ -21,7 +21,7 @@ const POSTURE_LABEL: Record<string, string> = { guarded: 'Guarded', autonomous: 
 
 // Mounted as the **Schedules** section (nested under Librarians) of the Agents hub (SPEC-0053 WS-E):
 // the hub owns the "Schedules" group header/naming, so this section drops its own page-title h1.
-const HEADER = `<p class="job-sub viz-body">Recurring background tasks that keep your KB healthy. Changes apply without a restart.</p>`;
+const HEADER = `<p class="job-sub viz-body">Recurring background tasks that keep your library healthy. Changes apply without a restart.</p>`;
 
 export async function mountJobs(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="jobs-view viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;
@@ -41,7 +41,7 @@ async function render(container: HTMLElement): Promise<void> {
     const jobs = await withTimeout(window.kbApi.listJobs());
 
     if (jobs.length === 0) {
-      container.innerHTML = `<div class="jobs-view viz-surface">${HEADER}<p class="job-empty viz-body">No jobs available — open a Knowledge Base to manage its jobs.</p></div>`;
+      container.innerHTML = `<div class="jobs-view viz-surface">${HEADER}<p class="job-empty viz-body">No jobs available — open a library to manage its jobs.</p></div>`;
       return;
     }
 

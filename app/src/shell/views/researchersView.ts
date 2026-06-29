@@ -52,7 +52,7 @@ const templateDesc = (t: ResearcherView['template']): string => TEMPLATE_BY_KEY.
 
 // Mounted as the **Researchers** section of the Agents hub (SPEC-0053 WS-E): the hub owns the group
 // header/naming, so this section drops its own page-title h1 and renders the field desk directly.
-const HEADER = `<p class="rdesk-sub viz-body">Agents you brief and dispatch outside your KB — they bring back cited sources. Clearance shows how far each one's data can travel.</p>`;
+const HEADER = `<p class="rdesk-sub viz-body">Agents you brief and dispatch outside your library — they bring back cited sources. Clearance shows how far each one's data can travel.</p>`;
 
 export async function mountResearchers(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="rdesk viz-surface">${HEADER}<p class="viz-body">Loading…</p></div>`;
@@ -427,7 +427,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
         const patch: ResearcherConfigPatch = { id, egressTier };
         if (isRiskyResearcherChange(asConfig(current), patch)) {
           askConfirm(
-            `Widen where “${current.label}” can send data to ${EGRESS_TIER_LABELS[egressTier]}? More of your KB can leave to a less-trusted destination.`,
+            `Widen where “${current.label}” can send data to ${EGRESS_TIER_LABELS[egressTier]}? More of your library can leave to a less-trusted destination.`,
             () => apply(patch),
             () => {},
           );
@@ -515,7 +515,7 @@ function wire(container: HTMLElement, researchers: ResearcherView[]): void {
     // — only the config/registration is removed.
     removeBtn.addEventListener('click', () => {
       askConfirm(
-        `Retire “${current.label}”? Its configuration is removed and it stops running. Sources it already brought in — and its full activity trail — stay in your KB.`,
+        `Retire “${current.label}”? Its configuration is removed and it stops running. Sources it already brought in — and its full activity trail — stay in your library.`,
         async () => {
           status.textContent = 'Retiring…';
           try {

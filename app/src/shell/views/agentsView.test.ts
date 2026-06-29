@@ -64,7 +64,7 @@ describe('Agents view (SPEC-0027 PANEL-3 · v3)', () => {
     setApi(vi.fn(async () => []));
     await mountAgents(root);
     await tick();
-    expect(root.textContent).toContain('open a knowledge base');
+    expect(root.textContent).toContain('open a library');
   });
 
   // SPEC-0060 VUX-1 — the v3 card language: status-first state pill (running flies the LOOM mark, idle a

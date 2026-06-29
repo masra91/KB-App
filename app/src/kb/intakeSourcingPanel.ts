@@ -26,7 +26,7 @@ export interface IntakeConnectorCatalogEntry {
 }
 
 export const INTAKE_CONNECTOR_CATALOG: IntakeConnectorCatalogEntry[] = [
-  { type: 'rss', label: 'RSS / Atom feed', description: 'Pull new items from a public RSS/Atom feed into your KB on a schedule.' },
+  { type: 'rss', label: 'RSS / Atom feed', description: 'Pull new items from a public RSS/Atom feed into your library on a schedule.' },
   { type: 'm365-mail', label: 'Microsoft 365 mail', description: 'Pull new mail from your M365 mailbox (your tenant, read-only). Live wiring is env-gated.' },
 ];
 

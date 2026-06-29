@@ -284,7 +284,7 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
 
   it('a failed capture keeps the sheet open (no silent loss) and shows the reason', async () => {
     vi.useFakeTimers();
-    setApi({ capture: { ok: false, ids: [], captureBatch: null, committed: false, message: 'No active knowledge base.' } });
+    setApi({ capture: { ok: false, ids: [], captureBatch: null, committed: false, message: 'No active library.' } });
     mountQuickCaptureSheet(root);
     const ta = root.querySelector('#qcapText') as HTMLTextAreaElement;
     ta.value = 'keep me';
@@ -292,7 +292,7 @@ describe('QuickCapture sheet (SPEC-0038)', () => {
     await flush();
     const noteText = root.querySelector('#qcapNote')!.textContent ?? '';
     expect(noteText).toContain("couldn't save"); // held oxide notice with ⏎ retry
-    expect(noteText).toContain('No active knowledge base.'); // the reason is still surfaced
+    expect(noteText).toContain('No active library.'); // the reason is still surfaced
     expect(root.querySelector('.qcap-field')!.classList.contains('is-error')).toBe(true);
     vi.advanceTimersByTime(QCAP_CONFIRM_MS * 2);
     expect(api().quickCaptureClose as unknown as Mock).not.toHaveBeenCalled(); // sheet stays so the thought survives

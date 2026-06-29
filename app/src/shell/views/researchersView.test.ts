@@ -551,7 +551,7 @@ describe('Field Desk — lifecycle delete / Retire (PANEL-11)', () => {
     expect(confirm.hidden).toBe(false);
     // Destructive → the frame goes oxide to match the danger go-button (DL ConfirmInline coherence).
     expect(confirm.classList.contains('viz-confirm--danger')).toBe(true);
-    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/Retire .*stay in your KB/i);
+    expect(c.querySelector('.researcher-confirm-msg')?.textContent).toMatch(/Retire .*stay in your library/i);
     expect(removeResearcher).not.toHaveBeenCalled(); // gated — not purged yet
     c.querySelector<HTMLButtonElement>('.researcher-confirm-go')!.click();
     await flush();

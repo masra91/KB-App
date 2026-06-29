@@ -214,7 +214,7 @@ function setEffort(container: HTMLElement, next: Effort): void {
 }
 
 const CITE_ERRORS: Record<string, string> = {
-  'no-vault': 'No active knowledge base.',
+  'no-vault': 'No active library.',
   'invalid-ref': 'That citation could not be opened.',
   'open-failed': 'Could not open Obsidian — is it installed?',
 };
@@ -556,7 +556,7 @@ function renderSaveRow(t: Turn, index: number): string {
     return `<div class="ask-save-row is-saved">✓ Saved to your library — <code>${esc(t.savedRel)}</code></div>`;
   }
   const err = t.saveError ? `<span class="ask-save-status error"> ${esc(t.saveError)}</span>` : '';
-  return `<div class="ask-save-row"><button type="button" class="ask-save" data-turn="${index}"><span aria-hidden="true">⤓</span> Save to KB</button>${err}</div>`;
+  return `<div class="ask-save-row"><button type="button" class="ask-save" data-turn="${index}"><span aria-hidden="true">⤓</span> Save to Library</button>${err}</div>`;
 }
 
 /** The calm in-flight state (VUX: never a blank async gap) — a status line + a shimmer skeleton. */

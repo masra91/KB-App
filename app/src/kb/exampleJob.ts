@@ -23,7 +23,7 @@ export const exampleJobBehavior: JobBehavior = async (ctx): Promise<JobPassResul
   if (lastCount === count) {
     return { inspected, findings: [], cursor: { entityCount: count } };
   }
-  const content = `---\ngenerated: example-job\nentityCount: ${count}\n---\n\n# Entity census\n\n${count} canonical entit${count === 1 ? 'y' : 'ies'} in the KB.\n`;
+  const content = `---\ngenerated: example-job\nentityCount: ${count}\n---\n\n# Entity census\n\n${count} canonical entit${count === 1 ? 'y' : 'ies'} in your library.\n`;
   return {
     inspected,
     findings: [

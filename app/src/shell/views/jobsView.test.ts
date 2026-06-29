@@ -14,7 +14,7 @@ function job(over: Partial<JobView> & Pick<JobView, 'id'>): JobView {
   return {
     type: over.id,
     label: 'Reflect',
-    description: 'reviews your KB',
+    description: 'reviews your library',
     production: true,
     registered: false,
     enabled: false,
@@ -97,7 +97,7 @@ describe('Jobs view (SPEC-0027 PANEL-2/7)', () => {
   it('shows a friendly empty state when there are no jobs (PANEL-9)', async () => {
     setApi({ listJobs: vi.fn(async () => []), setJobConfig: vi.fn(), runJobNow: vi.fn() });
     await mountJobs(root);
-    expect(root.textContent).toContain('open a Knowledge Base');
+    expect(root.textContent).toContain('open a library');
   });
 
   it('enabling a job is risky: confirms first, then persists on confirm (PANEL-7)', async () => {
