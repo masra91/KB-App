@@ -926,13 +926,30 @@ button:disabled {
 .hrow .ht span { font-size: 0.74rem; color: var(--stone); }
 .hrow .hn { font-family: var(--mono); font-size: 0.95rem; color: var(--ink); }
 .health-row-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.15rem; }
-.health-open { display: flex; align-items: baseline; gap: 0.55rem; width: 100%; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
+/* VUX-16: a finding row is the click-through (primary) + a secondary action zone (relink/find-homes +
+   dismiss). The click-through grows; the actions sit at the end, quiet until the row is hovered/focused. */
+.health-row { display: flex; align-items: center; gap: 0.4rem; }
+.health-open { display: flex; align-items: baseline; gap: 0.55rem; flex: 1; min-width: 0; text-align: left; padding: 0.3rem 0.4rem; cursor: pointer; border-left: 2px solid transparent; }
 .health-open:hover { border-left-color: var(--slate); background: var(--hover); } /* interactive hover → --slate (ember reserved for "decide") */
 .health-finding-name { color: var(--ink); } /* name stays ink — never the severity hue (#184) */
 .health-open:hover .health-finding-name { color: var(--slate); }
 .health-untitled { color: var(--stone); font-style: italic; }
 .health-kind { color: var(--stone); }
 .health-defect { color: var(--stone); font-size: 0.74rem; margin-left: auto; } /* the specific defect, muted */
+/* The secondary action zone (VUX-16). MAINTENANCE actions, not decisions → NO ember (DL-1): apply = slate
+   interactive, dismiss = faint→oxide, working = loom (sprout), error = inline oxide. Low-emphasis at rest,
+   full on row hover/focus-within so the click-through stays the primary affordance. */
+.health-actions { flex: none; display: flex; align-items: center; gap: 0.35rem; opacity: 0.6; transition: opacity var(--t); }
+.health-row:hover .health-actions, .health-row:focus-within .health-actions { opacity: 1; }
+.health-act { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.74rem; color: var(--slate); background: none; border: 0.5px solid var(--hair); border-radius: var(--r-chip); padding: 0.15rem 0.5rem; cursor: pointer; white-space: nowrap; }
+.health-act:hover { background: color-mix(in srgb, var(--slate) 10%, transparent); border-color: var(--slate); }
+.health-act:disabled { opacity: 0.5; cursor: default; }
+.health-act-gl { font-size: 0.85em; line-height: 1; }
+.health-dismiss { color: var(--faint); background: none; border: none; border-radius: var(--r-chip); padding: 0.1rem 0.35rem; font-size: 0.85rem; line-height: 1; cursor: pointer; }
+.health-dismiss:hover { color: var(--oxide); background: color-mix(in srgb, var(--oxide) 8%, transparent); }
+.health-dismiss:disabled { opacity: 0.5; cursor: default; }
+.health-row-status { font-size: 0.72rem; color: var(--stone); display: inline-flex; align-items: center; gap: 0.3rem; }
+.health-row-error { color: var(--oxide); }
 .health-more { margin: 0.4rem 0 0; font-size: 0.78rem; color: var(--stone); font-style: italic; }
 .health-footnote { margin: 0.8rem 0 0; font-size: 0.76rem; color: var(--stone); font-style: italic; max-width: 64ch; }
 

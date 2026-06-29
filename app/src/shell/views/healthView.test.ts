@@ -31,12 +31,16 @@ const proj = (over: Partial<HealthReport> = {}): HealthProjection => toHealthPro
 let healthReport: ReturnType<typeof vi.fn>;
 let openCitation: ReturnType<typeof vi.fn>;
 let reportRendererError: ReturnType<typeof vi.fn>;
+let healthRemediate: ReturnType<typeof vi.fn>;
+let dismissHealthFinding: ReturnType<typeof vi.fn>;
 
 function setApi(): void {
   (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
     healthReport: healthReport as unknown as KbApi['healthReport'],
     openCitation: openCitation as unknown as KbApi['openCitation'],
     reportRendererError: reportRendererError as unknown as KbApi['reportRendererError'],
+    healthRemediate: healthRemediate as unknown as KbApi['healthRemediate'],
+    dismissHealthFinding: dismissHealthFinding as unknown as KbApi['dismissHealthFinding'],
   };
 }
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -45,6 +49,8 @@ beforeEach(() => {
   healthReport = vi.fn(async () => proj());
   openCitation = vi.fn(async () => ({ ok: true as const }));
   reportRendererError = vi.fn(async () => {});
+  healthRemediate = vi.fn(async () => ({ ok: true, message: 'done', changed: true }));
+  dismissHealthFinding = vi.fn(async () => ({ ok: true, message: 'Dismissed.' }));
   setApi();
 });
 afterEach(() => {
@@ -207,6 +213,70 @@ describe('Health view — projection-backed glance (HEALTH-8, SPEC-0058 STATE-13
   });
 });
 
+// SPEC-0060 VUX-16 — the per-finding remediation affordances (relink / find-homes / dismiss) wired to the
+// merged backend IPCs. The finding→action mapping (dangling→relink, orphan→find-homes, thin→dismiss-only),
+// the apply→re-scan payoff, the immediate dismiss, and the calm working/error states.
+describe('Health view — VUX-16 remediation affordances', () => {
+  const rowFor = (c: HTMLElement, name: string): HTMLElement =>
+    Array.from(c.querySelectorAll<HTMLElement>('.health-row')).find((r) => r.querySelector('.health-finding-name')?.textContent === name)!;
+
+  it('maps finding → action: dangling=Relink, orphan=Find homes, thin=dismiss-only — and dismiss on all', async () => {
+    const c = await mount();
+    const dangling = rowFor(c, 'Ada Lovelace');
+    const orphan = rowFor(c, 'Lonely');
+    const thin = rowFor(c, 'Stub');
+    expect(dangling.querySelector('.health-act--relink')).toBeTruthy();
+    expect(dangling.querySelector('.health-act--find-homes')).toBeFalsy();
+    expect(orphan.querySelector('.health-act--find-homes')).toBeTruthy();
+    expect(thin.querySelector('.health-act')).toBeFalsy(); // thin = NO apply action (enrich held — no dead button)
+    // dismiss ✕ on every finding
+    for (const r of [dangling, orphan, thin]) expect(r.querySelector('.health-dismiss')).toBeTruthy();
+    // no ember anywhere on the maintenance affordances (DL-1)
+    expect(c.querySelector('.health-actions [class*="ember"]')).toBeNull();
+  });
+
+  it('Relink calls healthRemediate with the SOURCE node, then re-scans on ok (the finding resolves away)', async () => {
+    const c = await mount();
+    rowFor(c, 'Ada Lovelace').querySelector<HTMLButtonElement>('.health-act--relink')!.click();
+    expect(healthRemediate).toHaveBeenCalledWith({ action: 'relink', nodeRel: 'entities/person/ada.md' });
+    await flush();
+    expect(healthReport.mock.calls.length).toBeGreaterThanOrEqual(2); // re-scan after the apply
+  });
+
+  it('Find homes calls healthRemediate find-homes with the orphan node', async () => {
+    const c = await mount();
+    rowFor(c, 'Lonely').querySelector<HTMLButtonElement>('.health-act--find-homes')!.click();
+    expect(healthRemediate).toHaveBeenCalledWith({ action: 'find-homes', nodeRel: 'entities/x/lonely.md' });
+  });
+
+  it('Dismiss calls dismissHealthFinding with the content-stable key + kind, then re-scans (immediate, no confirm)', async () => {
+    const c = await mount();
+    rowFor(c, 'Lonely').querySelector<HTMLButtonElement>('.health-dismiss')!.click();
+    expect(dismissHealthFinding).toHaveBeenCalledWith({ findingKey: 'orphan:concept|lonely', kind: 'orphan' });
+    await flush();
+    expect(healthReport.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a failed apply shows a calm inline (oxide) error on the row, re-enabled (retryable) — no re-scan', async () => {
+    healthRemediate = vi.fn(async () => ({ ok: false, message: 'Couldn’t reach the vault.' }));
+    setApi();
+    const c = await mount();
+    const row = rowFor(c, 'Ada Lovelace');
+    row.querySelector<HTMLButtonElement>('.health-act--relink')!.click();
+    await flush();
+    expect(row.querySelector('.health-row-error')?.textContent).toContain('Couldn’t reach the vault.');
+    expect(row.querySelector<HTMLButtonElement>('.health-act--relink')!.disabled).toBe(false); // re-enabled
+    expect(healthReport.mock.calls.length).toBe(1); // NOT re-scanned on failure
+  });
+
+  it('the footnote is honest — names the WIRED actions, not merge/enrich', async () => {
+    const c = await mount();
+    const fn = c.querySelector('.health-footnote')?.textContent ?? '';
+    expect(fn).toMatch(/dismiss/i);
+    expect(fn).not.toMatch(/read-only/i); // the old passive copy is gone
+  });
+});
+
 // SPEC-0060 VUX-1 — the Health CSS block is migrated OFF the instrument-panel `--viz-*` tokens onto the
 // v3 warm-vellum set (consumed from design-system.css, never redefined here). Fails-before: the pre-v3
 // block referenced `var(--viz-ink)` / `var(--viz-rule)` / `var(--viz-brass)` etc. — this guard keeps the
@@ -243,12 +313,14 @@ describe('Health v3 token migration (SPEC-0060 VUX-1)', () => {
   });
 
   it('tokenizes hover washes (themeCohesion §: no hardcoded :hover background)', () => {
-    // Both interactive hovers (.hrow, .health-open) must use the v3 --hover wash, never a literal color.
+    // Every interactive hover background must be TOKENIZED — either the generic `--hover` wash, or a
+    // tokenized `color-mix(var(--…))` tint (VUX-16's slate/oxide action washes, DL-1) — never a literal.
     const hovers = declarations.match(/:hover\s*\{[^}]*\}/g) ?? [];
     expect(hovers.length).toBeGreaterThan(0);
     for (const h of hovers) {
-      if (h.includes('background')) expect(h).toContain('var(--hover)');
+      if (h.includes('background')) expect(h).toMatch(/var\(--/); // tokenized (var(--hover) or color-mix(var(--…)))
       expect(h).not.toMatch(/#[0-9a-fA-F]{3,6}/); // no hex literal in a hover rule
+      expect(h).not.toMatch(/rgba?\(\s*\d/); // no literal rgb(a) channel in a hover rule
     }
   });
 });

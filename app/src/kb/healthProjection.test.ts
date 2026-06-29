@@ -37,6 +37,17 @@ describe('toHealthProjection', () => {
     expect(p.dimensions.every((d) => d.desc.length > 0)).toBe(true);
   });
 
+  it('VUX-16: every finding carries its content-stable dismiss key (the view never re-derives it)', () => {
+    const p = toHealthProjection(report(), ISO);
+    const keyOf = (dim: string): string => p.dimensions.find((d) => d.key === dim)!.findings[0].key;
+    // class is singular ('orphan'), derived from the entity kind|name (NOT a ULID) → replay-stable.
+    expect(keyOf('orphans')).toBe('orphan:concept|a');
+    expect(keyOf('thin')).toBe('thin:person|b');
+    expect(keyOf('dangling')).toBe('dangling:c→entities/ghost/z.md');
+    // the render fields are all preserved alongside the added key (additive).
+    expect(p.dimensions.find((d) => d.key === 'orphans')!.findings[0]).toMatchObject({ name: 'A', rel: 'entities/x/a.md' });
+  });
+
   it('overall = attention when there are issues, ok when none', () => {
     expect(toHealthProjection(report(), ISO).overall).toBe('attention');
     expect(toHealthProjection(report(), ISO).totalIssues).toBe(3);

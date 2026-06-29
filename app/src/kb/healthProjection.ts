@@ -9,7 +9,8 @@
 // maintained graph projection, STATE-2) is posted, the report is derived from THAT instead — this transform
 // and the whole view contract are unchanged (the read-layer swaps underneath). Holding that seam avoids
 // colliding with the shared graph-projection work.
-import type { HealthReport, HealthFinding, DanglingLink } from './healthPanel';
+import { healthFindingKey } from './healthPanel';
+import type { HealthReport, HealthFinding, DanglingLink, HealthFindingClass } from './healthPanel';
 
 /** Whether the maintained projection is live, still indexing, or genuinely unavailable (STATE-9). `warming`
  *  renders a calm "still preparing…" (never the scary "app busy"); `unavailable` is the honest error face. */
@@ -27,6 +28,12 @@ export type HealthDimensionKey = 'dangling' | 'orphans' | 'thin';
  *  a malformed one to "(untitled)" per-item (ENG-15/16) — findings are PASSED THROUGH, never dropped here. */
 export type HealthDimensionFinding = HealthFinding | DanglingLink;
 
+/** A projected finding carries its content-stable `key` (SPEC-0060 VUX-16) so the Health view can DISMISS
+ *  it without re-deriving the key — re-deriving in the renderer would risk drifting from the backend's
+ *  `blockKey` normalize, making a dismiss silently no-op. The view passes this `key` straight to
+ *  `kb:dismissHealthFinding`. ADDITIVE over the union (every render field is preserved). */
+export type ProjectedHealthFinding = HealthDimensionFinding & { key: string };
+
 /** One row of the health glance: a labelled dimension with its severity tile, count, and (capped) findings. */
 export interface HealthDimension {
   key: HealthDimensionKey;
@@ -38,8 +45,9 @@ export interface HealthDimension {
   severity: HealthSeverity;
   /** The FULL count (the `findings` list may be capped by healthPanel's FINDING_CAP). */
   count: number;
-  /** The (capped) findings to render; `[]` when count is 0. Malformed entries pass through (ENG-15/16). */
-  findings: HealthDimensionFinding[];
+  /** The (capped) findings to render, each carrying its dismiss `key`; `[]` when count is 0. Malformed
+   *  entries pass through (ENG-15/16). */
+  findings: ProjectedHealthFinding[];
 }
 
 /** The maintained Health projection — the single shape the Health view renders (DL-2's render contract). */
@@ -79,8 +87,13 @@ export function dimensionSeverity(key: HealthDimensionKey, count: number): Healt
  * `warming`/`unavailable` envelopes are produced by {@link warmingHealthProjection}/{@link unavailableHealthProjection}.
  */
 export function toHealthProjection(report: HealthReport, generatedAt: string): HealthProjection {
-  const findingsFor = (key: HealthDimensionKey): HealthDimensionFinding[] =>
-    key === 'dangling' ? report.dangling : key === 'orphans' ? report.orphans : report.thin;
+  // The dimension key → the finding CLASS healthFindingKey expects (singular 'orphan', not 'orphans').
+  const CLASS_FOR: Record<HealthDimensionKey, HealthFindingClass> = { dangling: 'dangling', orphans: 'orphan', thin: 'thin' };
+  const findingsFor = (key: HealthDimensionKey): ProjectedHealthFinding[] => {
+    const raw: HealthDimensionFinding[] = key === 'dangling' ? report.dangling : key === 'orphans' ? report.orphans : report.thin;
+    const cls = CLASS_FOR[key];
+    return raw.map((f) => ({ ...f, key: healthFindingKey(cls, f) }));
+  };
   const dimensions: HealthDimension[] = DIMENSION_META.map((m) => {
     const count = report.counts[m.key];
     return { key: m.key, label: m.label, desc: m.desc, severity: dimensionSeverity(m.key, count), count, findings: findingsFor(m.key) };
