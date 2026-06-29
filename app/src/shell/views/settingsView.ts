@@ -11,6 +11,7 @@
 import { esc } from '../html';
 import { withTimeout, renderLoadError } from '../loadGuard';
 import { mountAboutPanel } from '../aboutPanel';
+import { mountWatchedFolders } from './watchedFolders';
 import { readStoredTheme, setTheme, type Theme } from '../theme';
 import type { InstanceSettings, QuiesceStatus } from '../../kb/types';
 // SPEC-0048 SCALE Settings (Scale card). Imported from the PURE `scaleConstants` (no node import) so
@@ -211,6 +212,11 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
         <p id="recall-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>
       <div class="card">
+        <h2>Watched folders</h2>
+        <p class="settings-note">Folders Vellum watches — files dropped in are kept verbatim as sources. A watched folder drains like an inbox unless you set it to leave originals in place.</p>
+        <div id="settings-watched"></div>
+      </div>
+      <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="settings-note">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
         <button id="replay-btn" type="button" class="viz-btn viz-btn--danger viz-focusable"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild Library…</button>
@@ -240,6 +246,10 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
     wireRecall(container, settings);
     wireReplay(container);
     void wireQuiesce(container);
+    // SPEC-0060 IA: the Watched-folders section (moved here from Connectors) mounts itself into its
+    // card container + owns its own re-render, so a folder change repaints just that section.
+    const watchedEl = container.querySelector<HTMLElement>('#settings-watched');
+    if (watchedEl) void mountWatchedFolders(watchedEl);
   } catch {
     // #145: failed/timed-out load → a retryable error, never an infinite spinner.
     renderLoadError(container, '<h1 class="settings-title viz-voice">Settings</h1>', () => void mountSettings(container));
