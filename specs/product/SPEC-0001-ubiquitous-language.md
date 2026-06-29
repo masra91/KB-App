@@ -16,6 +16,11 @@ supersedes: null
 > The canonical vocabulary of the Knowledge Base. These words mean exactly one
 > thing across every spec, agent prompt, UI string, and line of code. When we
 > disagree about a word, we change it *here* first.
+>
+> **User-facing display name:** internally the concept is the *Knowledge Base*; in the **UI it is
+> always the "Library"** (Vellum is the product; the Library is what it tends) — the acronym **"KB"
+> is banned from every user-facing string**. See `specs/design/terminology.md` §0 for the display
+> law and scrub sites.
 
 ## 1. Intent (the why / JTBD)
 

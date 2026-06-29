@@ -6,8 +6,8 @@ type: design
 status: draft   # Principal-requested root-cause fix for Connect/Linking-type drift; SPEC-0033 gates pending
 owners: [KB-Design-Lead, KB-Lead, Principal]
 created: 2026-06-13
-updated: 2026-06-13
-related: [SPEC-0033, SPEC-0032, SPEC-0048, SPEC-0020, SPEC-0017]
+updated: 2026-06-28
+related: [SPEC-0033, SPEC-0032, SPEC-0048, SPEC-0020, SPEC-0017, SPEC-0050, SPEC-0060]
 gates:
   ai-patterns: pending      # GATE 1 — KB-AI-Detector (distinctiveness)
   boundaries: pending       # GATE 2 — KB-QD / KB-QD-2
@@ -30,6 +30,33 @@ canonical lowercase, per the `stageLabels.ts` guardrail).
 term below, or add one here first via KB-Design-Lead through the design gate. A PR that introduces
 a synonym for an existing concept is a gate reject — same class as an unstyled primitive or a
 miscoloured state hue.
+
+---
+
+## 0. The product & the Library (Principal-ratified 2026-06-28)
+
+The collection the user builds and owns is their **Library** (instance noun: *your library*).
+**Vellum** is the product/app; the **Library** is what it tends — and the inward agents are
+**Librarians**, so the word is coherent, warm, and already live (Today: "Your library is quiet and
+current"; Health). The acronym **"KB" is BANNED from every user-facing string** — it is internal
+jargon and reads as unfinished. Use **Library** in all running UI. The spelled-out **"knowledge
+base"** (never "KB") is allowed ONLY as a one-time formal gloss in first-run / help prose. This is
+display-layer only: code ids, audit actors, the git repo, wikilinks, and agent codenames keep their
+internal names.
+
+| Canonical | Means | Do NOT say |
+|---|---|---|
+| **Library** | The user's instance — everything Vellum has ingested, connected, and composed for them | **"KB"**, "the KB", "your KB", "vault" (UI; it's the Obsidian/code word), "database", and "knowledge base" in *running* UI (formal one-time gloss only) |
+| **Vellum** | The product / app itself | "the app", "the tool", "the system" (in UI chrome) |
+
+**Scrub sites (executor task — change the string AND its asserting test in the same PR):**
+- `shell/html.ts` `'My KB'` → **`'My Library'`** (default Library name) + `html.test.ts`, `setupFlow.test.ts`, `settingsView.test.ts`.
+- `shell/setupFlow.ts` "…your KB will use the default" → "your library"; "empty, pristine KB" → "empty, pristine library".
+- `shell/views/askView.ts` "⚠ not grounded in the KB" → "⚠ not grounded in your library".
+- `shell/views/settingsView.ts` "rebuild this KB" → "rebuild your library"; "Scale to KB size" → **"Scale to library size"** (matches §2 Search-depth Auto label).
+- `shell/views/jobsView.ts` "reviews your KB" → "reviews your library".
+- Prototype `design-prototypes/vellum-v3.html`: "Save to KB" → **"Save to Library"**; Settings card "Knowledge base" → **"Library"**.
+- Sweep the rest: `grep -rn "\bKB\b" app/src/shell` and fix every user-facing hit (skip code ids, `KB-*` agent codenames, file paths).
 
 ---
 
@@ -69,7 +96,7 @@ the **stage is Connect; its output is links**. "Linking" as a stage name is reti
 | **Ceiling** | Total concurrency across all stages (`copilotCeiling`); Auto (cores-derived) or Manual | "Max", "Limit", "Parallelism" |
 | **Cap** | Per-stage concurrency (Decompose/Claims/Connect/Compose/Archive) | "Stage limit", "Slots" (in prose) |
 | **Answer time** | How long recall may work before it returns its best grounded answer so far (`recallBudgetMs`; edited in whole minutes at the UI boundary) | "Timeout", "Budget", "Max time" |
-| **Search depth** | How far recall traverses entities/claims/links to gather evidence; Auto ("Scale to KB size") or Manual — same grammar as the Ceiling toggle | "Recall budget", "Max tool calls", "Limit" |
+| **Search depth** | How far recall traverses entities/claims/links to gather evidence; Auto ("Scale to library size") or Manual — same grammar as the Ceiling toggle | "Recall budget", "Max tool calls", "Limit" |
 | **Search steps** | The per-question retrieval step count set when Search depth is Manual (`recallMaxToolCalls`, 4–24) | "Tool calls", "Iterations", "Max" |
 | **Pending** | Work not yet finished at a stage = **queued** + **in-progress** (`pendingForStage`) | "Backlog", "Waiting" (ambiguous) |
 | **Queued** | Pending items not yet picked up (the slate segment) | "Waiting", "Pending" (that's the sum) |
@@ -117,8 +144,64 @@ Status markers are **monochrome glyphs, never coloured emoji** (standing voice r
 
 ---
 
+## 5. Surfaces — canonical view names (reconciled with SPEC-0060 v3)
+
+The name in the rail is the ONLY name a user reads for that surface.
+
+| Canonical | What it is | Do NOT say |
+|---|---|---|
+| **Today** | the home / daily overview | "Dashboard", "Home", "Overview" |
+| **Ask** | grounded recall conversation | "Search", "Chat", "Query" |
+| **Capture** | quick ingest | "Add", "New", "Inbox", "Import" |
+| **Reviews** | the needs-you decision queue | "Tasks", "Approvals", "Inbox" |
+| **Explore** | the entity graph | "Graph", "Map", "Browse" |
+| **Activity** | the run / audit feed | "Log", "History", "Feed" |
+| **Health** | structural lint + remediation | "Diagnostics", "Issues", "Lint" |
+| **Agents** | the Manage hub for the workers | "Bots", "Automations", "Workers" |
+| **Connectors** | incoming-material feeds (RSS / M365) | **"Sources"** (retired as a surface name — that's the *noun*, §7), "Feeds", "Integrations" |
+| **Settings** | global app preferences | "Preferences", "Config", "Options" |
+| **Guidance** | the directives surface (SPEC-0050) | "Rules", "Memory", "Instructions" |
+| **Manage** | the rail group: Agents / Connectors / Guidance / Settings | "Admin", "Config" |
+
+**Retired surfaces (do not reintroduce):** **Status** / **"The Line"** as a standalone view —
+*dissolved* per SPEC-0060 (a slim flow-strip on Today + diagnostics in Health). **Sources** as a
+*surface* name → **Connectors**. **Jobs** → folded under Agents as **Schedules**.
+
+---
+
+## 6. The workers — agent role names
+
+| Canonical | Means | Do NOT say |
+|---|---|---|
+| **Librarians** | the inward, built-in agents that read / connect / maintain your Library (pausable, not removable) | "bots", "workers", "pipeline agents", "jobs" |
+| **Researchers** | the outward, egress-gated agents you add that fetch outside corroboration | "crawlers", "scrapers", "web agents" |
+| **Schedules** | when recurring Librarian work runs | "Jobs", "Crons", "Tasks" |
+
+---
+
+## 7. Core nouns (the data model, user-facing) — cross-ref SPEC-0001 / SPEC-0007
+
+The display law (one word per concept in UI); precise definitions live in SPEC-0001 LANG.
+
+| Canonical | Means | Do NOT say |
+|---|---|---|
+| **Source** | a captured piece of evidence (immutable) | "note", "doc", "file", "entry" (a **Connector** is the *intake*; a **Source** is the *thing*) |
+| **Entity** | a person / concept / thing the Library knows about | "node", "page", "topic", "record" |
+| **Claim** | an atomic statement extracted from a Source | "fact", "statement", "snippet" |
+| **Connection** / **link** | a relationship Connect produces between entities | "edge", "relation" (in UI prose) |
+| **Output** | a composed, human-readable artifact (e.g. an entity page) | "doc", "report", "summary" |
+| **Guidance** (a directive) | a standing human instruction (SPEC-0050) | "rule", "setting", "preference" |
+
+---
+
 ## Changelog
 
+- **2026-06-28** — **§0 Library ruling (Principal-ratified):** the user's knowledge base is the
+  **Library**; **"KB" is banned from all user-facing strings** ("knowledge base" allowed only as a
+  formal first-run gloss). Listed the scrub sites. Folded in the v3 lexicon (SPEC-0060): **§5**
+  canonical surface names + retired surfaces (Status/The Line dissolved, Sources→Connectors,
+  Jobs→Schedules), **§6** worker roles (Librarians / Researchers / Schedules), **§7** core nouns.
+  Updated §2's "Scale to KB size" → "Scale to library size".
 - **2026-06-13** — Initial glossary (DESIGN-TERMS). Ratifies **Connect** (not "Linking") as the
   `connect` stage's user-facing name; codifies ceiling/cap/pending/queued/in-progress,
   effective-vs-configured, resolved-model/"runs as", needs-you-vs-error, and the throttling-is-
