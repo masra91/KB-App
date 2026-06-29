@@ -243,7 +243,7 @@ describe('Ask view (SPEC-0026 ASK-1/2/8 · v3)', () => {
   });
 });
 
-describe('Ask view · save-to-KB (SPEC-0026 ASK-6)', () => {
+describe('Ask view · save-to-library (SPEC-0026 ASK-6)', () => {
   let root: HTMLElement;
   beforeEach(() => {
     document.body.innerHTML = '<div id="r"></div>';
@@ -260,7 +260,7 @@ describe('Ask view · save-to-KB (SPEC-0026 ASK-6)', () => {
   }
   const saveBtn = (): HTMLButtonElement | null => root.querySelector('.ask-save');
 
-  it('offers "Save to KB" on an answered turn and persists it on click (ASK-6)', async () => {
+  it('offers "Save to Library" on an answered turn and persists it on click (ASK-6)', async () => {
     const save = vi.fn(async () => ({ ok: true, rel: 'outputs/recall/OUT1.md', message: 'Saved to outputs/recall/OUT1.md' }));
     setApi(vi.fn(async () => GROUNDED), save);
     mountAsk(root);
@@ -277,13 +277,13 @@ describe('Ask view · save-to-KB (SPEC-0026 ASK-6)', () => {
   });
 
   it('surfaces a save failure inline and keeps the button (retryable)', async () => {
-    const save = vi.fn(async () => ({ ok: false, message: 'No active knowledge base.' }));
+    const save = vi.fn(async () => ({ ok: false, message: 'No active library.' }));
     setApi(vi.fn(async () => GROUNDED), save);
     mountAsk(root);
     await askOnce();
     saveBtn()!.click();
     await tick();
-    expect(root.querySelector('.ask-save-status')?.textContent).toContain('No active knowledge base.');
+    expect(root.querySelector('.ask-save-status')?.textContent).toContain('No active library.');
     expect(saveBtn()).toBeTruthy(); // still offered
   });
 

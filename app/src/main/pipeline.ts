@@ -222,7 +222,7 @@ function startProducers(a: ActivePipeline): void {
 
 /** Enter QUIESCING (QUIESCE-1): pause new ingestion + scheduled work; the pipeline keeps draining. */
 export async function quiesceActive(): Promise<QuiesceStatus> {
-  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No knowledge base is open.' };
+  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No library is open.' };
   if (!active.quiescing) {
     active.quiescing = true;
     stopProducers(active);
@@ -233,7 +233,7 @@ export async function quiesceActive(): Promise<QuiesceStatus> {
 
 /** Leave QUIESCING (QUIESCE-5, reversible): un-pause — restart producers, resume normal running. */
 export async function resumeActive(): Promise<QuiesceStatus> {
-  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No knowledge base is open.' };
+  if (!active) return { quiescing: false, remaining: 0, safe: false, detail: 'No library is open.' };
   if (active.quiescing) {
     active.quiescing = false;
     startProducers(active);
@@ -931,7 +931,7 @@ export function refreshTodayProjection(): Promise<void> {
  */
 export async function pipelineControlForActive(req: PipelineControlRequest): Promise<PipelineControlResult> {
   const a = active;
-  if (!a) return { ok: false, message: 'No knowledge base open.' };
+  if (!a) return { ok: false, message: 'No library open.' };
   try {
     let targets: SetAsideTarget[];
     let doRetry: (handle: string) => Promise<void>;
@@ -990,7 +990,7 @@ export async function listActiveReviews(): Promise<Review[]> {
  */
 export async function answerActiveReview(id: string, answerInput: unknown): Promise<AnswerReviewResult> {
   const a = active;
-  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  if (!a) return { ok: false, message: 'No active library.' };
   const result = await answerReviewInVault(a.stagingWt, a.lock, id, answerInput);
   if (result.ok) {
     // SHELL-12 seam: re-read + push the queue so the next instant read (the renderer's reconcile poll
@@ -1010,7 +1010,7 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
  *  active vault — under the canonical-writer lock, promoted so the next Health scan shows the fix. */
 export async function remediateActiveHealthFinding(req: HealthRemediateRequest): Promise<HealthRemediateResult> {
   const a = active;
-  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  if (!a) return { ok: false, message: 'No active library.' };
   return remediateHealthFindingInVault(a.stagingWt, a.vaultPath, a.lock, req, a.log);
 }
 
@@ -1018,7 +1018,7 @@ export async function remediateActiveHealthFinding(req: HealthRemediateRequest):
  *  evergreen directive, promoted to `main` where the Health scan's dismiss filter reads it. */
 export async function dismissActiveHealthFinding(req: HealthDismissRequest): Promise<HealthDismissResult> {
   const a = active;
-  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  if (!a) return { ok: false, message: 'No active library.' };
   return dismissHealthFindingInVault(a.stagingWt, a.vaultPath, a.lock, req, new Date().toISOString(), a.log);
 }
 
@@ -1066,7 +1066,7 @@ async function runAnsweredReviewEffects(a: ActivePipeline, id: string): Promise<
  */
 export async function saveRecallOutput(result: AskResult): Promise<SaveRecallOutputResult> {
   const a = active;
-  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  if (!a) return { ok: false, message: 'No active library.' };
   if (typeof result?.answer !== 'string' || result.answer.trim().length === 0) {
     return { ok: false, message: 'Nothing to save — the answer is empty.' };
   }
@@ -2013,7 +2013,7 @@ let replaying = false;
  * A second concurrent replay is refused (REPLAY-12).
  */
 export async function fullReplay(): Promise<FullReplayResult> {
-  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  if (!active) return { ok: false, message: 'No active library.' };
   if (replaying) return { ok: false, message: 'A replay is already in progress.' };
   replaying = true;
   const { vaultPath, stagingWt, lock } = active;
@@ -2029,7 +2029,7 @@ export async function fullReplay(): Promise<FullReplayResult> {
       message:
         counts.sourcesReset > 0
           ? `Cleaning & rebuilding — reset ${counts.sourcesReset} source(s) for reprocessing.`
-          : 'Nothing to rebuild — the KB has no sources yet.',
+          : 'Nothing to rebuild — your library has no sources yet.',
     };
   } catch (err) {
     return { ok: false, message: err instanceof Error ? err.message : String(err) };
@@ -2054,7 +2054,7 @@ function composeCoverageMessage(stats: { total: number; composed: number; remain
  * the staging worktree (the compose source of truth) so it reflects work composed but not yet promoted.
  */
 export async function composeBacklogStatus(): Promise<ComposeBacklogResult> {
-  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  if (!active) return { ok: false, message: 'No active library.' };
   try {
     const stats = await composeBacklogStats(active.stagingWt);
     return { ok: true, ...stats, message: composeCoverageMessage(stats) };
@@ -2070,7 +2070,7 @@ export async function composeBacklogStatus(): Promise<ComposeBacklogResult> {
  * the CURRENT coverage immediately; the backfill then runs in the background.
  */
 export async function composeBacklog(): Promise<ComposeBacklogResult> {
-  if (!active) return { ok: false, message: 'No active knowledge base.' };
+  if (!active) return { ok: false, message: 'No active library.' };
   const { stagingWt, lock, compose } = active;
   try {
     const reopened = await reopenComposeSetAside(stagingWt, lock);

@@ -78,7 +78,7 @@ function paintSkeleton(container: HTMLElement): void {
   container.innerHTML = `
     <div class="${V2}" aria-busy="true">
       ${V2_HEAD}
-      <div class="rev-skel-status" aria-hidden="true"><span class="vmark loom"></span> Reading your vault…</div>
+      <div class="rev-skel-status" aria-hidden="true"><span class="vmark loom"></span> Reading your library…</div>
       <ul class="review-list rev-skeleton-list">${row}${row}</ul>
     </div>`;
 }

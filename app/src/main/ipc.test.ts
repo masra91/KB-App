@@ -341,7 +341,7 @@ describe('SPEC-0026 ASK — kb:ask grounded recall', () => {
   it('returns an honest ungrounded result when no KB is configured (recall not run)', async () => {
     const res = await invoke<{ grounded: boolean; answer: string }>('kb:ask', { question: 'Who?' });
     expect(res.grounded).toBe(false);
-    expect(res.answer).toContain('No active knowledge base');
+    expect(res.answer).toContain('No active library');
     expect(mocks.recall).not.toHaveBeenCalled();
   });
 

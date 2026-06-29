@@ -50,7 +50,7 @@ function renderSetup(): void {
     <div class="card">
       <h1>Set up your Knowledge Base</h1>
       <p class="muted">
-        Choose a folder to hold your KB. It becomes a git-versioned vault you can also
+        Choose a folder to hold your library. It becomes a git-versioned vault you can also
         open directly in Obsidian.
       </p>
       <button id="choose" class="primary">Choose folder…</button>
@@ -89,7 +89,7 @@ function renderDetails(): void {
     <label class="field">Name<input id="name" value="${esc(baseName(ins.path))}" /></label>
     <label class="checkbox"><input type="checkbox" id="initGit" checked /> Initialize git repo if needed</label>
     ${ins.gitInstalled ? '' : '<p class="error">git is required. Install git, then choose the folder again.</p>'}
-    <button id="create" class="primary" ${ins.gitInstalled ? '' : 'disabled'}>Create KB</button>
+    <button id="create" class="primary" ${ins.gitInstalled ? '' : 'disabled'}>Create Library</button>
     <div id="result"></div>`;
   document.getElementById('create')?.addEventListener('click', onCreate);
 }
@@ -126,7 +126,7 @@ async function onCreate(): Promise<void> {
   }
   document.getElementById('result')!.innerHTML = `<p class="error">${esc(res.message)}</p>`;
   btn.disabled = false;
-  btn.textContent = 'Create KB';
+  btn.textContent = 'Create Library';
 }
 
 /** Dev-only design-system showcase gate (design-system-showcase.md): reachable ONLY via `?showcase`

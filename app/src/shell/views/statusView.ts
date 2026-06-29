@@ -233,7 +233,7 @@ export function lineBodyHtml(s: BodyState, nowMs: number): string {
   // rendering it; only a cold failure (no last-known) shows the banner.
   if (s.errorMsg && s.view === null) return `<p class="line-error viz-body" role="alert">Couldn’t load status: ${esc(s.errorMsg)}</p>`;
   if (s.loading && s.view === null) return `<p class="line-loading viz-body">Loading…</p>`;
-  if (s.view === null) return `<p class="line-empty viz-body">No knowledge base open.</p>`;
+  if (s.view === null) return `<p class="line-empty viz-body">No library open.</p>`;
   const stations = buildStations(s.view);
   // ENG-15/16: a legacy/partial status payload may omit `inFlight`/`setAsideItems`; coalesce here to match
   // the guards `load()`/`buildStations` already apply (the sibling derefs were the lone unguarded outliers).

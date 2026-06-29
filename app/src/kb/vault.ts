@@ -203,6 +203,6 @@ export async function createKb(opts: CreateKbOptions): Promise<CreateKbResult> {
     ok: true,
     vaultConfig: config,
     committed,
-    message: committed ? 'KB initialized and committed.' : 'KB already initialized (nothing new to commit).',
+    message: committed ? 'Library initialized and committed.' : 'Library already initialized (nothing new to commit).',
   };
 }

@@ -602,7 +602,7 @@ describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)',
     expect(root.querySelector('.load-retry')).toBeTruthy();
 
     // Retry succeeds → Settings renders.
-    getState.mockResolvedValue({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'My KB', createdAt: 't' } });
+    getState.mockResolvedValue({ activeVaultPath: '/v', vaultConfig: { schemaVersion: 1, id: 'x', name: 'My Library', createdAt: 't' } });
     (window as unknown as { kbApi: Partial<KbApi> }).kbApi = {
       getState,
       inspect: vi.fn(async () => ({ copilot: { available: true, detail: 'ok' } }) as Awaited<ReturnType<KbApi['inspect']>>),
@@ -611,7 +611,7 @@ describe('Settings · #145 load resilience (no infinite spinner on a hung IPC)',
     };
     root.querySelector<HTMLButtonElement>('.load-retry')!.click();
     await vi.advanceTimersByTimeAsync(0);
-    expect(root.textContent).toContain('My KB');
+    expect(root.textContent).toContain('My Library');
   });
 });
 

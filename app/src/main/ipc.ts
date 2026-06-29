@@ -143,7 +143,7 @@ const NO_PIPELINE: CaptureResult = {
   ids: [],
   captureBatch: null,
   committed: false,
-  message: 'No active knowledge base.',
+  message: 'No active library.',
 };
 
 /** Start the orchestrator if a valid KB is already configured (called on app launch). */
@@ -204,7 +204,7 @@ export function registerIpc(): void {
     const resolved = path.resolve(vaultPath);
     const cfg = await readAppConfig();
     if (!cfg.activeVaultPath || resolved !== cfg.activeVaultPath) {
-      return { ok: false, denied: false, message: 'That folder isn’t the active knowledge base.' };
+      return { ok: false, denied: false, message: 'That folder isn’t the active library.' };
     }
     const marker = path.join(resolved, '.kb', '.permission-probe');
     try {
@@ -448,7 +448,7 @@ export function registerIpc(): void {
     if (process.env.KB_ASK_E2E_STUB) return stubbedAsk(req);
     const cfg = await readAppConfig();
     if (!cfg.activeVaultPath) {
-      return { question: req.question, answer: 'No active knowledge base — set one up first.', citations: [], grounded: false, toolCalls: 0, truncated: false };
+      return { question: req.question, answer: 'No active library — set one up first.', citations: [], grounded: false, toolCalls: 0, truncated: false };
     }
     // BUG #65: hand recall the resolved BYOA `copilot` path so the SDK spawns it in the packaged
     // app (PATH was ensured at boot, STACK-9). Null → SDK default search (dev fallback).

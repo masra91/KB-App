@@ -78,7 +78,7 @@ async function renderModelStep(root: HTMLElement, index: number, goTo: (i: numbe
   // "using the default" note + Continue. Never a dead control, never a hard block (SETUP-4 ethos).
   let body: string;
   if (!accepted || accepted.length === 0) {
-    body = `<p class="setup-note viz-body">${catalog ? `Using the default model${resolved ? ` — <span class="path">${esc(resolved)}</span>` : ''}.` : 'Couldn’t reach the model list right now — your KB will use the default. You can set one later in Manage › Agents.'}</p>`;
+    body = `<p class="setup-note viz-body">${catalog ? `Using the default model${resolved ? ` — <span class="path">${esc(resolved)}</span>` : ''}.` : 'Couldn’t reach the model list right now — your library will use the default. You can set one later in Manage › Agents.'}</p>`;
   } else {
     const options = [`<option value="">Recommended default${resolved ? ` (${esc(resolved)})` : ''}</option>`]
       .concat(accepted.map((m) => `<option value="${esc(m)}"${m === catalog?.configured ? ' selected' : ''}>${esc(m)}</option>`))
@@ -116,7 +116,7 @@ async function renderModelStep(root: HTMLElement, index: number, goTo: (i: numbe
 
 // ── Step 2 · Sample seed (optional) ─────────────────────────────────────────────────────────────────
 async function renderSeedStep(root: HTMLElement, index: number, goTo: (i: number) => void): Promise<void> {
-  const lead = 'Want a few sample notes to explore? They flow in through the same pipeline your real captures use — so you can see filing, linking, and recall right away. Skip for an empty, pristine KB.';
+  const lead = 'Want a few sample notes to explore? They flow in through the same pipeline your real captures use — so you can see filing, linking, and recall right away. Skip for an empty, pristine library.';
   const body = `
     <ul class="setup-samples viz-body">
       <li>A welcome note</li>
@@ -166,7 +166,7 @@ const TOUR_CARDS: TourCard[] = [
 ];
 
 function renderTourStep(root: HTMLElement, index: number, opts: GuidedSetupOptions, goTo: (i: number) => void): void {
-  const lead = `Your KB <span class="path">${esc(opts.vaultName)}</span> is ready. A 10-second lay of the land:`;
+  const lead = `Your library <span class="path">${esc(opts.vaultName)}</span> is ready. A 10-second lay of the land:`;
   const cards = TOUR_CARDS.map(
     (c) => `<li class="setup-tour-card viz-no-chrome"><span class="setup-tour-glyph" aria-hidden="true">${esc(c.glyph)}</span><div><span class="setup-tour-title viz-signage">${esc(c.title)}</span><p class="setup-tour-body viz-body">${esc(c.body)}</p></div></li>`,
   ).join('');

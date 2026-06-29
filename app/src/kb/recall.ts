@@ -321,8 +321,8 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
       result = {
         question,
         answer: busy
-          ? 'The KB is busy ingesting right now, so I couldn’t reach a grounded answer in time — please try again in a moment.'
-          : `I couldn't reach a grounded answer in time (${err instanceof Error ? err.message : String(err)}). The KB may be large — try a more specific question or raise the recall budget in Settings.`,
+          ? 'Your library is busy ingesting right now, so I couldn’t reach a grounded answer in time — please try again in a moment.'
+          : `I couldn't reach a grounded answer in time (${err instanceof Error ? err.message : String(err)}). Your library may be large — try a more specific question or raise the recall budget in Settings.`,
         citations: [],
         grounded: false,
         toolCalls: budget.used,
@@ -341,7 +341,7 @@ export async function recall(root: string, q: RecallQuestion | string, opts: Rec
     // ASK-17(c): a budget-exhausted run that DID capture a partial answer is returned grounded-as-far-as-
     // it-got with an honest "incomplete" note appended — never silently presented as complete.
     const answer = sessionIncomplete
-      ? `${finalized.answer}\n\n_(Recall ran out of time before fully exploring the KB — this answer may be incomplete. Ask a more specific question or raise the recall budget in Settings.)_`
+      ? `${finalized.answer}\n\n_(Recall ran out of time before fully exploring your library — this answer may be incomplete. Ask a more specific question or raise the recall budget in Settings.)_`
       : finalized.answer;
     result = {
       question,

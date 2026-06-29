@@ -33,7 +33,7 @@ const RECALL_DEPTH_MANUAL_SEED = 12;
 
 // SPEC-0022 §3.3 — the confirmation copy MUST name the consequence before any destructive step (REPLAY-2).
 const REPLAY_CONFIRM =
-  'Completely clean and rebuild this KB? This permanently deletes all derived knowledge — ' +
+  'Completely clean and rebuild your library? This permanently deletes all derived knowledge — ' +
   'candidates, entities, claims, and review questions — and reprocesses every Source from scratch. ' +
   'Your Sources are preserved. This cannot be undone from the app.';
 
@@ -135,7 +135,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       <div class="card">
         <h1 class="settings-title viz-voice">Settings</h1>
         <dl class="settings">
-          <dt>Knowledge Base</dt>
+          <dt>Library</dt>
           <dd>${esc(name)}</dd>
           <dt>Vault path</dt>
           <dd><span class="path">${esc(vaultPath ?? '—')}</span></dd>
@@ -154,7 +154,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>
       <div class="card">
         <h2>Autonomy</h2>
-        <p class="settings-note">Default posture for autonomous jobs in this Knowledge Base. Each job inherits this unless it sets its own. <strong>Guarded</strong> routes risky or low-confidence changes to Reviews; <strong>Autonomous</strong> lets the agent apply them directly.</p>
+        <p class="settings-note">Default posture for autonomous jobs in this library. Each job inherits this unless it sets its own. <strong>Guarded</strong> routes risky or low-confidence changes to Reviews; <strong>Autonomous</strong> lets the agent apply them directly.</p>
         <div class="settings-control">
           <span class="viz-field__label" id="autonomy-label">Default posture</span>
           <span class="viz-seg" role="radiogroup" aria-labelledby="autonomy-label" id="autonomy-default">${segOpt('guarded', 'Guarded', settings.autonomyDefault)}${segOpt('autonomous', 'Autonomous', settings.autonomyDefault)}</span>
@@ -168,7 +168,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>
       <div class="card">
         <h2>Diagnostics</h2>
-        <p class="settings-note">Diagnostic detail for this Knowledge Base. <strong>Info</strong> is the default; <strong>Debug</strong> adds verbose detail — and includes redaction-protected captured text / data sent to external services — to troubleshoot a stuck pipeline. Applies on the next pipeline start.</p>
+        <p class="settings-note">Diagnostic detail for this library. <strong>Info</strong> is the default; <strong>Debug</strong> adds verbose detail — and includes redaction-protected captured text / data sent to external services — to troubleshoot a stuck pipeline. Applies on the next pipeline start.</p>
         <div class="settings-control">
           <span class="viz-field__label" id="devlog-label">Diagnostic detail</span>
           <span class="viz-seg" role="radiogroup" aria-labelledby="devlog-label" id="devlog-level">${segOpt('info', 'Info', settings.devLogLevel)}${segOpt('debug', 'Debug', settings.devLogLevel)}</span>
@@ -177,7 +177,7 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>
       <div class="card">
         <h2>Scale</h2>
-        <p class="settings-note">How hard this Knowledge Base runs. <strong>Total at once</strong> caps how many AI sessions run concurrently across all stages; <strong>per-stage</strong> limits tune which stages get the slots. Higher is faster on a big backlog but loads your machine and the model more. Each stage always keeps at least one slot, so raising one never starves another. Applies live, on the next sweep.</p>
+        <p class="settings-note">How hard this library runs. <strong>Total at once</strong> caps how many AI sessions run concurrently across all stages; <strong>per-stage</strong> limits tune which stages get the slots. Higher is faster on a big backlog but loads your machine and the model more. Each stage always keeps at least one slot, so raising one never starves another. Applies live, on the next sweep.</p>
         <div class="settings-control">
           <span class="viz-field__label" id="ceiling-mode-label">Total at once</span>
           <span class="viz-seg" role="radiogroup" aria-labelledby="ceiling-mode-label" id="ceiling-mode">${segOpt('auto', 'Let the app decide', ceilingMode)}${segOpt('manual', 'Manual', ceilingMode)}</span>
@@ -194,26 +194,26 @@ export async function mountSettings(container: HTMLElement): Promise<void> {
       </div>
       <div class="card">
         <h2>Recall &amp; Ask</h2>
-        <p class="settings-note">How much room a question gets to find a complete, cited answer from this Knowledge Base. <strong>Answer time</strong> is how long recall may work before it returns its best grounded answer so far; <strong>search depth</strong> is how far it traverses entities, claims, and links to gather evidence. More is more thorough on a large Knowledge Base, but each question takes longer and more model work. Applies to your next question.</p>
+        <p class="settings-note">How much room a question gets to find a complete, cited answer from this library. <strong>Answer time</strong> is how long recall may work before it returns its best grounded answer so far; <strong>search depth</strong> is how far it traverses entities, claims, and links to gather evidence. More is more thorough on a large library, but each question takes longer and more model work. Applies to your next question.</p>
         <div class="settings-control recall-budget-row">
           <span class="viz-field__label" id="recall-time-label">Answer time (minutes)</span>
           ${stepper('recall-time', recallMinutes, RECALL_MIN_MINUTES, RECALL_MAX_MINUTES)}
         </div>
         <div class="settings-control">
           <span class="viz-field__label" id="recall-depth-mode-label">Search depth</span>
-          <span class="viz-seg" role="radiogroup" aria-labelledby="recall-depth-mode-label" id="recall-depth-mode">${segOpt('auto', 'Scale to KB size', recallDepthMode)}${segOpt('manual', 'Manual', recallDepthMode)}</span>
+          <span class="viz-seg" role="radiogroup" aria-labelledby="recall-depth-mode-label" id="recall-depth-mode">${segOpt('auto', 'Scale to library size', recallDepthMode)}${segOpt('manual', 'Manual', recallDepthMode)}</span>
         </div>
         <div class="settings-control recall-budget-row" id="recall-depth-manual-row"${recallDepthMode === 'manual' ? '' : ' hidden'}>
           <span class="viz-field__label" id="recall-depth-label">Search steps per question</span>
           ${stepper('recall-depth', recallDepthValue, RECALL_BUDGET.MIN, RECALL_BUDGET.MAX)}
         </div>
-        <p id="recall-depth-hint" class="settings-note" role="note"${recallDepthMode === 'manual' ? ' hidden' : ''}>Recall scales how far it searches to the size of your Knowledge Base.</p>
+        <p id="recall-depth-hint" class="settings-note" role="note"${recallDepthMode === 'manual' ? ' hidden' : ''}>Recall scales how far it searches to the size of your library.</p>
         <p id="recall-status" class="settings-note" role="status" aria-live="polite"></p>
       </div>
       <div class="card">
         <h2>Replay / Maintenance</h2>
         <p class="settings-note">Delete all derived knowledge and reprocess every Source from scratch. Your Sources are preserved.</p>
-        <button id="replay-btn" type="button" class="viz-btn viz-btn--danger viz-focusable"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild KB…</button>
+        <button id="replay-btn" type="button" class="viz-btn viz-btn--danger viz-focusable"${vaultPath ? '' : ' disabled'}>Clean &amp; Rebuild Library…</button>
         <div id="replay-confirm" class="viz-confirm viz-confirm--danger" hidden>
           <p class="viz-confirm__msg viz-body">${esc(REPLAY_CONFIRM)}</p>
           <button id="replay-cancel" type="button" class="viz-btn viz-focusable">Cancel</button>

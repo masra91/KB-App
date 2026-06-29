@@ -199,7 +199,7 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     await flush();
     const confirm = strip.querySelector('.intake-remove-confirm') as HTMLElement;
     expect(confirm.hidden).toBe(false);
-    expect(strip.querySelector('.intake-remove-confirm-msg')!.textContent).toMatch(/Items already brought in.*stay in your KB/i);
+    expect(strip.querySelector('.intake-remove-confirm-msg')!.textContent).toMatch(/Items already brought in.*stay in your library/i);
     expect(removeIntakeConnector).not.toHaveBeenCalled(); // gated — not removed yet
     (strip.querySelector('.intake-remove-confirm-go') as HTMLButtonElement).click();
     await flush();
@@ -269,7 +269,7 @@ describe('Sources view · Watched folders (WATCH-9)', () => {
     (c.querySelector('.watch-add-pick') as HTMLButtonElement).click();
     await flush();
     expect(setWatchFolder).toHaveBeenCalled(); // the client sent it to the guarded backend (no client bypass)
-    expect(c.querySelector('.watch-add-status')!.textContent).toMatch(/Couldn.t watch that folder.*inside your knowledge base/i);
+    expect(c.querySelector('.watch-add-status')!.textContent).toMatch(/Couldn.t watch that folder.*inside your library/i);
     expect(c.querySelector('.rdesk-strip[data-watch-id="kb"]')).toBeNull(); // the refused folder never renders
   });
 

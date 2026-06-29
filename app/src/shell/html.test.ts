@@ -29,7 +29,7 @@ describe('esc — null-safe interpolation (ENG-16)', () => {
 describe('baseName', () => {
   it('returns the last path segment, friendly fallback when empty', () => {
     expect(baseName('/Users/me/My Vault')).toBe('My Vault');
-    expect(baseName('')).toBe('My KB');
+    expect(baseName('')).toBe('My Library');
   });
 });
 

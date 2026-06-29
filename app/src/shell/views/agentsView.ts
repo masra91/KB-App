@@ -48,7 +48,7 @@ async function render(container: HTMLElement): Promise<void> {
     catalog = null;
   }
   if (agents.length === 0) {
-    container.innerHTML = `<p class="ag-empty viz-body">No librarians to show — open a knowledge base.</p>`;
+    container.innerHTML = `<p class="ag-empty viz-body">No librarians to show — open a library.</p>`;
     return;
   }
   container.innerHTML = `${modelControlHtml(catalog)}<div class="ag-grid">${agents.map((a) => agentCard(a, catalog)).join('')}</div>`;

@@ -27,7 +27,7 @@ export async function mountAgentsHub(container: HTMLElement): Promise<void> {
       <section class="ag-sec" aria-labelledby="agents-grp-librarians">
         <div class="ag-sechead">
           <h2 id="agents-grp-librarians"><span class="ti" aria-hidden="true">↻</span> Librarians <span class="ct">built-in</span></h2>
-          <span class="hint">Work inside your KB — pause them, not remove them.</span>
+          <span class="hint">Work inside your library — pause them, not remove them.</span>
         </div>
         <div class="agents-section" data-section="librarians"></div>
         <div class="ag-subsec">
@@ -42,7 +42,7 @@ export async function mountAgentsHub(container: HTMLElement): Promise<void> {
       <section class="ag-sec" aria-labelledby="agents-grp-researchers">
         <div class="ag-sechead">
           <h2 id="agents-grp-researchers"><span class="ti" aria-hidden="true">→</span> Researchers</h2>
-          <span class="hint">Reach outside your KB — egress-gated; you add and remove these.</span>
+          <span class="hint">Reach outside your library — egress-gated; you add and remove these.</span>
         </div>
         <div class="agents-section" data-section="researchers"></div>
       </section>

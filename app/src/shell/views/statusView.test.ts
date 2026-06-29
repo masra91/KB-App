@@ -438,7 +438,7 @@ describe('The Line — pivot toggle (VIZ-5) + secondary readout (OBS-6/7/15)', (
 describe('The Line — body states', () => {
   it('renders loading / no-KB / error states', () => {
     expect(lineBodyHtml({ view: null, loading: true, errorMsg: '', expanded: new Set(), lens: 'stage' }, NOW)).toContain('Loading…');
-    expect(body(null)).toContain('No knowledge base open');
+    expect(body(null)).toContain('No library open');
     expect(lineBodyHtml({ view: null, loading: false, errorMsg: 'boom', expanded: new Set(), lens: 'stage' }, NOW)).toContain('boom');
   });
 
@@ -609,7 +609,7 @@ describe('mountStatus (OBS-8/9 — live + read-only; VIZ-5 pivot)', () => {
     mountStatus(root);
     await Promise.resolve();
     await Promise.resolve();
-    expect(root.textContent).toContain('No knowledge base open');
+    expect(root.textContent).toContain('No library open');
   });
 });
 

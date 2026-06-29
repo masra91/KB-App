@@ -36,7 +36,7 @@ beforeEach(() => {
 async function mount(onDone = vi.fn()): Promise<{ root: HTMLElement; onDone: ReturnType<typeof vi.fn> }> {
   const root = document.createElement('div');
   document.body.appendChild(root);
-  runGuidedSetup(root, { vaultName: 'My KB', onDone });
+  runGuidedSetup(root, { vaultName: 'My Library', onDone });
   await flush(); // model step awaits getModelCatalog
   return { root, onDone };
 }
@@ -160,7 +160,7 @@ describe('Guided setup — tour + handoff (SPEC-0009)', () => {
   it('renders the tour cards + the vault name, with the last progress dot active', async () => {
     const { root } = await toTour();
     expect(root.querySelectorAll('.setup-tour-card').length).toBeGreaterThanOrEqual(4);
-    expect(root.querySelector('.setup-lead')?.textContent).toContain('My KB');
+    expect(root.querySelector('.setup-lead')?.textContent).toContain('My Library');
     expect(root.querySelectorAll('.setup-dot')[2].classList.contains('setup-dot--on')).toBe(true);
   });
 
