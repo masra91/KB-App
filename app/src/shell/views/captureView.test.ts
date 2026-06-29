@@ -5,6 +5,8 @@
 // actionable) instead of surfacing the raw OS error — never a dead-end, never dev jargon.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { Mock } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountCapture } from './captureView';
 import type { KbApi, CaptureResult, CaptureInput } from '../../kb/types';
 
@@ -231,7 +233,8 @@ describe('captureView — WS3 design-system migration (DESIGN-LEGACY-VIEWS §6 �
     mountCapture(root, '/v', 'KB');
     const ta = root.querySelector<HTMLTextAreaElement>('#captureText')!;
     expect(ta.getAttribute('aria-label')).toBe('Capture'); // accessible name (placeholder is NOT one)
-    expect(root.querySelector('.capture-title')?.textContent).toBe('Capture'); // Spectral head names the surface
+    expect(root.querySelector('.capture-eyebrow')?.textContent).toBe('Capture'); // the eyebrow names the surface
+    expect(root.querySelector('.capture-title')?.textContent).toContain('mind'); // v3 de-slopped human title
     expect(ta.classList.contains('viz-field__input--multiline')).toBe(true);
   });
 
@@ -288,13 +291,17 @@ describe('captureView — Vellum UX v2 glance (SPEC-0058 STATE content view, DL-
     vi.restoreAllMocks();
   });
 
-  it('is a centered material composer: a Spectral head + a raised .viz-card (not legacy .card chrome)', () => {
+  it('is a centered v3 composer: a Spectral head + a focus-within surface (not v2 .viz-card / legacy .card)', () => {
     mountCapture(root, '/v', 'KB');
     expect(root.querySelector('.capture-v2')).not.toBeNull();
-    expect(root.querySelector('.capture-composer')?.classList.contains('viz-card')).toBe(true); // #453 material depth
+    const composer = root.querySelector('.capture-composer');
+    expect(composer).not.toBeNull();
+    expect(composer?.classList.contains('viz-card')).toBe(false); // v3: its own surface, off the v2 card chrome
+    expect(root.querySelector('.capture-v2')?.classList.contains('viz-surface')).toBe(false);
     expect(root.querySelector('.capture-title')?.classList.contains('viz-voice')).toBe(true); // Spectral head
     expect(root.querySelector('.card')).toBeNull(); // legacy card chrome gone
     expect(root.querySelector('.path')).toBeNull(); // vault path is no longer chrome (kept in state)
+    expect(root.querySelector('[class*="ember"]')).toBeNull(); // capture is input, never a decision
   });
 
   it('the dropzone drag-over adds the .over hook (CSS maps it to the --viz-accent wash, DL-2 ruling — not ember)', () => {
@@ -339,5 +346,31 @@ describe('captureView — Vellum UX v2 glance (SPEC-0058 STATE content view, DL-
     drop(root.querySelector('#dropzone') as HTMLElement, [new File([new Uint8Array([1])], 'f.bin', { type: 'application/octet-stream' })]);
     await flush();
     expect(root.innerHTML.toLowerCase()).not.toContain('ember');
+  });
+});
+
+// SPEC-0060 VUX-1: the Capture CSS block migrates off the instrument-panel --viz-* names onto the
+// warm-vellum v3 tokens. NO ember (capture is input, not a decision). Guard on the CSS source.
+describe('VUX-1 v3 token migration (SPEC-0060 — off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Capture view — VELLUM v3'),
+    indexCss.indexOf('App navigation shell'),
+  );
+
+  it('isolated the Capture v3 block', () => {
+    expect(block.length).toBeGreaterThan(500);
+  });
+
+  it('the v3 Capture block carries NO --viz-* tokens and NO ember', () => {
+    expect(block).not.toMatch(/var\(--viz-/);
+    expect(block).not.toMatch(/--ember|var\(--ember/);
+  });
+
+  it('uses v3 ground/ink + interactive/state tokens (linen/ink/slate/sprout)', () => {
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--linen\b/);
+    expect(block).toMatch(/var\(--slate\b/); // interactive (focus ring / dropzone wash)
+    expect(block).toMatch(/var\(--sprout\b/); // captured-✓ / queued
   });
 });
