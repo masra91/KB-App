@@ -45,7 +45,7 @@ function watchOutcomeLabel(kind: string): string {
 // UX v2 (SPEC-0058): Spectral head (viz-voice), sentence-case copy. The `src-v2` marker scopes every
 // material/voice override to Sources only — the shared `rdesk-*` manage-view language (also rendered by
 // Researchers inside the Agents hub) is NOT restyled globally, so this can't bleed into another surface.
-const HEADER = `<h1 class="rdesk-title src-title viz-voice">Sources</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
+const HEADER = `<h1 class="rdesk-title src-title viz-voice">Connectors</h1><p class="rdesk-sub viz-body">Where your knowledge comes from — feeds you subscribe to and folders you watch. New items arrive as sources in your KB.</p>`;
 
 export async function mountSources(container: HTMLElement): Promise<void> {
   container.innerHTML = `<div class="rdesk viz-surface src-v2">${HEADER}<p class="viz-body">Loading…</p></div>`;
@@ -80,12 +80,12 @@ async function render(container: HTMLElement): Promise<void> {
       : emptyState({ compact: true, title: 'No watched folders yet.', body: 'Add one below — files dropped in are kept verbatim as sources.' });
 
   container.innerHTML = `<div class="rdesk viz-surface src-v2">${HEADER}
-    <section class="src-section viz-card viz-grain">
+    <section class="src-section">
       <h2 class="src-section-head viz-voice">Feeds</h2>
       ${feeds}
       ${addDock()}
     </section>
-    <section class="src-section viz-card viz-grain">
+    <section class="src-section">
       <h2 class="src-section-head viz-voice">Watched folders</h2>
       ${watched}
       ${watchAddDock()}
@@ -140,7 +140,7 @@ function strip(c: IntakeConnectorView): string {
   const elig = intakeRunEligibility(c);
   const scheduleOpts = SCHEDULE_OPTIONS.map((s) => ({ value: s, text: schedulePresetLabel(s) }));
   return `
-    <li class="rdesk-strip viz-no-chrome viz-spine" data-id="${esc(c.id)}" data-armed="${armed ? 'true' : 'false'}">
+    <li class="rdesk-strip ag-card" data-id="${esc(c.id)}" data-armed="${armed ? 'true' : 'false'}">
       <div class="rdesk-strip-head">
         <span class="rdesk-id viz-numeric">${esc(c.id)}</span>
         ${armSwitch('intake-arm', armed, false, armed ? 'Enabled' : 'Paused')}
@@ -400,7 +400,7 @@ function watchStrip(w: WatchFolderView): string {
   const armLabel = armed ? (w.watching ? 'Watching' : 'Enabled') : 'Paused';
   const ignore = w.ignoreGlobs.length ? ` · ignoring ${esc(w.ignoreGlobs.join(', '))}` : '';
   return `
-    <li class="rdesk-strip viz-no-chrome viz-spine" data-watch-id="${esc(w.id)}" data-armed="${armed ? 'true' : 'false'}">
+    <li class="rdesk-strip ag-card" data-watch-id="${esc(w.id)}" data-armed="${armed ? 'true' : 'false'}">
       <div class="rdesk-strip-head">
         <span class="rdesk-id viz-numeric">${esc(w.label)}</span>
         ${armSwitch('watch-arm', armed, w.watching, armLabel)}
