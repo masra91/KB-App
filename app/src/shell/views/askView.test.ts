@@ -577,7 +577,7 @@ describe('Ask view · Past chats + Save chat (VUX-11 slice-3)', () => {
     expect(root.querySelector('.ask-past-status')?.textContent).toContain('No saved chats');
   });
 
-  it('Past chats deletes a thread via the per-row delete (idempotent IPC), then re-lists (slice-2d, #492)', async () => {
+  it('Past chats delete is a TWO-STEP inline confirm (PANEL-7): ✕ reveals "Delete?", ✓ deletes + re-lists', async () => {
     const summaries: ConversationSummary[] = [{ id: 'C1', title: 'Ada chat', updatedAt: iso, turnCount: 1, preview: 'p' }];
     const listConversations = vi
       .fn<KbApi['listConversations']>()
@@ -589,12 +589,30 @@ describe('Ask view · Past chats + Save chat (VUX-11 slice-3)', () => {
     root.querySelector<HTMLButtonElement>('#askPast')!.click();
     await tick();
     expect(root.querySelectorAll('.ask-pastrow')).toHaveLength(1);
+    // step 1: ✕ reveals the inline confirm — it does NOT delete yet (cancel-default, no immediate loss)
     root.querySelector<HTMLButtonElement>('.ask-pastdel')!.click();
+    expect(root.querySelector('.ask-pastconfirm')).toBeTruthy();
+    expect(deleteConversation).not.toHaveBeenCalled();
+    // step 2: ✓ confirms → deletes + re-lists to empty
+    root.querySelector<HTMLButtonElement>('.ask-pastdel-yes')!.click();
     await tick();
     expect(deleteConversation).toHaveBeenCalledWith('C1');
-    // the panel re-rendered from the fresh (now-empty) list — delete is distinct from open (didn't load)
     expect(root.querySelector('.ask-past-status')?.textContent).toContain('No saved chats');
-    expect(root.querySelector('.ask-prose')).toBeNull();
+    expect(root.querySelector('.ask-prose')).toBeNull(); // distinct from open (didn't load)
+  });
+
+  it('Past chats delete confirm can be cancelled (✕ keep) — nothing is deleted', async () => {
+    const summaries: ConversationSummary[] = [{ id: 'C1', title: 'Ada chat', updatedAt: iso, turnCount: 1, preview: 'p' }];
+    const deleteConversation = vi.fn<KbApi['deleteConversation']>(async () => ({ ok: true }));
+    setApi({ listConversations: vi.fn(async () => summaries), deleteConversation });
+    mountAsk(root);
+    root.querySelector<HTMLButtonElement>('#askPast')!.click();
+    await tick();
+    root.querySelector<HTMLButtonElement>('.ask-pastdel')!.click(); // reveal confirm
+    root.querySelector<HTMLButtonElement>('.ask-pastdel-no')!.click(); // cancel
+    expect(deleteConversation).not.toHaveBeenCalled();
+    expect(root.querySelector('.ask-pastconfirm')).toBeNull(); // back to the row, no confirm
+    expect(root.querySelectorAll('.ask-pastrow')).toHaveLength(1); // row still there
   });
 
   it('New starts a fresh thread — the next Save creates a NEW conversation (no stale id)', async () => {

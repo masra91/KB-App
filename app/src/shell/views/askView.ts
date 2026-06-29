@@ -62,6 +62,10 @@ let effort: Effort = 'considered'; // VUX-11 default — the Considered (deeper)
 // (null = unsaved). A saved thread auto-updates as it grows. `pastOpen` tracks the Past-chats panel.
 let convId: string | null = null;
 let pastOpen = false;
+// The last-fetched Past-chats list (so a delete-intent re-renders the panel WITHOUT a re-fetch) + the
+// row currently showing its inline delete-confirm (PANEL-7 idiom; null = none).
+let pastList: ConversationSummary[] = [];
+let pendingDeleteId: string | null = null;
 
 export function mountAsk(container: HTMLElement): void {
   turns = [];
@@ -69,6 +73,8 @@ export function mountAsk(container: HTMLElement): void {
   effort = 'considered';
   convId = null;
   pastOpen = false;
+  pastList = [];
+  pendingDeleteId = null;
   container.innerHTML = `
     <section class="ask-view" id="ask">
       <header class="ask-head">
@@ -138,15 +144,29 @@ export function mountAsk(container: HTMLElement): void {
   container.querySelector<HTMLElement>('#askSaveChat')?.addEventListener('click', () => void saveChat(container));
   // Past chats (VUX-11 slice-2b) — toggle the panel; load the list on open.
   container.querySelector<HTMLElement>('#askPast')?.addEventListener('click', () => void togglePastPanel(container));
-  // Delegated: delete or load a past chat (the panel re-renders, so bind on the container). Delete is
-  // checked first so it never falls through to a load.
-  container.querySelector<HTMLElement>('#askPastPanel')?.addEventListener('click', (e) => {
-    const del = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastdel');
-    if (del?.dataset.del) {
-      void deleteConv(container, del.dataset.del);
+  // Delegated (the panel re-renders, so bind on the container). Order: confirm-yes / confirm-no / reveal-
+  // confirm / open — so a click never falls through to the wrong action. The ✕ REVEALS an inline confirm
+  // (PANEL-7 idiom, cancel-default); only the ✓ actually deletes.
+  const panelEl = container.querySelector<HTMLElement>('#askPastPanel');
+  panelEl?.addEventListener('click', (e) => {
+    const t = e.target as HTMLElement;
+    const yes = t.closest<HTMLElement>('.ask-pastdel-yes');
+    if (yes?.dataset.del) {
+      void deleteConv(container, yes.dataset.del);
       return;
     }
-    const open = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastopen');
+    if (t.closest('.ask-pastdel-no')) {
+      pendingDeleteId = null;
+      renderPastPanel(container);
+      return;
+    }
+    const del = t.closest<HTMLElement>('.ask-pastdel');
+    if (del?.dataset.del) {
+      pendingDeleteId = del.dataset.del; // reveal the inline confirm on this row (don't delete yet)
+      renderPastPanel(container);
+      return;
+    }
+    const open = t.closest<HTMLElement>('.ask-pastopen');
     if (open?.dataset.id) void loadConv(container, open.dataset.id);
   });
 
@@ -377,6 +397,7 @@ async function togglePastPanel(container: HTMLElement): Promise<void> {
 
 function closePastPanel(container: HTMLElement): void {
   pastOpen = false;
+  pendingDeleteId = null; // drop any half-shown confirm so it doesn't reappear on reopen
   const panel = container.querySelector<HTMLElement>('#askPastPanel');
   if (panel) panel.hidden = true;
   container.querySelector<HTMLElement>('#askPast')?.setAttribute('aria-expanded', 'false');
@@ -398,20 +419,40 @@ async function openPastPanel(container: HTMLElement): Promise<void> {
     return;
   }
   if (!pastOpen) return; // closed while loading
-  panel.innerHTML = list.length === 0 ? `<div class="ask-past-status">No saved chats yet.</div>` : list.map(pastRow).join('');
+  pastList = list;
+  pendingDeleteId = null;
+  renderPastPanel(container);
+}
+
+/** Render the Past-chats panel from the cached list — so a delete-intent (inline confirm) re-renders
+ *  without a re-fetch. */
+function renderPastPanel(container: HTMLElement): void {
+  const panel = container.querySelector<HTMLElement>('#askPastPanel');
+  if (!panel) return;
+  panel.innerHTML = pastList.length === 0 ? `<div class="ask-past-status">No saved chats yet.</div>` : pastList.map(pastRow).join('');
 }
 
 function pastRow(c: ConversationSummary): string {
   const meta = `${c.turnCount} turn${c.turnCount === 1 ? '' : 's'} · ${relTime(Date.parse(c.updatedAt) || Date.now())}`;
-  // A row = an open-button (loads the thread) + a quiet delete-button. Two buttons, not nested (a11y),
-  // so the delete affordance is reachable + distinct from the open action.
-  return `<div class="ask-pastrow">
+  const title = c.title || 'Untitled chat';
+  // PANEL-7 inline confirm: the ✕ doesn't delete — it reveals an in-row "Delete? ✓ / ✕" (cancel-default,
+  // slate/oxide, no ember). Only ✓ deletes. Reuses the reveal-confirm idiom from Agents·Schedules.
+  const tail =
+    pendingDeleteId === c.id
+      ? `<span class="ask-pastconfirm" role="group" aria-label="Confirm delete">
+          <span class="ask-pastconfirm-q">Delete?</span>
+          <button type="button" class="ask-pastdel-yes" data-del="${esc(c.id)}" aria-label="Confirm delete “${esc(title)}”" title="Delete">✓</button>
+          <button type="button" class="ask-pastdel-no" aria-label="Keep “${esc(title)}”" title="Keep">✕</button>
+        </span>`
+      : `<button type="button" class="ask-pastdel" data-del="${esc(c.id)}" aria-label="Delete “${esc(title)}”" title="Delete chat">✕</button>`;
+  // A row = an open-button (loads the thread) + the delete affordance. Two buttons, not nested (a11y).
+  return `<div class="ask-pastrow${pendingDeleteId === c.id ? ' is-confirming' : ''}">
     <button type="button" class="ask-pastopen" role="menuitem" data-id="${esc(c.id)}">
-      <span class="ask-pasttitle">${esc(c.title || 'Untitled chat')}</span>
+      <span class="ask-pasttitle">${esc(title)}</span>
       <span class="ask-pastmeta">${esc(meta)}</span>
       ${c.preview ? `<span class="ask-pastprev">${esc(c.preview)}</span>` : ''}
     </button>
-    <button type="button" class="ask-pastdel" data-del="${esc(c.id)}" aria-label="Delete “${esc(c.title || 'Untitled chat')}”" title="Delete chat">✕</button>
+    ${tail}
   </div>`;
 }
 

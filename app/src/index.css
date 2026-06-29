@@ -590,6 +590,15 @@ button:disabled {
 .ask-pastopen { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; text-align: left; background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.55rem 0.6rem; cursor: pointer; font: inherit; }
 .ask-pastdel { flex: none; align-self: center; background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.4rem 0.55rem; margin-right: 0.15rem; cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--faint); transition: color var(--t), background var(--t); }
 .ask-pastdel:hover, .ask-pastdel:focus-visible { color: var(--oxide); background: rgba(168, 67, 42, 0.1); }
+/* Inline delete confirm (PANEL-7 idiom) — revealed by the ✕; cancel-default. "Delete?" + a slate ✓ + a
+   stone ✕. The ✓ goes oxide (a true destructive confirm); no ember. */
+.ask-pastconfirm { flex: none; align-self: center; display: inline-flex; align-items: center; gap: 0.2rem; margin-right: 0.15rem; }
+.ask-pastconfirm-q { font-family: var(--ui); font-size: 0.74rem; color: var(--stone); margin-right: 0.15rem; }
+.ask-pastdel-yes, .ask-pastdel-no { background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.3rem 0.45rem; cursor: pointer; font: inherit; font-size: 0.82rem; line-height: 1; transition: color var(--t), background var(--t); }
+.ask-pastdel-yes { color: var(--slate); }
+.ask-pastdel-yes:hover, .ask-pastdel-yes:focus-visible { color: var(--oxide); background: rgba(168, 67, 42, 0.1); }
+.ask-pastdel-no { color: var(--faint); }
+.ask-pastdel-no:hover, .ask-pastdel-no:focus-visible { color: var(--ink); background: var(--hover); }
 .ask-pasttitle { font-family: var(--ui); font-weight: 600; font-size: 0.86rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-pastmeta { font-family: var(--mono); font-size: 0.68rem; color: var(--faint); }
 .ask-pastprev { font-family: var(--ui); font-size: 0.78rem; color: var(--stone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
