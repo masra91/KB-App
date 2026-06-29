@@ -138,10 +138,16 @@ export function mountAsk(container: HTMLElement): void {
   container.querySelector<HTMLElement>('#askSaveChat')?.addEventListener('click', () => void saveChat(container));
   // Past chats (VUX-11 slice-2b) — toggle the panel; load the list on open.
   container.querySelector<HTMLElement>('#askPast')?.addEventListener('click', () => void togglePastPanel(container));
-  // Delegated: load a chosen past chat (the panel re-renders, so bind on the container).
+  // Delegated: delete or load a past chat (the panel re-renders, so bind on the container). Delete is
+  // checked first so it never falls through to a load.
   container.querySelector<HTMLElement>('#askPastPanel')?.addEventListener('click', (e) => {
-    const row = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastrow');
-    if (row?.dataset.id) void loadConv(container, row.dataset.id);
+    const del = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastdel');
+    if (del?.dataset.del) {
+      void deleteConv(container, del.dataset.del);
+      return;
+    }
+    const open = (e.target as HTMLElement).closest<HTMLElement>('.ask-pastopen');
+    if (open?.dataset.id) void loadConv(container, open.dataset.id);
   });
 
   // ASK-6/14: delegated handlers on the persistent transcript — save-to-KB + citation deep-links.
@@ -397,11 +403,16 @@ async function openPastPanel(container: HTMLElement): Promise<void> {
 
 function pastRow(c: ConversationSummary): string {
   const meta = `${c.turnCount} turn${c.turnCount === 1 ? '' : 's'} · ${relTime(Date.parse(c.updatedAt) || Date.now())}`;
-  return `<button type="button" class="ask-pastrow" role="menuitem" data-id="${esc(c.id)}">
-    <span class="ask-pasttitle">${esc(c.title || 'Untitled chat')}</span>
-    <span class="ask-pastmeta">${esc(meta)}</span>
-    ${c.preview ? `<span class="ask-pastprev">${esc(c.preview)}</span>` : ''}
-  </button>`;
+  // A row = an open-button (loads the thread) + a quiet delete-button. Two buttons, not nested (a11y),
+  // so the delete affordance is reachable + distinct from the open action.
+  return `<div class="ask-pastrow">
+    <button type="button" class="ask-pastopen" role="menuitem" data-id="${esc(c.id)}">
+      <span class="ask-pasttitle">${esc(c.title || 'Untitled chat')}</span>
+      <span class="ask-pastmeta">${esc(meta)}</span>
+      ${c.preview ? `<span class="ask-pastprev">${esc(c.preview)}</span>` : ''}
+    </button>
+    <button type="button" class="ask-pastdel" data-del="${esc(c.id)}" aria-label="Delete “${esc(c.title || 'Untitled chat')}”" title="Delete chat">✕</button>
+  </div>`;
 }
 
 /** Load a saved chat into the view (replaces the current thread). Reloaded turns carry the full
@@ -426,6 +437,22 @@ async function loadConv(container: HTMLElement, id: string): Promise<void> {
   updateHead(container);
   updateActions(container);
   scrollToEnd(container);
+}
+
+/** Delete a saved chat (slice-2d, over #492). The IPC is idempotent + ULID-contained; we refresh the
+ *  open panel afterward. If the deleted thread is the one currently loaded, drop the saved id — the view
+ *  keeps the turns, but a future Save starts a fresh conversation. */
+async function deleteConv(container: HTMLElement, id: string): Promise<void> {
+  try {
+    await window.kbApi.deleteConversation(id);
+  } catch {
+    /* best-effort: a failed delete leaves the row; the next open re-lists the truth */
+  }
+  if (convId === id) {
+    convId = null;
+    updateActions(container);
+  }
+  if (pastOpen) await openPastPanel(container); // re-render the list without the removed row
 }
 
 const CITATION_KIND_LABEL: Record<string, string> = { entity: 'Entity', claim: 'Claim', source: 'Source' };

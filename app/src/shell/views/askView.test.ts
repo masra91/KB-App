@@ -558,7 +558,7 @@ describe('Ask view · Past chats + Save chat (VUX-11 slice-3)', () => {
     const rows = root.querySelectorAll<HTMLElement>('.ask-pastrow');
     expect(rows).toHaveLength(1);
     expect(root.querySelector('.ask-pasttitle')?.textContent).toBe('Ada chat');
-    rows[0].click();
+    root.querySelector<HTMLButtonElement>('.ask-pastopen')!.click();
     await tick();
     // the reloaded thread re-renders the answer + its reference card (full AskResult, faithful)
     expect(root.querySelector('.ask-prose')?.textContent).toContain('first computer programmer');
@@ -575,6 +575,26 @@ describe('Ask view · Past chats + Save chat (VUX-11 slice-3)', () => {
     root.querySelector<HTMLButtonElement>('#askPast')!.click();
     await tick();
     expect(root.querySelector('.ask-past-status')?.textContent).toContain('No saved chats');
+  });
+
+  it('Past chats deletes a thread via the per-row delete (idempotent IPC), then re-lists (slice-2d, #492)', async () => {
+    const summaries: ConversationSummary[] = [{ id: 'C1', title: 'Ada chat', updatedAt: iso, turnCount: 1, preview: 'p' }];
+    const listConversations = vi
+      .fn<KbApi['listConversations']>()
+      .mockResolvedValueOnce(summaries) // first open → one row
+      .mockResolvedValue([]); // after delete → empty
+    const deleteConversation = vi.fn<KbApi['deleteConversation']>(async () => ({ ok: true }));
+    setApi({ listConversations, deleteConversation });
+    mountAsk(root);
+    root.querySelector<HTMLButtonElement>('#askPast')!.click();
+    await tick();
+    expect(root.querySelectorAll('.ask-pastrow')).toHaveLength(1);
+    root.querySelector<HTMLButtonElement>('.ask-pastdel')!.click();
+    await tick();
+    expect(deleteConversation).toHaveBeenCalledWith('C1');
+    // the panel re-rendered from the fresh (now-empty) list — delete is distinct from open (didn't load)
+    expect(root.querySelector('.ask-past-status')?.textContent).toContain('No saved chats');
+    expect(root.querySelector('.ask-prose')).toBeNull();
   });
 
   it('New starts a fresh thread — the next Save creates a NEW conversation (no stale id)', async () => {

@@ -585,8 +585,11 @@ button:disabled {
 .ask-pastpanel[hidden] { display: none; }
 .ask-past-status { font-family: var(--ui); font-size: 0.82rem; color: var(--stone); padding: 0.7rem 0.6rem; }
 .ask-past-status.error { color: var(--oxide); }
-.ask-pastrow { display: flex; flex-direction: column; gap: 0.15rem; width: 100%; text-align: left; background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.55rem 0.6rem; cursor: pointer; font: inherit; transition: background var(--t); }
-.ask-pastrow:hover, .ask-pastrow:focus-visible { background: var(--hover); }
+.ask-pastrow { display: flex; align-items: stretch; gap: 0.15rem; border-radius: var(--r-chip); transition: background var(--t); }
+.ask-pastrow:hover, .ask-pastrow:focus-within { background: var(--hover); }
+.ask-pastopen { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; text-align: left; background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.55rem 0.6rem; cursor: pointer; font: inherit; }
+.ask-pastdel { flex: none; align-self: center; background: transparent; border: 0; border-radius: var(--r-chip); padding: 0.4rem 0.55rem; margin-right: 0.15rem; cursor: pointer; font: inherit; font-size: 0.82rem; color: var(--faint); transition: color var(--t), background var(--t); }
+.ask-pastdel:hover, .ask-pastdel:focus-visible { color: var(--oxide); background: rgba(168, 67, 42, 0.1); }
 .ask-pasttitle { font-family: var(--ui); font-weight: 600; font-size: 0.86rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-pastmeta { font-family: var(--mono); font-size: 0.68rem; color: var(--faint); }
 .ask-pastprev { font-family: var(--ui); font-size: 0.78rem; color: var(--stone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
