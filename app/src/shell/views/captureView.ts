@@ -229,25 +229,26 @@ async function onCapture(container: HTMLElement): Promise<void> {
 export function mountCapture(container: HTMLElement, vaultPathArg: string, name: string): void {
   vaultPath = vaultPathArg;
   vaultName = name;
-  // v2 (DL-2 contract): a centered airy composer — Spectral head + warm sub, a raised material card holding
-  // the field, controls, dropzone, staged manifest, and the calm note; the pipeline queue reads below it.
+  // v3 (SPEC-0060 VUX-1): a calm centered composer on the warm-vellum tokens. De-slopped copy — a plain
+  // eyebrow + a human title (no "Vellum reads it, files it, and connects it" marketing line, no slop
+  // placeholder). NO ember (capture is input, not a decision); accent=interactive, sprout=captured-✓.
   // `vaultName`/`vaultPath` are retained in state (for the Blocked-recovery re-mount) but no longer chrome.
   container.innerHTML = `
-    <div class="capture-v2 viz-surface">
+    <div class="capture-v2">
       <header class="capture-head">
-        <h1 class="capture-title viz-voice">Capture</h1>
-        <p class="capture-sub viz-body">Drop a thought, a link, or a file — Vellum reads it, files it, and connects it.</p>
+        <div class="capture-eyebrow viz-signage">Capture</div>
+        <h1 class="capture-title viz-voice">What’s on your mind?</h1>
       </header>
-      <div class="capture-composer viz-card">
+      <div class="capture-composer">
         <textarea id="captureText" class="capture viz-field__input viz-field__input--multiline viz-body viz-focusable" rows="5"
-          placeholder="Capture a thought, paste a passage (formatting kept), or drop a file…" aria-label="Capture"></textarea>
+          placeholder="Paste a thought, a link, or drop a file…" aria-label="Capture"></textarea>
         <div id="dropzone" class="capture-dropzone viz-focusable" role="region" tabindex="0" aria-label="Drop files or images here to capture them">
           <span class="capture-dropzone-glyph" aria-hidden="true">⊕</span> Drop files or images here
         </div>
         <ul id="staged" class="capture-staged"></ul>
         <div class="capture-controls">
           <label class="capture-toggle viz-body"><input type="checkbox" id="keepFormatting" checked /> Keep formatting on paste</label>
-          <button id="capture" class="viz-btn viz-btn--primary viz-focusable capture-submit">Capture</button>
+          <button id="capture" class="viz-btn viz-btn--primary viz-focusable capture-submit">Keep it</button>
         </div>
         <p id="captureNote" class="capture-note viz-body" role="status"></p>
       </div>
