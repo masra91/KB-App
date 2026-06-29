@@ -68,7 +68,9 @@ and a unique `key` here.
 | SPEC-0054 | RMEM    | Researcher Memory & KB-Grounding (fit-and-fill, don't repeat, resume) | feature | draft | `features/` |
 | SPEC-0055 | RELEASE | Release Cadence & Signed Builds (tag-based, signed+notarized; macOS first) | feature | draft | `features/` |
 | SPEC-0056 | UPDATE  | In-app Auto-Update (electron-updater via GitHub Releases; stable+beta) | feature | draft | `features/` |
+| SPEC-0057 | BRAND   | Brand Identity (Vellum visual language, color/type/motion) | feature | draft | `features/` |
 | SPEC-0058 | STATE   | UI State Model — Projection-Backed Reads (no live vault scans on the render path) | architecture | draft | `architecture/` |
+| SPEC-0060 | VUX     | Vellum v3 UI — whole-app visual & IA direction (one language; top bar; rail; motion) | feature | active | `design/` |
 
 ## Reserved / planned (not yet written)
 

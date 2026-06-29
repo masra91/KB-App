@@ -6,8 +6,8 @@ type: feature
 status: draft
 owners: [KB-Developer-7, KB-Lead, Principal]
 created: 2026-06-15
-updated: 2026-06-15
-related: [SPEC-0002, SPEC-0007, SPEC-0016, SPEC-0018, SPEC-0019, SPEC-0020, SPEC-0022, SPEC-0024, SPEC-0028, SPEC-0047, SPEC-0051]
+updated: 2026-06-28
+related: [SPEC-0002, SPEC-0007, SPEC-0016, SPEC-0018, SPEC-0019, SPEC-0020, SPEC-0022, SPEC-0024, SPEC-0028, SPEC-0047, SPEC-0051, SPEC-0060]
 stage: cross-cutting
 supersedes: null
 ---
@@ -82,14 +82,27 @@ Every directive type MUST:
 4. carry a **rebirth regression** test where the ULID-keyed log is provably blind (ULIDs reborn) yet the
    directive still settles the question — with a **control** proving the bug exists without it.
 
-## 4. Surfacing — the Rules surface (slice 3 ▢)
+## 4. Surfacing — the Guidance surface (slice 3 ▢)
 
-A read-only in-app **"Rules"** view lists the **active** directives (revokes applied) — the Principal's
-standing interpretations — with type, the human-readable identity (**never a raw ULID**, PRIN-24),
-verdict/payload, and provenance (which answer/correction produced it, when). An inline **"correct this"**
-affordance on an entity/claim creates the right directive type directly (e.g. retract a claim, mark two
-entities distinct) without waiting for the machine to raise a review. Carries the **Design-Lead visual
-gate** in addition to QD-2.
+The directives UI gets a **home in the Manage rail** (alongside Agents / Connectors / Settings),
+user-facing name **"Guidance"** (per Vellum v3 IA, SPEC-0060 §7). It lists the **active** directives
+(revokes applied) — the Principal's standing interpretations — with type, the human-readable identity
+(**never a raw ULID**, PRIN-24), verdict/payload, and provenance (which answer/correction produced it,
+when). Examples the surface must express in plain language: *"when I say X I mean Y"* (guidance),
+*"\<nickname\> is the same person as \<this\>"* (merge/alias), *"there are many Bobs — they include A, B, C;
+be certain when linking, don't guess"* (disambiguation guard).
+
+**Three creation paths** (so it is not a dead config screen):
+1. **Manual** — authored directly on the Guidance surface.
+2. **Proposed inline during Reviews** — a "save this as a standing rule" affordance on a review, so a
+   one-off answer graduates to a durable directive (the existing `recordCorrectionDirective` / `answerReview`
+   seams).
+3. **From an entity in Explore** — the inline **"correct this"** affordance on an entity/claim creates the
+   right directive type directly (retract a claim, mark two entities distinct, add an alias) without waiting
+   for the machine to raise a review.
+
+Related: the Vellum-v3 **"you" identity** (SPEC-0060 §7) seeds a natural alias directive ("the narrator =
+me"). Carries the **Design-Lead visual gate** in addition to QD-2.
 
 ## 5. Implementation status
 
