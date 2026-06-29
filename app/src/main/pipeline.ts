@@ -54,6 +54,14 @@ import { ensureStagingWorktree } from '../kb/stagingWorktree';
 import { reapEphemeralWorktrees, boundedGit } from '../kb/canonicalAdvance';
 import { reconcileStaleIndexLock, hasLiveIndexHolder } from '../kb/canonicalLockHeal';
 import { promote } from '../kb/staging';
+import {
+  remediateHealthFindingInVault,
+  dismissHealthFindingInVault,
+  type HealthRemediateRequest,
+  type HealthRemediateResult,
+  type HealthDismissRequest,
+  type HealthDismissResult,
+} from '../kb/healthRemediation';
 import { findOpenReviews, answerReview as answerReviewInVault, type AnswerReviewResult } from '../kb/reviewStore';
 import { executeApprovedConsolidation } from '../kb/executeApprovedConsolidation';
 import { reviewResumeStage } from '../kb/reviewResume';
@@ -996,6 +1004,22 @@ export async function answerActiveReview(id: string, answerInput: unknown): Prom
     void runAnsweredReviewEffects(a, id);
   }
   return result;
+}
+
+/** SPEC-0060 VUX-16 slice-1: apply a non-destructive Health remediation (relink / find-homes) on the
+ *  active vault — under the canonical-writer lock, promoted so the next Health scan shows the fix. */
+export async function remediateActiveHealthFinding(req: HealthRemediateRequest): Promise<HealthRemediateResult> {
+  const a = active;
+  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  return remediateHealthFindingInVault(a.stagingWt, a.vaultPath, a.lock, req, a.log);
+}
+
+/** SPEC-0060 VUX-16 slice-1: dismiss (or restore) a Health finding on the active vault — persisted as an
+ *  evergreen directive, promoted to `main` where the Health scan's dismiss filter reads it. */
+export async function dismissActiveHealthFinding(req: HealthDismissRequest): Promise<HealthDismissResult> {
+  const a = active;
+  if (!a) return { ok: false, message: 'No active knowledge base.' };
+  return dismissHealthFindingInVault(a.stagingWt, a.vaultPath, a.lock, req, new Date().toISOString(), a.log);
 }
 
 /**

@@ -2,8 +2,9 @@
 // controlled entities + node markdown; we assert orphan / dangling-link / thin-stub detection, the
 // alias-aware link resolution, the bounded lists vs full counts, and ENG-16 unreadable-node tolerance.
 import { describe, it, expect, vi } from 'vitest';
-import { buildHealthReport, THIN_BODY_CHARS } from './healthPanel';
+import { buildHealthReport, healthFindingKey, THIN_BODY_CHARS } from './healthPanel';
 import type { RecallTools, EntityHit } from './recall';
+import type { HealthDismissalDirective } from './directives';
 
 function hit(over: Partial<EntityHit> & Pick<EntityHit, 'rel' | 'name'>): EntityHit {
   return { id: over.rel, kind: 'concept', aliases: [], confidence: 0.8, tags: [], derivedFrom: [], ...over };
@@ -52,6 +53,29 @@ describe('healthPanel — buildHealthReport', () => {
     expect(r.scanned).toBe(3);
     expect(r.orphans.map((o) => o.name)).toEqual(['Lonely']);
     expect(r.counts.orphans).toBe(1);
+  });
+
+  it('VUX-16: a dismissed finding drops from the list AND the count (pre-cap filter)', async () => {
+    const tools = fakeTools({
+      entities: [ADA, ENGINE, hit({ rel: 'entities/x/lonely.md', name: 'Lonely', kind: 'concept' })],
+      nodes: {
+        'entities/person/ada.md': node('Ada Lovelace', { prose: PROSE, links: ['entities/concept/engine.md|Analytical Engine'] }),
+        'entities/concept/engine.md': node('Analytical Engine', { prose: PROSE }),
+        'entities/x/lonely.md': node('Lonely', { prose: PROSE }), // orphan
+      },
+    });
+    // Fails-before: with no dismissals the orphan shows (count 1).
+    expect((await buildHealthReport(tools)).counts.orphans).toBe(1);
+    // Passes-after: dismiss it by its CONTENT-STABLE key → gone from list + count, not just hidden in the UI.
+    const key = healthFindingKey('orphan', { rel: 'entities/x/lonely.md', id: 'x', name: 'Lonely', kind: 'concept' });
+    expect(key).toBe('orphan:concept|lonely'); // stable identity (NOT a ULID) — survives re-derive/replay
+    const dismissals = new Map<string, HealthDismissalDirective>([[key, { findingKey: key, kind: 'orphan', dismissed: true, decidedAt: '2026-06-29T00:00:00.000Z' }]]);
+    const r = await buildHealthReport(tools, dismissals);
+    expect(r.orphans).toHaveLength(0);
+    expect(r.counts.orphans).toBe(0);
+    // A `dismissed:false` (un-dismiss / restore) record re-surfaces it.
+    const restored = new Map<string, HealthDismissalDirective>([[key, { findingKey: key, kind: 'orphan', dismissed: false, decidedAt: '2026-06-29T01:00:00.000Z' }]]);
+    expect((await buildHealthReport(tools, restored)).counts.orphans).toBe(1);
   });
 
   it('flags a dangling link (target resolves to no node) but not a resolvable one', async () => {
