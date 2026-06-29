@@ -45,6 +45,10 @@ import {
   readEnrichDirectives,
   recordEnrichDirective,
   activeEnrichTowardForIdentity,
+  HEALTH_DISMISSAL_DIRECTIVES_REL,
+  readHealthDismissals,
+  recordHealthDismissal,
+  isHealthFindingDismissed,
 } from './directives';
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
@@ -488,6 +492,43 @@ describe('enrich directives (SPEC-0050 slice-3c)', () => {
       await recordRevokeDirective(root, { family: 'enrich', targetKey: 'person|ada lovelace', reviewId: 'r', decidedAt: '3' });
       [e, rv] = [await readEnrichDirectives(root), await readRevokeDirectives(root)];
       expect(activeEnrichTowardForIdentity(e, rv, 'person|ada lovelace')).toBeUndefined(); // revoked
+    });
+  });
+});
+
+describe('health dismissals (SPEC-0060 VUX-16 slice-1)', () => {
+  it('records + reads a dismissal; isHealthFindingDismissed reflects last-wins (dismiss → restore → dismiss)', async () => {
+    await withRoot(async (root) => {
+      const key = 'orphan:concept|lonely';
+      expect((await readHealthDismissals(root)).size).toBe(0); // absent file → empty
+      expect(isHealthFindingDismissed(await readHealthDismissals(root), key)).toBe(false);
+
+      await recordHealthDismissal(root, { findingKey: key, kind: 'orphan', decidedAt: '2026-06-29T00:00:00.000Z' });
+      let map = await readHealthDismissals(root);
+      expect(isHealthFindingDismissed(map, key)).toBe(true); // default record = dismissed
+      expect(map.get(key)?.kind).toBe('orphan');
+
+      await recordHealthDismissal(root, { findingKey: key, kind: 'orphan', dismissed: false, decidedAt: '2026-06-29T01:00:00.000Z' });
+      expect(isHealthFindingDismissed(await readHealthDismissals(root), key)).toBe(false); // later restore wins
+
+      await recordHealthDismissal(root, { findingKey: key, kind: 'orphan', reason: 'intentional standalone', decidedAt: '2026-06-29T02:00:00.000Z' });
+      map = await readHealthDismissals(root);
+      expect(isHealthFindingDismissed(map, key)).toBe(true); // still-later dismiss wins again
+      expect(map.get(key)?.reason).toBe('intentional standalone');
+    });
+  });
+
+  it('refuses an empty findingKey (an un-keyable dismissal is a no-op we never write)', async () => {
+    await withRoot(async (root) => {
+      await expect(recordHealthDismissal(root, { findingKey: '', kind: 'orphan', decidedAt: 'x' })).rejects.toThrow(/findingKey/);
+    });
+  });
+
+  it('skips a garbled line, the good record survives (ENG-16)', async () => {
+    await withRoot(async (root) => {
+      await recordHealthDismissal(root, { findingKey: 'thin:person|ada-lovelace', kind: 'thin', decidedAt: 'x' });
+      await fs.appendFile(path.join(root, HEALTH_DISMISSAL_DIRECTIVES_REL), '{ not json\n', 'utf8');
+      expect((await readHealthDismissals(root)).size).toBe(1);
     });
   });
 });

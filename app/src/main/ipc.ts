@@ -14,6 +14,8 @@ import {
   pipelineControlForActive,
   reviewProjectionForActive,
   answerActiveReview,
+  remediateActiveHealthFinding,
+  dismissActiveHealthFinding,
   saveRecallOutput,
   fullReplay,
   composeBacklog,
@@ -61,6 +63,8 @@ import { makeReadOnlyTools } from '../kb/recallTools';
 import { makeProjectionTools } from '../kb/graphProjection';
 import { buildNeighborhood, listExploreEntities, type ExploreEntityRef, type ExploreNeighborhood, type ExploreProjection } from '../kb/explorePanel';
 import { buildHealthReport } from '../kb/healthPanel';
+import { readHealthDismissals } from '../kb/directives';
+import type { HealthRemediateRequest, HealthRemediateResult, HealthDismissRequest, HealthDismissResult } from '../kb/healthRemediation';
 import { toHealthProjection, type HealthProjection } from '../kb/healthProjection';
 import { readContradictionDirectives } from '../kb/directives';
 import { resolveContainedRel } from '../kb/pathContainment';
@@ -600,7 +604,27 @@ export function registerIpc(): void {
     const cfg = await readAppConfig();
     const now = new Date().toISOString();
     if (!cfg.activeVaultPath) return toHealthProjection({ scanned: 0, orphans: [], thin: [], dangling: [], counts: { orphans: 0, thin: 0, dangling: 0 } }, now);
-    return toHealthProjection(await buildHealthReport(makeReadOnlyTools(path.resolve(cfg.activeVaultPath))), now);
+    // VUX-16: filter findings the Principal has dismissed (evergreen on `main`, read at the same root the
+    // scan reads) BEFORE the report caps + counts, so a dismissed finding is truly gone, not UI-hidden.
+    const root = path.resolve(cfg.activeVaultPath);
+    return toHealthProjection(await buildHealthReport(makeReadOnlyTools(root), await readHealthDismissals(root)), now);
+  });
+
+  // SPEC-0060 VUX-16 slice-1: apply a non-destructive Health remediation (relink / find-homes). Under the
+  // canonical-writer lock + promoted, so the next `kb:healthReport` re-scan reflects the fix. Destructive
+  // merge + the enrich action are HELD for a later slice (see healthRemediation.ts).
+  ipcMain.handle('kb:healthRemediate', async (_e, req: HealthRemediateRequest): Promise<HealthRemediateResult> => {
+    if (!req || (req.action !== 'relink' && req.action !== 'find-homes') || typeof req.nodeRel !== 'string') {
+      return { ok: false, message: 'Invalid remediation request.' };
+    }
+    return remediateActiveHealthFinding(req);
+  });
+  // SPEC-0060 VUX-16 slice-1: dismiss / restore a Health finding (a durable evergreen directive).
+  ipcMain.handle('kb:dismissHealthFinding', async (_e, req: HealthDismissRequest): Promise<HealthDismissResult> => {
+    if (!req || typeof req.findingKey !== 'string' || typeof req.kind !== 'string') {
+      return { ok: false, message: 'Invalid dismiss request.' };
+    }
+    return dismissActiveHealthFinding(req);
   });
 
   // SPEC-0058 Today: the single home read — `{status, data, builtAt, stale}` from the maintained Today

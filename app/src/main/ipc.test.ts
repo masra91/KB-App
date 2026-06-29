@@ -81,6 +81,8 @@ vi.mock('./pipeline', () => ({
   graphProjectionForActive: () => state.graphProjection, // SPEC-0058 STATE-2: the maintained graph projection (or null = warming)
   todayProjectionForActive: () => state.todayProjection, // SPEC-0058 Today: the maintained home projection (or null = warming)
   answerActiveReview: async () => ({ ok: false, message: 'no active kb' }),
+  remediateActiveHealthFinding: async () => ({ ok: false, message: 'no active kb' }), // VUX-16
+  dismissActiveHealthFinding: async () => ({ ok: false, message: 'no active kb' }),
   pipelineControlForActive: mocks.pipelineControl,
   fullReplay: async () => ({ ok: false, message: 'no active kb' }),
   composeBacklog: async () => ({ ok: false, message: 'no active kb' }),
@@ -745,6 +747,20 @@ describe('SPEC-0058 slice-0 — Explore + Health evergreen-graph read path (REAL
     expect(await invoke<unknown[]>('kb:exploreEntities')).toEqual([]);
     expect(await invoke<{ found: boolean }>('kb:exploreNeighborhood')).toMatchObject({ found: false });
     expect(await invoke<{ scanned: number }>('kb:healthReport')).toMatchObject({ scanned: 0 });
+  });
+
+  // SPEC-0060 VUX-16 slice-1: the remediation IPCs reject malformed input at the boundary, and with no
+  // active KB they fail honestly (never throw). The end-to-end apply/dismiss loop is covered in
+  // healthRemediation.test.ts (real staging + promote); here we guard the IPC contract.
+  it('kb:healthRemediate / kb:dismissHealthFinding validate input + fail honestly with no active KB', async () => {
+    await fs.writeFile(path.join(state.userData, 'kb-app.config.json'), JSON.stringify({ activeVaultPath: null }) + '\n');
+    // malformed → rejected at the boundary
+    expect(await invoke<{ ok: boolean }>('kb:healthRemediate', { action: 'merge', nodeRel: 'x' })).toMatchObject({ ok: false }); // merge is HELD/destructive — not a slice-1 action
+    expect(await invoke<{ ok: boolean }>('kb:healthRemediate', {})).toMatchObject({ ok: false });
+    expect(await invoke<{ ok: boolean }>('kb:dismissHealthFinding', { kind: 'orphan' })).toMatchObject({ ok: false }); // missing findingKey
+    // well-formed but no active KB → honest failure, not a throw
+    expect(await invoke<{ ok: boolean; message: string }>('kb:healthRemediate', { action: 'find-homes', nodeRel: 'entities/x.md' })).toMatchObject({ ok: false });
+    expect(await invoke<{ ok: boolean; message: string }>('kb:dismissHealthFinding', { findingKey: 'orphan:concept|x', kind: 'orphan' })).toMatchObject({ ok: false });
   });
 });
 

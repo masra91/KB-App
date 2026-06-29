@@ -45,6 +45,9 @@ export const REVOKE_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'revokes.jsonl');
 /** Repo-relative path of the durable enrich-directive log (evergreen). SPEC-0050 slice-3c. */
 export const ENRICH_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'enrich.jsonl');
 
+/** Repo-relative path of the durable Health-dismissal log (evergreen). SPEC-0060 VUX-16 slice-1. */
+export const HEALTH_DISMISSAL_DIRECTIVES_REL = path.join(DIRECTIVES_DIR, 'health-dismissals.jsonl');
+
 export type DirectiveVerdict = 'same' | 'distinct';
 
 /**
@@ -931,4 +934,88 @@ export function activeEnrichTowardForIdentity(
   const e = enrich.get(identityKey);
   if (!e) return undefined;
   return isDirectiveRevoked(revokes, 'enrich', identityKey, e.decidedAt) ? undefined : e.toward;
+}
+
+// ── Health dismissals (SPEC-0060 VUX-16 slice-1) ─────────────────────────────────────────────────
+// The Principal said "ignore this Health finding". Keyed by the finding's STABLE identity
+// (`<class>:<blockKey>` for an entity finding, `dangling:<fromKey>→<target>` for a dead link — see
+// `healthFindingKey` in healthRemediation.ts), so a dismissal survives re-derive/replay even though the
+// entity's ULID is reborn. `dismissed` is last-wins per key: a `false` record un-dismisses (re-surfaces),
+// so the store stays append-only like its siblings while still supporting a future "restore" affordance.
+
+/** One durable Health-finding dismissal. `findingKey` is content-stable (NOT a ULID). */
+export interface HealthDismissalDirective {
+  findingKey: string;
+  kind: string; // the finding class — 'orphan' | 'thin' | 'dangling' (kept generic, like the others)
+  dismissed: boolean; // last-wins: true = ignore the finding; false = un-dismiss (re-surface)
+  reason?: string; // optional human note
+  decidedAt: string; // ISO provenance (PRIN-5/6)
+}
+
+function healthDismissalsAbs(root: string): string {
+  return path.join(path.resolve(root), HEALTH_DISMISSAL_DIRECTIVES_REL);
+}
+
+/**
+ * Read every Health dismissal into a last-wins map keyed by `findingKey` (latest record per finding wins,
+ * so a later `dismissed:false` un-dismisses). Absent/garbled lines skipped; absent file → empty (ENG-16).
+ */
+export async function readHealthDismissals(root: string): Promise<Map<string, HealthDismissalDirective>> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(healthDismissalsAbs(root), 'utf8');
+  } catch {
+    return new Map();
+  }
+  const out = new Map<string, HealthDismissalDirective>();
+  for (const line of raw.split('\n')) {
+    if (line.trim().length === 0) continue;
+    let obj: Partial<HealthDismissalDirective>;
+    try {
+      obj = JSON.parse(line) as Partial<HealthDismissalDirective>;
+    } catch {
+      continue;
+    }
+    if (typeof obj.findingKey !== 'string' || obj.findingKey.length === 0) continue;
+    const rec: HealthDismissalDirective = {
+      findingKey: obj.findingKey,
+      kind: typeof obj.kind === 'string' ? obj.kind : '',
+      dismissed: obj.dismissed !== false, // default true (a record with no flag is a dismissal)
+      reason: typeof obj.reason === 'string' ? obj.reason : undefined,
+      decidedAt: typeof obj.decidedAt === 'string' ? obj.decidedAt : '',
+    };
+    const prev = out.get(rec.findingKey);
+    if (!prev || prev.decidedAt <= rec.decidedAt) out.set(rec.findingKey, rec); // latest wins
+  }
+  return out;
+}
+
+/** True iff `findingKey` is currently dismissed (latest record says so). */
+export function isHealthFindingDismissed(dismissals: Map<string, HealthDismissalDirective>, findingKey: string): boolean {
+  return dismissals.get(findingKey)?.dismissed === true;
+}
+
+/**
+ * Append a Health-dismissal record. Does NOT commit — the caller is inside the shared canonical-writer
+ * lock and stages/commits (atomic + promoted). Throws on an empty `findingKey` (an un-keyable dismissal
+ * is a silent no-op we refuse to write).
+ */
+export async function recordHealthDismissal(
+  root: string,
+  d: { findingKey: string; kind: string; dismissed?: boolean; reason?: string; decidedAt: string },
+): Promise<HealthDismissalDirective> {
+  if (!d.findingKey || d.findingKey.length === 0) {
+    throw new Error('directives: a Health dismissal requires a non-empty findingKey');
+  }
+  const rec: HealthDismissalDirective = {
+    findingKey: d.findingKey,
+    kind: d.kind,
+    dismissed: d.dismissed !== false,
+    ...(d.reason ? { reason: d.reason } : {}),
+    decidedAt: d.decidedAt,
+  };
+  const file = healthDismissalsAbs(root);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.appendFile(file, JSON.stringify(rec) + '\n', 'utf8');
+  return rec;
 }

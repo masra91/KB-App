@@ -9,6 +9,24 @@
 // The scan reads each entity node **once** and derives the whole-graph adjacency from its outgoing
 // `[[wikilinks]]` (inbound = the reverse) — O(N) reads, never the O(N²) of per-node backlink walks.
 import type { RecallTools, EntityHit } from './recall';
+import { blockKey } from './connect';
+import { isHealthFindingDismissed, type HealthDismissalDirective } from './directives';
+
+/** The three structural finding classes (HEALTH §3) — the dismiss key + the remediation actions key off these. */
+export type HealthFindingClass = 'orphan' | 'thin' | 'dangling';
+
+/** A content-STABLE key for a finding (NOT a ULID): `<class>:<kind>|<normalizedName>` for an entity finding,
+ *  `dangling:<fromName>→<target>` for a dead link. Stable across re-derive/replay so a dismissal (and a
+ *  future remediation record) re-matches the same finding after the entity's ULID is reborn (SPEC-0050 lesson). */
+export function healthFindingKey(cls: HealthFindingClass, f: HealthFinding | DanglingLink): string {
+  if (cls === 'dangling') {
+    const d = f as DanglingLink;
+    const norm = (s: string): string => s.trim().toLowerCase().replace(/\s+/g, ' ');
+    return `dangling:${norm(d.fromName)}→${norm(d.target)}`;
+  }
+  const e = f as HealthFinding;
+  return `${cls}:${blockKey(e.kind, e.name)}`;
+}
 
 /** A flagged entity (orphan / thin) — enough to render a row + click-through, never a raw id. */
 export interface HealthFinding {
@@ -83,7 +101,10 @@ const toFinding = (e: EntityHit): HealthFinding => ({ rel: e.rel, id: e.id, name
  * node never aborts the scan (ENG-16). Targets into `claims/` or `sources/` are not entity edges and
  * are ignored (they're never "dangling entity links").
  */
-export async function buildHealthReport(tools: RecallTools): Promise<HealthReport> {
+export async function buildHealthReport(
+  tools: RecallTools,
+  dismissals: Map<string, HealthDismissalDirective> = new Map(),
+): Promise<HealthReport> {
   const all = await tools.entityLookup({ query: '', limit: ENTITY_SCAN_LIMIT });
 
   // Resolution maps: a link target may be a rel-path, a human name, or an alias (case-insensitive).
@@ -133,11 +154,19 @@ export async function buildHealthReport(tools: RecallTools): Promise<HealthRepor
   thin.sort(byName);
   dangling.sort((a, b) => a.fromName.localeCompare(b.fromName) || a.target.localeCompare(b.target));
 
+  // VUX-16: drop findings the Principal has dismissed — BEFORE capping + counting, so a dismissed item
+  // never shows AND the readout count reflects the true remaining total (not the pre-dismissal one).
+  const keep = (cls: HealthFindingClass, f: HealthFinding | DanglingLink): boolean =>
+    !isHealthFindingDismissed(dismissals, healthFindingKey(cls, f));
+  const orphansKept = orphans.filter((f) => keep('orphan', f));
+  const thinKept = thin.filter((f) => keep('thin', f));
+  const danglingKept = dangling.filter((d) => keep('dangling', d));
+
   return {
     scanned: all.length,
-    orphans: orphans.slice(0, FINDING_CAP),
-    thin: thin.slice(0, FINDING_CAP),
-    dangling: dangling.slice(0, FINDING_CAP),
-    counts: { orphans: orphans.length, thin: thin.length, dangling: dangling.length },
+    orphans: orphansKept.slice(0, FINDING_CAP),
+    thin: thinKept.slice(0, FINDING_CAP),
+    dangling: danglingKept.slice(0, FINDING_CAP),
+    counts: { orphans: orphansKept.length, thin: thinKept.length, dangling: danglingKept.length },
   };
 }

@@ -7,6 +7,8 @@
 // type` is erased at build time.
 import type { ExploreEntityRef, ExploreNeighborhood, ExploreProjection } from './explorePanel';
 import type { HealthProjection } from './healthProjection';
+import type { HealthRemediateRequest, HealthRemediateResult, HealthDismissRequest, HealthDismissResult } from './healthRemediation';
+export type { HealthRemediateRequest, HealthRemediateResult, HealthDismissRequest, HealthDismissResult };
 import type { SchedulePreset, AutonomyPosture, Facing } from './jobs';
 import type { WorkDepthConfig } from './workDepth';
 import type { EgressTier, ResearcherTemplate } from './researchers';
@@ -872,6 +874,9 @@ export interface KbApi {
   // SPEC-0035 HEALTH + SPEC-0058 STATE-3: the maintained Health PROJECTION (DL-2's render contract) — the
   // structural-lint glance (orphans / dead links / thin stubs) the view draws from one read, severity baked in.
   healthReport(): Promise<HealthProjection>;
+  // SPEC-0060 VUX-16 slice-1: non-destructive Health remediation + dismiss/restore a finding.
+  healthRemediate(req: HealthRemediateRequest): Promise<HealthRemediateResult>;
+  dismissHealthFinding(req: HealthDismissRequest): Promise<HealthDismissResult>;
   // SPEC-0058 Today: the single home read — {status, data, builtAt, stale} from the maintained Today
   // projection (warming|ready; the view switches on status, no live scan). The live clock is view-rendered.
   getTodayProjection(): Promise<TodayProjectionView>;

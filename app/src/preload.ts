@@ -71,6 +71,8 @@ const kbApi: KbApi = {
   exploreNeighborhood: (focus) => ipcRenderer.invoke('kb:exploreNeighborhood', focus),
   exploreProjection: (focus) => ipcRenderer.invoke('kb:exploreProjection', focus), // SPEC-0058 STATE-2
   healthReport: () => ipcRenderer.invoke('kb:healthReport'),
+  healthRemediate: (req) => ipcRenderer.invoke('kb:healthRemediate', req), // SPEC-0060 VUX-16
+  dismissHealthFinding: (req) => ipcRenderer.invoke('kb:dismissHealthFinding', req),
   getTodayProjection: () => ipcRenderer.invoke('kb:getTodayProjection'), // SPEC-0058 Today (instant, maintained)
 };
 
