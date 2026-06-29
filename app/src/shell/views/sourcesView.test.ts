@@ -5,6 +5,8 @@
 // the enable-confirm gate (enabling starts an outbound pull), the typed pull report, add-from-tile, the
 // Watched-folders "arriving" section, and HTML escaping of untrusted connector fields.
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountSources } from './sourcesView';
 import type { IntakeConnectorView, WatchFolderView, KbApi } from '../../kb/types';
 
@@ -77,10 +79,11 @@ describe('Sources view (PANEL-4 / INTAKE-14)', () => {
     const c = await mount();
     // scoped material marker present (so the shared rdesk-* language isn't restyled globally)
     expect(c.querySelector('.rdesk.src-v2')).toBeTruthy();
-    // sections are real cards (foundation material), not flat dividers
+    // v3: sections are headed BANDS (the strips inside are the cards), not v2 viz-card section chrome
     const sections = Array.from(c.querySelectorAll('.src-section'));
     expect(sections.length).toBe(2);
-    expect(sections.every((s) => s.classList.contains('viz-card') && s.classList.contains('viz-grain'))).toBe(true);
+    expect(sections.every((s) => !s.classList.contains('viz-card'))).toBe(true);
+    expect(c.querySelector('.rdesk-strip.ag-card')).toBeTruthy(); // each connector is a v3 card
     // type marks are tokenized (hue-class), and the armed switch carries a hue dot — both aria-hidden
     expect(c.querySelector('.src-mark--rss')).toBeTruthy();
     expect(c.querySelector('.intake-arm .src-arm-dot')).toBeTruthy();
@@ -343,5 +346,31 @@ describe('Sources view · Slice-2 per-folder rules (WATCH-12/14)', () => {
     (c.querySelector('.rdesk-strip[data-watch-id="inbox"] .watch-consume') as HTMLButtonElement).click();
     await flush();
     expect(setWatchFolder).toHaveBeenCalledWith({ id: 'inbox', consume: false }); // leave originals
+  });
+});
+
+// SPEC-0060 VUX-1: the Connectors (.src-*) CSS block migrates off the instrument-panel --viz-* names onto
+// the warm-vellum v3 tokens. NO ember (a passive intake list isn't a decision). Guard on the CSS source.
+describe('VUX-1 v3 token migration (SPEC-0060 — Connectors, off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Connectors view — VELLUM v3'),
+    indexCss.indexOf('Activity view — VELLUM v3'),
+  );
+
+  it('isolated the Connectors v3 block', () => {
+    expect(block.length).toBeGreaterThan(400);
+  });
+
+  it('the v3 Connectors block carries NO --viz-* tokens and NO ember', () => {
+    expect(block).not.toMatch(/var\(--viz-/);
+    expect(block).not.toMatch(/--ember|var\(--ember/);
+  });
+
+  it('uses v3 ground/ink + interactive/state tokens (ink/slate/viridian/sprout)', () => {
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--slate\b/); // interactive (feeds/mail mark, arm)
+    expect(block).toMatch(/var\(--viridian\b/); // folder mark / armed card
+    expect(block).toMatch(/var\(--sprout\b/); // active dot
   });
 });
