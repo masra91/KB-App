@@ -6,6 +6,8 @@
 // language composition (no native <select>). Data comes from the maintained `kb:exploreProjection`
 // envelope (STATE-2) — one read, no live walk.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { mountExplore } from './exploreView';
 import type { KbApi } from '../../kb/types';
 import type { ExploreEntityRef, ExploreNeighborhood, ExploreProjection } from '../../kb/explorePanel';
@@ -238,5 +240,38 @@ describe('Explore v2 — click-throughs (EXPLORE-4 / WS-A / REVIEW-17, retained 
     link.click();
     await flush();
     expect(exploreProjection).toHaveBeenCalledWith('Finance Team');
+  });
+});
+
+// SPEC-0060 VUX-1: the Explore CSS block migrates its COLOUR/material/font/radius tokens off --viz-*
+// onto the v3 warm-vellum set. The ambient-field MOTION utilities (--viz-field-gradient / --viz-dur-* /
+// viz-drift) are intentionally KEPT — they're pure motion with no v3 equivalent, not colour. NO ember
+// (graph exploration isn't a decision; contested/speculative = gold caution). Guard on the CSS source.
+describe('VUX-1 v3 token migration (SPEC-0060 — Explore, colour off --viz-*)', () => {
+  const indexCss = readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8');
+  const block = indexCss.slice(
+    indexCss.indexOf('Explore view — VELLUM v3'),
+    indexCss.indexOf('Health view: structural-lint'),
+  );
+
+  it('isolated the Explore v3 block', () => {
+    expect(block.length).toBeGreaterThan(1000);
+  });
+
+  it('the COLOUR/material/font tokens are off --viz-* (only motion utilities remain) + NO ember', () => {
+    for (const t of ['--viz-ink', '--viz-accent', '--viz-brass', '--viz-patina', '--viz-idle', '--viz-panel', '--viz-rule', '--viz-font-']) {
+      expect(block.includes(`var(${t}`)).toBe(false);
+    }
+    expect(block).not.toMatch(/--ember|var\(--ember/);
+    // the only surviving --viz-* are the pure-motion utilities (no v3 equivalent)
+    const survivors = [...block.matchAll(/var\(--viz-[a-z-]+/g)].map((m) => m[0]);
+    expect(survivors.every((s) => s.includes('--viz-dur-') || s.includes('--viz-field-gradient'))).toBe(true);
+  });
+
+  it('uses v3 colour tokens (ink/slate/gold/viridian/faint)', () => {
+    expect(block).toMatch(/var\(--ink\b/);
+    expect(block).toMatch(/var\(--slate\b/); // focus / interactive
+    expect(block).toMatch(/var\(--gold\b/); // contested / speculative caution
+    expect(block).toMatch(/var\(--viridian\b/);
   });
 });
